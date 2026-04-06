@@ -9,13 +9,13 @@
   <meta property="og:title" content="WebBrain — Free Open-Source AI Browser Agent">
   <meta property="og:description" content="The open-source alternative to Claude's browser plugin. AI-powered browser extension for Chrome & Firefox. Read, understand, and automate any web page. Multi-provider LLM support. Free forever.">
   <meta property="og:type" content="website">
-  <meta property="og:url" content="https://webbrain.me">
+  <meta property="og:url" content="https://webbrain.one">
   <meta property="og:site_name" content="WebBrain">
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:title" content="WebBrain — Open-Source AI Browser Agent">
   <meta name="twitter:description" content="Free, open-source alternative to Claude browser plugin. AI agent for Chrome & Firefox. Works with local or cloud LLMs.">
   <meta name="robots" content="index, follow">
-  <link rel="canonical" href="https://webbrain.me">
+  <link rel="canonical" href="https://webbrain.one">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧠</text></svg>">
 
   <!-- JSON-LD Structured Data -->
@@ -32,7 +32,7 @@
       "priceCurrency": "USD"
     },
     "description": "Free, open-source AI browser agent extension for Chrome and Firefox. Alternative to Claude browser plugin and OpenClaw. Read pages, extract data, automate tasks with local or cloud LLMs.",
-    "url": "https://webbrain.me",
+    "url": "https://webbrain.one",
     "downloadUrl": "https://github.com/esokullu/webbrain/releases",
     "softwareVersion": "0.9.0",
     "author": {
@@ -42,7 +42,7 @@
     },
     "license": "https://opensource.org/licenses/MIT",
     "isAccessibleForFree": true,
-    "screenshot": "https://webbrain.me/og-image.png"
+    "screenshot": "https://webbrain.one/og-image.png"
   }
   </script>
   <script type="application/ld+json">
@@ -750,9 +750,9 @@
 <!-- NAV -->
 <nav>
   <div class="nav-inner">
-    <div class="nav-brand">
-      <span class="emoji">🧠</span> WebBrain
-    </div>
+    <a href="/" class="nav-brand" style="text-decoration:none;">
+      <span class="emoji">🧠</span> WebBrain<span style="opacity:0.5; font-weight:400;">.one</span>
+    </a>
     <div class="nav-links">
       <a href="#features">Features</a>
       <a href="#providers">Providers</a>
@@ -955,9 +955,11 @@
 <!-- COMPARISON TABLE -->
 <section class="section" id="compare">
   <div class="section-label">Why WebBrain?</div>
-  <h2 class="section-title">Open-source alternative to proprietary AI browser plugins</h2>
-  <p class="section-subtitle">See how WebBrain compares to Claude's browser plugin, OpenClaw, and other AI browser agents.</p>
+  <h2 class="section-title">How does WebBrain compare?</h2>
+  <p class="section-subtitle">WebBrain sits at the intersection of browser-native AI plugins and full agent frameworks. Here's how it stacks up.</p>
 
+  <!-- vs Browser Plugins -->
+  <h3 style="font-size:16px; color:var(--text-dim); margin-bottom:16px; text-align:center;">vs. Browser AI Plugins</h3>
   <div class="compare-table-wrap">
     <table class="compare-table">
       <thead>
@@ -965,23 +967,52 @@
           <th>Feature</th>
           <th class="highlight">WebBrain</th>
           <th>Claude in Chrome</th>
-          <th>OpenClaw</th>
         </tr>
       </thead>
       <tbody>
-        <tr><td>Open Source</td><td class="highlight">MIT License</td><td>Proprietary</td><td>Open Source</td></tr>
-        <tr><td>Price</td><td class="highlight">Free forever</td><td>Requires Claude Pro</td><td>Free / Paid tiers</td></tr>
-        <tr><td>Local LLM support</td><td class="highlight">llama.cpp, Ollama</td><td>No</td><td>Limited</td></tr>
-        <tr><td>Multi-provider</td><td class="highlight">4 providers</td><td>Claude only</td><td>Multiple</td></tr>
-        <tr><td>Chrome support</td><td class="highlight">Yes (MV3)</td><td>Yes</td><td>Yes</td></tr>
-        <tr><td>Firefox support</td><td class="highlight">Yes (MV2)</td><td>No</td><td>No</td></tr>
-        <tr><td>Side panel UI</td><td class="highlight">Yes</td><td>Yes</td><td>Separate window</td></tr>
-        <tr><td>Ask / Act modes</td><td class="highlight">Yes</td><td>Similar</td><td>Act only</td></tr>
-        <tr><td>Privacy / Self-hosted</td><td class="highlight">Full offline mode</td><td>Cloud only</td><td>Cloud dependent</td></tr>
-        <tr><td>Context management</td><td class="highlight">Auto-trim + recovery</td><td>Built-in</td><td>Basic</td></tr>
+        <tr><td>Open Source</td><td class="highlight">MIT License</td><td>Proprietary</td></tr>
+        <tr><td>Price</td><td class="highlight">Free forever</td><td>Requires Claude Pro ($20/mo)</td></tr>
+        <tr><td>Local LLM support</td><td class="highlight">llama.cpp, Ollama</td><td>No — Claude only</td></tr>
+        <tr><td>Multi-provider</td><td class="highlight">4 providers (local + cloud)</td><td>Claude only</td></tr>
+        <tr><td>Chrome</td><td class="highlight">Yes (MV3)</td><td>Yes</td></tr>
+        <tr><td>Firefox</td><td class="highlight">Yes (MV2)</td><td>No</td></tr>
+        <tr><td>Side panel UI</td><td class="highlight">Yes</td><td>Yes</td></tr>
+        <tr><td>Ask / Act modes</td><td class="highlight">Yes</td><td>Similar</td></tr>
+        <tr><td>Fully offline</td><td class="highlight">Yes (with local LLM)</td><td>No — cloud required</td></tr>
+        <tr><td>Page interaction</td><td>Content script</td><td>Chrome DevTools Protocol</td></tr>
+        <tr><td>Self-hostable</td><td class="highlight">Yes</td><td>No</td></tr>
       </tbody>
     </table>
   </div>
+
+  <!-- vs Agent Frameworks -->
+  <h3 style="font-size:16px; color:var(--text-dim); margin: 40px 0 16px; text-align:center;">vs. AI Agent Frameworks <span style="font-weight:400; font-size:13px;">(different category)</span></h3>
+  <div class="compare-table-wrap">
+    <table class="compare-table">
+      <thead>
+        <tr>
+          <th>Aspect</th>
+          <th class="highlight">WebBrain</th>
+          <th>OpenClaw / Browser-Use / etc.</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td>What is it?</td><td class="highlight">Browser extension (end-user tool)</td><td>Agent framework / SDK (developer tool)</td></tr>
+        <tr><td>Target user</td><td class="highlight">Anyone — no coding needed</td><td>Developers building automations</td></tr>
+        <tr><td>Installation</td><td class="highlight">One-click browser install</td><td>Python/Docker setup required</td></tr>
+        <tr><td>UI</td><td class="highlight">Built-in side panel chat</td><td>No UI — code or API only</td></tr>
+        <tr><td>Browser control</td><td>Content script (lightweight)</td><td>CDP / Playwright (full control)</td></tr>
+        <tr><td>Multi-tab workflows</td><td>Per-tab conversations</td><td>Programmable multi-tab orchestration</td></tr>
+        <tr><td>Headless mode</td><td>No — runs in your browser</td><td>Yes — headless automation</td></tr>
+        <tr><td>Extensibility</td><td>Add custom LLM providers</td><td>Full Python SDK, custom tools</td></tr>
+        <tr><td>Best for</td><td class="highlight">Daily browsing AI assistant</td><td>Automated scraping / testing pipelines</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p style="text-align:center; color:var(--text-dim); font-size:13px; margin-top:24px; max-width:600px; margin-left:auto; margin-right:auto;">
+    WebBrain is a browser extension for end users who want an AI assistant while they browse. Agent frameworks like OpenClaw are developer tools for building automated browser pipelines. Different tools for different jobs — and you can use both.
+  </p>
 </section>
 
 <!-- FAQ -->
@@ -996,8 +1027,8 @@
     </details>
 
     <details class="faq-item">
-      <summary>How does WebBrain compare to OpenClaw and other AI browser agents?</summary>
-      <p>WebBrain is a lightweight browser extension with a built-in side panel, while tools like OpenClaw typically run as separate applications. WebBrain focuses on being easy to install (no Docker, no server setup for the extension itself), supporting multiple LLM providers out of the box, and working on both Chrome and Firefox. It's also fully self-hostable with local models via llama.cpp — your data never has to leave your machine.</p>
+      <summary>How does WebBrain compare to OpenClaw, Browser-Use, and other AI agent frameworks?</summary>
+      <p>They're different categories of tools. WebBrain is a browser extension — you install it in Chrome or Firefox and chat with it in a side panel, no coding required. Frameworks like OpenClaw and Browser-Use are developer SDKs for building automated browser pipelines in Python, typically using headless browsers and CDP. Think of it this way: WebBrain is for daily browsing with an AI assistant; agent frameworks are for building scraping bots and test automation. You can use both — they complement each other.</p>
     </details>
 
     <details class="faq-item">
