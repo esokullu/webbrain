@@ -100,6 +100,23 @@ async function handleMessage(msg, sender) {
       return { content: result };
     }
 
+    case 'continue': {
+      const tabId = msg.tabId || sender.tab?.id;
+      if (!tabId) throw new Error('No tab ID');
+      const mode = msg.mode || 'ask';
+
+      const result = await agent.continueProcessing(tabId, (type, data) => {
+        chrome.runtime.sendMessage({
+          target: 'sidepanel',
+          action: 'agent_update',
+          type,
+          data,
+        }).catch(() => {});
+      }, mode);
+
+      return { content: result };
+    }
+
     case 'clear_conversation': {
       const tabId = msg.tabId || sender.tab?.id;
       if (tabId) agent.clearConversation(tabId);

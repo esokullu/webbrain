@@ -286,6 +286,13 @@ export class Agent {
   }
 
   /**
+   * Continue processing from where we left off (after max steps).
+   */
+  async continueProcessing(tabId, onUpdate = () => {}, mode = 'ask') {
+    return this.processMessage(tabId, 'Please continue from where you left off.', onUpdate, mode);
+  }
+
+  /**
    * Process a single user message — may trigger a multi-step tool-use loop.
    * @param {number} tabId
    * @param {string} userMessage
@@ -428,9 +435,7 @@ export class Agent {
     }
 
     if (steps >= this.maxSteps) {
-      const warning = '\n\n[Reached maximum steps limit. Stopping.]';
-      finalResponse += warning;
-      onUpdate('warning', { message: 'Reached maximum steps limit.' });
+      onUpdate('max_steps_reached', { steps: this.maxSteps });
     }
 
     return finalResponse;
@@ -557,7 +562,7 @@ export class Agent {
       }
     }
 
-    onUpdate('warning', { message: 'Reached maximum steps limit.' });
-    return '[Reached maximum steps limit]';
+    onUpdate('max_steps_reached', { steps: this.maxSteps });
+    return '[Reached maximum steps limit. You can continue from where I left off.]';
   }
 }

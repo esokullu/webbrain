@@ -25,6 +25,9 @@ let verboseMode = false;
 let agentMode = 'ask'; // 'ask' or 'act'
 let abortRequested = false;
 
+// Per-tab chat history (stores innerHTML of messages container)
+const tabChats = new Map();
+
 // Human-friendly labels for tool names
 const TOOL_LABELS = {
   read_page: 'Reading page',
@@ -71,7 +74,7 @@ async function init() {
   await testConnection();
 
   browser.tabs.onActivated.addListener(async (info) => {
-    currentTabId = info.tabId;
+    switchToTab(info.tabId);
   });
 
   // Listen for setting changes (from options page)
@@ -80,6 +83,27 @@ async function init() {
       verboseMode = changes.verboseMode.newValue;
     }
   });
+}
+
+function switchToTab(newTabId) {
+  if (newTabId === currentTabId) return;
+  if (isProcessing) return; // don't switch while agent is running
+
+  // Save current tab's chat
+  if (currentTabId != null) {
+    tabChats.set(currentTabId, messagesEl.innerHTML);
+  }
+
+  currentTabId = newTabId;
+
+  // Restore new tab's chat or start fresh
+  if (tabChats.has(newTabId)) {
+    messagesEl.innerHTML = tabChats.get(newTabId);
+  } else {
+    messagesEl.innerHTML = '';
+    addMessage('system', 'How can I help with this page?');
+  }
+  scrollToBottom();
 }
 
 async function loadProviders() {
@@ -200,6 +224,7 @@ browser.runtime.onMessage.addListener((msg) => {
 
     case 'tool_call':
       showActivity(friendlyToolLabel(data.name, data.args));
+      showInspectionBanner(data.name);
       if (currentAssistantEl) {
         if (verboseMode) {
           appendVerboseToolCall(data.name, data.args);
@@ -225,6 +250,13 @@ browser.runtime.onMessage.addListener((msg) => {
       hideActivity();
       if (currentAssistantEl) markLastStepFailed();
       addMessage('error', `Error: ${data.message}`);
+      break;
+
+    case 'max_steps_reached':
+      hideActivity();
+      if (currentAssistantEl) {
+        showContinueButton();
+      }
       break;
 
     case 'warning':
@@ -423,6 +455,87 @@ function addMessage(role, content) {
   return msgEl;
 }
 
+function showContinueButton() {
+  document.querySelectorAll('.continue-bar').forEach(el => el.remove());
+
+  const bar = document.createElement('div');
+  bar.className = 'continue-bar';
+  bar.innerHTML = `
+    <span class="continue-text">Reached the step limit (${agent_maxSteps || 25} steps). Want me to keep going?</span>
+    <button class="continue-btn" id="btn-continue">Continue</button>
+  `;
+  messagesEl.appendChild(bar);
+  scrollToBottom();
+
+  document.getElementById('btn-continue').addEventListener('click', continueAgent);
+}
+
+async function continueAgent() {
+  document.querySelectorAll('.continue-bar').forEach(el => el.remove());
+
+  isProcessing = true;
+  abortRequested = false;
+  sendBtn.disabled = true;
+
+  currentAssistantEl = addMessage('assistant', '');
+  showActivity('Continuing...');
+
+  try {
+    const res = await sendToBackground('continue', {
+      tabId: currentTabId,
+      mode: agentMode,
+    });
+
+    if (res.content && currentAssistantEl) {
+      const textEl = currentAssistantEl.querySelector('.message-text');
+      if (textEl && !textEl.textContent.trim()) {
+        textEl.innerHTML = formatMarkdown(res.content);
+        addMessageCopyButton(currentAssistantEl);
+      }
+    }
+  } catch (e) {
+    if (!abortRequested) {
+      addMessage('error', `Error: ${e.message}`);
+    }
+  } finally {
+    finalizeSteps();
+    isProcessing = false;
+    abortRequested = false;
+    sendBtn.disabled = false;
+    hideActivity();
+    currentAssistantEl = null;
+    scrollToBottom();
+  }
+}
+
+let agent_maxSteps = 25;
+browser.storage.local.get('maxAgentSteps').then(s => { agent_maxSteps = s.maxAgentSteps || 25; });
+browser.storage.onChanged.addListener((changes) => {
+  if (changes.maxAgentSteps) agent_maxSteps = changes.maxAgentSteps.newValue;
+});
+
+// Page inspection banner
+const PAGE_TOOLS = new Set(['read_page', 'get_interactive_elements', 'click', 'type_text', 'scroll', 'extract_data', 'wait_for_element', 'get_selection', 'execute_js', 'screenshot']);
+let inspectionBannerShown = false;
+
+function showInspectionBanner(toolName) {
+  if (inspectionBannerShown || !PAGE_TOOLS.has(toolName)) return;
+  inspectionBannerShown = true;
+
+  const banner = document.getElementById('inspection-banner');
+  if (banner) banner.classList.remove('hidden');
+
+  browser.browserAction?.setBadgeText?.({ text: '🔍' }).catch(() => {});
+  browser.browserAction?.setBadgeBackgroundColor?.({ color: '#6c63ff' }).catch(() => {});
+}
+
+function hideInspectionBanner() {
+  inspectionBannerShown = false;
+  const banner = document.getElementById('inspection-banner');
+  if (banner) banner.classList.add('hidden');
+  browser.browserAction?.setBadgeText?.({ text: '' }).catch(() => {});
+}
+
 function showActivity(text) {
   agentActivity.classList.remove('hidden');
   activityText.textContent = text;
@@ -430,6 +543,7 @@ function showActivity(text) {
 
 function hideActivity() {
   agentActivity.classList.add('hidden');
+  hideInspectionBanner();
 }
 
 function scrollToBottom() {
