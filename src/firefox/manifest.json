@@ -1,7 +1,7 @@
 {
   "manifest_version": 2,
   "name": "WebBrain",
-  "version": "0.9.2",
+  "version": "0.9.3",
   "description": "Open-source AI browser agent — chat with pages, automate tasks, multi-provider LLM support.",
   "permissions": [
     "activeTab",
@@ -50,7 +50,7 @@
       "id": "webbrain@esokullu.com",
       "strict_min_version": "109.0",
       "data_collection_permissions": {
-        "required": [],
+        "required": ["none"],
         "is_exempt": true,
         "reason": "WebBrain does not collect, store, or transmit any user data. All data flows directly between the user's browser and their chosen AI provider. No telemetry, analytics, or tracking of any kind."
       }
