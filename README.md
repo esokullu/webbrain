@@ -1,6 +1,6 @@
 # WebBrain
 
-Open-source AI browser agent for Chrome. Chat with any web page, automate browser tasks, and run multi-step agent workflows — powered by your choice of LLM.
+Open-source AI browser agent for Chrome and Firefox. Chat with any web page, automate browser tasks, and run multi-step agent workflows — powered by your choice of LLM.
 
 ## Features
 
