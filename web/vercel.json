@@ -1,6 +1,7 @@
 {
   "rewrites": [
     { "source": "/privacy", "destination": "/privacy.html" },
+    { "source": "/:path*\\.(png|jpg|jpeg|gif|webp|svg|ico|css|js|map|txt|xml|json|woff|woff2|ttf|otf)", "destination": "/:path*" },
     { "source": "/(.*)", "destination": "/index.html" }
   ],
   "headers": [
