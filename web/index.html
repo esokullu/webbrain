@@ -728,6 +728,31 @@
     }
 
     /* ================================================================
+       DEMO VIDEO
+       ================================================================ */
+    .video-showcase {
+      max-width: 900px;
+      margin: 0 auto;
+    }
+    .video-frame {
+      position: relative;
+      width: 100%;
+      padding-bottom: 56.25%;
+      border-radius: var(--radius);
+      overflow: hidden;
+      border: 1px solid var(--border);
+      background: #000;
+      box-shadow: 0 20px 40px rgba(0,0,0,0.35);
+    }
+    .video-frame iframe {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      border: 0;
+    }
+
+    /* ================================================================
        RESPONSIVE
        ================================================================ */
     @media (max-width: 768px) {
@@ -762,6 +787,7 @@
     </a>
     <div class="nav-links">
       <a href="#features">Features</a>
+      <a href="#demo">Demo</a>
       <a href="#providers">Providers</a>
       <a href="#compare">Compare</a>
       <a href="#download">Download</a>
@@ -841,6 +867,18 @@
           </div>
         </div>
       </div>
+    </div>
+  </div>
+</section>
+
+<!-- DEMO VIDEO -->
+<section class="section" id="demo" style="padding-top: 30px;">
+  <div class="section-label">Demo</div>
+  <h2 class="section-title">Watch WebBrain in action</h2>
+  <p class="section-subtitle">See how WebBrain reads pages, extracts data, and automates browser tasks.</p>
+  <div class="video-showcase">
+    <div class="video-frame">
+      <iframe src="https://www.youtube.com/embed/1NN2dweooKM" title="WebBrain demo video" loading="lazy" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe>
     </div>
   </div>
 </section>
