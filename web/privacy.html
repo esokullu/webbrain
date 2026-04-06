@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Privacy Policy — WebBrain</title>
+  <meta name="description" content="WebBrain privacy policy. Your data stays local. No tracking, no analytics, no third-party data sharing.">
+  <meta name="robots" content="index, follow">
+  <link rel="canonical" href="https://webbrain.one/privacy">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧠</text></svg>">
+  <style>
+    :root {
+      --bg: #0b0e17;
+      --surface: #151822;
+      --border: #23283a;
+      --text: #e4e4ec;
+      --text-dim: #8b8fa4;
+      --accent: #6c63ff;
+      --accent2: #a78bfa;
+      --radius: 16px;
+      --max-w: 780px;
+    }
+    html { scroll-behavior: smooth; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Inter, Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.75;
+      margin: 0;
+      padding: 0;
+    }
+    a { color: var(--accent2); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+
+    nav {
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      backdrop-filter: blur(20px);
+      background: rgba(11,14,23,0.8);
+      border-bottom: 1px solid var(--border);
+    }
+    .nav-inner {
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 14px 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .nav-brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 20px;
+      font-weight: 800;
+      background: linear-gradient(135deg, var(--accent), var(--accent2));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    .nav-brand span.emoji { -webkit-text-fill-color: initial; font-size: 22px; }
+    .nav-back {
+      font-size: 14px;
+      color: var(--text-dim);
+      padding: 6px 16px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      transition: all 0.2s;
+    }
+    .nav-back:hover { color: var(--text); border-color: var(--accent); text-decoration: none; }
+
+    .container {
+      max-width: var(--max-w);
+      margin: 0 auto;
+      padding: 60px 24px 100px;
+    }
+
+    h1 {
+      font-size: 2rem;
+      font-weight: 800;
+      margin: 0 0 8px;
+      background: linear-gradient(135deg, var(--accent), var(--accent2));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    .updated {
+      color: var(--text-dim);
+      font-size: 14px;
+      margin-bottom: 48px;
+    }
+
+    h2 {
+      font-size: 1.25rem;
+      font-weight: 700;
+      margin: 40px 0 12px;
+      color: var(--text);
+    }
+    h2:first-of-type { margin-top: 0; }
+
+    p, li {
+      color: var(--text-dim);
+      font-size: 15px;
+      line-height: 1.8;
+    }
+    ul {
+      padding-left: 20px;
+      margin: 8px 0 16px;
+    }
+    li { margin-bottom: 6px; }
+    li strong { color: var(--text); font-weight: 600; }
+
+    .highlight-box {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 24px 28px;
+      margin: 32px 0;
+    }
+    .highlight-box p { margin: 0; }
+    .highlight-box strong { color: var(--accent2); }
+
+    footer {
+      text-align: center;
+      padding: 32px 24px;
+      color: var(--text-dim);
+      font-size: 13px;
+      border-top: 1px solid var(--border);
+    }
+  </style>
+</head>
+<body>
+
+<nav>
+  <div class="nav-inner">
+    <a href="/" class="nav-brand" style="text-decoration:none;">
+      <span class="emoji">🧠</span> WebBrain<span style="opacity:0.5; font-weight:400;">.one</span>
+    </a>
+    <a href="/" class="nav-back">← Back to home</a>
+  </div>
+</nav>
+
+<div class="container">
+  <h1>Privacy Policy</h1>
+  <p class="updated">Last updated: April 6, 2026</p>
+
+  <div class="highlight-box">
+    <p><strong>TL;DR:</strong> WebBrain runs entirely in your browser. We don't collect, store, or transmit any of your data. Your API keys stay on your device. We have no servers, no analytics, no tracking.</p>
+  </div>
+
+  <h2>What WebBrain Is</h2>
+  <p>WebBrain is an open-source browser extension for Chrome and Firefox that connects to AI language model providers (such as OpenAI, Google Gemini, Anthropic, or OpenRouter) to help you read, analyze, and interact with web pages. It operates entirely within your browser.</p>
+
+  <h2>Data We Collect</h2>
+  <p><strong>None.</strong> WebBrain does not collect, store, or transmit any personal data, browsing history, page content, or usage statistics to us or any third party. We operate no servers and have no backend infrastructure that receives your data.</p>
+
+  <h2>How Your Data Flows</h2>
+  <p>When you use WebBrain, data flows directly between your browser and the AI provider you have configured:</p>
+  <ul>
+    <li><strong>Page content</strong> — When you ask a question about a page, the relevant page content is sent directly from your browser to your chosen AI provider's API. WebBrain does not relay, intercept, or store this data.</li>
+    <li><strong>API keys</strong> — Your API keys are stored locally in your browser's extension storage (<code>chrome.storage.local</code> or <code>browser.storage.local</code>). They are never transmitted to us or any third party. They are only sent directly to the AI provider you have selected.</li>
+    <li><strong>Conversations</strong> — Your chat history exists only in your browser's memory during the session. It is not persisted to disk or sent anywhere other than to your configured AI provider for generating responses.</li>
+  </ul>
+
+  <h2>Third-Party AI Providers</h2>
+  <p>WebBrain connects to the AI provider of your choice. Each provider has its own privacy policy and data handling practices:</p>
+  <ul>
+    <li><strong>OpenAI</strong> — <a href="https://openai.com/privacy" target="_blank">openai.com/privacy</a></li>
+    <li><strong>Google (Gemini)</strong> — <a href="https://ai.google.dev/terms" target="_blank">ai.google.dev/terms</a></li>
+    <li><strong>Anthropic (Claude)</strong> — <a href="https://www.anthropic.com/privacy" target="_blank">anthropic.com/privacy</a></li>
+    <li><strong>OpenRouter</strong> — <a href="https://openrouter.ai/privacy" target="_blank">openrouter.ai/privacy</a></li>
+  </ul>
+  <p>We encourage you to review the privacy policy of whichever provider you use. When using API keys (as opposed to consumer products), most providers do not use your data for training by default, but please verify with your chosen provider.</p>
+
+  <h2>Browser Permissions</h2>
+  <p>WebBrain requires certain browser permissions to function. Here is what each permission is used for and why:</p>
+  <ul>
+    <li><strong>activeTab / tabs</strong> — To read the content of the current page when you ask a question, and to manage per-tab conversations.</li>
+    <li><strong>scripting</strong> — To inject content scripts that can read page content and perform actions in Act mode.</li>
+    <li><strong>sidePanel (Chrome) / sidebar_action (Firefox)</strong> — To display the WebBrain chat interface as a side panel.</li>
+    <li><strong>storage</strong> — To save your settings (selected provider, API key, preferences) locally on your device.</li>
+  </ul>
+  <p>No permission is used to monitor, track, or collect your browsing activity.</p>
+
+  <h2>Act Mode</h2>
+  <p>When you enable Act mode, WebBrain can interact with web pages on your behalf (clicking, typing, scrolling, navigating). This is done via content scripts running in your browser — no data about these actions is sent to us. All actions are performed locally and are visible to you in real time. Act mode requires explicit activation and displays a visible warning banner.</p>
+
+  <h2>Cookies &amp; Analytics</h2>
+  <p>WebBrain does not use cookies. The webbrain.one website does not use analytics, tracking pixels, or any third-party scripts. There are no ads.</p>
+
+  <h2>Children's Privacy</h2>
+  <p>WebBrain is not directed at children under 13. We do not knowingly collect any information from children.</p>
+
+  <h2>Open Source</h2>
+  <p>WebBrain is fully open source under the MIT License. You can audit the complete source code to verify all claims in this privacy policy:</p>
+  <p><a href="https://github.com/esokullu/webbrain" target="_blank">github.com/esokullu/webbrain</a></p>
+
+  <h2>Changes to This Policy</h2>
+  <p>If we make changes to this privacy policy, we will update the "Last updated" date at the top. Since WebBrain is open source with no data collection, significant privacy-relevant changes are unlikely.</p>
+
+  <h2>Contact</h2>
+  <p>If you have questions about this privacy policy, you can reach us at:</p>
+  <ul>
+    <li>GitHub: <a href="https://github.com/esokullu/webbrain/issues" target="_blank">github.com/esokullu/webbrain/issues</a></li>
+    <li>Website: <a href="https://emresokullu.com" target="_blank">emresokullu.com</a></li>
+  </ul>
+</div>
+
+<footer>
+  &copy; 2026 <a href="https://emresokullu.com" target="_blank">Emre Sokullu</a>. WebBrain is open source under the MIT License.
+</footer>
+
+</body>
+</html>
