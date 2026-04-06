@@ -166,15 +166,6 @@ All providers normalize to a common response format:
 { content: string, toolCalls: Array|null, usage: Object|null }
 ```
 
-## Website
-
-The `web/` folder contains the landing page for [webbrain.me](https://webbrain.me), deployable to Vercel:
-
-```bash
-cd web
-vercel dev    # local preview
-vercel        # deploy
-```
 
 ## License
 
