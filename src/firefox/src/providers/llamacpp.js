@@ -1,0 +1,115 @@
+import { BaseLLMProvider } from './base.js';
+
+/**
+ * Provider for local llama.cpp server (OpenAI-compatible API on localhost).
+ */
+export class LlamaCppProvider extends BaseLLMProvider {
+  get name() {
+    return 'llama.cpp';
+  }
+
+  get baseUrl() {
+    return this.config.baseUrl || 'http://localhost:8080';
+  }
+
+  get supportsTools() {
+    return true; // llama.cpp server supports function calling
+  }
+
+  async chat(messages, options = {}) {
+    const body = {
+      messages,
+      temperature: options.temperature ?? 0.7,
+      max_tokens: options.maxTokens ?? 4096,
+      stream: false,
+    };
+
+    if (options.tools && options.tools.length > 0) {
+      body.tools = options.tools;
+      body.tool_choice = options.toolChoice || 'auto';
+    }
+
+    const res = await fetch(`${this.baseUrl}/v1/chat/completions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+
+    if (!res.ok) {
+      const err = await res.text();
+      throw new Error(`llama.cpp error ${res.status}: ${err}`);
+    }
+
+    const data = await res.json();
+    const choice = data.choices?.[0];
+    const message = choice?.message;
+
+    return {
+      content: message?.content || '',
+      toolCalls: message?.tool_calls || null,
+      usage: data.usage || null,
+      raw: data,
+    };
+  }
+
+  async *chatStream(messages, options = {}) {
+    const body = {
+      messages,
+      temperature: options.temperature ?? 0.7,
+      max_tokens: options.maxTokens ?? 4096,
+      stream: true,
+    };
+
+    if (options.tools && options.tools.length > 0) {
+      body.tools = options.tools;
+      body.tool_choice = options.toolChoice || 'auto';
+    }
+
+    const res = await fetch(`${this.baseUrl}/v1/chat/completions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+
+    if (!res.ok) {
+      const err = await res.text();
+      throw new Error(`llama.cpp stream error ${res.status}: ${err}`);
+    }
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed || !trimmed.startsWith('data: ')) continue;
+        const payload = trimmed.slice(6);
+        if (payload === '[DONE]') {
+          yield { type: 'done', content: '' };
+          return;
+        }
+        try {
+          const json = JSON.parse(payload);
+          const delta = json.choices?.[0]?.delta;
+          if (delta?.content) {
+            yield { type: 'text', content: delta.content };
+          }
+          if (delta?.tool_calls) {
+            yield { type: 'tool_call', content: delta.tool_calls };
+          }
+        } catch {
+          // skip malformed chunks
+        }
+      }
+    }
+    yield { type: 'done', content: '' };
+  }
+}

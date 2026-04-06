@@ -1,0 +1,232 @@
+import { BaseLLMProvider } from './base.js';
+
+/**
+ * Provider for Anthropic Claude API (native, not OpenAI-compatible).
+ */
+export class AnthropicProvider extends BaseLLMProvider {
+  get name() {
+    return 'anthropic';
+  }
+
+  get baseUrl() {
+    return this.config.baseUrl || 'https://api.anthropic.com';
+  }
+
+  get model() {
+    return this.config.model || 'claude-sonnet-4-20250514';
+  }
+
+  get supportsTools() {
+    return true;
+  }
+
+  _headers() {
+    return {
+      'Content-Type': 'application/json',
+      'x-api-key': this.config.apiKey || '',
+      'anthropic-version': '2023-06-01',
+      'anthropic-dangerous-direct-browser-access': 'true',
+    };
+  }
+
+  /**
+   * Convert OpenAI-style tools to Anthropic tool format.
+   */
+  _convertTools(tools) {
+    if (!tools) return undefined;
+    return tools.map(t => {
+      const fn = t.function || t;
+      return {
+        name: fn.name,
+        description: fn.description,
+        input_schema: fn.parameters,
+      };
+    });
+  }
+
+  /**
+   * Convert OpenAI-style messages to Anthropic format.
+   * Extracts system message, converts tool_calls/tool results.
+   */
+  _convertMessages(messages) {
+    let system = '';
+    const converted = [];
+
+    for (const msg of messages) {
+      if (msg.role === 'system') {
+        system += (system ? '\n\n' : '') + msg.content;
+        continue;
+      }
+
+      if (msg.role === 'assistant' && msg.tool_calls) {
+        // Convert assistant tool_calls to Anthropic content blocks
+        const content = [];
+        if (msg.content) {
+          content.push({ type: 'text', text: msg.content });
+        }
+        for (const tc of msg.tool_calls) {
+          content.push({
+            type: 'tool_use',
+            id: tc.id,
+            name: tc.function.name,
+            input: typeof tc.function.arguments === 'string'
+              ? JSON.parse(tc.function.arguments)
+              : tc.function.arguments,
+          });
+        }
+        converted.push({ role: 'assistant', content });
+        continue;
+      }
+
+      if (msg.role === 'tool') {
+        // Convert tool result messages
+        converted.push({
+          role: 'user',
+          content: [{
+            type: 'tool_result',
+            tool_use_id: msg.tool_call_id,
+            content: msg.content,
+          }],
+        });
+        continue;
+      }
+
+      converted.push({ role: msg.role, content: msg.content });
+    }
+
+    return { system, messages: converted };
+  }
+
+  async chat(messages, options = {}) {
+    const { system, messages: anthropicMessages } = this._convertMessages(messages);
+
+    const body = {
+      model: this.model,
+      max_tokens: options.maxTokens ?? 4096,
+      messages: anthropicMessages,
+    };
+
+    if (system) body.system = system;
+    if (options.temperature != null) body.temperature = options.temperature;
+    if (options.tools && options.tools.length > 0) {
+      body.tools = this._convertTools(options.tools);
+    }
+
+    const res = await fetch(`${this.baseUrl}/v1/messages`, {
+      method: 'POST',
+      headers: this._headers(),
+      body: JSON.stringify(body),
+    });
+
+    if (!res.ok) {
+      const err = await res.text();
+      throw new Error(`Anthropic error ${res.status}: ${err}`);
+    }
+
+    const data = await res.json();
+
+    // Extract text content and tool use blocks
+    let content = '';
+    let toolCalls = null;
+
+    for (const block of data.content || []) {
+      if (block.type === 'text') {
+        content += block.text;
+      } else if (block.type === 'tool_use') {
+        if (!toolCalls) toolCalls = [];
+        toolCalls.push({
+          id: block.id,
+          type: 'function',
+          function: {
+            name: block.name,
+            arguments: JSON.stringify(block.input),
+          },
+        });
+      }
+    }
+
+    return {
+      content,
+      toolCalls,
+      usage: data.usage ? {
+        prompt_tokens: data.usage.input_tokens,
+        completion_tokens: data.usage.output_tokens,
+        total_tokens: (data.usage.input_tokens || 0) + (data.usage.output_tokens || 0),
+      } : null,
+      raw: data,
+    };
+  }
+
+  async *chatStream(messages, options = {}) {
+    const { system, messages: anthropicMessages } = this._convertMessages(messages);
+
+    const body = {
+      model: this.model,
+      max_tokens: options.maxTokens ?? 4096,
+      messages: anthropicMessages,
+      stream: true,
+    };
+
+    if (system) body.system = system;
+    if (options.temperature != null) body.temperature = options.temperature;
+    if (options.tools && options.tools.length > 0) {
+      body.tools = this._convertTools(options.tools);
+    }
+
+    const res = await fetch(`${this.baseUrl}/v1/messages`, {
+      method: 'POST',
+      headers: this._headers(),
+      body: JSON.stringify(body),
+    });
+
+    if (!res.ok) {
+      const err = await res.text();
+      throw new Error(`Anthropic stream error ${res.status}: ${err}`);
+    }
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed || !trimmed.startsWith('data: ')) continue;
+        const payload = trimmed.slice(6);
+        try {
+          const event = JSON.parse(payload);
+          if (event.type === 'content_block_delta') {
+            if (event.delta?.type === 'text_delta') {
+              yield { type: 'text', content: event.delta.text };
+            } else if (event.delta?.type === 'input_json_delta') {
+              yield { type: 'tool_call_delta', content: event.delta.partial_json };
+            }
+          } else if (event.type === 'content_block_start') {
+            if (event.content_block?.type === 'tool_use') {
+              yield {
+                type: 'tool_call_start',
+                content: {
+                  id: event.content_block.id,
+                  name: event.content_block.name,
+                },
+              };
+            }
+          } else if (event.type === 'message_stop') {
+            yield { type: 'done', content: '' };
+            return;
+          }
+        } catch {
+          // skip
+        }
+      }
+    }
+    yield { type: 'done', content: '' };
+  }
+}

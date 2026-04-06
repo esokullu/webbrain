@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>WebBrain Settings</title>
+  <style>
+    :root {
+      --bg: #1a1a2e;
+      --bg2: #16213e;
+      --bg3: #1e2746;
+      --text: #e8e8e8;
+      --text2: #a0a0b8;
+      --accent: #6c63ff;
+      --accent2: #5a52d5;
+      --border: rgba(255,255,255,0.08);
+      --success: #4caf50;
+      --error: #f44336;
+      --radius: 10px;
+    }
+    * { margin:0; padding:0; box-sizing:border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      padding: 24px;
+      max-width: 640px;
+      margin: 0 auto;
+    }
+    h1 {
+      font-size: 22px;
+      margin-bottom: 6px;
+      background: linear-gradient(135deg, var(--accent), #a78bfa);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    .subtitle { color: var(--text2); font-size: 13px; margin-bottom: 24px; }
+
+    h2 {
+      font-size: 14px;
+      margin: 28px 0 12px 0;
+      color: var(--text2);
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      font-weight: 600;
+    }
+    h2:first-of-type { margin-top: 0; }
+
+    .provider-card {
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 16px;
+      margin-bottom: 14px;
+      transition: border-color 0.2s;
+    }
+    .provider-card.active { border-color: var(--accent); }
+
+    .provider-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 12px;
+    }
+    .provider-name { font-weight: 600; font-size: 14px; }
+    .provider-type { color: var(--text2); font-size: 11px; }
+
+    .field { margin-bottom: 10px; }
+    .field label {
+      display: block;
+      font-size: 11px;
+      color: var(--text2);
+      margin-bottom: 4px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .field input, .field select {
+      width: 100%;
+      background: var(--bg3);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--text);
+      padding: 8px 10px;
+      font-size: 13px;
+      font-family: inherit;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    .field input:focus, .field select:focus {
+      border-color: var(--accent);
+    }
+    .field input[type="password"] {
+      font-family: monospace;
+    }
+
+    .btn-row {
+      display: flex;
+      gap: 8px;
+      margin-top: 12px;
+    }
+    button {
+      border: none;
+      border-radius: 6px;
+      padding: 8px 16px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.2s, transform 0.1s;
+    }
+    button:active { transform: scale(0.97); }
+
+    .btn-primary {
+      background: var(--accent);
+      color: #fff;
+    }
+    .btn-primary:hover { background: var(--accent2); }
+
+    .btn-secondary {
+      background: var(--bg3);
+      color: var(--text);
+      border: 1px solid var(--border);
+    }
+    .btn-secondary:hover { background: rgba(255,255,255,0.05); }
+
+    .test-result {
+      margin-top: 8px;
+      font-size: 11px;
+      padding: 6px 8px;
+      border-radius: 4px;
+      display: none;
+    }
+    .test-result.show { display: block; }
+    .test-result.ok { background: rgba(76,175,80,0.12); color: var(--success); }
+    .test-result.fail { background: rgba(244,67,54,0.12); color: var(--error); }
+
+    /* Toggle switch */
+    .setting-row {
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 14px 16px;
+      margin-bottom: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+    .setting-info {
+      flex: 1;
+    }
+    .setting-label {
+      font-size: 13px;
+      font-weight: 600;
+      margin-bottom: 2px;
+    }
+    .setting-desc {
+      font-size: 11px;
+      color: var(--text2);
+      line-height: 1.4;
+    }
+
+    .toggle {
+      position: relative;
+      width: 40px;
+      height: 22px;
+      flex-shrink: 0;
+    }
+    .toggle input {
+      opacity: 0;
+      width: 0;
+      height: 0;
+    }
+    .toggle-slider {
+      position: absolute;
+      inset: 0;
+      background: var(--bg3);
+      border: 1px solid var(--border);
+      border-radius: 11px;
+      cursor: pointer;
+      transition: background 0.2s, border-color 0.2s;
+    }
+    .toggle-slider::before {
+      content: '';
+      position: absolute;
+      width: 16px;
+      height: 16px;
+      left: 2px;
+      top: 2px;
+      background: var(--text2);
+      border-radius: 50%;
+      transition: transform 0.2s, background 0.2s;
+    }
+    .toggle input:checked + .toggle-slider {
+      background: var(--accent);
+      border-color: var(--accent);
+    }
+    .toggle input:checked + .toggle-slider::before {
+      transform: translateX(18px);
+      background: #fff;
+    }
+
+    .info-box {
+      background: rgba(108,99,255,0.08);
+      border: 1px solid rgba(108,99,255,0.2);
+      border-radius: var(--radius);
+      padding: 12px 14px;
+      margin-top: 20px;
+      font-size: 12px;
+      color: var(--text2);
+      line-height: 1.5;
+    }
+    .info-box strong { color: var(--text); }
+    .info-box code {
+      background: rgba(0,0,0,0.3);
+      padding: 1px 4px;
+      border-radius: 3px;
+      font-size: 11px;
+    }
+  </style>
+</head>
+<body>
+  <h1>WebBrain Settings</h1>
+  <p class="subtitle">Configure your LLM providers and display preferences</p>
+
+  <h2>Display</h2>
+  <div id="display-settings">
+    <div class="setting-row">
+      <div class="setting-info">
+        <div class="setting-label">Verbose Mode</div>
+        <div class="setting-desc">Show full tool call details, arguments, and raw JSON results. Off by default for a cleaner chat experience.</div>
+      </div>
+      <label class="toggle">
+        <input type="checkbox" id="toggle-verbose">
+        <span class="toggle-slider"></span>
+      </label>
+    </div>
+    <div class="setting-row">
+      <div class="setting-info">
+        <div class="setting-label">Screenshot Fallback</div>
+        <div class="setting-desc">Capture a screenshot of the page when DOM reading fails or returns insufficient content. Requires a vision-capable model.</div>
+      </div>
+      <label class="toggle">
+        <input type="checkbox" id="toggle-screenshot-fallback">
+        <span class="toggle-slider"></span>
+      </label>
+    </div>
+    <div class="setting-row">
+      <div class="setting-info">
+        <div class="setting-label">Max Agent Steps <span id="steps-value" style="color:var(--accent);font-weight:700;margin-left:4px;">25</span></div>
+        <div class="setting-desc">Maximum number of tool-use steps the agent can take per message. Higher values allow more complex multi-step tasks but may use more tokens.</div>
+      </div>
+      <input type="range" id="range-max-steps" min="5" max="50" value="25" step="5"
+             style="width:120px;accent-color:var(--accent);cursor:pointer;">
+    </div>
+  </div>
+
+  <h2>Providers</h2>
+  <div id="providers"></div>
+
+  <div class="info-box">
+    <strong>Getting started with llama.cpp:</strong><br>
+    Run <code>llama-server -m your-model.gguf --port 8080</code> to start a local server.<br>
+    No API key needed — it runs entirely on your machine.
+  </div>
+
+  <script src="settings.js" type="module"></script>
+</body>
+</html>
