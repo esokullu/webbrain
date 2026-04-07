@@ -67,7 +67,7 @@ function renderProviders() {
     openai: {
       fields: [
         { key: 'apiKey', label: 'API Key', type: 'password', placeholder: 'sk-...' },
-        { key: 'model', label: 'Model', type: 'text', placeholder: 'gpt-4o' },
+        { key: 'model', label: 'Model', type: 'text', placeholder: 'gpt-5' },
         { key: 'baseUrl', label: 'API Base URL', type: 'text', placeholder: 'https://api.openai.com/v1' },
       ],
     },

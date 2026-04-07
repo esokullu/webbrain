@@ -62,7 +62,7 @@ export class ProviderManager {
         label: 'OpenAI',
         providerName: 'openai',
         baseUrl: 'https://api.openai.com/v1',
-        model: 'gpt-4o',
+        model: 'gpt-5',
         apiKey: '',
         enabled: false,
       },
