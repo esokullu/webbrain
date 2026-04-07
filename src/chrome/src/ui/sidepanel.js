@@ -817,41 +817,24 @@ modeAskBtn.addEventListener('click', () => setMode('ask'));
 
 modeActBtn.addEventListener('click', async () => {
   if (agentMode === 'act') return; // already active
-  setMode('act');
-  // Show a non-blocking one-time hint instead of a confirm() dialog. Only on
-  // the very first time per install — tracked via chrome.storage.local.
+  // Show a confirmation dialog the very first time the user enables Act
+  // mode on this install — tracked via chrome.storage.local so it only
+  // happens once, not on every click.
   try {
-    const stored = await chrome.storage.local.get('actHintShown');
-    if (!stored.actHintShown) {
-      showActHintToast();
-      chrome.storage.local.set({ actHintShown: true }).catch(() => {});
+    const stored = await chrome.storage.local.get('actConfirmed');
+    if (!stored.actConfirmed) {
+      const ok = confirm(
+        'Act mode lets WebBrain click, type, scroll, and navigate on your behalf.\n\n' +
+        'It runs inside your authenticated browser session, so it has the same access as you do on every site you\'re logged into.\n\n' +
+        'Watch what it does and stop it any time with the ◼ button.\n\n' +
+        'Continue?'
+      );
+      if (!ok) return;
+      chrome.storage.local.set({ actConfirmed: true }).catch(() => {});
     }
-  } catch (e) { /* storage unavailable, skip */ }
+  } catch (e) { /* storage unavailable, fall through */ }
+  setMode('act');
 });
-
-function showActHintToast() {
-  // Remove any existing toast first.
-  document.querySelectorAll('.act-hint-toast').forEach(el => el.remove());
-  const toast = document.createElement('div');
-  toast.className = 'act-hint-toast';
-  toast.innerHTML = `
-    <div class="act-hint-text">
-      Act mode on — WebBrain can now click, type, and navigate for you.
-      Watch what it does and stop it any time with the ◼ button.
-    </div>
-    <button class="act-hint-dismiss" title="Dismiss">×</button>
-  `;
-  document.body.appendChild(toast);
-  // Animate in.
-  requestAnimationFrame(() => toast.classList.add('show'));
-  const dismiss = () => {
-    toast.classList.remove('show');
-    setTimeout(() => toast.remove(), 250);
-  };
-  toast.querySelector('.act-hint-dismiss').addEventListener('click', dismiss);
-  // Auto-dismiss after 6 seconds.
-  setTimeout(dismiss, 6000);
-}
 
 
 // --- Stop / Abort ---
