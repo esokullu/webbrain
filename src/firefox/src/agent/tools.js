@@ -192,6 +192,30 @@ export const AGENT_TOOLS = [
       },
     },
   },
+  {
+    type: 'function',
+    function: {
+      name: 'get_shadow_dom',
+      description: 'Get all shadow DOM hosts on the page (Chrome-only: use content script for Firefox).',
+      parameters: {
+        type: 'object',
+        properties: {},
+        required: [],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'get_frames',
+      description: 'Get all iframes on the page with their URLs.',
+      parameters: {
+        type: 'object',
+        properties: {},
+        required: [],
+      },
+    },
+  },
 ];
 
 /**

@@ -50,6 +50,56 @@
     };
   }
 
+  function getPageInfoFull() {
+    const getShadowContent = (root = document) => {
+      const shadowContent = [];
+      const hosts = root.querySelectorAll('*');
+      hosts.forEach(el => {
+        if (el.shadowRoot) {
+          shadowContent.push({
+            host: el.tagName.toLowerCase(),
+            id: el.id || '',
+            className: el.className || '',
+            mode: el.shadowRoot.mode,
+            text: el.shadowRoot.innerText?.trim().slice(0, 500) || '',
+          });
+          shadowContent.push(...getShadowContent(el.shadowRoot));
+        }
+      });
+      return shadowContent;
+    };
+
+    return {
+      url: window.location.href,
+      title: document.title,
+      description: document.querySelector('meta[name="description"]')?.content || '',
+      text: getPageText(),
+      links: Array.from(document.querySelectorAll('a[href]')).slice(0, 100).map(a => ({
+        text: a.innerText.trim().slice(0, 100),
+        href: a.href,
+      })),
+      forms: Array.from(document.querySelectorAll('form')).map((form, i) => ({
+        id: form.id || `form-${i}`,
+        action: form.action,
+        inputs: Array.from(form.querySelectorAll('input, textarea, select')).map(el => ({
+          type: el.type || el.tagName.toLowerCase(),
+          name: el.name,
+          id: el.id,
+          placeholder: el.placeholder || '',
+          value: el.value || '',
+        })),
+      })),
+      shadowDOM: getShadowContent(),
+      iframes: Array.from(document.querySelectorAll('iframe')).map((iframe, i) => ({
+        index: i,
+        src: iframe.src,
+        id: iframe.id || '',
+        name: iframe.name || '',
+        visible: iframe.offsetWidth > 0 && iframe.offsetHeight > 0,
+      })),
+    };
+  }
+
   /**
    * Get a simplified DOM snapshot for the agent.
    */
@@ -64,8 +114,8 @@
     const all = document.querySelectorAll(selectors.join(', '));
     all.forEach((el, index) => {
       const rect = el.getBoundingClientRect();
-      if (rect.width === 0 && rect.height === 0) return; // hidden
-      if (el.offsetParent === null && el.tagName !== 'BODY') return; // not visible
+      if (rect.width === 0 && rect.height === 0) return;
+      if (el.offsetParent === null && el.tagName !== 'BODY') return;
 
       elements.push({
         index,
@@ -81,6 +131,51 @@
     });
 
     return elements;
+  }
+
+  function getInteractiveElementsFull() {
+    const pierceShadow = (root, results, idx) => {
+      const selectors = [
+        'a[href]', 'button', 'input', 'textarea', 'select',
+        '[role="button"]', '[role="link"]', '[role="tab"]',
+        '[onclick]', '[data-action]', 'summary', 'label'
+      ];
+
+      selectors.forEach(sel => {
+        try {
+          const all = root.querySelectorAll(sel);
+          all.forEach(el => {
+            const rect = el.getBoundingClientRect();
+            if (rect.width === 0 && rect.height === 0) return;
+
+            results.push({
+              index: idx.current++,
+              tag: el.tagName.toLowerCase(),
+              type: el.type || '',
+              role: el.getAttribute('role') || '',
+              text: (el.innerText || el.value || el.placeholder || el.title || el.ariaLabel || '').trim().slice(0, 100),
+              id: el.id || '',
+              name: el.name || '',
+              href: el.href || '',
+              rect: { x: Math.round(rect.x), y: Math.round(rect.y), w: Math.round(rect.width), h: Math.round(rect.height) },
+              inShadowDOM: root !== document,
+            });
+          });
+        } catch (e) {}
+      });
+
+      const hosts = root.querySelectorAll('*');
+      hosts.forEach(host => {
+        if (host.shadowRoot) {
+          pierceShadow(host.shadowRoot, results, idx);
+        }
+      });
+    };
+
+    const results = [];
+    const idx = { current: 0 };
+    pierceShadow(document, results, idx);
+    return results;
   }
 
   /**
@@ -226,13 +321,49 @@
     });
   }
 
+  function getShadowDOM() {
+    const collect = (root = document) => {
+      const hosts = root.querySelectorAll('*');
+      const result = [];
+      hosts.forEach(el => {
+        if (el.shadowRoot) {
+          result.push({
+            tag: el.tagName.toLowerCase(),
+            id: el.id || '',
+            className: el.className || '',
+            mode: el.shadowRoot.mode,
+            text: el.shadowRoot.innerText?.trim().slice(0, 200) || '',
+          });
+          result.push(...collect(el.shadowRoot));
+        }
+      });
+      return result;
+    };
+    return { success: true, shadowHosts: collect() };
+  }
+
+  function getFrames() {
+    return {
+      success: true,
+      frames: Array.from(document.querySelectorAll('iframe')).map((iframe, i) => ({
+        index: i,
+        src: iframe.src,
+        id: iframe.id || '',
+        name: iframe.name || '',
+        visible: iframe.offsetWidth > 0 && iframe.offsetHeight > 0,
+      })),
+    };
+  }
+
   // --- Message handler ---
   browser.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     if (msg.target !== 'content') return;
 
     const handlers = {
       'get_page_info': () => getPageInfo(),
+      'get_page_info_cdp': () => getPageInfoFull(),
       'get_interactive_elements': () => getInteractiveElements(),
+      'get_interactive_elements_cdp': () => getInteractiveElementsFull(),
       'click': () => clickElement(msg.params || {}),
       'type': () => typeText(msg.params || {}),
       'scroll': () => scrollPage(msg.params || {}),
@@ -241,13 +372,14 @@
       'get_selection': () => ({ text: window.getSelection()?.toString() || '' }),
       'execute_js': () => {
         try {
-          // Sandboxed eval for agent-generated scripts
           const fn = new Function(msg.params.code);
           return { success: true, result: fn() };
         } catch (e) {
           return { success: false, error: e.message };
         }
       },
+      'get_shadow_dom': () => getShadowDOM(),
+      'get_frames': () => getFrames(),
     };
 
     const handler = handlers[msg.action];

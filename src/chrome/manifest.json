@@ -1,14 +1,16 @@
 {
   "manifest_version": 3,
   "name": "WebBrain",
-  "version": "0.9.0",
+  "version": "1.0.0",
   "description": "Open-source AI browser agent — chat with pages, automate tasks, multi-provider LLM support.",
   "permissions": [
     "sidePanel",
     "activeTab",
     "scripting",
     "storage",
-    "tabs"
+    "tabs",
+    "debugger",
+    "downloads"
   ],
   "host_permissions": [
     "<all_urls>"

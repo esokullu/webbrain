@@ -35,13 +35,31 @@ chrome.storage.onChanged.addListener((changes) => {
   }
 });
 
-// Open side panel when extension icon is clicked
+// Track which tabs have the panel enabled (per-tab, not global)
+const panelTabs = new Set();
+
+chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: false }).catch(() => {});
+
+// Default: panel disabled everywhere; enable only on tabs the user explicitly opens
 chrome.action.onClicked.addListener(async (tab) => {
+  if (!tab?.id) return;
+  panelTabs.add(tab.id);
+  await chrome.sidePanel.setOptions({
+    tabId: tab.id,
+    path: 'src/ui/sidepanel.html',
+    enabled: true
+  });
   await chrome.sidePanel.open({ tabId: tab.id });
 });
 
-// Enable side panel on all tabs
-chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => {});
+// When switching tabs, disable panel on tabs the user didn't open it on
+chrome.tabs.onActivated.addListener(async ({ tabId }) => {
+  if (!panelTabs.has(tabId)) {
+    await chrome.sidePanel.setOptions({ tabId, enabled: false }).catch(() => {});
+  }
+});
+
+chrome.tabs.onRemoved.addListener((tabId) => panelTabs.delete(tabId));
 
 /**
  * Central message handler.
