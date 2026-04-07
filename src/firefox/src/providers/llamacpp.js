@@ -12,6 +12,10 @@ export class LlamaCppProvider extends BaseLLMProvider {
     return this.config.baseUrl || 'http://localhost:8080';
   }
 
+  get model() {
+    return this.config.model || null;
+  }
+
   get supportsTools() {
     return true; // llama.cpp server supports function calling
   }
@@ -23,6 +27,10 @@ export class LlamaCppProvider extends BaseLLMProvider {
       max_tokens: options.maxTokens ?? 4096,
       stream: false,
     };
+
+    if (this.model) {
+      body.model = this.model;
+    }
 
     if (options.tools && options.tools.length > 0) {
       body.tools = options.tools;
@@ -59,6 +67,10 @@ export class LlamaCppProvider extends BaseLLMProvider {
       max_tokens: options.maxTokens ?? 4096,
       stream: true,
     };
+
+    if (this.model) {
+      body.model = this.model;
+    }
 
     if (options.tools && options.tools.length > 0) {
       body.tools = options.tools;

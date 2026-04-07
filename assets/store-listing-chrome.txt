@@ -1,0 +1,59 @@
+---
+CHROME WEB STORE LISTING - WebBrain v0.9.0
+---
+
+TITLE: WebBrain — Open-Source AI Browser Agent
+
+SUMMARY (132 chars max):
+Open-source AI browser agent. Use any LLM (OpenAI, Gemini, Anthropic, local models) to read, analyze, and automate web pages.
+
+DESCRIPTION (up to 16,000 chars):
+WebBrain is an open-source browser extension that turns any LLM into a powerful browser agent — right from a side panel.
+
+Unlike proprietary alternatives, WebBrain is provider-agnostic: use OpenAI, Google Gemini, Anthropic Claude, or local models via OpenRouter. Your choice, your API key, your data.
+
+TWO MODES:
+
+🔍 Ask Mode (Default)
+Read-only page analysis. Ask questions about any web page without modifying anything. Perfect for:
+• Summarizing articles and documents
+• Extracting data from tables and lists
+• Analyzing page structure and content
+• Getting explanations of complex content
+
+🤖 Act Mode
+Full browser automation with your permission. Let the AI agent interact with pages on your behalf:
+• Click buttons and links
+• Fill out forms
+• Navigate between pages
+• Scroll and read dynamic content
+• Execute multi-step workflows
+
+SUPPORTED PROVIDERS:
+• OpenAI (GPT-4o, GPT-4.1, etc.)
+• Google Gemini (Gemini 2.5 Pro, Flash, etc.)
+• Anthropic Claude (Claude Sonnet, Opus, Haiku)
+• OpenRouter (access to 200+ models including local/self-hosted)
+• Any OpenAI-compatible API endpoint
+
+KEY FEATURES:
+• Provider-agnostic — switch between AI providers anytime
+• Side panel UI — always accessible, never in your way
+• Ask & Act modes — read-only analysis or full automation
+• Configurable agent steps — control how many actions the agent takes
+• Per-tab conversations — separate chat history for each tab
+• Page inspection indicator — see when the agent is analyzing a page
+• Dark mode support
+• Open source (MIT License)
+
+PRIVACY & SECURITY:
+WebBrain runs entirely in your browser. Your API keys are stored locally and never sent to any third-party server. All communication goes directly between your browser and your chosen AI provider. The full source code is available on GitHub for audit.
+
+Website: https://webbrain.one
+GitHub: https://github.com/esokullu/webbrain
+License: MIT
+Author: Emre Sokullu
+
+CATEGORY: Productivity
+
+LANGUAGE: English

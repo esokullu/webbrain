@@ -1,0 +1,72 @@
+---
+FIREFOX ADD-ONS (AMO) LISTING - WebBrain v0.9.0
+---
+
+NAME: WebBrain — Open-Source AI Browser Agent
+
+SUMMARY (up to 250 chars):
+Open-source AI browser agent for Firefox. Use any LLM (OpenAI, Gemini, Anthropic, local models) to read, analyze, and automate web pages via the Firefox sidebar.
+
+DESCRIPTION (up to 8,000 chars):
+WebBrain is an open-source Firefox add-on that turns any LLM into a powerful browser agent — integrated seamlessly into your Firefox sidebar.
+
+Unlike proprietary alternatives, WebBrain is provider-agnostic: use OpenAI, Google Gemini, Anthropic Claude, or local models via OpenRouter. Your choice, your API key, your data.
+
+TWO MODES:
+
+🔍 Ask Mode (Default)
+Read-only page analysis. Ask questions about any web page without modifying anything. Perfect for:
+• Summarizing articles and documents
+• Extracting data from tables and lists
+• Analyzing page structure and content
+• Getting explanations of complex content
+
+🤖 Act Mode
+Full browser automation with your permission. Let the AI agent interact with pages on your behalf:
+• Click buttons and links
+• Fill out forms
+• Navigate between pages
+• Scroll and read dynamic content
+• Execute multi-step workflows
+
+FIREFOX INTEGRATION:
+• Native sidebar integration — access WebBrain anytime with Ctrl+Shift+E (customizable)
+• Works with Firefox's sidebar_action API
+• Persistent sidebar across tabs and windows
+• Full keyboard shortcuts support
+• Compatible with Firefox 90+
+
+SUPPORTED PROVIDERS:
+• OpenAI (GPT-4o, GPT-4.1, etc.)
+• Google Gemini (Gemini 2.5 Pro, Flash, etc.)
+• Anthropic Claude (Claude Sonnet, Opus, Haiku)
+• OpenRouter (access to 200+ models including local/self-hosted)
+• Any OpenAI-compatible API endpoint
+
+KEY FEATURES:
+• Provider-agnostic — switch between AI providers anytime
+• Firefox sidebar UI — always accessible, integrated naturally
+• Ask & Act modes — read-only analysis or full automation
+• Configurable agent steps — control how many actions the agent takes
+• Per-tab conversations — separate chat history for each tab
+• Page inspection indicator — see when the agent is analyzing a page
+• Dark mode support
+• Open source (MIT License)
+
+PRIVACY & SECURITY:
+WebBrain runs entirely in your browser. Your API keys are stored locally and never sent to any third-party server. All communication goes directly between your Firefox browser and your chosen AI provider. The full source code is available on GitHub for audit.
+
+Website: https://webbrain.one
+GitHub: https://github.com/esokullu/webbrain
+License: MIT
+Author: Emre Sokullu
+
+CATEGORY: Productivity
+
+LANGUAGE: English
+
+PERMISSIONS EXPLAINED:
+• Access to all web pages: Required to read and analyze page content
+• Tabs API: Required to track active tab and maintain per-tab conversation history
+• Storage: Required to save your API keys and settings locally
+• Scripting: Required for Act Mode to interact with web pages on your behalf

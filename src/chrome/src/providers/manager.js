@@ -45,6 +45,7 @@ export class ProviderManager {
         type: 'llamacpp',
         label: 'llama.cpp (Local)',
         baseUrl: 'http://localhost:8080',
+        model: '',
         enabled: true,
       },
       openai: {

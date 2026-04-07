@@ -55,6 +55,7 @@ function renderProviders() {
     llamacpp: {
       fields: [
         { key: 'baseUrl', label: 'Server URL', type: 'text', placeholder: 'http://localhost:8080' },
+        { key: 'model', label: 'Model', type: 'text', placeholder: 'qwen/qwen3.5-9b' },
       ],
     },
     openai: {
