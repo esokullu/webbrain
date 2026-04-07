@@ -58,6 +58,12 @@ function renderProviders() {
         { key: 'model', label: 'Model', type: 'text', placeholder: 'qwen/qwen3.5-9b' },
       ],
     },
+    lmstudio: {
+      fields: [
+        { key: 'baseUrl', label: 'Server URL', type: 'text', placeholder: 'http://localhost:1234/v1' },
+        { key: 'model', label: 'Model (optional)', type: 'text', placeholder: 'leave blank to use loaded model' },
+      ],
+    },
     openai: {
       fields: [
         { key: 'apiKey', label: 'API Key', type: 'password', placeholder: 'sk-...' },

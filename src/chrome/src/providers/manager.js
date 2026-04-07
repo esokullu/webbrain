@@ -48,6 +48,15 @@ export class ProviderManager {
         model: '',
         enabled: true,
       },
+      lmstudio: {
+        type: 'openai',
+        label: 'LM Studio (Local)',
+        providerName: 'lmstudio',
+        baseUrl: 'http://localhost:1234/v1',
+        model: '',
+        apiKey: 'lm-studio',
+        enabled: true,
+      },
       openai: {
         type: 'openai',
         label: 'OpenAI',
