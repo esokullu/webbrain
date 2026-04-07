@@ -42,6 +42,56 @@ export class Agent {
    * Capture a viewport JPEG screenshot via CDP and return a data URL, or null
    * if capture fails. JPEG @ q60 keeps tokens reasonable (~1k–2k per image).
    */
+  /**
+   * For the FIRST user message in a conversation, attach the current page's
+   * URL/title (always) and a viewport screenshot (if the active provider
+   * supports vision). Subsequent turns return the user message unchanged.
+   *
+   * "First message" = no prior user/assistant turns in the message array
+   * (system prompt may exist; summarized-trim acks may exist but those are
+   * synthetic). We treat any conversation with no real user turn yet as
+   * fresh context and seed it.
+   */
+  async _enrichFirstUserMessage(tabId, messages, userMessage) {
+    const hasPriorUserTurn = messages.some(m => m.role === 'user');
+    if (hasPriorUserTurn) {
+      return { role: 'user', content: userMessage };
+    }
+
+    // Collect URL + title via chrome.tabs (cheap, no debugger needed).
+    let url = '';
+    let title = '';
+    try {
+      const tab = await chrome.tabs.get(tabId);
+      url = tab?.url || '';
+      title = tab?.title || '';
+    } catch (e) { /* ignore */ }
+
+    const contextLine = url
+      ? `[Page context — URL: ${url}${title ? ` — Title: ${title}` : ''}]\n\n`
+      : '';
+
+    // Without vision, fall back to plain text context.
+    const provider = this.providerManager.getActive();
+    if (!provider.supportsVision) {
+      return { role: 'user', content: contextLine + userMessage };
+    }
+
+    // With vision, attach a viewport screenshot.
+    const dataUrl = await this._captureAutoScreenshot(tabId);
+    if (!dataUrl) {
+      return { role: 'user', content: contextLine + userMessage };
+    }
+
+    return {
+      role: 'user',
+      content: [
+        { type: 'text', text: contextLine + userMessage },
+        { type: 'image_url', image_url: { url: dataUrl } },
+      ],
+    };
+  }
+
   async _captureAutoScreenshot(tabId) {
     try {
       await cdpClient.attach(tabId);
@@ -591,7 +641,8 @@ export class Agent {
     // Trim context if it's getting too long
     await this._manageContext(tabId, messages);
 
-    messages.push({ role: 'user', content: userMessage });
+    const enriched = await this._enrichFirstUserMessage(tabId, messages, userMessage);
+    messages.push(enriched);
     this._persist(tabId);
 
     const provider = this.providerManager.getActive();
@@ -767,7 +818,8 @@ export class Agent {
     // Trim context if it's getting too long
     await this._manageContext(tabId, messages);
 
-    messages.push({ role: 'user', content: userMessage });
+    const enriched = await this._enrichFirstUserMessage(tabId, messages, userMessage);
+    messages.push(enriched);
     this._persist(tabId);
 
     const provider = this.providerManager.getActive();

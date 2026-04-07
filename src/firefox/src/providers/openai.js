@@ -13,11 +13,17 @@ export class OpenAICompatibleProvider extends BaseLLMProvider {
   }
 
   get model() {
-    return this.config.model || 'gpt-4o';
+    return this.config.model || 'gpt-5';
   }
 
   get supportsTools() {
     return true;
+  }
+
+  get supportsVision() {
+    if (this.config.supportsVision != null) return !!this.config.supportsVision;
+    const m = (this.config.model || '').toLowerCase();
+    return /gpt-4o|gpt-4\.1|gpt-4-turbo|gpt-5|claude|gemini|llava|qwen.*vl|qwen2.*vl|qwen3.*vl|pixtral|llama.*vision|gemma.*vision|gemma-?[34]/.test(m);
   }
 
   _headers() {

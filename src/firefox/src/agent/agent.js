@@ -11,6 +11,74 @@ export class Agent {
     this.maxSteps = 60; // safety limit for autonomous loops (configurable via settings)
     this.maxContextMessages = 50; // trim beyond this
     this.maxContextChars = 80000; // rough char budget (~20k tokens)
+    this.autoScreenshot = 'state_change';
+  }
+
+  static NAV_TOOLS = new Set(['navigate', 'new_tab']);
+  static STATE_CHANGE_TOOLS = new Set(['navigate', 'new_tab', 'click', 'type_text', 'scroll']);
+
+  _shouldAutoScreenshot(toolName) {
+    const mode = this.autoScreenshot;
+    if (mode === 'off' || !mode) return false;
+    if (mode === 'every_step') return true;
+    if (mode === 'state_change') return Agent.STATE_CHANGE_TOOLS.has(toolName);
+    if (mode === 'navigation') return Agent.NAV_TOOLS.has(toolName);
+    return false;
+  }
+
+  /**
+   * Capture a viewport screenshot via the WebExtension tabs API. Firefox
+   * doesn't expose CDP, but tabs.captureVisibleTab works for the active tab
+   * in the active window. Returns a data URL or null on failure.
+   */
+  async _captureAutoScreenshot(tabId) {
+    try {
+      const tab = await browser.tabs.get(tabId);
+      if (!tab) return null;
+      const dataUrl = await browser.tabs.captureVisibleTab(tab.windowId, {
+        format: 'jpeg',
+        quality: 60,
+      });
+      return dataUrl || null;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  /**
+   * For the FIRST user message, attach page URL/title (always) and a
+   * viewport screenshot (only when the active provider supports vision).
+   */
+  async _enrichFirstUserMessage(tabId, messages, userMessage) {
+    const hasPriorUserTurn = messages.some(m => m.role === 'user');
+    if (hasPriorUserTurn) return { role: 'user', content: userMessage };
+
+    let url = '', title = '';
+    try {
+      const tab = await browser.tabs.get(tabId);
+      url = tab?.url || '';
+      title = tab?.title || '';
+    } catch (e) { /* ignore */ }
+
+    const contextLine = url
+      ? `[Page context — URL: ${url}${title ? ` — Title: ${title}` : ''}]\n\n`
+      : '';
+
+    const provider = this.providerManager.getActive();
+    if (!provider.supportsVision) {
+      return { role: 'user', content: contextLine + userMessage };
+    }
+
+    const dataUrl = await this._captureAutoScreenshot(tabId);
+    if (!dataUrl) return { role: 'user', content: contextLine + userMessage };
+
+    return {
+      role: 'user',
+      content: [
+        { type: 'text', text: contextLine + userMessage },
+        { type: 'image_url', image_url: { url: dataUrl } },
+      ],
+    };
   }
 
   /**
@@ -307,7 +375,8 @@ export class Agent {
     // Trim context if it's getting too long
     await this._manageContext(tabId, messages);
 
-    messages.push({ role: 'user', content: userMessage });
+    const enriched = await this._enrichFirstUserMessage(tabId, messages, userMessage);
+    messages.push(enriched);
 
     const provider = this.providerManager.getActive();
     const tools = getToolsForMode(mode);
@@ -381,6 +450,8 @@ export class Agent {
           onUpdate('text', { content: result.content });
         }
 
+        let didStateChange = false;
+
         for (const tc of result.toolCalls) {
           // Check abort before each tool execution
           if (this._checkAbort(tabId)) {
@@ -423,6 +494,26 @@ export class Agent {
             tool_call_id: tc.id,
             content: this._limitToolResult(toolResult),
           });
+
+          if (this._shouldAutoScreenshot(fnName) && !toolResult?.error) {
+            didStateChange = true;
+          }
+        }
+
+        if (didStateChange && provider.supportsVision) {
+          await new Promise(r => setTimeout(r, 250));
+          const dataUrl = await this._captureAutoScreenshot(tabId);
+          if (dataUrl) {
+            messages.push({
+              role: 'user',
+              content: [
+                { type: 'text', text: '[Auto-screenshot of current viewport after the action above. Use this to confirm the result and plan the next step.]' },
+                { type: 'image_url', image_url: { url: dataUrl } },
+              ],
+            });
+            onUpdate('tool_call', { name: 'auto_screenshot', args: {} });
+            onUpdate('tool_result', { name: 'auto_screenshot', result: { success: true, bytes: dataUrl.length } });
+          }
         }
 
         // Continue the loop — the LLM will see the tool results
@@ -452,7 +543,8 @@ export class Agent {
     // Trim context if it's getting too long
     await this._manageContext(tabId, messages);
 
-    messages.push({ role: 'user', content: userMessage });
+    const enriched = await this._enrichFirstUserMessage(tabId, messages, userMessage);
+    messages.push(enriched);
 
     const provider = this.providerManager.getActive();
     const tools = getToolsForMode(mode);
@@ -519,6 +611,8 @@ export class Agent {
             tool_calls: toolCalls,
           });
 
+          let didStateChange = false;
+
           for (const tc of toolCalls) {
             const fnName = tc.function.name;
             let fnArgs;
@@ -541,6 +635,26 @@ export class Agent {
               tool_call_id: tc.id,
               content: this._limitToolResult(toolResult),
             });
+
+            if (this._shouldAutoScreenshot(fnName) && !toolResult?.error) {
+              didStateChange = true;
+            }
+          }
+
+          if (didStateChange && provider.supportsVision) {
+            await new Promise(r => setTimeout(r, 250));
+            const dataUrl = await this._captureAutoScreenshot(tabId);
+            if (dataUrl) {
+              messages.push({
+                role: 'user',
+                content: [
+                  { type: 'text', text: '[Auto-screenshot of current viewport after the action above. Use this to confirm the result and plan the next step.]' },
+                  { type: 'image_url', image_url: { url: dataUrl } },
+                ],
+              });
+              onUpdate('tool_call', { name: 'auto_screenshot', args: {} });
+              onUpdate('tool_result', { name: 'auto_screenshot', result: { success: true, bytes: dataUrl.length } });
+            }
           }
 
           continue;

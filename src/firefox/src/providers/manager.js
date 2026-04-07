@@ -46,6 +46,7 @@ export class ProviderManager {
         label: 'llama.cpp (Local)',
         baseUrl: 'http://localhost:8080',
         model: '',
+        supportsVision: false,
         enabled: true,
       },
       lmstudio: {
@@ -55,6 +56,7 @@ export class ProviderManager {
         baseUrl: 'http://localhost:1234/v1',
         model: '',
         apiKey: 'lm-studio',
+        supportsVision: false,
         enabled: true,
       },
       openai: {

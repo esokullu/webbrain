@@ -15,10 +15,17 @@ async function loadMaxSteps() {
   if (stored.maxAgentSteps) agent.maxSteps = stored.maxAgentSteps;
 }
 
+async function loadAutoScreenshot() {
+  const stored = await browser.storage.local.get('autoScreenshot');
+  if (stored.autoScreenshot != null) agent.autoScreenshot = stored.autoScreenshot;
+}
+loadAutoScreenshot();
+
 // Initialize on install
 browser.runtime.onInstalled.addListener(async () => {
   await providerManager.load();
   await loadMaxSteps();
+  await loadAutoScreenshot();
   console.log('[WebBrain] Extension installed, providers loaded.');
 });
 
@@ -26,6 +33,9 @@ browser.runtime.onInstalled.addListener(async () => {
 browser.storage.onChanged.addListener((changes) => {
   if (changes.maxAgentSteps) {
     agent.maxSteps = changes.maxAgentSteps.newValue;
+  }
+  if (changes.autoScreenshot) {
+    agent.autoScreenshot = changes.autoScreenshot.newValue;
   }
 });
 

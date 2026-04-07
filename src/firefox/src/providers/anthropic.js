@@ -20,6 +20,10 @@ export class AnthropicProvider extends BaseLLMProvider {
     return true;
   }
 
+  get supportsVision() {
+    return /claude-(3|sonnet-4|opus-4|haiku-4|4)/.test(this.config.model || '');
+  }
+
   _headers() {
     return {
       'Content-Type': 'application/json',
@@ -88,6 +92,29 @@ export class AnthropicProvider extends BaseLLMProvider {
             content: msg.content,
           }],
         });
+        continue;
+      }
+
+      // Handle array-style content (e.g. user messages with embedded images
+      // from auto-screenshot mode). Translate OpenAI-style image_url blocks
+      // to Anthropic's image/source format.
+      if (Array.isArray(msg.content)) {
+        const blocks = [];
+        for (const part of msg.content) {
+          if (part.type === 'text') {
+            blocks.push({ type: 'text', text: part.text });
+          } else if (part.type === 'image_url' && part.image_url?.url) {
+            const url = part.image_url.url;
+            const m = /^data:([^;]+);base64,(.+)$/.exec(url);
+            if (m) {
+              blocks.push({
+                type: 'image',
+                source: { type: 'base64', media_type: m[1], data: m[2] },
+              });
+            }
+          }
+        }
+        converted.push({ role: msg.role, content: blocks });
         continue;
       }
 

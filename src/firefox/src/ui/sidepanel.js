@@ -254,9 +254,9 @@ browser.runtime.onMessage.addListener((msg) => {
 
     case 'max_steps_reached':
       hideActivity();
-      if (currentAssistantEl) {
-        showContinueButton();
-      }
+      // Don't gate on currentAssistantEl — race with sendResponse means it
+      // may already be null by the time this fires.
+      showContinueButton();
       break;
 
     case 'warning':

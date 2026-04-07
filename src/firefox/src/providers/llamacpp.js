@@ -20,6 +20,10 @@ export class LlamaCppProvider extends BaseLLMProvider {
     return true; // llama.cpp server supports function calling
   }
 
+  get supportsVision() {
+    return !!this.config.supportsVision;
+  }
+
   async chat(messages, options = {}) {
     const body = {
       messages,

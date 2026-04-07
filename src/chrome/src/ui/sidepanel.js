@@ -354,9 +354,12 @@ chrome.runtime.onMessage.addListener((msg) => {
 
     case 'max_steps_reached':
       hideActivity();
-      if (currentAssistantEl) {
-        showContinueButton();
-      }
+      // Don't gate on currentAssistantEl — this event sometimes arrives
+      // after the chat sendResponse has resolved and the finally block has
+      // already nulled out currentAssistantEl. The continue bar attaches to
+      // the messages container, not to a specific message, so it's fine to
+      // show unconditionally.
+      showContinueButton();
       break;
 
     case 'warning':
