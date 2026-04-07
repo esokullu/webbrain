@@ -38,6 +38,13 @@ export class BaseLLMProvider {
   }
 
   /**
+   * Check if this provider supports image inputs (vision).
+   */
+  get supportsVision() {
+    return false;
+  }
+
+  /**
    * Test the connection to this provider.
    * @returns {Promise<{ok: boolean, error?: string, model?: string}>}
    */

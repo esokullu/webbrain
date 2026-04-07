@@ -15,6 +15,12 @@ async function loadMaxSteps() {
   if (stored.maxAgentSteps) agent.maxSteps = stored.maxAgentSteps;
 }
 
+async function loadAutoScreenshot() {
+  const stored = await chrome.storage.local.get('autoScreenshot');
+  if (stored.autoScreenshot != null) agent.autoScreenshot = stored.autoScreenshot;
+}
+loadAutoScreenshot();
+
 // Initialize on install
 chrome.runtime.onInstalled.addListener(async () => {
   await providerManager.load();
@@ -32,6 +38,9 @@ chrome.runtime.onStartup?.addListener(async () => {
 chrome.storage.onChanged.addListener((changes) => {
   if (changes.maxAgentSteps) {
     agent.maxSteps = changes.maxAgentSteps.newValue;
+  }
+  if (changes.autoScreenshot) {
+    agent.autoScreenshot = changes.autoScreenshot.newValue;
   }
 });
 
@@ -118,6 +127,35 @@ chrome.tabs.onRemoved.addListener((tabId) => {
   // Also clear any persisted chat state for that tab.
   chrome.storage.session?.remove(`tabChat:${tabId}`).catch(() => {});
 });
+
+// SPA navigation tracking. Many sites change route via History API without
+// a full page load — content scripts and any cached element snapshots become
+// stale. We record per-tab timestamps for both full and history-only
+// navigations and expose them on globalThis so cdpClient.resolveSelector can
+// extend its retry budget when a click/type fires soon after a nav (the new
+// route may still be hydrating).
+const lastNavByTab = new Map(); // tabId -> { ts, type }
+globalThis.__webbrainLastNav = lastNavByTab;
+
+function recordNav(tabId, type) {
+  if (tabId == null) return;
+  lastNavByTab.set(tabId, { ts: Date.now(), type });
+}
+
+chrome.webNavigation?.onHistoryStateUpdated?.addListener((details) => {
+  if (details.frameId === 0) recordNav(details.tabId, 'history');
+});
+chrome.webNavigation?.onReferenceFragmentUpdated?.addListener((details) => {
+  if (details.frameId === 0) recordNav(details.tabId, 'fragment');
+});
+chrome.webNavigation?.onCommitted?.addListener((details) => {
+  if (details.frameId === 0) recordNav(details.tabId, 'committed');
+});
+chrome.webNavigation?.onCompleted?.addListener((details) => {
+  if (details.frameId === 0) recordNav(details.tabId, 'completed');
+});
+
+chrome.tabs.onRemoved.addListener((tabId) => lastNavByTab.delete(tabId));
 
 /**
  * Central message handler.

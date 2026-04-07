@@ -20,6 +20,12 @@ export class LlamaCppProvider extends BaseLLMProvider {
     return true; // llama.cpp server supports function calling
   }
 
+  get supportsVision() {
+    // Local models vary — some llama.cpp / Qwen2-VL / Gemma 3 / LLaVA builds
+    // are multimodal, others are text-only. The user opts in via settings.
+    return !!this.config.supportsVision;
+  }
+
   async chat(messages, options = {}) {
     const body = {
       messages,

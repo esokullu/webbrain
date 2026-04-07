@@ -246,6 +246,18 @@
     </div>
     <div class="setting-row">
       <div class="setting-info">
+        <div class="setting-label">Auto-screenshot</div>
+        <div class="setting-desc">Automatically capture a viewport screenshot after the agent acts on the page, so vision-capable models can see what changed. Costs more tokens. Disabled silently if the active model doesn't support images.</div>
+      </div>
+      <select id="select-auto-screenshot" style="background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:6px 10px;font-family:inherit;cursor:pointer;">
+        <option value="off">Off</option>
+        <option value="navigation">On navigation</option>
+        <option value="state_change">On state change (default)</option>
+        <option value="every_step">Every step</option>
+      </select>
+    </div>
+    <div class="setting-row">
+      <div class="setting-info">
         <div class="setting-label">Max Agent Steps <span id="steps-value" style="color:var(--accent);font-weight:700;margin-left:4px;">50</span></div>
         <div class="setting-desc">Maximum number of tool-use steps the agent can take per message. Higher values allow more complex multi-step tasks but may use more tokens.</div>
       </div>

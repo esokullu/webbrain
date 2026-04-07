@@ -137,17 +137,11 @@ Key difference: Chrome uses Manifest V3 (service worker, `chrome.scripting`, `si
 
 ## Known Issues
 
-- **No file download/upload support** — The agent cannot download files from pages or upload files to file inputs. This is a limitation of the content script architecture. Planned for a future release via `chrome.downloads` API and CDP integration.
-- **No Chrome DevTools Protocol (CDP) support** — Currently uses content script injection instead of CDP. This means no access to network requests, shadow DOM, cross-origin iframes, or pixel-perfect screenshots. CDP support is planned as an opt-in advanced mode.
-- **Shadow DOM limitations** — Web components using closed shadow DOM cannot be read or interacted with by the content script.
 - **SPA navigation detection** — Some single-page applications may not trigger content script re-injection after client-side navigation.
 - **Firefox temporary add-on** — Firefox requires the extension to be loaded as a temporary add-on during development, which is removed on restart.
 
 ## Roadmap
 
-- [ ] **CDP integration** — Optional Chrome DevTools Protocol mode for advanced page access (network, shadow DOM, cross-origin frames, precise screenshots)
-- [ ] **File download** — Download files from pages via `chrome.downloads` API
-- [ ] **File upload** — Upload files to `<input type="file">` elements via CDP `DOM.setFileInputFiles`
 - [ ] **Conversation export/import** — Save and load chat histories
 - [ ] **Custom tool definitions** — User-defined tools via settings
 - [ ] **Keyboard shortcuts** — Hotkeys for opening panel, sending messages, switching modes

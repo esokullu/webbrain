@@ -7,6 +7,7 @@ const verboseToggle = document.getElementById('toggle-verbose');
 const screenshotToggle = document.getElementById('toggle-screenshot-fallback');
 const maxStepsRange = document.getElementById('range-max-steps');
 const stepsValueLabel = document.getElementById('steps-value');
+const autoScreenshotSelect = document.getElementById('select-auto-screenshot');
 
 let providersData = {};
 let activeProviderId = '';
@@ -15,11 +16,12 @@ let activeProviderId = '';
 
 async function init() {
   // Load display settings
-  const stored = await chrome.storage.local.get(['verboseMode', 'screenshotFallback', 'maxAgentSteps']);
+  const stored = await chrome.storage.local.get(['verboseMode', 'screenshotFallback', 'maxAgentSteps', 'autoScreenshot']);
   verboseToggle.checked = stored.verboseMode || false;
   screenshotToggle.checked = stored.screenshotFallback ?? true; // on by default
   maxStepsRange.value = stored.maxAgentSteps || 60;
   stepsValueLabel.textContent = maxStepsRange.value;
+  autoScreenshotSelect.value = stored.autoScreenshot || 'state_change';
 
   // Load providers
   const res = await sendToBackground('get_providers');
@@ -46,6 +48,10 @@ maxStepsRange.addEventListener('change', () => {
   chrome.storage.local.set({ maxAgentSteps: parseInt(maxStepsRange.value) });
 });
 
+autoScreenshotSelect.addEventListener('change', () => {
+  chrome.storage.local.set({ autoScreenshot: autoScreenshotSelect.value });
+});
+
 // --- Provider Rendering ---
 
 function renderProviders() {
@@ -56,12 +62,14 @@ function renderProviders() {
       fields: [
         { key: 'baseUrl', label: 'Server URL', type: 'text', placeholder: 'http://localhost:8080' },
         { key: 'model', label: 'Model', type: 'text', placeholder: 'qwen/qwen3.5-9b' },
+        { key: 'supportsVision', label: 'Model supports vision (multimodal)', type: 'checkbox' },
       ],
     },
     lmstudio: {
       fields: [
         { key: 'baseUrl', label: 'Server URL', type: 'text', placeholder: 'http://localhost:1234/v1' },
         { key: 'model', label: 'Model (optional)', type: 'text', placeholder: 'leave blank to use loaded model' },
+        { key: 'supportsVision', label: 'Model supports vision (multimodal)', type: 'checkbox' },
       ],
     },
     openai: {
@@ -96,13 +104,24 @@ function renderProviders() {
 
     let fieldsHTML = '';
     for (const field of fieldDefs) {
-      fieldsHTML += `
-        <div class="field">
-          <label>${field.label}</label>
-          <input type="${field.type}" data-provider="${id}" data-key="${field.key}"
-                 value="${config[field.key] || ''}" placeholder="${field.placeholder}">
-        </div>
-      `;
+      if (field.type === 'checkbox') {
+        const checked = config[field.key] ? 'checked' : '';
+        fieldsHTML += `
+          <div class="field" style="display:flex;align-items:center;gap:8px;flex-direction:row;">
+            <input type="checkbox" data-provider="${id}" data-key="${field.key}" data-type="checkbox" ${checked}
+                   style="width:auto;cursor:pointer;">
+            <label style="margin:0;cursor:pointer;">${field.label}</label>
+          </div>
+        `;
+      } else {
+        fieldsHTML += `
+          <div class="field">
+            <label>${field.label}</label>
+            <input type="${field.type}" data-provider="${id}" data-key="${field.key}"
+                   value="${config[field.key] || ''}" placeholder="${field.placeholder || ''}">
+          </div>
+        `;
+      }
     }
 
     card.innerHTML = `
@@ -140,7 +159,11 @@ async function saveProvider(id) {
   const inputs = document.querySelectorAll(`input[data-provider="${id}"]`);
   const config = {};
   inputs.forEach(input => {
-    config[input.dataset.key] = input.value;
+    if (input.dataset.type === 'checkbox' || input.type === 'checkbox') {
+      config[input.dataset.key] = input.checked;
+    } else {
+      config[input.dataset.key] = input.value;
+    }
   });
 
   await sendToBackground('update_provider', { providerId: id, config });

@@ -15,6 +15,47 @@ export class Agent {
     this.maxSteps = 60; // safety limit for autonomous loops (configurable via settings)
     this.maxContextMessages = 50; // trim beyond this
     this.maxContextChars = 80000; // rough char budget (~20k tokens)
+    // Auto-screenshot mode. 'off' | 'navigation' | 'state_change' | 'every_step'.
+    // Loaded from chrome.storage.local in background.js.
+    this.autoScreenshot = 'state_change';
+  }
+
+  // Tools whose successful completion should trigger an auto-screenshot when
+  // the corresponding mode is active.
+  static NAV_TOOLS = new Set(['navigate', 'new_tab']);
+  static STATE_CHANGE_TOOLS = new Set(['navigate', 'new_tab', 'click', 'type_text', 'scroll']);
+
+  /**
+   * Decide whether to capture an auto-screenshot after a tool call, based on
+   * the current setting and which tool ran.
+   */
+  _shouldAutoScreenshot(toolName) {
+    const mode = this.autoScreenshot;
+    if (mode === 'off' || !mode) return false;
+    if (mode === 'every_step') return true;
+    if (mode === 'state_change') return Agent.STATE_CHANGE_TOOLS.has(toolName);
+    if (mode === 'navigation') return Agent.NAV_TOOLS.has(toolName);
+    return false;
+  }
+
+  /**
+   * Capture a viewport JPEG screenshot via CDP and return a data URL, or null
+   * if capture fails. JPEG @ q60 keeps tokens reasonable (~1k–2k per image).
+   */
+  async _captureAutoScreenshot(tabId) {
+    try {
+      await cdpClient.attach(tabId);
+      await cdpClient.sendCommand(tabId, 'Page.enable');
+      const shot = await cdpClient.sendCommand(tabId, 'Page.captureScreenshot', {
+        format: 'jpeg',
+        quality: 60,
+        fromSurface: true,
+      });
+      if (!shot?.data) return null;
+      return `data:image/jpeg;base64,${shot.data}`;
+    } catch (e) {
+      return null;
+    }
   }
 
   // ---- Persistence: keep per-tab conversation state alive across service
@@ -625,6 +666,8 @@ export class Agent {
           onUpdate('text', { content: result.content });
         }
 
+        let didStateChange = false;
+
         for (const tc of result.toolCalls) {
           // Check abort before each tool execution
           if (this._checkAbort(tabId)) {
@@ -668,6 +711,30 @@ export class Agent {
             tool_call_id: tc.id,
             content: this._limitToolResult(toolResult),
           });
+
+          if (this._shouldAutoScreenshot(fnName) && !toolResult?.error) {
+            didStateChange = true;
+          }
+        }
+
+        // Auto-screenshot: if any state-changing tool ran in this batch and
+        // the active provider supports vision, capture the viewport once and
+        // inject it as a synthetic user message before the next LLM turn.
+        if (didStateChange && provider.supportsVision) {
+          // Give the page a beat to settle (animations, hydration).
+          await new Promise(r => setTimeout(r, 250));
+          const dataUrl = await this._captureAutoScreenshot(tabId);
+          if (dataUrl) {
+            messages.push({
+              role: 'user',
+              content: [
+                { type: 'text', text: '[Auto-screenshot of current viewport after the action above. Use this to confirm the result and plan the next step.]' },
+                { type: 'image_url', image_url: { url: dataUrl } },
+              ],
+            });
+            onUpdate('tool_call', { name: 'auto_screenshot', args: {} });
+            onUpdate('tool_result', { name: 'auto_screenshot', result: { success: true, bytes: dataUrl.length } });
+          }
         }
 
         this._persist(tabId);
@@ -768,6 +835,8 @@ export class Agent {
             tool_calls: toolCalls,
           });
 
+          let didStateChange = false;
+
           for (const tc of toolCalls) {
             const fnName = tc.function.name;
             let fnArgs;
@@ -796,6 +865,26 @@ export class Agent {
               tool_call_id: tc.id,
               content: this._limitToolResult(toolResult),
             });
+
+            if (this._shouldAutoScreenshot(fnName) && !toolResult?.error) {
+              didStateChange = true;
+            }
+          }
+
+          if (didStateChange && provider.supportsVision) {
+            await new Promise(r => setTimeout(r, 250));
+            const dataUrl = await this._captureAutoScreenshot(tabId);
+            if (dataUrl) {
+              messages.push({
+                role: 'user',
+                content: [
+                  { type: 'text', text: '[Auto-screenshot of current viewport after the action above. Use this to confirm the result and plan the next step.]' },
+                  { type: 'image_url', image_url: { url: dataUrl } },
+                ],
+              });
+              onUpdate('tool_call', { name: 'auto_screenshot', args: {} });
+              onUpdate('tool_result', { name: 'auto_screenshot', result: { success: true, bytes: dataUrl.length } });
+            }
           }
 
           this._persist(tabId);

@@ -618,8 +618,22 @@ export class CDPClient {
     // shadow root attachment, modal/menu open animations). Each attempt is
     // a fresh DOM walk + fresh CDP DOM.getDocument, so any newly attached
     // shadow root becomes visible on the next try.
-    const retries = options.retries ?? 3;
-    const delayMs = options.delayMs ?? 200;
+    //
+    // If a SPA navigation just happened on this tab, the new route is
+    // probably still hydrating — extend the retry window so we wait through
+    // the framework re-render instead of failing fast. background.js writes
+    // to globalThis.__webbrainLastNav via chrome.webNavigation listeners.
+    let retries = options.retries ?? 3;
+    let delayMs = options.delayMs ?? 200;
+    try {
+      const navMap = globalThis.__webbrainLastNav;
+      const last = navMap?.get(tabId);
+      if (last && Date.now() - last.ts < 4000) {
+        // Recent nav: give it ~3 seconds total (10 × 300ms).
+        retries = Math.max(retries, 10);
+        delayMs = Math.max(delayMs, 300);
+      }
+    } catch (e) { /* ignore */ }
 
     let lastResult = null;
     for (let i = 0; i <= retries; i++) {
