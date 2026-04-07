@@ -8,10 +8,64 @@ export class Agent {
   constructor(providerManager) {
     this.providerManager = providerManager;
     this.conversations = new Map(); // tabId -> messages[]
+    this.conversationModes = new Map(); // tabId -> 'ask' | 'act'
+    this.hydratedTabs = new Set(); // tabIds we've already pulled from storage
+    this.persistTimers = new Map(); // tabId -> debounce handle
     this.abortFlags = new Map(); // tabId -> boolean
     this.maxSteps = 25; // safety limit for autonomous loops (configurable via settings)
     this.maxContextMessages = 50; // trim beyond this
     this.maxContextChars = 80000; // rough char budget (~20k tokens)
+  }
+
+  // ---- Persistence: keep per-tab conversation state alive across service
+  // worker restarts by mirroring it to chrome.storage.session. Without this,
+  // killing the worker between turns means the model loses all prior context
+  // even though the sidebar UI still shows the messages.
+
+  _convKey(tabId) { return `agentConv:${tabId}`; }
+
+  /**
+   * Pull a tab's conversation from storage.session into memory if we haven't
+   * already this worker lifetime. Safe to call repeatedly.
+   */
+  async _hydrate(tabId) {
+    if (this.hydratedTabs.has(tabId)) return;
+    this.hydratedTabs.add(tabId);
+    if (this.conversations.has(tabId)) return;
+    try {
+      const key = this._convKey(tabId);
+      const stored = await chrome.storage.session.get(key);
+      const entry = stored?.[key];
+      if (entry && Array.isArray(entry.messages) && entry.messages.length > 0) {
+        this.conversations.set(tabId, entry.messages);
+        if (entry.mode) {
+          this.conversationModes.set(tabId, entry.mode);
+          this._conversationMode = entry.mode;
+        }
+      }
+    } catch (e) { /* session storage may be unavailable */ }
+  }
+
+  /**
+   * Debounced write of a tab's conversation to storage.session. Multiple
+   * rapid mutations within 300ms collapse into one write.
+   */
+  _persist(tabId) {
+    if (tabId == null) return;
+    const existing = this.persistTimers.get(tabId);
+    if (existing) clearTimeout(existing);
+    const handle = setTimeout(() => {
+      this.persistTimers.delete(tabId);
+      const messages = this.conversations.get(tabId);
+      if (!messages) return;
+      const mode = this.conversationModes.get(tabId) || 'ask';
+      try {
+        chrome.storage.session.set({
+          [this._convKey(tabId)]: { mode, messages },
+        }).catch(() => {});
+      } catch (e) { /* ignore */ }
+    }, 300);
+    this.persistTimers.set(tabId, handle);
   }
 
   /**
@@ -41,15 +95,18 @@ export class Agent {
       this.conversations.set(tabId, [
         { role: 'system', content: systemPrompt },
       ]);
+      this.conversationModes.set(tabId, mode);
       this._conversationMode = mode;
     }
     // If mode changed, update the system prompt
-    if (this._conversationMode !== mode) {
+    const lastMode = this.conversationModes.get(tabId);
+    if (lastMode !== mode) {
       const messages = this.conversations.get(tabId);
       const systemPrompt = mode === 'act' ? SYSTEM_PROMPT_ACT : SYSTEM_PROMPT_ASK;
       if (messages[0]?.role === 'system') {
         messages[0].content = systemPrompt;
       }
+      this.conversationModes.set(tabId, mode);
       this._conversationMode = mode;
     }
     return this.conversations.get(tabId);
@@ -60,6 +117,13 @@ export class Agent {
    */
   clearConversation(tabId) {
     this.conversations.delete(tabId);
+    this.conversationModes.delete(tabId);
+    this.hydratedTabs.delete(tabId);
+    const t = this.persistTimers.get(tabId);
+    if (t) { clearTimeout(t); this.persistTimers.delete(tabId); }
+    try {
+      chrome.storage.session.remove(this._convKey(tabId)).catch(() => {});
+    } catch (e) { /* ignore */ }
   }
 
   /**
@@ -444,12 +508,14 @@ export class Agent {
    * @returns {Promise<string>} final text response
    */
   async processMessage(tabId, userMessage, onUpdate = () => {}, mode = 'ask') {
+    await this._hydrate(tabId);
     const messages = this.getConversation(tabId, mode);
 
     // Trim context if it's getting too long
     await this._manageContext(tabId, messages);
 
     messages.push({ role: 'user', content: userMessage });
+    this._persist(tabId);
 
     const provider = this.providerManager.getActive();
     const tools = getToolsForMode(mode);
@@ -555,6 +621,7 @@ export class Agent {
               tool_call_id: tc.id,
               content: this._limitToolResult(toolResult),
             });
+            this._persist(tabId);
             // Don't continue the loop
             return finalResponse;
           }
@@ -567,6 +634,7 @@ export class Agent {
           });
         }
 
+        this._persist(tabId);
         // Continue the loop — the LLM will see the tool results
         continue;
       }
@@ -582,6 +650,7 @@ export class Agent {
       onUpdate('max_steps_reached', { steps: this.maxSteps });
     }
 
+    this._persist(tabId);
     return finalResponse;
   }
 
@@ -589,12 +658,14 @@ export class Agent {
    * Process a message with streaming output.
    */
   async processMessageStream(tabId, userMessage, onUpdate = () => {}, mode = 'ask') {
+    await this._hydrate(tabId);
     const messages = this.getConversation(tabId, mode);
 
     // Trim context if it's getting too long
     await this._manageContext(tabId, messages);
 
     messages.push({ role: 'user', content: userMessage });
+    this._persist(tabId);
 
     const provider = this.providerManager.getActive();
     const tools = getToolsForMode(mode);
@@ -675,6 +746,12 @@ export class Agent {
             onUpdate('tool_result', { name: fnName, result: toolResult });
 
             if (toolResult.done) {
+              messages.push({
+                role: 'tool',
+                tool_call_id: tc.id,
+                content: this._limitToolResult(toolResult),
+              });
+              this._persist(tabId);
               return toolResult.summary || fullText || 'Task completed.';
             }
 
@@ -685,11 +762,13 @@ export class Agent {
             });
           }
 
+          this._persist(tabId);
           continue;
         }
 
         // No tool calls — final response
         messages.push({ role: 'assistant', content: fullText });
+        this._persist(tabId);
         return fullText;
 
       } catch (e) {
@@ -697,16 +776,19 @@ export class Agent {
         if (this._isContextOverflow(e.message)) {
           onUpdate('thinking', { step: steps, note: 'Context too large, trimming...' });
           this._emergencyTrim(messages);
+          this._persist(tabId);
           continue; // retry the loop with trimmed context
         }
         onUpdate('error', { message: e.message });
         const errMsg = `Error: ${e.message}`;
         messages.push({ role: 'assistant', content: errMsg });
+        this._persist(tabId);
         return errMsg;
       }
     }
 
     onUpdate('max_steps_reached', { steps: this.maxSteps });
+    this._persist(tabId);
     return '[Reached maximum steps limit. You can continue from where I left off.]';
   }
 }
