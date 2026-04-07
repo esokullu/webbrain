@@ -40,16 +40,19 @@ const panelTabs = new Set();
 
 chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: false }).catch(() => {});
 
-// Default: panel disabled everywhere; enable only on tabs the user explicitly opens
-chrome.action.onClicked.addListener(async (tab) => {
+// IMPORTANT: must be a sync handler with no awaits before sidePanel.open(),
+// otherwise the user-gesture token expires across the await and Chrome
+// silently refuses to open the panel.
+chrome.action.onClicked.addListener((tab) => {
   if (!tab?.id) return;
   panelTabs.add(tab.id);
-  await chrome.sidePanel.setOptions({
+  // Fire-and-forget; do NOT await — preserves user gesture for open() below
+  chrome.sidePanel.setOptions({
     tabId: tab.id,
     path: 'src/ui/sidepanel.html',
     enabled: true
   });
-  await chrome.sidePanel.open({ tabId: tab.id });
+  chrome.sidePanel.open({ tabId: tab.id });
 });
 
 // When switching tabs, disable panel on tabs the user didn't open it on

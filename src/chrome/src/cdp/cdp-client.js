@@ -149,6 +149,7 @@ export class CDPClient {
       returnByValue,
       awaitPromise: true,
       userGesture: true,
+      allowUnsafeEvalBlockedByCSP: true,
     });
     return result;
   }
