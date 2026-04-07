@@ -18,6 +18,91 @@ export class Agent {
     // Auto-screenshot mode. 'off' | 'navigation' | 'state_change' | 'every_step'.
     // Loaded from chrome.storage.local in background.js.
     this.autoScreenshot = 'state_change';
+    // Loop detection: per-tab ring buffer of recent tool calls + nudge count.
+    this.recentCalls = new Map(); // tabId -> [{ key, name, ts }]
+    this.loopNudges = new Map();  // tabId -> consecutive-nudge counter
+  }
+
+  // ---- Loop detection ----
+  // Catches the agent stuck repeating an ineffective action or oscillating
+  // between two calls. Cheap, runs after every tool execution. On first
+  // detection we soft-nudge by injecting a [LOOP DETECTED] note into the
+  // tool result the model sees. On second detection within the same loop,
+  // we hard-stop the run with a clear final message.
+
+  _recordCall(tabId, name, args, result) {
+    const argsHash = JSON.stringify(args || {});
+    const errored = !!(result && (result.error || result.success === false));
+    const key = `${name}|${argsHash}|${errored ? 'err' : 'ok'}`;
+    const buf = this.recentCalls.get(tabId) || [];
+    buf.push({ key, name, ts: Date.now() });
+    if (buf.length > 6) buf.shift();
+    this.recentCalls.set(tabId, buf);
+    return buf;
+  }
+
+  _detectLoop(buf) {
+    if (!buf || buf.length < 3) return null;
+    // 1. Same key 3+ times in the window.
+    const counts = new Map();
+    for (const e of buf) counts.set(e.key, (counts.get(e.key) || 0) + 1);
+    for (const [key, n] of counts) {
+      if (n >= 3) {
+        return { type: 'repeat', key, name: key.split('|')[0], count: n };
+      }
+    }
+    // 2. ABAB oscillation in the last 4.
+    if (buf.length >= 4) {
+      const last4 = buf.slice(-4);
+      if (
+        last4[0].key === last4[2].key &&
+        last4[1].key === last4[3].key &&
+        last4[0].key !== last4[1].key
+      ) {
+        return { type: 'oscillation', a: last4[0].name, b: last4[1].name };
+      }
+    }
+    return null;
+  }
+
+  _clearLoopState(tabId) {
+    this.recentCalls.delete(tabId);
+    this.loopNudges.delete(tabId);
+  }
+
+  /**
+   * Run loop detection on a freshly recorded call. Returns one of:
+   *   { kind: 'none' }
+   *   { kind: 'nudge', warning: string }   // soft warning to inject into tool result
+   *   { kind: 'stop',  message: string }   // hard stop, abort the run
+   */
+  _checkLoop(tabId, toolName, toolArgs, toolResult) {
+    const buf = this._recordCall(tabId, toolName, toolArgs, toolResult);
+    const loop = this._detectLoop(buf);
+    if (!loop) {
+      // Successful, non-looping call — reset the nudge counter.
+      this.loopNudges.delete(tabId);
+      return { kind: 'none' };
+    }
+
+    const nudges = (this.loopNudges.get(tabId) || 0) + 1;
+    this.loopNudges.set(tabId, nudges);
+
+    if (nudges >= 2) {
+      this._clearLoopState(tabId);
+      const desc = loop.type === 'repeat'
+        ? `the same call to ${loop.name}`
+        : `between ${loop.a} and ${loop.b}`;
+      return {
+        kind: 'stop',
+        message: `Stopped: I detected I was looping on ${desc} without making progress, even after a warning to try something different. Please tell me what's blocking, give me a different instruction, or take a look at the page yourself.`,
+      };
+    }
+
+    const warning = loop.type === 'repeat'
+      ? `[LOOP DETECTED: You've just called ${loop.name} ${loop.count} times with the same arguments and the same outcome. The current approach is NOT working. Do something fundamentally different on your next step: a different selector, a different tool, scroll to find a different element, take a screenshot to see what's actually on screen, or call done() if the task is impossible. DO NOT repeat this exact call again.]`
+      : `[LOOP DETECTED: You're oscillating between ${loop.a} and ${loop.b} without making progress. Stop. Take a screenshot to see what's actually happening, then try a completely different approach.]`;
+    return { kind: 'nudge', warning };
   }
 
   // Tools whose successful completion should trigger an auto-screenshot when
@@ -210,6 +295,7 @@ export class Agent {
     this.conversations.delete(tabId);
     this.conversationModes.delete(tabId);
     this.hydratedTabs.delete(tabId);
+    this._clearLoopState(tabId);
     const t = this.persistTimers.get(tabId);
     if (t) { clearTimeout(t); this.persistTimers.delete(tabId); }
     try {
@@ -756,12 +842,30 @@ export class Agent {
             return finalResponse;
           }
 
+          // Loop detection: see if this call is part of a stuck pattern.
+          const loopCheck = this._checkLoop(tabId, fnName, fnArgs, toolResult);
+          let resultContent = this._limitToolResult(toolResult);
+          if (loopCheck.kind === 'nudge') {
+            // Append the warning so the model sees it on its next turn.
+            resultContent = resultContent + '\n' + loopCheck.warning;
+            onUpdate('warning', { message: 'Loop detected — nudging the agent.' });
+          }
+
           // Add tool result to conversation
           messages.push({
             role: 'tool',
             tool_call_id: tc.id,
-            content: this._limitToolResult(toolResult),
+            content: resultContent,
           });
+
+          if (loopCheck.kind === 'stop') {
+            finalResponse = loopCheck.message;
+            messages.push({ role: 'assistant', content: finalResponse });
+            onUpdate('text', { content: finalResponse });
+            onUpdate('error', { message: 'Stuck in a loop. Stopped.' });
+            this._persist(tabId);
+            return finalResponse;
+          }
 
           if (this._shouldAutoScreenshot(fnName) && !toolResult?.error) {
             didStateChange = true;
@@ -912,11 +1016,27 @@ export class Agent {
               return toolResult.summary || fullText || 'Task completed.';
             }
 
+            // Loop detection.
+            const loopCheck = this._checkLoop(tabId, fnName, fnArgs, toolResult);
+            let resultContent = this._limitToolResult(toolResult);
+            if (loopCheck.kind === 'nudge') {
+              resultContent = resultContent + '\n' + loopCheck.warning;
+              onUpdate('warning', { message: 'Loop detected — nudging the agent.' });
+            }
+
             messages.push({
               role: 'tool',
               tool_call_id: tc.id,
-              content: this._limitToolResult(toolResult),
+              content: resultContent,
             });
+
+            if (loopCheck.kind === 'stop') {
+              messages.push({ role: 'assistant', content: loopCheck.message });
+              onUpdate('text', { content: loopCheck.message });
+              onUpdate('error', { message: 'Stuck in a loop. Stopped.' });
+              this._persist(tabId);
+              return loopCheck.message;
+            }
 
             if (this._shouldAutoScreenshot(fnName) && !toolResult?.error) {
               didStateChange = true;

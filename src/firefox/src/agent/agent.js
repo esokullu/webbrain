@@ -12,6 +12,70 @@ export class Agent {
     this.maxContextMessages = 50; // trim beyond this
     this.maxContextChars = 80000; // rough char budget (~20k tokens)
     this.autoScreenshot = 'state_change';
+    this.recentCalls = new Map();
+    this.loopNudges = new Map();
+  }
+
+  // ---- Loop detection ----
+  _recordCall(tabId, name, args, result) {
+    const argsHash = JSON.stringify(args || {});
+    const errored = !!(result && (result.error || result.success === false));
+    const key = `${name}|${argsHash}|${errored ? 'err' : 'ok'}`;
+    const buf = this.recentCalls.get(tabId) || [];
+    buf.push({ key, name, ts: Date.now() });
+    if (buf.length > 6) buf.shift();
+    this.recentCalls.set(tabId, buf);
+    return buf;
+  }
+
+  _detectLoop(buf) {
+    if (!buf || buf.length < 3) return null;
+    const counts = new Map();
+    for (const e of buf) counts.set(e.key, (counts.get(e.key) || 0) + 1);
+    for (const [key, n] of counts) {
+      if (n >= 3) return { type: 'repeat', key, name: key.split('|')[0], count: n };
+    }
+    if (buf.length >= 4) {
+      const last4 = buf.slice(-4);
+      if (
+        last4[0].key === last4[2].key &&
+        last4[1].key === last4[3].key &&
+        last4[0].key !== last4[1].key
+      ) {
+        return { type: 'oscillation', a: last4[0].name, b: last4[1].name };
+      }
+    }
+    return null;
+  }
+
+  _clearLoopState(tabId) {
+    this.recentCalls.delete(tabId);
+    this.loopNudges.delete(tabId);
+  }
+
+  _checkLoop(tabId, toolName, toolArgs, toolResult) {
+    const buf = this._recordCall(tabId, toolName, toolArgs, toolResult);
+    const loop = this._detectLoop(buf);
+    if (!loop) {
+      this.loopNudges.delete(tabId);
+      return { kind: 'none' };
+    }
+    const nudges = (this.loopNudges.get(tabId) || 0) + 1;
+    this.loopNudges.set(tabId, nudges);
+    if (nudges >= 2) {
+      this._clearLoopState(tabId);
+      const desc = loop.type === 'repeat'
+        ? `the same call to ${loop.name}`
+        : `between ${loop.a} and ${loop.b}`;
+      return {
+        kind: 'stop',
+        message: `Stopped: I detected I was looping on ${desc} without making progress, even after a warning to try something different. Please tell me what's blocking, give me a different instruction, or take a look at the page yourself.`,
+      };
+    }
+    const warning = loop.type === 'repeat'
+      ? `[LOOP DETECTED: You've just called ${loop.name} ${loop.count} times with the same arguments and the same outcome. The current approach is NOT working. Do something fundamentally different on your next step: a different selector, a different tool, scroll to find a different element, take a screenshot to see what's actually on screen, or call done() if the task is impossible. DO NOT repeat this exact call again.]`
+      : `[LOOP DETECTED: You're oscillating between ${loop.a} and ${loop.b} without making progress. Stop. Take a screenshot to see what's actually happening, then try a completely different approach.]`;
+    return { kind: 'nudge', warning };
   }
 
   static NAV_TOOLS = new Set(['navigate', 'new_tab']);
@@ -127,6 +191,7 @@ export class Agent {
    */
   clearConversation(tabId) {
     this.conversations.delete(tabId);
+    this._clearLoopState(tabId);
   }
 
   /**
@@ -488,12 +553,28 @@ export class Agent {
             return finalResponse;
           }
 
+          // Loop detection.
+          const loopCheck = this._checkLoop(tabId, fnName, fnArgs, toolResult);
+          let resultContent = this._limitToolResult(toolResult);
+          if (loopCheck.kind === 'nudge') {
+            resultContent = resultContent + '\n' + loopCheck.warning;
+            onUpdate('warning', { message: 'Loop detected — nudging the agent.' });
+          }
+
           // Add tool result to conversation
           messages.push({
             role: 'tool',
             tool_call_id: tc.id,
-            content: this._limitToolResult(toolResult),
+            content: resultContent,
           });
+
+          if (loopCheck.kind === 'stop') {
+            finalResponse = loopCheck.message;
+            messages.push({ role: 'assistant', content: finalResponse });
+            onUpdate('text', { content: finalResponse });
+            onUpdate('error', { message: 'Stuck in a loop. Stopped.' });
+            return finalResponse;
+          }
 
           if (this._shouldAutoScreenshot(fnName) && !toolResult?.error) {
             didStateChange = true;
@@ -630,11 +711,25 @@ export class Agent {
               return toolResult.summary || fullText || 'Task completed.';
             }
 
+            const loopCheck = this._checkLoop(tabId, fnName, fnArgs, toolResult);
+            let resultContent = this._limitToolResult(toolResult);
+            if (loopCheck.kind === 'nudge') {
+              resultContent = resultContent + '\n' + loopCheck.warning;
+              onUpdate('warning', { message: 'Loop detected — nudging the agent.' });
+            }
+
             messages.push({
               role: 'tool',
               tool_call_id: tc.id,
-              content: this._limitToolResult(toolResult),
+              content: resultContent,
             });
+
+            if (loopCheck.kind === 'stop') {
+              messages.push({ role: 'assistant', content: loopCheck.message });
+              onUpdate('text', { content: loopCheck.message });
+              onUpdate('error', { message: 'Stuck in a loop. Stopped.' });
+              return loopCheck.message;
+            }
 
             if (this._shouldAutoScreenshot(fnName) && !toolResult?.error) {
               didStateChange = true;
