@@ -600,52 +600,395 @@ export class CDPClient {
   }
 
   /**
-   * Click element by selector using JS evaluation.
+   * Resolve a CSS selector to viewport-center coordinates and a backend nodeId.
+   *
+   * Tries three strategies in order:
+   *   1. JS walker piercing OPEN shadow roots via Runtime.evaluate (fastest,
+   *      handles 99% of real pages including Web Components).
+   *   2. CDP DOM-tree traversal with `pierce: true`, which sees CLOSED shadow
+   *      roots too. We collect every shadow-root nodeId in the document and
+   *      run `DOM.querySelector` against each one until something matches.
+   *   3. Returns null if nothing matched.
+   *
+   * Returns: { nodeId?, x, y, width, height, inViewport, hitOk, tag, text } or null.
+   */
+  async resolveSelector(tabId, selector) {
+    await this.sendCommand(tabId, 'Runtime.enable');
+
+    const selectorJSON = JSON.stringify(selector);
+
+    // ---- Strategy 1: JS walker (open shadow roots) ----
+    const jsExpr = `
+      (() => {
+        const sel = ${selectorJSON};
+        const queryDeep = (root) => {
+          try {
+            const hit = root.querySelector(sel);
+            if (hit) return hit;
+          } catch (e) {
+            return { __error: 'Invalid selector: ' + e.message };
+          }
+          const walker = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT);
+          let node = walker.currentNode;
+          while (node) {
+            if (node.shadowRoot) {
+              const inner = queryDeep(node.shadowRoot);
+              if (inner) return inner;
+            }
+            node = walker.nextNode();
+          }
+          return null;
+        };
+        const found = queryDeep(document);
+        if (!found) return { found: false };
+        if (found.__error) return { found: false, error: found.__error };
+        try { found.scrollIntoView({ block: 'center', inline: 'center' }); } catch (e) {}
+        const r = found.getBoundingClientRect();
+        const cx = r.left + r.width / 2;
+        const cy = r.top + r.height / 2;
+        const vw = window.innerWidth, vh = window.innerHeight;
+        const inViewport = r.width > 0 && r.height > 0 && cx >= 0 && cy >= 0 && cx <= vw && cy <= vh;
+        let hitOk = false;
+        if (inViewport) {
+          let top = document.elementFromPoint(cx, cy);
+          while (top && top.shadowRoot) {
+            const inner = top.shadowRoot.elementFromPoint(cx, cy);
+            if (!inner || inner === top) break;
+            top = inner;
+          }
+          hitOk = !!(top && (top === found || found.contains(top) || (top.contains && top.contains(found))));
+        }
+        return {
+          found: true,
+          x: cx, y: cy,
+          width: r.width, height: r.height,
+          inViewport, hitOk,
+          tag: found.tagName,
+          text: (found.innerText || found.value || '').slice(0, 80),
+        };
+      })()
+    `;
+
+    const jsRes = await this.evaluate(tabId, jsExpr);
+    const jsInfo = jsRes?.result?.value;
+    if (jsInfo?.error) return { error: jsInfo.error };
+    if (jsInfo?.found) {
+      // Wait briefly for scroll to settle, then re-measure once.
+      await new Promise(r => setTimeout(r, 60));
+      const reMeasure = await this.evaluate(tabId, `
+        (() => {
+          const sel = ${selectorJSON};
+          const queryDeep = (root) => {
+            try { const h = root.querySelector(sel); if (h) return h; } catch (e) { return null; }
+            const w = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT);
+            let n = w.currentNode;
+            while (n) { if (n.shadowRoot) { const i = queryDeep(n.shadowRoot); if (i) return i; } n = w.nextNode(); }
+            return null;
+          };
+          const el = queryDeep(document);
+          if (!el) return null;
+          const r = el.getBoundingClientRect();
+          return { x: r.left + r.width / 2, y: r.top + r.height / 2, width: r.width, height: r.height };
+        })()
+      `);
+      const m = reMeasure?.result?.value;
+      if (m) { jsInfo.x = m.x; jsInfo.y = m.y; jsInfo.width = m.width; jsInfo.height = m.height; }
+      return jsInfo;
+    }
+
+    // ---- Strategy 2: CDP traversal (closed shadow roots) ----
+    try {
+      await this.sendCommand(tabId, 'DOM.enable');
+      const { root } = await this.sendCommand(tabId, 'DOM.getDocument', { depth: -1, pierce: true });
+
+      // Walk the tree, collecting the document nodeId plus every shadow root nodeId.
+      const searchRoots = [];
+      const walk = (node) => {
+        if (!node) return;
+        if (node.nodeName === '#document' || node.nodeType === 9) searchRoots.push(node.nodeId);
+        if (node.shadowRoots) {
+          for (const sr of node.shadowRoots) {
+            searchRoots.push(sr.nodeId);
+            walk(sr);
+          }
+        }
+        if (node.children) for (const c of node.children) walk(c);
+        if (node.contentDocument) walk(node.contentDocument);
+      };
+      walk(root);
+
+      let foundNodeId = null;
+      for (const rootId of searchRoots) {
+        try {
+          const { nodeId } = await this.sendCommand(tabId, 'DOM.querySelector', { nodeId: rootId, selector });
+          if (nodeId) { foundNodeId = nodeId; break; }
+        } catch (e) { /* invalid selector for this root, keep going */ }
+      }
+
+      if (!foundNodeId) return null;
+
+      // Scroll into view and measure.
+      try {
+        await this.sendCommand(tabId, 'DOM.scrollIntoViewIfNeeded', { nodeId: foundNodeId });
+      } catch (e) { /* not all targets support this */ }
+
+      const box = await this.sendCommand(tabId, 'DOM.getBoxModel', { nodeId: foundNodeId }).catch(() => null);
+      if (!box?.model) return { nodeId: foundNodeId, found: true, inViewport: false, hitOk: false };
+
+      // content quad: [x1,y1,x2,y2,x3,y3,x4,y4]
+      const c = box.model.content;
+      const cx = (c[0] + c[2] + c[4] + c[6]) / 4;
+      const cy = (c[1] + c[3] + c[5] + c[7]) / 4;
+
+      // Check viewport via window dims.
+      const vp = await this.evaluate(tabId, '({w: window.innerWidth, h: window.innerHeight})');
+      const vw = vp?.result?.value?.w || 1920;
+      const vh = vp?.result?.value?.h || 1080;
+      const inViewport = cx >= 0 && cy >= 0 && cx <= vw && cy <= vh && box.model.width > 0 && box.model.height > 0;
+
+      return {
+        found: true,
+        nodeId: foundNodeId,
+        x: cx, y: cy,
+        width: box.model.width,
+        height: box.model.height,
+        inViewport,
+        hitOk: inViewport, // can't reliably hit-test into closed roots
+        tag: '',
+        text: '',
+        viaCDP: true,
+      };
+    } catch (e) {
+      return null;
+    }
+  }
+
+  /**
+   * Click element by selector.
+   *
+   * Robust path:
+   *  1. Locate the element via a shadow-DOM-piercing walker (open roots) inside
+   *     a Runtime.evaluate. Selector is passed as a JSON-encoded string so
+   *     quotes/backslashes/newlines can't break the eval.
+   *  2. Scroll into view, wait a tick, read its center coordinates and check
+   *     that the topmost element at that point is the target (or a descendant).
+   *  3. Dispatch real mouse events via CDP Input.dispatchMouseEvent
+   *     (mouseMoved → mousePressed → mouseReleased). These fire trusted
+   *     pointer/mouse/click sequences that frameworks (React, Vue, Web
+   *     Components) expect — el.click() alone often isn't enough.
+   *  4. If coordinate-based clicking isn't viable (occluded, off-screen after
+   *     scroll, zero box), fall back to calling el.click() on the resolved
+   *     element so we still attempt the action.
    */
   async clickElement(tabId, selector) {
-    return await this.evaluate(tabId, `
+    await this.sendCommand(tabId, 'Input.enable').catch(() => {});
+
+    const info = await this.resolveSelector(tabId, selector);
+    if (!info) return { success: false, error: 'Element not found' };
+    if (info.error) return { success: false, error: info.error };
+
+    // Step 1: real mouse events at center coordinates.
+    if (info.inViewport && info.hitOk) {
+      try {
+        await this.sendCommand(tabId, 'Input.dispatchMouseEvent', {
+          type: 'mouseMoved', x: info.x, y: info.y, button: 'none', buttons: 0,
+        });
+        await this.sendCommand(tabId, 'Input.dispatchMouseEvent', {
+          type: 'mousePressed', x: info.x, y: info.y, button: 'left', buttons: 1, clickCount: 1,
+        });
+        await this.sendCommand(tabId, 'Input.dispatchMouseEvent', {
+          type: 'mouseReleased', x: info.x, y: info.y, button: 'left', buttons: 0, clickCount: 1,
+        });
+        return {
+          success: true,
+          method: info.viaCDP ? 'cdp-mouse-closed-shadow' : 'cdp-mouse',
+          tag: info.tag,
+          text: info.text,
+          x: info.x,
+          y: info.y,
+        };
+      } catch (e) {
+        // fall through to fallback
+      }
+    }
+
+    // Step 2: fallback. For closed shadow roots we have a nodeId — use DOM.focus
+    // and Runtime.callFunctionOn to invoke .click() on the resolved object.
+    if (info.nodeId) {
+      try {
+        await this.sendCommand(tabId, 'DOM.focus', { nodeId: info.nodeId }).catch(() => {});
+        const { object } = await this.sendCommand(tabId, 'DOM.resolveNode', { nodeId: info.nodeId });
+        if (object?.objectId) {
+          await this.sendCommand(tabId, 'Runtime.callFunctionOn', {
+            objectId: object.objectId,
+            functionDeclaration: 'function() { this.click(); }',
+            awaitPromise: false,
+          });
+          return { success: true, method: 'cdp-node-click', x: info.x, y: info.y };
+        }
+      } catch (e) { /* fall through */ }
+    }
+
+    // Step 3: JS fallback for open shadow roots.
+    const selectorJSON = JSON.stringify(selector);
+    const fb = await this.evaluate(tabId, `
       (() => {
-        const el = document.querySelector('${selector.replace(/'/g, "\\'")}');
-        if (!el) return { success: false, error: 'Element not found' };
-        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        const sel = ${selectorJSON};
+        const queryDeep = (root) => {
+          try { const h = root.querySelector(sel); if (h) return h; } catch (e) { return null; }
+          const w = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT);
+          let n = w.currentNode;
+          while (n) { if (n.shadowRoot) { const i = queryDeep(n.shadowRoot); if (i) return i; } n = w.nextNode(); }
+          return null;
+        };
+        const el = queryDeep(document);
+        if (!el) return { success: false, error: 'Element not found (fallback)' };
+        try { el.focus(); } catch (e) {}
         el.click();
-        return { success: true, tag: el.tagName, text: el.innerText?.slice(0, 50) };
+        return { success: true, method: 'js-click', tag: el.tagName, text: (el.innerText || '').slice(0, 80) };
       })()
     `);
+    return fb?.result?.value || { success: false, error: 'Click failed' };
   }
 
   /**
    * Type text into an element.
+   *
+   * Robust path:
+   *   1. Resolve via shared shadow-piercing resolver (open + closed roots).
+   *   2. Focus via real mouse click at the element's coordinates so the page
+   *      sees a trusted focus event (matters for contenteditable, rich editors,
+   *      and Google-style search boxes).
+   *   3. Optionally clear existing value.
+   *   4. Type via Input.insertText — this generates an actual `beforeinput` /
+   *      `input` event that frameworks accept, and works for both <input>,
+   *      <textarea>, and contenteditable.
+   *   5. Falls back to a JS-level value setter if Input.insertText is rejected
+   *      (e.g. element isn't focusable through CDP because it's in a closed
+   *      shadow root with no usable hit point).
    */
   async typeText(tabId, selector, text, clear = false) {
-    return await this.evaluate(tabId, `
-      (() => {
-        const el = document.querySelector('${selector.replace(/'/g, "\\'")}');
-        if (!el) return { success: false, error: 'Element not found' };
+    await this.sendCommand(tabId, 'Input.enable').catch(() => {});
 
-        el.focus();
-        if (${clear}) {
-          el.value = '';
-        }
+    const info = await this.resolveSelector(tabId, selector);
+    if (!info) return { success: false, error: 'Element not found' };
+    if (info.error) return { success: false, error: info.error };
 
-        const setter = Object.getOwnPropertyDescriptor(
-          window.HTMLInputElement.prototype, 'value'
-        )?.set || Object.getOwnPropertyDescriptor(
-          window.HTMLTextAreaElement.prototype, 'value'
-        )?.set;
+    let focused = false;
 
-        if (setter) {
-          setter.call(el, (${clear} ? '' : el.value) + '${text.replace(/'/g, "\\'")}');
-        } else {
-          el.value = (${clear} ? '' : el.value) + '${text.replace(/'/g, "\\'")}';
-        }
+    // Focus path A: real mouse click (most reliable, fires trusted events).
+    if (info.inViewport && info.hitOk) {
+      try {
+        await this.sendCommand(tabId, 'Input.dispatchMouseEvent', {
+          type: 'mouseMoved', x: info.x, y: info.y, button: 'none', buttons: 0,
+        });
+        await this.sendCommand(tabId, 'Input.dispatchMouseEvent', {
+          type: 'mousePressed', x: info.x, y: info.y, button: 'left', buttons: 1, clickCount: 1,
+        });
+        await this.sendCommand(tabId, 'Input.dispatchMouseEvent', {
+          type: 'mouseReleased', x: info.x, y: info.y, button: 'left', buttons: 0, clickCount: 1,
+        });
+        focused = true;
+      } catch (e) { /* try next */ }
+    }
 
-        el.dispatchEvent(new Event('input', { bubbles: true }));
-        el.dispatchEvent(new Event('change', { bubbles: true }));
+    // Focus path B: DOM.focus by nodeId (closed shadow root case).
+    if (!focused && info.nodeId) {
+      try {
+        await this.sendCommand(tabId, 'DOM.focus', { nodeId: info.nodeId });
+        focused = true;
+      } catch (e) { /* try next */ }
+    }
 
-        return { success: true, value: el.value.slice(0, 100) };
-      })()
-    `);
+    // Focus path C: JS .focus() (open shadow root case).
+    if (!focused) {
+      const selectorJSON = JSON.stringify(selector);
+      await this.evaluate(tabId, `
+        (() => {
+          const sel = ${selectorJSON};
+          const queryDeep = (root) => {
+            try { const h = root.querySelector(sel); if (h) return h; } catch (e) { return null; }
+            const w = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT);
+            let n = w.currentNode;
+            while (n) { if (n.shadowRoot) { const i = queryDeep(n.shadowRoot); if (i) return i; } n = w.nextNode(); }
+            return null;
+          };
+          const el = queryDeep(document);
+          if (el && el.focus) el.focus();
+        })()
+      `);
+    }
+
+    // Clear existing content if requested. Use Select All + Delete via key events
+    // so the page observes proper input events.
+    if (clear) {
+      try {
+        // Select all
+        await this.sendCommand(tabId, 'Input.dispatchKeyEvent', {
+          type: 'keyDown', key: 'a', code: 'KeyA', modifiers: 2 /* Ctrl */, windowsVirtualKeyCode: 65,
+        });
+        await this.sendCommand(tabId, 'Input.dispatchKeyEvent', {
+          type: 'keyUp', key: 'a', code: 'KeyA', modifiers: 2, windowsVirtualKeyCode: 65,
+        });
+        // Delete selection
+        await this.sendCommand(tabId, 'Input.dispatchKeyEvent', {
+          type: 'keyDown', key: 'Delete', code: 'Delete', windowsVirtualKeyCode: 46,
+        });
+        await this.sendCommand(tabId, 'Input.dispatchKeyEvent', {
+          type: 'keyUp', key: 'Delete', code: 'Delete', windowsVirtualKeyCode: 46,
+        });
+      } catch (e) { /* best effort */ }
+    }
+
+    // Type via Input.insertText — atomic, fires beforeinput/input correctly.
+    let typed = false;
+    try {
+      await this.sendCommand(tabId, 'Input.insertText', { text });
+      typed = true;
+    } catch (e) { /* fall through to JS setter */ }
+
+    if (!typed) {
+      // JS fallback using native setter. Properly escape via JSON.
+      const selectorJSON = JSON.stringify(selector);
+      const textJSON = JSON.stringify(text);
+      const result = await this.evaluate(tabId, `
+        (() => {
+          const sel = ${selectorJSON};
+          const txt = ${textJSON};
+          const queryDeep = (root) => {
+            try { const h = root.querySelector(sel); if (h) return h; } catch (e) { return null; }
+            const w = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT);
+            let n = w.currentNode;
+            while (n) { if (n.shadowRoot) { const i = queryDeep(n.shadowRoot); if (i) return i; } n = w.nextNode(); }
+            return null;
+          };
+          const el = queryDeep(document);
+          if (!el) return { success: false, error: 'Element not found (fallback)' };
+          try { el.focus(); } catch (e) {}
+
+          if (el.isContentEditable) {
+            if (${clear}) el.textContent = '';
+            el.textContent += txt;
+            el.dispatchEvent(new InputEvent('input', { bubbles: true, data: txt }));
+            return { success: true, method: 'js-contenteditable', value: el.textContent.slice(0, 100) };
+          }
+
+          const proto = el instanceof HTMLTextAreaElement
+            ? HTMLTextAreaElement.prototype
+            : HTMLInputElement.prototype;
+          const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set;
+          const newVal = (${clear} ? '' : (el.value || '')) + txt;
+          if (setter) setter.call(el, newVal); else el.value = newVal;
+
+          el.dispatchEvent(new Event('input', { bubbles: true }));
+          el.dispatchEvent(new Event('change', { bubbles: true }));
+          return { success: true, method: 'js-setter', value: (el.value || '').slice(0, 100) };
+        })()
+      `);
+      return result?.result?.value || { success: false, error: 'Type failed' };
+    }
+
+    return { success: true, method: 'cdp-insert-text', tag: info.tag };
   }
 
   /**

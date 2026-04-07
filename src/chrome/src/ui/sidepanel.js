@@ -25,8 +25,48 @@ let verboseMode = false;
 let agentMode = 'ask'; // 'ask' or 'act'
 let abortRequested = false;
 
-// Per-tab chat history (stores innerHTML of messages container)
+// Per-tab chat history (stores innerHTML of messages container).
+// Also mirrored to chrome.storage.session keyed `tabChat:<tabId>` so the
+// conversation survives the side panel being closed and reopened.
 const tabChats = new Map();
+const TAB_CHAT_PREFIX = 'tabChat:';
+
+async function loadTabChat(tabId) {
+  if (tabChats.has(tabId)) return tabChats.get(tabId);
+  try {
+    const key = TAB_CHAT_PREFIX + tabId;
+    const stored = await chrome.storage.session.get(key);
+    const html = stored?.[key];
+    if (typeof html === 'string') {
+      tabChats.set(tabId, html);
+      return html;
+    }
+  } catch (e) { /* ignore */ }
+  return null;
+}
+
+function persistTabChat(tabId, html) {
+  if (tabId == null) return;
+  tabChats.set(tabId, html);
+  try {
+    chrome.storage.session.set({ [TAB_CHAT_PREFIX + tabId]: html }).catch(() => {});
+  } catch (e) { /* ignore */ }
+}
+
+// Save current tab's chat to storage on a debounced cadence — we don't want
+// to thrash storage on every keystroke / streamed token.
+let persistTimer = null;
+function schedulePersist() {
+  if (persistTimer) clearTimeout(persistTimer);
+  persistTimer = setTimeout(() => {
+    persistTimer = null;
+    if (currentTabId != null) persistTabChat(currentTabId, messagesEl.innerHTML);
+  }, 400);
+}
+
+// Observe the messages container so any DOM mutation (new message, streamed
+// delta, tool step update) eventually gets persisted.
+const persistObserver = new MutationObserver(schedulePersist);
 
 // Human-friendly labels for tool names
 const TOOL_LABELS = {
@@ -70,6 +110,19 @@ async function init() {
   const stored = await chrome.storage.local.get('verboseMode');
   verboseMode = stored.verboseMode || false;
 
+  // Restore prior conversation for this tab (if any) — survives close/reopen.
+  if (currentTabId != null) {
+    const html = await loadTabChat(currentTabId);
+    if (html) {
+      messagesEl.innerHTML = html;
+      rebindCopyButtons();
+      scrollToBottom();
+    }
+  }
+
+  // Start observing the messages container for changes to persist.
+  persistObserver.observe(messagesEl, { childList: true, subtree: true, characterData: true });
+
   await loadProviders();
   await testConnection();
 
@@ -94,25 +147,63 @@ async function init() {
   });
 }
 
-function switchToTab(newTabId) {
+async function switchToTab(newTabId) {
   if (newTabId === currentTabId) return;
   if (isProcessing) return; // don't switch while agent is running
 
-  // Save current tab's chat
+  // Save current tab's chat (in-memory + storage).
   if (currentTabId != null) {
-    tabChats.set(currentTabId, messagesEl.innerHTML);
+    persistTabChat(currentTabId, messagesEl.innerHTML);
   }
 
   currentTabId = newTabId;
 
-  // Restore new tab's chat or start fresh
-  if (tabChats.has(newTabId)) {
-    messagesEl.innerHTML = tabChats.get(newTabId);
+  // Restore new tab's chat from memory or storage.
+  const html = await loadTabChat(newTabId);
+  if (html) {
+    messagesEl.innerHTML = html;
+    rebindCopyButtons();
   } else {
     messagesEl.innerHTML = '';
     addMessage('system', 'How can I help with this page?');
   }
   scrollToBottom();
+}
+
+// After restoring innerHTML the copy buttons need their click handlers re-bound,
+// since serialized HTML loses listeners.
+function rebindCopyButtons() {
+  document.querySelectorAll('.msg-copy-btn').forEach(btn => {
+    if (btn.dataset.bound) return;
+    btn.dataset.bound = 'true';
+    btn.addEventListener('click', () => {
+      const content = btn.closest('.message-content');
+      const textEl = content?.querySelector('.message-text');
+      if (textEl) {
+        navigator.clipboard.writeText(textEl.innerText).then(() => {
+          btn.textContent = 'Copied!';
+          btn.classList.add('copied');
+          setTimeout(() => { btn.textContent = 'Copy'; btn.classList.remove('copied'); }, 1500);
+        });
+      }
+    });
+  });
+  document.querySelectorAll('.code-copy-btn').forEach(btn => {
+    if (btn.dataset.bound) return;
+    btn.dataset.bound = 'true';
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const wrapper = btn.closest('.code-block-wrapper');
+      const codeEl = wrapper?.querySelector('pre code');
+      if (codeEl) {
+        navigator.clipboard.writeText(codeEl.textContent).then(() => {
+          btn.textContent = 'Copied!';
+          btn.classList.add('copied');
+          setTimeout(() => { btn.textContent = 'Copy'; btn.classList.remove('copied'); }, 1500);
+        });
+      }
+    });
+  });
 }
 
 async function loadProviders() {
@@ -788,6 +879,10 @@ clearBtn.addEventListener('click', async () => {
   await sendToBackground('clear_conversation', { tabId: currentTabId });
   messagesEl.innerHTML = '';
   addMessage('system', 'Conversation cleared. How can I help?');
+  if (currentTabId != null) {
+    tabChats.delete(currentTabId);
+    chrome.storage.session?.remove(TAB_CHAT_PREFIX + currentTabId).catch(() => {});
+  }
 });
 
 providerSelect.addEventListener('change', async () => {

@@ -35,8 +35,24 @@ chrome.storage.onChanged.addListener((changes) => {
   }
 });
 
-// Track which tabs have the panel enabled (per-tab, not global)
+// Track which tabs have the panel enabled (per-tab, not global).
+// Persisted to chrome.storage.session so a service worker restart doesn't
+// forget which tabs the user had opened the panel on.
 const panelTabs = new Set();
+const PANEL_TABS_KEY = 'panelTabs';
+
+async function loadPanelTabs() {
+  try {
+    const stored = await chrome.storage.session.get(PANEL_TABS_KEY);
+    if (Array.isArray(stored[PANEL_TABS_KEY])) {
+      stored[PANEL_TABS_KEY].forEach(id => panelTabs.add(id));
+    }
+  } catch (e) { /* session storage not available */ }
+}
+function savePanelTabs() {
+  chrome.storage.session?.set({ [PANEL_TABS_KEY]: Array.from(panelTabs) }).catch(() => {});
+}
+loadPanelTabs();
 
 chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: false }).catch(() => {});
 
@@ -46,6 +62,7 @@ chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: false }).catch(() =>
 chrome.action.onClicked.addListener((tab) => {
   if (!tab?.id) return;
   panelTabs.add(tab.id);
+  savePanelTabs();
   // Fire-and-forget; do NOT await — preserves user gesture for open() below
   chrome.sidePanel.setOptions({
     tabId: tab.id,
@@ -55,14 +72,30 @@ chrome.action.onClicked.addListener((tab) => {
   chrome.sidePanel.open({ tabId: tab.id });
 });
 
-// When switching tabs, disable panel on tabs the user didn't open it on
+// When switching tabs, explicitly disable the panel on tabs the user didn't
+// open it on. With manifest.default_path removed, the panel is OFF by default
+// — but we still call setOptions({enabled:false}) defensively to make sure
+// Chrome closes the side panel for any window whose new active tab isn't in
+// our opt-in set.
 chrome.tabs.onActivated.addListener(async ({ tabId }) => {
   if (!panelTabs.has(tabId)) {
     await chrome.sidePanel.setOptions({ tabId, enabled: false }).catch(() => {});
+  } else {
+    // Re-affirm enabled state in case service worker restarted between activations.
+    await chrome.sidePanel.setOptions({
+      tabId,
+      path: 'src/ui/sidepanel.html',
+      enabled: true,
+    }).catch(() => {});
   }
 });
 
-chrome.tabs.onRemoved.addListener((tabId) => panelTabs.delete(tabId));
+chrome.tabs.onRemoved.addListener((tabId) => {
+  panelTabs.delete(tabId);
+  savePanelTabs();
+  // Also clear any persisted chat state for that tab.
+  chrome.storage.session?.remove(`tabChat:${tabId}`).catch(() => {});
+});
 
 /**
  * Central message handler.
