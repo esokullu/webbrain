@@ -612,7 +612,31 @@ export class CDPClient {
    *
    * Returns: { nodeId?, x, y, width, height, inViewport, hitOk, tag, text } or null.
    */
-  async resolveSelector(tabId, selector) {
+  async resolveSelector(tabId, selector, options = {}) {
+    // Retry the resolution a few times so we tolerate elements that get
+    // attached asynchronously after a click (framework hydration, dynamic
+    // shadow root attachment, modal/menu open animations). Each attempt is
+    // a fresh DOM walk + fresh CDP DOM.getDocument, so any newly attached
+    // shadow root becomes visible on the next try.
+    const retries = options.retries ?? 3;
+    const delayMs = options.delayMs ?? 200;
+
+    let lastResult = null;
+    for (let i = 0; i <= retries; i++) {
+      const result = await this._resolveSelectorOnce(tabId, selector);
+      // Found and usable → done.
+      if (result && result.found && (result.inViewport || result.nodeId)) {
+        return result;
+      }
+      // Hard error from invalid selector — no point retrying.
+      if (result && result.error) return result;
+      lastResult = result;
+      if (i < retries) await new Promise(r => setTimeout(r, delayMs));
+    }
+    return lastResult;
+  }
+
+  async _resolveSelectorOnce(tabId, selector) {
     await this.sendCommand(tabId, 'Runtime.enable');
 
     const selectorJSON = JSON.stringify(selector);

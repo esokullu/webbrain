@@ -448,6 +448,42 @@ export class Agent {
       }
     }
 
+    // Click/type are routed through CDP for robust shadow-DOM piercing,
+    // real Input.dispatchMouseEvent / Input.insertText events, and
+    // selector-resolution retry. The content-script versions only see flat
+    // document.querySelector and el.click(), which fails on Web Components,
+    // closed shadow roots, and many React/Vue handlers.
+    if (name === 'click') {
+      try {
+        await cdpClient.attach(tabId);
+        if (args.selector) {
+          return await cdpClient.clickElement(tabId, args.selector);
+        }
+        if (args.x != null && args.y != null) {
+          await cdpClient.dispatchMouseEvent(tabId, 'mouseMoved', args.x, args.y);
+          await cdpClient.dispatchMouseEvent(tabId, 'mousePressed', args.x, args.y);
+          await cdpClient.dispatchMouseEvent(tabId, 'mouseReleased', args.x, args.y);
+          return { success: true, method: 'cdp-coords', x: args.x, y: args.y };
+        }
+        // index-based: fall through to content-script path which knows the
+        // interactive-elements ordering.
+      } catch (e) {
+        return { success: false, error: `Click failed: ${e.message}` };
+      }
+    }
+
+    if (name === 'type_text') {
+      try {
+        await cdpClient.attach(tabId);
+        if (args.selector) {
+          return await cdpClient.typeText(tabId, args.selector, args.text || '', !!args.clear);
+        }
+        // index-based: fall through to content-script path.
+      } catch (e) {
+        return { success: false, error: `Type failed: ${e.message}` };
+      }
+    }
+
     // Map tool names to content script actions
     const actionMap = {
       'read_page': 'get_page_info_cdp',
