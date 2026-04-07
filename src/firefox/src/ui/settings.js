@@ -198,7 +198,21 @@ async function testProvider(id) {
   }
 }
 
+function syncInputsIntoProvidersData() {
+  document.querySelectorAll('input[data-provider]').forEach((input) => {
+    const id = input.dataset.provider;
+    const key = input.dataset.key;
+    if (!id || !key || !providersData[id]) return;
+    if (input.dataset.type === 'checkbox' || input.type === 'checkbox') {
+      providersData[id][key] = input.checked;
+    } else {
+      providersData[id][key] = input.value;
+    }
+  });
+}
+
 async function activateProvider(id) {
+  syncInputsIntoProvidersData();
   await sendToBackground('set_active_provider', { providerId: id });
   activeProviderId = id;
   renderProviders();

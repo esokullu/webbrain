@@ -137,7 +137,14 @@ Key difference: Chrome uses Manifest V3 (service worker, `chrome.scripting`, `si
 
 ## Known Issues
 
-- **SPA navigation detection** — Some single-page applications may not trigger content script re-injection after client-side navigation.
+- **Firefox is meaningfully weaker than Chrome.** Firefox has no equivalent to Chrome DevTools Protocol via `chrome.debugger`, so several Chrome-only features are missing in the Firefox build:
+  - Click/type goes through the content-script path (`document.querySelector` + `el.click()`) instead of CDP `Input.dispatchMouseEvent`. This means **no shadow-DOM piercing**, **no real trusted mouse events** (some React/Vue handlers won't fire), **no closed-shadow-root traversal**, and **no `resolveSelector` retry budget**.
+  - **No SPA-navigation-aware retry extension.**
+  - **No conversation persistence** across background restarts.
+  - **No CDP screenshots.** Auto-screenshot uses `tabs.captureVisibleTab` instead, which works for active tabs only and at slightly lower quality.
+  - **No closed shadow root support** for read/extract tools.
+  - Site adapters, vision detection, loop detection, and the auto-screenshot loop *are* mirrored to Firefox.
+- **SPA navigation detection in Firefox.** Some single-page applications may not trigger content-script re-injection after client-side navigation.
 - **Firefox temporary add-on** — Firefox requires the extension to be loaded as a temporary add-on during development, which is removed on restart.
 
 ## Roadmap

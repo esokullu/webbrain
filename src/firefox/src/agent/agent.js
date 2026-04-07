@@ -16,6 +16,9 @@ export class Agent {
     this.useSiteAdapters = true;
     this.recentCalls = new Map();
     this.loopNudges = new Map();
+    this.healthyCallsSinceLoop = new Map();
+    this.lastAutoScreenshotTs = new Map();
+    this.lastSeenAdapter = new Map();
   }
 
   // ---- Loop detection ----
@@ -53,15 +56,23 @@ export class Agent {
   _clearLoopState(tabId) {
     this.recentCalls.delete(tabId);
     this.loopNudges.delete(tabId);
+    this.healthyCallsSinceLoop.delete(tabId);
   }
 
   _checkLoop(tabId, toolName, toolArgs, toolResult) {
     const buf = this._recordCall(tabId, toolName, toolArgs, toolResult);
     const loop = this._detectLoop(buf);
     if (!loop) {
-      this.loopNudges.delete(tabId);
+      // Healthy run — reset nudges only after a sustained streak.
+      const healthy = (this.healthyCallsSinceLoop.get(tabId) || 0) + 1;
+      this.healthyCallsSinceLoop.set(tabId, healthy);
+      if (healthy >= 6) {
+        this.loopNudges.delete(tabId);
+        this.healthyCallsSinceLoop.delete(tabId);
+      }
       return { kind: 'none' };
     }
+    this.healthyCallsSinceLoop.delete(tabId);
     const nudges = (this.loopNudges.get(tabId) || 0) + 1;
     this.loopNudges.set(tabId, nudges);
     if (nudges >= 2) {
@@ -90,6 +101,114 @@ export class Agent {
     if (mode === 'state_change') return Agent.STATE_CHANGE_TOOLS.has(toolName);
     if (mode === 'navigation') return Agent.NAV_TOOLS.has(toolName);
     return false;
+  }
+
+  /**
+   * Re-inject site adapter notes if the user navigated to a different
+   * adapted site mid-conversation.
+   */
+  async _maybeReinjectAdapter(tabId, messages) {
+    if (!this.useSiteAdapters) return false;
+    let url = '';
+    try {
+      const tab = await browser.tabs.get(tabId);
+      url = tab?.url || '';
+    } catch (e) { return false; }
+    if (!url) return false;
+    const adapter = getActiveAdapter(url);
+    const lastName = this.lastSeenAdapter.get(tabId) || null;
+    const currentName = adapter ? adapter.name : null;
+    if (currentName === lastName) return false;
+    this.lastSeenAdapter.set(tabId, currentName);
+    if (!adapter) return false;
+    const heading = adapter.category === 'finance'
+      ? `[Site context changed → now on ${adapter.name} — FINANCE / HIGH-STAKES. Apply these rules from now on:]`
+      : `[Site context changed → now on ${adapter.name}. Apply these notes from now on:]`;
+    messages.push({
+      role: 'user',
+      content: `${heading}\n${adapter.notes.trim()}`,
+    });
+    return true;
+  }
+
+  /**
+   * Shared tool-batch executor used by both processMessage and
+   * processMessageStream so they can't drift.
+   */
+  async _executeToolBatch(tabId, toolCalls, messages, onUpdate, provider, partialAssistantText = null) {
+    let didStateChange = false;
+    for (const tc of toolCalls) {
+      if (this._checkAbort(tabId)) {
+        const value = partialAssistantText || '[Stopped by user]';
+        onUpdate('warning', { message: 'Stopped by user.' });
+        return { action: 'return', value };
+      }
+      const fnName = tc.function.name;
+      let fnArgs;
+      try {
+        fnArgs = typeof tc.function.arguments === 'string'
+          ? JSON.parse(tc.function.arguments)
+          : tc.function.arguments;
+      } catch {
+        fnArgs = {};
+      }
+      onUpdate('tool_call', { name: fnName, args: fnArgs });
+      const toolResult = await this.executeTool(tabId, fnName, fnArgs);
+      onUpdate('tool_result', { name: fnName, result: toolResult });
+
+      if (toolResult && toolResult.done) {
+        const finalResponse = toolResult.summary || partialAssistantText || 'Task completed.';
+        messages.push({
+          role: 'tool',
+          tool_call_id: tc.id,
+          content: this._limitToolResult(toolResult),
+        });
+        return { action: 'return', value: finalResponse };
+      }
+
+      const loopCheck = this._checkLoop(tabId, fnName, fnArgs, toolResult);
+      let resultContent = this._limitToolResult(toolResult);
+      if (loopCheck.kind === 'nudge') {
+        resultContent = resultContent + '\n' + loopCheck.warning;
+        onUpdate('warning', { message: 'Loop detected — nudging the agent.' });
+      }
+      messages.push({
+        role: 'tool',
+        tool_call_id: tc.id,
+        content: resultContent,
+      });
+      if (loopCheck.kind === 'stop') {
+        messages.push({ role: 'assistant', content: loopCheck.message });
+        onUpdate('text', { content: loopCheck.message });
+        onUpdate('error', { message: 'Stuck in a loop. Stopped.' });
+        return { action: 'return', value: loopCheck.message };
+      }
+      if (this._shouldAutoScreenshot(fnName) && !toolResult?.error) {
+        didStateChange = true;
+      }
+    }
+
+    if (didStateChange && provider.supportsVision) {
+      const lastTs = this.lastAutoScreenshotTs.get(tabId) || 0;
+      if (Date.now() - lastTs >= 500) {
+        await new Promise(r => setTimeout(r, 250));
+        const dataUrl = await this._captureAutoScreenshot(tabId);
+        if (dataUrl) {
+          this.lastAutoScreenshotTs.set(tabId, Date.now());
+          messages.push({
+            role: 'user',
+            content: [
+              { type: 'text', text: '[Auto-screenshot of current viewport after the action above. Use this to confirm the result and plan the next step.]' },
+              { type: 'image_url', image_url: { url: dataUrl } },
+            ],
+          });
+          onUpdate('tool_call', { name: 'auto_screenshot', args: {} });
+          onUpdate('tool_result', { name: 'auto_screenshot', result: { success: true, bytes: dataUrl.length } });
+        }
+      }
+    }
+
+    return { action: 'continue' };
   }
 
   /**
@@ -132,6 +251,7 @@ export class Agent {
 
     if (this.useSiteAdapters && url) {
       const adapter = getActiveAdapter(url);
+      this.lastSeenAdapter.set(tabId, adapter ? adapter.name : null);
       if (adapter) {
         const heading = adapter.category === 'finance'
           ? `[Site guidance for ${adapter.name} — FINANCE / HIGH-STAKES]`
@@ -463,12 +583,15 @@ export class Agent {
     this.abortFlags.delete(tabId); // clear any stale abort
 
     while (steps < this.maxSteps) {
-      // Check for abort before each step
       if (this._checkAbort(tabId)) {
         finalResponse = finalResponse || '[Stopped by user]';
         onUpdate('warning', { message: 'Stopped by user.' });
         messages.push({ role: 'assistant', content: finalResponse });
         break;
+      }
+
+      if (steps > 0) {
+        await this._maybeReinjectAdapter(tabId, messages);
       }
 
       steps++;
@@ -527,89 +650,13 @@ export class Agent {
           onUpdate('text', { content: result.content });
         }
 
-        let didStateChange = false;
-
-        for (const tc of result.toolCalls) {
-          // Check abort before each tool execution
-          if (this._checkAbort(tabId)) {
-            finalResponse = result.content || '[Stopped by user]';
-            onUpdate('warning', { message: 'Stopped by user.' });
-            return finalResponse;
-          }
-
-          const fnName = tc.function.name;
-          let fnArgs;
-          try {
-            fnArgs = typeof tc.function.arguments === 'string'
-              ? JSON.parse(tc.function.arguments)
-              : tc.function.arguments;
-          } catch {
-            fnArgs = {};
-          }
-
-          onUpdate('tool_call', { name: fnName, args: fnArgs });
-
-          const toolResult = await this.executeTool(tabId, fnName, fnArgs);
-
-          onUpdate('tool_result', { name: fnName, result: toolResult });
-
-          // Check if the agent signaled completion
-          if (toolResult.done) {
-            finalResponse = toolResult.summary || result.content || 'Task completed.';
-            messages.push({
-              role: 'tool',
-              tool_call_id: tc.id,
-              content: this._limitToolResult(toolResult),
-            });
-            // Don't continue the loop
-            return finalResponse;
-          }
-
-          // Loop detection.
-          const loopCheck = this._checkLoop(tabId, fnName, fnArgs, toolResult);
-          let resultContent = this._limitToolResult(toolResult);
-          if (loopCheck.kind === 'nudge') {
-            resultContent = resultContent + '\n' + loopCheck.warning;
-            onUpdate('warning', { message: 'Loop detected — nudging the agent.' });
-          }
-
-          // Add tool result to conversation
-          messages.push({
-            role: 'tool',
-            tool_call_id: tc.id,
-            content: resultContent,
-          });
-
-          if (loopCheck.kind === 'stop') {
-            finalResponse = loopCheck.message;
-            messages.push({ role: 'assistant', content: finalResponse });
-            onUpdate('text', { content: finalResponse });
-            onUpdate('error', { message: 'Stuck in a loop. Stopped.' });
-            return finalResponse;
-          }
-
-          if (this._shouldAutoScreenshot(fnName) && !toolResult?.error) {
-            didStateChange = true;
-          }
+        const batchResult = await this._executeToolBatch(
+          tabId, result.toolCalls, messages, onUpdate, provider, result.content
+        );
+        if (batchResult.action === 'return') {
+          finalResponse = batchResult.value;
+          return finalResponse;
         }
-
-        if (didStateChange && provider.supportsVision) {
-          await new Promise(r => setTimeout(r, 250));
-          const dataUrl = await this._captureAutoScreenshot(tabId);
-          if (dataUrl) {
-            messages.push({
-              role: 'user',
-              content: [
-                { type: 'text', text: '[Auto-screenshot of current viewport after the action above. Use this to confirm the result and plan the next step.]' },
-                { type: 'image_url', image_url: { url: dataUrl } },
-              ],
-            });
-            onUpdate('tool_call', { name: 'auto_screenshot', args: {} });
-            onUpdate('tool_result', { name: 'auto_screenshot', result: { success: true, bytes: dataUrl.length } });
-          }
-        }
-
-        // Continue the loop — the LLM will see the tool results
         continue;
       }
 
@@ -649,6 +696,10 @@ export class Agent {
       if (this._checkAbort(tabId)) {
         onUpdate('warning', { message: 'Stopped by user.' });
         return '[Stopped by user]';
+      }
+
+      if (steps > 0) {
+        await this._maybeReinjectAdapter(tabId, messages);
       }
 
       steps++;
@@ -703,67 +754,12 @@ export class Agent {
             content: fullText || null,
             tool_calls: toolCalls,
           });
-
-          let didStateChange = false;
-
-          for (const tc of toolCalls) {
-            const fnName = tc.function.name;
-            let fnArgs;
-            try {
-              fnArgs = JSON.parse(tc.function.arguments);
-            } catch {
-              fnArgs = {};
-            }
-
-            onUpdate('tool_call', { name: fnName, args: fnArgs });
-            const toolResult = await this.executeTool(tabId, fnName, fnArgs);
-            onUpdate('tool_result', { name: fnName, result: toolResult });
-
-            if (toolResult.done) {
-              return toolResult.summary || fullText || 'Task completed.';
-            }
-
-            const loopCheck = this._checkLoop(tabId, fnName, fnArgs, toolResult);
-            let resultContent = this._limitToolResult(toolResult);
-            if (loopCheck.kind === 'nudge') {
-              resultContent = resultContent + '\n' + loopCheck.warning;
-              onUpdate('warning', { message: 'Loop detected — nudging the agent.' });
-            }
-
-            messages.push({
-              role: 'tool',
-              tool_call_id: tc.id,
-              content: resultContent,
-            });
-
-            if (loopCheck.kind === 'stop') {
-              messages.push({ role: 'assistant', content: loopCheck.message });
-              onUpdate('text', { content: loopCheck.message });
-              onUpdate('error', { message: 'Stuck in a loop. Stopped.' });
-              return loopCheck.message;
-            }
-
-            if (this._shouldAutoScreenshot(fnName) && !toolResult?.error) {
-              didStateChange = true;
-            }
+          const batchResult = await this._executeToolBatch(
+            tabId, toolCalls, messages, onUpdate, provider, fullText
+          );
+          if (batchResult.action === 'return') {
+            return batchResult.value;
           }
-
-          if (didStateChange && provider.supportsVision) {
-            await new Promise(r => setTimeout(r, 250));
-            const dataUrl = await this._captureAutoScreenshot(tabId);
-            if (dataUrl) {
-              messages.push({
-                role: 'user',
-                content: [
-                  { type: 'text', text: '[Auto-screenshot of current viewport after the action above. Use this to confirm the result and plan the next step.]' },
-                  { type: 'image_url', image_url: { url: dataUrl } },
-                ],
-              });
-              onUpdate('tool_call', { name: 'auto_screenshot', args: {} });
-              onUpdate('tool_result', { name: 'auto_screenshot', result: { success: true, bytes: dataUrl.length } });
-            }
-          }
-
           continue;
         }
 

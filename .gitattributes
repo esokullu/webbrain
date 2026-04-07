@@ -1,0 +1,29 @@
+# Normalize all text files to LF in the repository.
+# Working trees on Windows can still check out CRLF if core.autocrlf=true.
+* text=auto eol=lf
+
+# Explicit text files (in case auto-detection misclassifies)
+*.js    text eol=lf
+*.mjs   text eol=lf
+*.json  text eol=lf
+*.html  text eol=lf
+*.css   text eol=lf
+*.md    text eol=lf
+*.txt   text eol=lf
+*.yml   text eol=lf
+*.yaml  text eol=lf
+
+# Binary files — never normalize
+*.png    binary
+*.jpg    binary
+*.jpeg   binary
+*.gif    binary
+*.ico    binary
+*.zip    binary
+*.gz     binary
+*.tar    binary
+*.pdf    binary
+*.woff   binary
+*.woff2  binary
+*.ttf    binary
+*.eot    binary

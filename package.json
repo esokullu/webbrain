@@ -1,0 +1,15 @@
+{
+  "name": "webbrain",
+  "version": "1.5.0",
+  "description": "Open-source AI browser agent — chat with pages, automate tasks, multi-provider LLM support.",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node test/run.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/esokullu/webbrain.git"
+  },
+  "license": "MIT"
+}

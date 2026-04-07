@@ -198,7 +198,27 @@ async function testProvider(id) {
   }
 }
 
+/**
+ * Snapshot any unsaved field values from the current DOM back into
+ * providersData so a subsequent renderProviders() preserves them.
+ * Without this, clicking "Set Active" or any other action that re-renders
+ * silently throws away whatever the user has typed but not yet saved.
+ */
+function syncInputsIntoProvidersData() {
+  document.querySelectorAll('input[data-provider]').forEach((input) => {
+    const id = input.dataset.provider;
+    const key = input.dataset.key;
+    if (!id || !key || !providersData[id]) return;
+    if (input.dataset.type === 'checkbox' || input.type === 'checkbox') {
+      providersData[id][key] = input.checked;
+    } else {
+      providersData[id][key] = input.value;
+    }
+  });
+}
+
 async function activateProvider(id) {
+  syncInputsIntoProvidersData();
   await sendToBackground('set_active_provider', { providerId: id });
   activeProviderId = id;
   renderProviders();
