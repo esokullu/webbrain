@@ -18,7 +18,7 @@ async function init() {
   const stored = await browser.storage.local.get(['verboseMode', 'screenshotFallback', 'maxAgentSteps']);
   verboseToggle.checked = stored.verboseMode || false;
   screenshotToggle.checked = stored.screenshotFallback ?? true; // on by default
-  maxStepsRange.value = stored.maxAgentSteps || 25;
+  maxStepsRange.value = stored.maxAgentSteps || 50;
   stepsValueLabel.textContent = maxStepsRange.value;
 
   // Load providers

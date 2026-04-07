@@ -244,8 +244,10 @@ export class Agent {
 
     // Map tool names to content script actions
     const actionMap = {
-      'read_page': 'get_page_info',
-      'get_interactive_elements': 'get_interactive_elements',
+      'read_page': 'get_page_info_cdp',
+      'get_interactive_elements': 'get_interactive_elements_cdp',
+      'get_shadow_dom': 'get_shadow_dom',
+      'get_frames': 'get_frames',
       'click': 'click',
       'type_text': 'type',
       'scroll': 'scroll',

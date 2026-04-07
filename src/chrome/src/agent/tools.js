@@ -192,6 +192,102 @@ export const AGENT_TOOLS = [
       },
     },
   },
+  {
+    type: 'function',
+    function: {
+      name: 'full_page_screenshot',
+      description: 'Capture a full-page screenshot that includes all scrollable content. Pixel-perfect capture via CDP. Returns a base64-encoded PNG image. Use this instead of screenshot when you need to see the entire page.',
+      parameters: {
+        type: 'object',
+        properties: {},
+        required: [],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'get_shadow_dom',
+      description: 'Get all shadow DOM hosts on the page with their mode (open/closed). Use shadow_dom_query to interact with elements inside shadow DOMs.',
+      parameters: {
+        type: 'object',
+        properties: {},
+        required: [],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'shadow_dom_query',
+      description: 'Query and interact with elements inside shadow DOMs. Works with both open and closed shadow DOMs via CDP. Returns matched elements with their shadow root context.',
+      parameters: {
+        type: 'object',
+        properties: {
+          selector: { type: 'string', description: 'CSS selector to query inside shadow DOMs' },
+          shadowPath: { type: 'string', description: 'Path to shadow host (e.g., "div#host >>> span.slot")' },
+        },
+        required: ['selector'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'get_frames',
+      description: 'Get all frames (including cross-origin iframes) on the page with their URLs, IDs, and hierarchy.',
+      parameters: {
+        type: 'object',
+        properties: {},
+        required: [],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'iframe_read',
+      description: 'Read content from a cross-origin iframe. Requires the iframe to have appropriate headers or be same-origin. Returns the iframe document content.',
+      parameters: {
+        type: 'object',
+        properties: {
+          frameId: { type: 'string', description: 'Frame ID from get_frames' },
+          selector: { type: 'string', description: 'CSS selector within the iframe' },
+        },
+        required: ['frameId'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'download_file',
+      description: 'Download a file from a URL. The file will be saved to the downloads folder.',
+      parameters: {
+        type: 'object',
+        properties: {
+          url: { type: 'string', description: 'URL of the file to download' },
+          filename: { type: 'string', description: 'Name to save the file as' },
+        },
+        required: ['url'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'upload_file',
+      description: 'Upload a file to a file input element. The file must exist on the local filesystem.',
+      parameters: {
+        type: 'object',
+        properties: {
+          selector: { type: 'string', description: 'CSS selector for the file input element' },
+          filePath: { type: 'string', description: 'Full path to the local file to upload' },
+        },
+        required: ['selector', 'filePath'],
+      },
+    },
+  },
 ];
 
 /**

@@ -1,4 +1,5 @@
 import { AGENT_TOOLS, getToolsForMode, SYSTEM_PROMPT_ASK, SYSTEM_PROMPT_ACT } from './tools.js';
+import { cdpClient } from '../cdp/cdp-client.js';
 
 /**
  * The WebBrain Agent — orchestrates multi-step LLM + tool-use loops.
@@ -221,18 +222,33 @@ export class Agent {
 
     if (name === 'screenshot') {
       try {
-        // Get the tab's window to capture
-        const tab = await chrome.tabs.get(tabId);
-        const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, {
-          format: 'png',
-          quality: 80,
-        });
-        // Return as base64 for vision-capable models
-        return {
-          success: true,
-          image: dataUrl,
-          description: `Screenshot captured (${dataUrl.length} bytes base64 PNG)`,
-        };
+        // Try CDP first for better quality, fallback to tabs API
+        try {
+          await cdpClient.attach(tabId);
+          await cdpClient.sendCommand(tabId, 'Page.enable');
+          const screenshot = await cdpClient.sendCommand(tabId, 'Page.captureScreenshot', {
+            format: 'png',
+            quality: 100,
+            fromSurface: true,
+          });
+          return {
+            success: true,
+            image: `data:image/png;base64,${screenshot.data}`,
+            description: `Screenshot captured via CDP (${screenshot.data.length} bytes)`,
+          };
+        } catch {
+          // Fallback to tabs API
+          const tab = await chrome.tabs.get(tabId);
+          const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, {
+            format: 'png',
+            quality: 80,
+          });
+          return {
+            success: true,
+            image: dataUrl,
+            description: `Screenshot captured (${dataUrl.length} bytes base64 PNG)`,
+          };
+        }
       } catch (e) {
         return { success: false, error: `Screenshot failed: ${e.message}` };
       }
@@ -242,10 +258,136 @@ export class Agent {
       return { done: true, summary: args.summary };
     }
 
+    if (name === 'full_page_screenshot') {
+      try {
+        await cdpClient.attach(tabId);
+        const imageData = await cdpClient.captureFullPageScreenshot(tabId);
+        return {
+          success: true,
+          image: `data:image/png;base64,${imageData}`,
+          description: `Full page screenshot captured (${imageData.length} bytes)`,
+        };
+      } catch (e) {
+        return { success: false, error: `Full page screenshot failed: ${e.message}` };
+      }
+    }
+
+    if (name === 'get_shadow_dom') {
+      try {
+        await cdpClient.attach(tabId);
+        const pageInfo = await cdpClient.readPage(tabId);
+        return {
+          success: true,
+          shadowHosts: pageInfo.shadowHosts || [],
+        };
+      } catch (e) {
+        return { success: false, error: `Failed to get shadow DOM info: ${e.message}` };
+      }
+    }
+
+    if (name === 'shadow_dom_query') {
+      try {
+        await cdpClient.attach(tabId);
+        await cdpClient.sendCommand(tabId, 'DOM.enable');
+        await cdpClient.sendCommand(tabId, 'DOM.getDocument', { depth: 0 });
+
+        const result = await cdpClient.evaluate(tabId, `
+          (() => {
+            const results = [];
+            const pierce = (root, sel) => {
+              try {
+                const els = root.querySelectorAll(sel);
+                els.forEach(el => {
+                  results.push({
+                    tag: el.tagName.toLowerCase(),
+                    text: (el.innerText || '').trim().slice(0, 100),
+                    id: el.id || '',
+                    hasShadowRoot: !!el.shadowRoot,
+                    shadowMode: el.shadowRoot?.mode || null,
+                  });
+                });
+              } catch (e) {}
+              root.querySelectorAll('*').forEach(host => {
+                if (host.shadowRoot) pierce(host.shadowRoot, sel);
+              });
+            };
+            pierce(document, '${args.selector.replace(/'/g, "\\'")}');
+            return results;
+          })()
+        `);
+        return { success: true, elements: result?.result?.value || [] };
+      } catch (e) {
+        return { success: false, error: `Shadow DOM query failed: ${e.message}` };
+      }
+    }
+
+    if (name === 'get_frames') {
+      try {
+        await cdpClient.attach(tabId);
+        const frames = await cdpClient.getAllFrames(tabId);
+        return { success: true, frames };
+      } catch (e) {
+        return { success: false, error: `Failed to get frames: ${e.message}` };
+      }
+    }
+
+    if (name === 'iframe_read') {
+      try {
+        await cdpClient.attach(tabId);
+        const result = await cdpClient.evaluate(tabId, `
+          (() => {
+            const frames = window.frames;
+            for (let i = 0; i < frames.length; i++) {
+              try {
+                const frame = frames[i];
+                const sel = '${(args.selector || 'body').replace(/'/g, "\\'")}';
+                const el = frame.document?.querySelector ? frame.document.querySelector(sel) : null;
+                if (el) {
+                  return {
+                    frameIndex: i,
+                    frameName: frame.name || '',
+                    content: el.innerText || '',
+                    html: el.innerHTML?.slice(0, 5000) || '',
+                  };
+                }
+              } catch (e) {}
+            }
+            return { error: 'Could not access iframe content (cross-origin)' };
+          })()
+        `);
+        return { success: true, ...result?.result?.value };
+      } catch (e) {
+        return { success: false, error: `Iframe read failed: ${e.message}` };
+      }
+    }
+
+    if (name === 'download_file') {
+      try {
+        const result = await cdpClient.downloadFile(tabId, args.url, args.filename);
+        return result;
+      } catch (e) {
+        return { success: false, error: `Download failed: ${e.message}` };
+      }
+    }
+
+    if (name === 'upload_file') {
+      try {
+        await cdpClient.attach(tabId);
+        const nodeIds = await cdpClient.querySelectorPierce(tabId, args.selector);
+        if (!nodeIds || nodeIds.length === 0) {
+          return { success: false, error: 'File input not found' };
+        }
+        await cdpClient.setFileInputFiles(tabId, nodeIds[0], [args.filePath]);
+        return { success: true, file: args.filePath };
+      } catch (e) {
+        return { success: false, error: `Upload failed: ${e.message}` };
+      }
+    }
+
     // Map tool names to content script actions
     const actionMap = {
-      'read_page': 'get_page_info',
-      'get_interactive_elements': 'get_interactive_elements',
+      'read_page': 'get_page_info_cdp',
+      'get_interactive_elements': 'get_interactive_elements_cdp',
       'click': 'click',
       'type_text': 'type',
       'scroll': 'scroll',
