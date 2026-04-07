@@ -56,6 +56,28 @@ loadPanelTabs();
 
 chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: false }).catch(() => {});
 
+// Because manifest.side_panel.default_path is required by Chrome, the panel
+// is implicitly available on every tab. Disable it pre-emptively on all
+// existing tabs (and any newly created tab) so it only opens where the user
+// has explicitly clicked the action.
+async function disablePanelOnAllTabsExceptOptedIn() {
+  try {
+    const tabs = await chrome.tabs.query({});
+    for (const t of tabs) {
+      if (t.id != null && !panelTabs.has(t.id)) {
+        chrome.sidePanel.setOptions({ tabId: t.id, enabled: false }).catch(() => {});
+      }
+    }
+  } catch (e) { /* ignore */ }
+}
+disablePanelOnAllTabsExceptOptedIn();
+
+chrome.tabs.onCreated.addListener((tab) => {
+  if (tab?.id != null && !panelTabs.has(tab.id)) {
+    chrome.sidePanel.setOptions({ tabId: tab.id, enabled: false }).catch(() => {});
+  }
+});
+
 // IMPORTANT: must be a sync handler with no awaits before sidePanel.open(),
 // otherwise the user-gesture token expires across the await and Chrome
 // silently refuses to open the panel.
