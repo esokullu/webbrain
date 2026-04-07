@@ -8,6 +8,7 @@ const screenshotToggle = document.getElementById('toggle-screenshot-fallback');
 const maxStepsRange = document.getElementById('range-max-steps');
 const stepsValueLabel = document.getElementById('steps-value');
 const autoScreenshotSelect = document.getElementById('select-auto-screenshot');
+const siteAdaptersToggle = document.getElementById('toggle-site-adapters');
 
 let providersData = {};
 let activeProviderId = '';
@@ -16,12 +17,13 @@ let activeProviderId = '';
 
 async function init() {
   // Load display settings
-  const stored = await chrome.storage.local.get(['verboseMode', 'screenshotFallback', 'maxAgentSteps', 'autoScreenshot']);
+  const stored = await chrome.storage.local.get(['verboseMode', 'screenshotFallback', 'maxAgentSteps', 'autoScreenshot', 'useSiteAdapters']);
   verboseToggle.checked = stored.verboseMode || false;
   screenshotToggle.checked = stored.screenshotFallback ?? true; // on by default
   maxStepsRange.value = stored.maxAgentSteps || 60;
   stepsValueLabel.textContent = maxStepsRange.value;
   autoScreenshotSelect.value = stored.autoScreenshot || 'state_change';
+  siteAdaptersToggle.checked = stored.useSiteAdapters ?? true;
 
   // Load providers
   const res = await sendToBackground('get_providers');
@@ -50,6 +52,10 @@ maxStepsRange.addEventListener('change', () => {
 
 autoScreenshotSelect.addEventListener('change', () => {
   chrome.storage.local.set({ autoScreenshot: autoScreenshotSelect.value });
+});
+
+siteAdaptersToggle.addEventListener('change', () => {
+  chrome.storage.local.set({ useSiteAdapters: siteAdaptersToggle.checked });
 });
 
 // --- Provider Rendering ---

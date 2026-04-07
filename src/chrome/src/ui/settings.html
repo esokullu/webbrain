@@ -246,6 +246,16 @@
     </div>
     <div class="setting-row">
       <div class="setting-info">
+        <div class="setting-label">Site adapters</div>
+        <div class="setting-desc">Inject short, hand-curated guidance for known high-traffic sites (GitHub, Gmail, Stripe, AWS, etc.) into the agent's first message. Helps the agent avoid common dead-ends. Adds a small token cost on the first turn of conversations on matched sites.</div>
+      </div>
+      <label class="toggle">
+        <input type="checkbox" id="toggle-site-adapters" checked>
+        <span class="toggle-slider"></span>
+      </label>
+    </div>
+    <div class="setting-row">
+      <div class="setting-info">
         <div class="setting-label">Auto-screenshot</div>
         <div class="setting-desc">Automatically capture a viewport screenshot after the agent acts on the page, so vision-capable models can see what changed. Costs more tokens. Disabled silently if the active model doesn't support images.</div>
       </div>

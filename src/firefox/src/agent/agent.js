@@ -1,4 +1,5 @@
 import { AGENT_TOOLS, getToolsForMode, SYSTEM_PROMPT_ASK, SYSTEM_PROMPT_ACT } from './tools.js';
+import { getActiveAdapter } from './adapters.js';
 
 /**
  * The WebBrain Agent — orchestrates multi-step LLM + tool-use loops.
@@ -12,6 +13,7 @@ export class Agent {
     this.maxContextMessages = 50; // trim beyond this
     this.maxContextChars = 80000; // rough char budget (~20k tokens)
     this.autoScreenshot = 'state_change';
+    this.useSiteAdapters = true;
     this.recentCalls = new Map();
     this.loopNudges = new Map();
   }
@@ -124,9 +126,19 @@ export class Agent {
       title = tab?.title || '';
     } catch (e) { /* ignore */ }
 
-    const contextLine = url
+    let contextLine = url
       ? `[Page context — URL: ${url}${title ? ` — Title: ${title}` : ''}]\n\n`
       : '';
+
+    if (this.useSiteAdapters && url) {
+      const adapter = getActiveAdapter(url);
+      if (adapter) {
+        const heading = adapter.category === 'finance'
+          ? `[Site guidance for ${adapter.name} — FINANCE / HIGH-STAKES]`
+          : `[Site guidance for ${adapter.name}]`;
+        contextLine += `${heading}\n${adapter.notes.trim()}\n\n`;
+      }
+    }
 
     const provider = this.providerManager.getActive();
     if (!provider.supportsVision) {

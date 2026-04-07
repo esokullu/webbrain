@@ -21,6 +21,12 @@ async function loadAutoScreenshot() {
 }
 loadAutoScreenshot();
 
+async function loadSiteAdapters() {
+  const stored = await browser.storage.local.get('useSiteAdapters');
+  if (stored.useSiteAdapters != null) agent.useSiteAdapters = stored.useSiteAdapters;
+}
+loadSiteAdapters();
+
 // Initialize on install
 browser.runtime.onInstalled.addListener(async () => {
   await providerManager.load();
@@ -36,6 +42,9 @@ browser.storage.onChanged.addListener((changes) => {
   }
   if (changes.autoScreenshot) {
     agent.autoScreenshot = changes.autoScreenshot.newValue;
+  }
+  if (changes.useSiteAdapters) {
+    agent.useSiteAdapters = changes.useSiteAdapters.newValue;
   }
 });
 

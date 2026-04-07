@@ -1,5 +1,6 @@
 import { AGENT_TOOLS, getToolsForMode, SYSTEM_PROMPT_ASK, SYSTEM_PROMPT_ACT } from './tools.js';
 import { cdpClient } from '../cdp/cdp-client.js';
+import { getActiveAdapter } from './adapters.js';
 
 /**
  * The WebBrain Agent — orchestrates multi-step LLM + tool-use loops.
@@ -18,6 +19,9 @@ export class Agent {
     // Auto-screenshot mode. 'off' | 'navigation' | 'state_change' | 'every_step'.
     // Loaded from chrome.storage.local in background.js.
     this.autoScreenshot = 'state_change';
+    // Whether to inject site adapter notes into the first user message of
+    // each conversation. Loaded from chrome.storage.local. Default true.
+    this.useSiteAdapters = true;
     // Loop detection: per-tab ring buffer of recent tool calls + nudge count.
     this.recentCalls = new Map(); // tabId -> [{ key, name, ts }]
     this.loopNudges = new Map();  // tabId -> consecutive-nudge counter
@@ -152,9 +156,21 @@ export class Agent {
       title = tab?.title || '';
     } catch (e) { /* ignore */ }
 
-    const contextLine = url
+    let contextLine = url
       ? `[Page context — URL: ${url}${title ? ` — Title: ${title}` : ''}]\n\n`
       : '';
+
+    // Site adapter notes: if the URL matches a known site, inject the
+    // non-obvious quirks the model would otherwise have to discover by trial.
+    if (this.useSiteAdapters && url) {
+      const adapter = getActiveAdapter(url);
+      if (adapter) {
+        const heading = adapter.category === 'finance'
+          ? `[Site guidance for ${adapter.name} — FINANCE / HIGH-STAKES]`
+          : `[Site guidance for ${adapter.name}]`;
+        contextLine += `${heading}\n${adapter.notes.trim()}\n\n`;
+      }
+    }
 
     // Without vision, fall back to plain text context.
     const provider = this.providerManager.getActive();

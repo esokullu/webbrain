@@ -753,6 +753,54 @@ body {
   background: var(--accent-hover);
 }
 
+/* Act mode hint toast — non-blocking, slides in from the bottom. */
+.act-hint-toast {
+  position: fixed;
+  left: 12px;
+  right: 12px;
+  bottom: 12px;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 14px;
+  background: rgba(255, 152, 0, 0.12);
+  border: 1px solid rgba(255, 152, 0, 0.45);
+  border-radius: var(--radius);
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--text);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+  transform: translateY(120%);
+  opacity: 0;
+  transition: transform 0.25s ease, opacity 0.25s ease;
+  z-index: 9999;
+  pointer-events: auto;
+}
+
+.act-hint-toast.show {
+  transform: translateY(0);
+  opacity: 1;
+}
+
+.act-hint-text {
+  flex: 1;
+}
+
+.act-hint-dismiss {
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 4px;
+  flex-shrink: 0;
+}
+
+.act-hint-dismiss:hover {
+  color: var(--text);
+}
+
 /* Error messages */
 .message.error .message-content {
   background: rgba(244, 67, 54, 0.1);

@@ -21,6 +21,12 @@ async function loadAutoScreenshot() {
 }
 loadAutoScreenshot();
 
+async function loadSiteAdapters() {
+  const stored = await chrome.storage.local.get('useSiteAdapters');
+  if (stored.useSiteAdapters != null) agent.useSiteAdapters = stored.useSiteAdapters;
+}
+loadSiteAdapters();
+
 // Initialize on install
 chrome.runtime.onInstalled.addListener(async () => {
   await providerManager.load();
@@ -41,6 +47,9 @@ chrome.storage.onChanged.addListener((changes) => {
   }
   if (changes.autoScreenshot) {
     agent.autoScreenshot = changes.autoScreenshot.newValue;
+  }
+  if (changes.useSiteAdapters) {
+    agent.useSiteAdapters = changes.useSiteAdapters.newValue;
   }
 });
 

@@ -696,21 +696,38 @@ function setMode(mode) {
 
 modeAskBtn.addEventListener('click', () => setMode('ask'));
 
-modeActBtn.addEventListener('click', () => {
+modeActBtn.addEventListener('click', async () => {
   if (agentMode === 'act') return; // already active
-  // Show a one-time confirmation if this is the first switch in the session
-  if (!modeActBtn.dataset.confirmed) {
-    const ok = confirm(
-      'Act mode lets WebBrain click, type, scroll, and navigate on your behalf.\n\n' +
-      'This can modify page content, submit forms, and trigger actions.\n' +
-      'The developers are not responsible for any unintended consequences.\n\n' +
-      'Continue?'
-    );
-    if (!ok) return;
-    modeActBtn.dataset.confirmed = 'true';
-  }
   setMode('act');
+  try {
+    const stored = await browser.storage.local.get('actHintShown');
+    if (!stored.actHintShown) {
+      showActHintToast();
+      browser.storage.local.set({ actHintShown: true }).catch(() => {});
+    }
+  } catch (e) { /* ignore */ }
 });
+
+function showActHintToast() {
+  document.querySelectorAll('.act-hint-toast').forEach(el => el.remove());
+  const toast = document.createElement('div');
+  toast.className = 'act-hint-toast';
+  toast.innerHTML = `
+    <div class="act-hint-text">
+      Act mode on — WebBrain can now click, type, and navigate for you.
+      Watch what it does and stop it any time with the ◼ button.
+    </div>
+    <button class="act-hint-dismiss" title="Dismiss">×</button>
+  `;
+  document.body.appendChild(toast);
+  requestAnimationFrame(() => toast.classList.add('show'));
+  const dismiss = () => {
+    toast.classList.remove('show');
+    setTimeout(() => toast.remove(), 250);
+  };
+  toast.querySelector('.act-hint-dismiss').addEventListener('click', dismiss);
+  setTimeout(dismiss, 6000);
+}
 
 
 // --- Stop / Abort ---
