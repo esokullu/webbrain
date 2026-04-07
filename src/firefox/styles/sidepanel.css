@@ -116,6 +116,11 @@ body {
   background: var(--accent-dim);
 }
 
+#header button.active {
+  color: var(--accent);
+  background: var(--accent-dim);
+}
+
 /* Page Inspection Banner */
 #inspection-banner {
   display: flex;

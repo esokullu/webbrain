@@ -86,6 +86,14 @@
           "@type": "Answer",
           "text": "Yes. WebBrain supports both Chrome (Manifest V3) and Firefox (Manifest V2). The Firefox version uses the sidebar_action API and is fully functional with all the same features."
         }
+      },
+      {
+        "@type": "Question",
+        "name": "Can I switch to another tab while WebBrain is working on a page?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "Yes on Chrome. The agent runs in the background service worker bound to its original tab, so it keeps clicking, typing, and reading that specific tab even when you switch focus elsewhere. The sidebar locks input while a task is running so you can't accidentally start a second task. On Firefox, the agent also keeps running, but auto-screenshots are skipped while the agent's tab is in the background — Firefox's screenshot API can only capture the active tab, so WebBrain refuses rather than feed the model an image of an unrelated page. Avoid actively interacting with the same tab the agent is working on."
+        }
       }
     ]
   }
@@ -1107,8 +1115,15 @@
     </details>
 
     <details class="faq-item">
+      <summary>Can I switch to another tab while WebBrain is working on a page?</summary>
+      <p>Yes, on Chrome — the agent runs in the background service worker and is bound to the tab it started on, so it keeps clicking, typing, and reading that specific tab even when you move focus elsewhere. Tools that target a tab (CDP click, type, navigate, screenshot) all work on backgrounded tabs in Chrome. The sidebar locks the input while a task is running so you can't accidentally start a second task on the new tab — you'll need to wait or stop the current one. Note that browsers throttle timers and animations on background tabs, so heavily animated sites may respond slightly slower.</p>
+      <p>On Firefox, the agent will keep running on its original tab too, but auto-screenshots are limited: Firefox's screenshot API can only capture the currently active tab, not a specific tab in the background. WebBrain detects this and skips the screenshot for that turn rather than feeding the model an image of an unrelated page. The agent will continue planning from text-based context until you switch back to its tab.</p>
+      <p><strong>Avoid actively clicking or typing on the same tab the agent is working on</strong> — that creates race conditions where you and the agent fight over the same page. Switching tabs is fine; co-driving the same tab is not.</p>
+    </details>
+
+    <details class="faq-item">
       <summary>Can I contribute to WebBrain?</summary>
-      <p>Absolutely! WebBrain is MIT-licensed and welcomes contributions. Check out the <a href="https://github.com/esokullu/webbrain" target="_blank">GitHub repository</a> for issues, feature requests, and contribution guidelines. Some planned features include CDP (Chrome DevTools Protocol) integration, file download/upload support, conversation export, and custom tool definitions.</p>
+      <p>Absolutely! WebBrain is MIT-licensed and welcomes contributions. Check out the <a href="https://github.com/esokullu/webbrain" target="_blank">GitHub repository</a> for issues, feature requests, and contribution guidelines.</p>
     </details>
   </div>
 </section>

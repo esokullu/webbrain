@@ -8,6 +8,7 @@ const inputEl = document.getElementById('user-input');
 const sendBtn = document.getElementById('btn-send');
 const clearBtn = document.getElementById('btn-clear');
 const settingsBtn = document.getElementById('btn-settings');
+const verboseBtn = document.getElementById('btn-verbose');
 const providerSelect = document.getElementById('provider-select');
 const statusDot = document.getElementById('status-dot');
 const agentActivity = document.getElementById('agent-activity');
@@ -78,10 +79,21 @@ async function init() {
   });
 
   // Listen for setting changes (from options page)
+  if (verboseBtn) verboseBtn.classList.toggle('active', verboseMode);
+
   browser.storage.onChanged.addListener((changes) => {
     if (changes.verboseMode) {
       verboseMode = changes.verboseMode.newValue;
+      if (verboseBtn) verboseBtn.classList.toggle('active', verboseMode);
     }
+  });
+}
+
+if (verboseBtn) {
+  verboseBtn.addEventListener('click', () => {
+    verboseMode = !verboseMode;
+    verboseBtn.classList.toggle('active', verboseMode);
+    browser.storage.local.set({ verboseMode }).catch(() => {});
   });
 }
 

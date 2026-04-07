@@ -222,6 +222,12 @@ export class Agent {
     try {
       const tab = await browser.tabs.get(tabId);
       if (!tab) return null;
+      // captureVisibleTab takes a windowId and snapshots whatever is currently
+      // visible in that window — it does NOT take a tabId. If the agent's
+      // tab isn't the active tab, we'd silently capture an unrelated page
+      // and feed misleading visual context to the model. Skip in that case;
+      // the model will plan from text only this turn.
+      if (!tab.active) return null;
       // Get the actual viewport dimensions from the page so we can include
       // them in the prompt accompanying the screenshot.
       let w = 1024, h = 768;
@@ -507,8 +513,17 @@ export class Agent {
 
     if (name === 'screenshot') {
       try {
-        // Get the tab's window to capture
+        // Get the tab's window to capture. Firefox captureVisibleTab takes
+        // a windowId and snapshots whatever's currently visible in that
+        // window — not the tab we ask for. If the agent's tab isn't the
+        // active tab, refuse rather than capture an unrelated page.
         const tab = await browser.tabs.get(tabId);
+        if (!tab?.active) {
+          return {
+            success: false,
+            error: 'Cannot capture screenshot: this tab is not the active tab in its window. Switch to the tab to take a screenshot, or use a different tool.',
+          };
+        }
         const dataUrl = await browser.tabs.captureVisibleTab(tab.windowId, {
           format: 'png',
           quality: 80,

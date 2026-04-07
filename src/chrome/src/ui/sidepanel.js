@@ -8,6 +8,7 @@ const inputEl = document.getElementById('user-input');
 const sendBtn = document.getElementById('btn-send');
 const clearBtn = document.getElementById('btn-clear');
 const settingsBtn = document.getElementById('btn-settings');
+const verboseBtn = document.getElementById('btn-verbose');
 const providerSelect = document.getElementById('provider-select');
 const statusDot = document.getElementById('status-dot');
 const agentActivity = document.getElementById('agent-activity');
@@ -139,11 +140,25 @@ async function init() {
     }
   });
 
+  // Reflect initial verbose state in the button.
+  if (verboseBtn) verboseBtn.classList.toggle('active', verboseMode);
+
   // Listen for setting changes (from options page)
   chrome.storage.onChanged.addListener((changes) => {
     if (changes.verboseMode) {
       verboseMode = changes.verboseMode.newValue;
+      if (verboseBtn) verboseBtn.classList.toggle('active', verboseMode);
     }
+  });
+}
+
+// Verbose toggle button: persists the choice via the same storage key the
+// settings page uses, so the two stay in sync.
+if (verboseBtn) {
+  verboseBtn.addEventListener('click', () => {
+    verboseMode = !verboseMode;
+    verboseBtn.classList.toggle('active', verboseMode);
+    chrome.storage.local.set({ verboseMode }).catch(() => {});
   });
 }
 

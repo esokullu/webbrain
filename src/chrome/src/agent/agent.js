@@ -671,8 +671,18 @@ export class Agent {
             description: `Screenshot captured via CDP (${screenshot.data.length} bytes)`,
           };
         } catch {
-          // Fallback to tabs API
+          // Fallback to tabs API. captureVisibleTab takes a windowId and
+          // captures whatever's visible in that window — NOT the tab we
+          // ask for. If the agent's tab isn't currently the active tab,
+          // we'd silently capture an unrelated page. Refuse and tell the
+          // model so it can plan without misleading visual context.
           const tab = await chrome.tabs.get(tabId);
+          if (!tab?.active) {
+            return {
+              success: false,
+              error: 'Cannot capture screenshot: this tab is not the active tab in its window. Switch to the tab to take a screenshot, or use a different tool.',
+            };
+          }
           const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, {
             format: 'png',
             quality: 80,
