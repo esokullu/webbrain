@@ -196,16 +196,18 @@ export class Agent {
     }
 
     // With vision, attach a viewport screenshot.
-    const dataUrl = await this._captureAutoScreenshot(tabId);
-    if (!dataUrl) {
+    const shot = await this._captureAutoScreenshot(tabId);
+    if (!shot) {
       return { role: 'user', content: contextLine + userMessage };
     }
+
+    const screenshotNote = `[Initial viewport screenshot follows. The image is ${shot.width}×${shot.height} pixels and represents the visible viewport at a 1:1 CSS-pixel coordinate system — a click at image pixel (X, Y) corresponds exactly to a click tool call with x=X, y=Y. Prefer selector-based clicks (call get_interactive_elements first) when possible; only use coordinates as a last resort.]\n\n`;
 
     return {
       role: 'user',
       content: [
-        { type: 'text', text: contextLine + userMessage },
-        { type: 'image_url', image_url: { url: dataUrl } },
+        { type: 'text', text: contextLine + screenshotNote + userMessage },
+        { type: 'image_url', image_url: { url: shot.dataUrl } },
       ],
     };
   }
@@ -325,18 +327,18 @@ export class Agent {
       const lastTs = this.lastAutoScreenshotTs.get(tabId) || 0;
       if (Date.now() - lastTs >= 500) {
         await new Promise(r => setTimeout(r, 250));
-        const dataUrl = await this._captureAutoScreenshot(tabId);
-        if (dataUrl) {
+        const shot = await this._captureAutoScreenshot(tabId);
+        if (shot) {
           this.lastAutoScreenshotTs.set(tabId, Date.now());
           messages.push({
             role: 'user',
             content: [
-              { type: 'text', text: '[Auto-screenshot of current viewport after the action above. Use this to confirm the result and plan the next step.]' },
-              { type: 'image_url', image_url: { url: dataUrl } },
+              { type: 'text', text: `[Auto-screenshot of current viewport after the action above. Image is ${shot.width}×${shot.height} pixels = the CSS viewport at 1:1. A click at image pixel (X, Y) maps directly to click(x:X, y:Y). Use this to confirm the result and plan the next step. Prefer selector-based clicks when an element is identifiable; coordinate clicks are a last resort.]` },
+              { type: 'image_url', image_url: { url: shot.dataUrl } },
             ],
           });
           onUpdate('tool_call', { name: 'auto_screenshot', args: {} });
-          onUpdate('tool_result', { name: 'auto_screenshot', result: { success: true, bytes: dataUrl.length } });
+          onUpdate('tool_result', { name: 'auto_screenshot', result: { success: true, bytes: shot.dataUrl.length } });
         }
       }
     }
@@ -345,17 +347,40 @@ export class Agent {
     return { action: 'continue' };
   }
 
+  /**
+   * Capture a viewport JPEG via CDP, pinned to a 1:1 CSS-pixel coordinate
+   * system. Returns { dataUrl, width, height } in CSS pixels, or null on
+   * failure.
+   *
+   * Why the clip+scale dance: by default `Page.captureScreenshot` with
+   * `fromSurface: true` captures at the native surface resolution, which on
+   * any HiDPI display is `viewport CSS pixels × devicePixelRatio`. The
+   * model then reads pixel coordinates from the image and emits them as
+   * click coords — but `Input.dispatchMouseEvent` interprets coordinates as
+   * CSS pixels, not surface pixels. On a DPR=2 display the click lands at
+   * half the intended X/Y. Result: the agent appears to click but nothing
+   * happens, then loops trying again. Forcing `clip.scale=1` with the
+   * actual CSS viewport dimensions gives an image where pixel-(X,Y) maps
+   * exactly to CSS-(X,Y), eliminating the offset.
+   */
   async _captureAutoScreenshot(tabId) {
     try {
       await cdpClient.attach(tabId);
       await cdpClient.sendCommand(tabId, 'Page.enable');
+      const vp = await cdpClient.evaluate(tabId, '({w: window.innerWidth, h: window.innerHeight})');
+      const w = Math.max(1, Math.round(vp?.result?.value?.w || 1024));
+      const h = Math.max(1, Math.round(vp?.result?.value?.h || 768));
       const shot = await cdpClient.sendCommand(tabId, 'Page.captureScreenshot', {
         format: 'jpeg',
         quality: 60,
-        fromSurface: true,
+        clip: { x: 0, y: 0, width: w, height: h, scale: 1 },
       });
       if (!shot?.data) return null;
-      return `data:image/jpeg;base64,${shot.data}`;
+      return {
+        dataUrl: `data:image/jpeg;base64,${shot.data}`,
+        width: w,
+        height: h,
+      };
     } catch (e) {
       return null;
     }

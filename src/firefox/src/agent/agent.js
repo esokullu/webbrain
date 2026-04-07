@@ -192,18 +192,18 @@ export class Agent {
       const lastTs = this.lastAutoScreenshotTs.get(tabId) || 0;
       if (Date.now() - lastTs >= 500) {
         await new Promise(r => setTimeout(r, 250));
-        const dataUrl = await this._captureAutoScreenshot(tabId);
-        if (dataUrl) {
+        const shot = await this._captureAutoScreenshot(tabId);
+        if (shot) {
           this.lastAutoScreenshotTs.set(tabId, Date.now());
           messages.push({
             role: 'user',
             content: [
-              { type: 'text', text: '[Auto-screenshot of current viewport after the action above. Use this to confirm the result and plan the next step.]' },
-              { type: 'image_url', image_url: { url: dataUrl } },
+              { type: 'text', text: `[Auto-screenshot of current viewport after the action above. Image is ${shot.width}×${shot.height} pixels = the CSS viewport at 1:1. A click at image pixel (X, Y) maps directly to click(x:X, y:Y). Use this to confirm the result and plan the next step. Prefer selector-based clicks when an element is identifiable; coordinate clicks are a last resort.]` },
+              { type: 'image_url', image_url: { url: shot.dataUrl } },
             ],
           });
           onUpdate('tool_call', { name: 'auto_screenshot', args: {} });
-          onUpdate('tool_result', { name: 'auto_screenshot', result: { success: true, bytes: dataUrl.length } });
+          onUpdate('tool_result', { name: 'auto_screenshot', result: { success: true, bytes: shot.dataUrl.length } });
         }
       }
     }
@@ -213,18 +213,37 @@ export class Agent {
 
   /**
    * Capture a viewport screenshot via the WebExtension tabs API. Firefox
-   * doesn't expose CDP, but tabs.captureVisibleTab works for the active tab
-   * in the active window. Returns a data URL or null on failure.
+   * supports `scale: 1` on captureVisibleTab to force a CSS-pixel-aligned
+   * image (otherwise it captures at devicePixelRatio, causing the same
+   * coordinate-mismatch loop chrome had pre-1.5.1). Returns
+   * { dataUrl, width, height } in CSS pixels, or null on failure.
    */
   async _captureAutoScreenshot(tabId) {
     try {
       const tab = await browser.tabs.get(tabId);
       if (!tab) return null;
+      // Get the actual viewport dimensions from the page so we can include
+      // them in the prompt accompanying the screenshot.
+      let w = 1024, h = 768;
+      try {
+        const dims = await browser.tabs.executeScript(tabId, {
+          code: 'JSON.stringify({w: window.innerWidth, h: window.innerHeight})',
+        });
+        if (dims && dims[0]) {
+          const parsed = JSON.parse(dims[0]);
+          w = Math.max(1, Math.round(parsed.w));
+          h = Math.max(1, Math.round(parsed.h));
+        }
+      } catch (e) { /* fall back to defaults */ }
+      // scale: 1 forces 1 image pixel per CSS pixel (Firefox-specific option,
+      // ignored by Chrome but Chrome path uses CDP anyway).
       const dataUrl = await browser.tabs.captureVisibleTab(tab.windowId, {
         format: 'jpeg',
         quality: 60,
+        scale: 1,
       });
-      return dataUrl || null;
+      if (!dataUrl) return null;
+      return { dataUrl, width: w, height: h };
     } catch (e) {
       return null;
     }
@@ -265,14 +284,16 @@ export class Agent {
       return { role: 'user', content: contextLine + userMessage };
     }
 
-    const dataUrl = await this._captureAutoScreenshot(tabId);
-    if (!dataUrl) return { role: 'user', content: contextLine + userMessage };
+    const shot = await this._captureAutoScreenshot(tabId);
+    if (!shot) return { role: 'user', content: contextLine + userMessage };
+
+    const screenshotNote = `[Initial viewport screenshot follows. The image is ${shot.width}×${shot.height} pixels and represents the visible viewport at a 1:1 CSS-pixel coordinate system — a click at image pixel (X, Y) corresponds exactly to a click tool call with x=X, y=Y. Prefer selector-based clicks (call get_interactive_elements first) when possible; only use coordinates as a last resort.]\n\n`;
 
     return {
       role: 'user',
       content: [
-        { type: 'text', text: contextLine + userMessage },
-        { type: 'image_url', image_url: { url: dataUrl } },
+        { type: 'text', text: contextLine + screenshotNote + userMessage },
+        { type: 'image_url', image_url: { url: shot.dataUrl } },
       ],
     };
   }
