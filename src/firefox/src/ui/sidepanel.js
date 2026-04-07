@@ -461,7 +461,7 @@ function showContinueButton() {
   const bar = document.createElement('div');
   bar.className = 'continue-bar';
   bar.innerHTML = `
-    <span class="continue-text">Reached the step limit (${agent_maxSteps || 25} steps). Want me to keep going?</span>
+    <span class="continue-text">Reached the step limit (${agent_maxSteps || 60} steps). Want me to keep going?</span>
     <button class="continue-btn" id="btn-continue">Continue</button>
   `;
   messagesEl.appendChild(bar);
@@ -508,8 +508,8 @@ async function continueAgent() {
   }
 }
 
-let agent_maxSteps = 25;
-browser.storage.local.get('maxAgentSteps').then(s => { agent_maxSteps = s.maxAgentSteps || 25; });
+let agent_maxSteps = 60;
+browser.storage.local.get('maxAgentSteps').then(s => { agent_maxSteps = s.maxAgentSteps || 60; });
 browser.storage.onChanged.addListener((changes) => {
   if (changes.maxAgentSteps) agent_maxSteps = changes.maxAgentSteps.newValue;
 });

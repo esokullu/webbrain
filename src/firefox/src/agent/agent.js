@@ -8,7 +8,7 @@ export class Agent {
     this.providerManager = providerManager;
     this.conversations = new Map(); // tabId -> messages[]
     this.abortFlags = new Map(); // tabId -> boolean
-    this.maxSteps = 25; // safety limit for autonomous loops (configurable via settings)
+    this.maxSteps = 60; // safety limit for autonomous loops (configurable via settings)
     this.maxContextMessages = 50; // trim beyond this
     this.maxContextChars = 80000; // rough char budget (~20k tokens)
   }
