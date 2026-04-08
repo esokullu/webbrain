@@ -40,12 +40,11 @@ export class OpenAICompatibleProvider extends BaseLLMProvider {
   }
 
   /**
-   * Newer OpenAI models (gpt-5, gpt-4.1+, o1, o3, o4) reject `max_tokens`
-   * and require `max_completion_tokens` instead. LM Studio and other local
-   * OpenAI-compatible servers only accept `max_tokens`. Detect by model
-   * name and provider type.
+   * GPT-5 / gpt-4.1 / o1 / o3 / o4 use a different API contract:
+   *   - require max_completion_tokens instead of max_tokens
+   *   - reject any temperature other than the default (1)
    */
-  _useMaxCompletionTokens() {
+  _isNewOpenAIContract() {
     const m = (this.config.model || '').toLowerCase();
     if (this.config.providerName === 'lmstudio') return false;
     return /^(gpt-5|gpt-4\.1|o1|o3|o4)/.test(m);
@@ -53,20 +52,25 @@ export class OpenAICompatibleProvider extends BaseLLMProvider {
 
   _addMaxTokens(body, options) {
     const max = options.maxTokens ?? 4096;
-    if (this._useMaxCompletionTokens()) {
+    if (this._isNewOpenAIContract()) {
       body.max_completion_tokens = max;
     } else {
       body.max_tokens = max;
     }
   }
 
+  _addTemperature(body, options) {
+    if (this._isNewOpenAIContract()) return;
+    body.temperature = options.temperature ?? 0.7;
+  }
+
   async chat(messages, options = {}) {
     const body = {
       model: this.model,
       messages,
-      temperature: options.temperature ?? 0.7,
       stream: false,
     };
+    this._addTemperature(body, options);
     this._addMaxTokens(body, options);
 
     if (options.tools && options.tools.length > 0) {
@@ -101,9 +105,9 @@ export class OpenAICompatibleProvider extends BaseLLMProvider {
     const body = {
       model: this.model,
       messages,
-      temperature: options.temperature ?? 0.7,
       stream: true,
     };
+    this._addTemperature(body, options);
     this._addMaxTokens(body, options);
 
     if (options.tools && options.tools.length > 0) {

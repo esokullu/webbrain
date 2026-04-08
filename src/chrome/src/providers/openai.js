@@ -43,36 +43,43 @@ export class OpenAICompatibleProvider extends BaseLLMProvider {
   }
 
   /**
-   * Newer OpenAI models (gpt-5, gpt-4.1+, o1, o3, o4) reject `max_tokens`
-   * and require `max_completion_tokens` instead. Older models (gpt-4o,
-   * gpt-4-turbo, gpt-3.5) only accept `max_tokens`. Some local OpenAI-
-   * compatible servers (LM Studio, llama.cpp) only accept `max_tokens`.
-   * Detect by name and pick the right field. OpenRouter accepts both.
+   * Newer OpenAI models (gpt-5, gpt-4.1+, o1, o3, o4) have a different API
+   * contract from the gpt-4o-and-earlier line:
+   *   - reject `max_tokens`, require `max_completion_tokens` instead
+   *   - reject any `temperature` other than the default (1)
+   * Local OpenAI-compatible servers (LM Studio) and OpenRouter still use
+   * the legacy contract. Detect by model name + provider type.
    */
-  _useMaxCompletionTokens() {
+  _isNewOpenAIContract() {
     const m = (this.config.model || '').toLowerCase();
-    // Local OpenAI-compatible servers haven't adopted the rename — always
-    // send `max_tokens` for them.
     if (this.config.providerName === 'lmstudio') return false;
     return /^(gpt-5|gpt-4\.1|o1|o3|o4)/.test(m);
   }
 
   _addMaxTokens(body, options) {
     const max = options.maxTokens ?? 4096;
-    if (this._useMaxCompletionTokens()) {
+    if (this._isNewOpenAIContract()) {
       body.max_completion_tokens = max;
     } else {
       body.max_tokens = max;
     }
   }
 
+  _addTemperature(body, options) {
+    // GPT-5 / o-series only accept the default temperature (1). Sending
+    // anything else returns 400. Omit the field entirely so the API uses
+    // its default; older models keep the explicit value.
+    if (this._isNewOpenAIContract()) return;
+    body.temperature = options.temperature ?? 0.7;
+  }
+
   async chat(messages, options = {}) {
     const body = {
       model: this.model,
       messages,
-      temperature: options.temperature ?? 0.7,
       stream: false,
     };
+    this._addTemperature(body, options);
     this._addMaxTokens(body, options);
 
     if (options.tools && options.tools.length > 0) {
@@ -107,9 +114,9 @@ export class OpenAICompatibleProvider extends BaseLLMProvider {
     const body = {
       model: this.model,
       messages,
-      temperature: options.temperature ?? 0.7,
       stream: true,
     };
+    this._addTemperature(body, options);
     this._addMaxTokens(body, options);
 
     if (options.tools && options.tools.length > 0) {
