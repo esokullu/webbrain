@@ -33,6 +33,22 @@ class LoopDetectorShim {
     this.recentCalls = new Map();
     this.loopNudges = new Map();
     this.healthyCallsSinceLoop = new Map();
+    this.recentCoordClicks = new Map();
+  }
+  _checkCoordClickLoop(tabId, x, y) {
+    const bx = Math.round(x / 5) * 5;
+    const by = Math.round(y / 5) * 5;
+    const key = `${bx},${by}`;
+    const buf = this.recentCoordClicks.get(tabId) || [];
+    buf.push({ key, ts: Date.now() });
+    if (buf.length > 8) buf.shift();
+    this.recentCoordClicks.set(tabId, buf);
+    const counts = new Map();
+    for (const e of buf) counts.set(e.key, (counts.get(e.key) || 0) + 1);
+    const n = counts.get(key) || 0;
+    if (n >= 3) return { kind: 'stop', x: bx, y: by };
+    if (n >= 2) return { kind: 'nudge', x: bx, y: by };
+    return { kind: 'none' };
   }
   _recordCall(tabId, name, args, result) {
     const argsHash = JSON.stringify(args || {});
@@ -301,6 +317,77 @@ test('tabs are isolated from each other', () => {
   d._checkLoop(10, 'click', { selector: '#x' }, { success: true });
   const result = d._checkLoop(20, 'click', { selector: '#x' }, { success: true });
   assert.equal(result.kind, 'none');
+});
+
+// ────────────────────────────────────────────────────────────────────────
+// Coordinate-click loop detector tests
+// ────────────────────────────────────────────────────────────────────────
+
+test('coord click: first call → none', () => {
+  const d = new LoopDetectorShim();
+  assert.equal(d._checkCoordClickLoop(1, 100, 200).kind, 'none');
+});
+
+test('coord click: second identical → nudge (faster than general detector)', () => {
+  const d = new LoopDetectorShim();
+  d._checkCoordClickLoop(1, 100, 200);
+  assert.equal(d._checkCoordClickLoop(1, 100, 200).kind, 'nudge');
+});
+
+test('coord click: third identical → stop', () => {
+  const d = new LoopDetectorShim();
+  d._checkCoordClickLoop(1, 100, 200);
+  d._checkCoordClickLoop(1, 100, 200);
+  assert.equal(d._checkCoordClickLoop(1, 100, 200).kind, 'stop');
+});
+
+test('coord click: 5px drift collapses to same bucket', () => {
+  const d = new LoopDetectorShim();
+  d._checkCoordClickLoop(1, 100, 200);
+  // (102, 199) rounds to (100, 200)
+  assert.equal(d._checkCoordClickLoop(1, 102, 199).kind, 'nudge');
+});
+
+test('coord click: 10px drift = different bucket', () => {
+  const d = new LoopDetectorShim();
+  d._checkCoordClickLoop(1, 100, 200);
+  // (115, 200) rounds to (115, 200) — different bucket
+  assert.equal(d._checkCoordClickLoop(1, 115, 200).kind, 'none');
+});
+
+test('coord click: survives interleaved noise (the failure mode this fixes)', () => {
+  // This is the exact pattern from the user trace: click(267,226), then a
+  // bunch of unrelated calls, then click(267,226) again. The general
+  // detector misses it because the unrelated calls fragment the buffer
+  // hash. The coordinate detector should catch it.
+  const d = new LoopDetectorShim();
+  d._checkCoordClickLoop(1, 267, 226);
+  // ... interleaved tools (not coord clicks, so they don't enter this buffer)
+  assert.equal(d._checkCoordClickLoop(1, 267, 226).kind, 'nudge');
+  // Even with many other coord clicks in between, the third (267,226) stops.
+  d._checkCoordClickLoop(1, 500, 500);
+  d._checkCoordClickLoop(1, 600, 100);
+  d._checkCoordClickLoop(1, 50, 50);
+  assert.equal(d._checkCoordClickLoop(1, 267, 226).kind, 'stop');
+});
+
+test('coord click: tabs are isolated', () => {
+  const d = new LoopDetectorShim();
+  d._checkCoordClickLoop(1, 100, 200);
+  d._checkCoordClickLoop(1, 100, 200);
+  // Same coords on a different tab — should still be 'none'
+  assert.equal(d._checkCoordClickLoop(2, 100, 200).kind, 'none');
+});
+
+test('coord click: window of 8 — old entries roll out', () => {
+  const d = new LoopDetectorShim();
+  d._checkCoordClickLoop(1, 100, 200); // first
+  // 8 distinct intervening clicks
+  for (let i = 0; i < 8; i++) {
+    d._checkCoordClickLoop(1, 50 + i * 20, 50);
+  }
+  // The original (100,200) has been pushed out. Next (100,200) is fresh.
+  assert.equal(d._checkCoordClickLoop(1, 100, 200).kind, 'none');
 });
 
 test('window of 6 means a loop can fall out of the window', () => {

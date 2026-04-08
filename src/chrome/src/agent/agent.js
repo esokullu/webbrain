@@ -28,6 +28,14 @@ export class Agent {
     this.healthyCallsSinceLoop = new Map(); // tabId -> count of clean calls since last nudge
     this.lastAutoScreenshotTs = new Map(); // tabId -> ms — defensive debounce
     this.lastSeenAdapter = new Map(); // tabId -> adapter name from last enrichment
+    // Separate buffer for coordinate-based click attempts. The general loop
+    // detector keys on JSON.stringify(args), so when the model interleaves
+    // execute_js with different code strings between clicks, the same
+    // (x,y) click never accumulates to the threshold inside its window.
+    // This buffer tracks ONLY coord clicks and survives any amount of
+    // unrelated noise between them, catching the "click missing its target,
+    // model retries forever" failure mode in 2-3 attempts instead of never.
+    this.recentCoordClicks = new Map(); // tabId -> [{ key, ts }]
   }
 
   // ---- Loop detection ----
@@ -76,6 +84,35 @@ export class Agent {
     this.recentCalls.delete(tabId);
     this.loopNudges.delete(tabId);
     this.healthyCallsSinceLoop.delete(tabId);
+    this.recentCoordClicks.delete(tabId);
+  }
+
+  /**
+   * Coordinate-click loop detector. Buckets to nearest 5px so a click that
+   * drifts by a pixel or two between attempts still hashes the same. Window
+   * of 8 — generous, since the goal is to survive interleaved noise like
+   * execute_js / type_text / read_page calls between coord retries.
+   *
+   * Returns 'nudge' on the 2nd repeat (much earlier than the general
+   * detector's 3-of-same), and 'stop' on the 3rd. The reasoning: a coord
+   * click that "succeeds" but doesn't change anything is the highest-cost
+   * failure mode and should be caught fastest.
+   */
+  _checkCoordClickLoop(tabId, x, y) {
+    const bx = Math.round(x / 5) * 5;
+    const by = Math.round(y / 5) * 5;
+    const key = `${bx},${by}`;
+    const buf = this.recentCoordClicks.get(tabId) || [];
+    buf.push({ key, ts: Date.now() });
+    if (buf.length > 8) buf.shift();
+    this.recentCoordClicks.set(tabId, buf);
+
+    const counts = new Map();
+    for (const e of buf) counts.set(e.key, (counts.get(e.key) || 0) + 1);
+    const n = counts.get(key) || 0;
+    if (n >= 3) return { kind: 'stop', x: bx, y: by };
+    if (n >= 2) return { kind: 'nudge', x: bx, y: by };
+    return { kind: 'none' };
   }
 
   /**
@@ -295,11 +332,36 @@ export class Agent {
         return { action: 'return', value: finalResponse };
       }
 
-      // Loop detection.
+      // Loop detection — two parallel checks, strongest action wins.
       const loopCheck = this._checkLoop(tabId, fnName, fnArgs, toolResult);
+      let coordCheck = { kind: 'none' };
+      if (fnName === 'click' && fnArgs?.x != null && fnArgs?.y != null) {
+        coordCheck = this._checkCoordClickLoop(tabId, fnArgs.x, fnArgs.y);
+      }
+
+      // Combine: stop > nudge > none.
+      let effectiveKind = 'none';
+      let nudgeWarning = '';
+      let stopMessage = '';
+      if (loopCheck.kind === 'stop' || coordCheck.kind === 'stop') {
+        effectiveKind = 'stop';
+        if (coordCheck.kind === 'stop') {
+          stopMessage = `Stopped: I clicked at (or near) coordinates (${coordCheck.x}, ${coordCheck.y}) three times and the page never responded. That position is hitting empty space, an overlay, or the wrong element. Either there's no clickable target there, or you need a selector-based click instead. Please give a different instruction or check the page yourself.`;
+        } else {
+          stopMessage = loopCheck.message;
+        }
+      } else if (loopCheck.kind === 'nudge' || coordCheck.kind === 'nudge') {
+        effectiveKind = 'nudge';
+        if (coordCheck.kind === 'nudge') {
+          nudgeWarning = `[COORDINATE LOOP DETECTED: You've clicked at or near (${coordCheck.x}, ${coordCheck.y}) twice with no visible page change. The click is missing its target — that position is empty space, an overlay, or the wrong element. STOP using these coordinates. Either: (a) call get_interactive_elements to find a real selector for the element you actually want, (b) call click({selector: "..."}) using a selector you've already discovered earlier in this conversation (look back at your prior tool calls), or (c) take a fresh screenshot and look more carefully at where the actual button is. DO NOT click these coordinates again — the next attempt will be hard-stopped.]`;
+        } else {
+          nudgeWarning = loopCheck.warning;
+        }
+      }
+
       let resultContent = this._limitToolResult(toolResult);
-      if (loopCheck.kind === 'nudge') {
-        resultContent = resultContent + '\n' + loopCheck.warning;
+      if (effectiveKind === 'nudge') {
+        resultContent = resultContent + '\n' + nudgeWarning;
         onUpdate('warning', { message: 'Loop detected — nudging the agent.' });
       }
 
@@ -309,12 +371,13 @@ export class Agent {
         content: resultContent,
       });
 
-      if (loopCheck.kind === 'stop') {
-        messages.push({ role: 'assistant', content: loopCheck.message });
-        onUpdate('text', { content: loopCheck.message });
+      if (effectiveKind === 'stop') {
+        messages.push({ role: 'assistant', content: stopMessage });
+        onUpdate('text', { content: stopMessage });
         onUpdate('error', { message: 'Stuck in a loop. Stopped.' });
+        this._clearLoopState(tabId);
         this._persist(tabId);
-        return { action: 'return', value: loopCheck.message };
+        return { action: 'return', value: stopMessage };
       }
 
       if (this._shouldAutoScreenshot(fnName) && !toolResult?.error) {

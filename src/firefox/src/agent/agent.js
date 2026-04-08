@@ -19,6 +19,7 @@ export class Agent {
     this.healthyCallsSinceLoop = new Map();
     this.lastAutoScreenshotTs = new Map();
     this.lastSeenAdapter = new Map();
+    this.recentCoordClicks = new Map();
   }
 
   // ---- Loop detection ----
@@ -57,6 +58,23 @@ export class Agent {
     this.recentCalls.delete(tabId);
     this.loopNudges.delete(tabId);
     this.healthyCallsSinceLoop.delete(tabId);
+    this.recentCoordClicks.delete(tabId);
+  }
+
+  _checkCoordClickLoop(tabId, x, y) {
+    const bx = Math.round(x / 5) * 5;
+    const by = Math.round(y / 5) * 5;
+    const key = `${bx},${by}`;
+    const buf = this.recentCoordClicks.get(tabId) || [];
+    buf.push({ key, ts: Date.now() });
+    if (buf.length > 8) buf.shift();
+    this.recentCoordClicks.set(tabId, buf);
+    const counts = new Map();
+    for (const e of buf) counts.set(e.key, (counts.get(e.key) || 0) + 1);
+    const n = counts.get(key) || 0;
+    if (n >= 3) return { kind: 'stop', x: bx, y: by };
+    if (n >= 2) return { kind: 'nudge', x: bx, y: by };
+    return { kind: 'none' };
   }
 
   _checkLoop(tabId, toolName, toolArgs, toolResult) {
@@ -166,10 +184,31 @@ export class Agent {
         return { action: 'return', value: finalResponse };
       }
 
+      // Loop detection — general + coordinate-specific. Strongest wins.
       const loopCheck = this._checkLoop(tabId, fnName, fnArgs, toolResult);
+      let coordCheck = { kind: 'none' };
+      if (fnName === 'click' && fnArgs?.x != null && fnArgs?.y != null) {
+        coordCheck = this._checkCoordClickLoop(tabId, fnArgs.x, fnArgs.y);
+      }
+
+      let effectiveKind = 'none';
+      let nudgeWarning = '';
+      let stopMessage = '';
+      if (loopCheck.kind === 'stop' || coordCheck.kind === 'stop') {
+        effectiveKind = 'stop';
+        stopMessage = coordCheck.kind === 'stop'
+          ? `Stopped: I clicked at (or near) coordinates (${coordCheck.x}, ${coordCheck.y}) three times and the page never responded. That position is hitting empty space, an overlay, or the wrong element. Either there's no clickable target there, or you need a selector-based click instead. Please give a different instruction or check the page yourself.`
+          : loopCheck.message;
+      } else if (loopCheck.kind === 'nudge' || coordCheck.kind === 'nudge') {
+        effectiveKind = 'nudge';
+        nudgeWarning = coordCheck.kind === 'nudge'
+          ? `[COORDINATE LOOP DETECTED: You've clicked at or near (${coordCheck.x}, ${coordCheck.y}) twice with no visible page change. The click is missing its target — that position is empty space, an overlay, or the wrong element. STOP using these coordinates. Either: (a) call get_interactive_elements to find a real selector for the element you actually want, (b) call click({selector: "..."}) using a selector you've already discovered earlier in this conversation, or (c) take a fresh screenshot and look more carefully. DO NOT click these coordinates again — the next attempt will be hard-stopped.]`
+          : loopCheck.warning;
+      }
+
       let resultContent = this._limitToolResult(toolResult);
-      if (loopCheck.kind === 'nudge') {
-        resultContent = resultContent + '\n' + loopCheck.warning;
+      if (effectiveKind === 'nudge') {
+        resultContent = resultContent + '\n' + nudgeWarning;
         onUpdate('warning', { message: 'Loop detected — nudging the agent.' });
       }
       messages.push({
@@ -177,11 +216,12 @@ export class Agent {
         tool_call_id: tc.id,
         content: resultContent,
       });
-      if (loopCheck.kind === 'stop') {
-        messages.push({ role: 'assistant', content: loopCheck.message });
-        onUpdate('text', { content: loopCheck.message });
+      if (effectiveKind === 'stop') {
+        messages.push({ role: 'assistant', content: stopMessage });
+        onUpdate('text', { content: stopMessage });
         onUpdate('error', { message: 'Stuck in a loop. Stopped.' });
-        return { action: 'return', value: loopCheck.message };
+        this._clearLoopState(tabId);
+        return { action: 'return', value: stopMessage };
       }
       if (this._shouldAutoScreenshot(fnName) && !toolResult?.error) {
         didStateChange = true;

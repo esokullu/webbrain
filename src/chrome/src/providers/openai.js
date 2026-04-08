@@ -42,14 +42,38 @@ export class OpenAICompatibleProvider extends BaseLLMProvider {
     return headers;
   }
 
+  /**
+   * Newer OpenAI models (gpt-5, gpt-4.1+, o1, o3, o4) reject `max_tokens`
+   * and require `max_completion_tokens` instead. Older models (gpt-4o,
+   * gpt-4-turbo, gpt-3.5) only accept `max_tokens`. Some local OpenAI-
+   * compatible servers (LM Studio, llama.cpp) only accept `max_tokens`.
+   * Detect by name and pick the right field. OpenRouter accepts both.
+   */
+  _useMaxCompletionTokens() {
+    const m = (this.config.model || '').toLowerCase();
+    // Local OpenAI-compatible servers haven't adopted the rename — always
+    // send `max_tokens` for them.
+    if (this.config.providerName === 'lmstudio') return false;
+    return /^(gpt-5|gpt-4\.1|o1|o3|o4)/.test(m);
+  }
+
+  _addMaxTokens(body, options) {
+    const max = options.maxTokens ?? 4096;
+    if (this._useMaxCompletionTokens()) {
+      body.max_completion_tokens = max;
+    } else {
+      body.max_tokens = max;
+    }
+  }
+
   async chat(messages, options = {}) {
     const body = {
       model: this.model,
       messages,
       temperature: options.temperature ?? 0.7,
-      max_tokens: options.maxTokens ?? 4096,
       stream: false,
     };
+    this._addMaxTokens(body, options);
 
     if (options.tools && options.tools.length > 0) {
       body.tools = options.tools;
@@ -84,9 +108,9 @@ export class OpenAICompatibleProvider extends BaseLLMProvider {
       model: this.model,
       messages,
       temperature: options.temperature ?? 0.7,
-      max_tokens: options.maxTokens ?? 4096,
       stream: true,
     };
+    this._addMaxTokens(body, options);
 
     if (options.tools && options.tools.length > 0) {
       body.tools = options.tools;
