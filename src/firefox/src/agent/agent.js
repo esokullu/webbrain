@@ -28,6 +28,17 @@ export class Agent {
     this.lastAutoScreenshotTs = new Map();
     this.lastSeenAdapter = new Map();
     this.recentCoordClicks = new Map();
+    this.apiAllowedTabs = new Set();
+    this.apiAllowedInjected = new Set();
+  }
+
+  setApiMutationsAllowed(tabId, allowed) {
+    if (allowed) {
+      this.apiAllowedTabs.add(tabId);
+    } else {
+      this.apiAllowedTabs.delete(tabId);
+      this.apiAllowedInjected.delete(tabId);
+    }
   }
 
   // ---- Loop detection ----
@@ -416,6 +427,11 @@ export class Agent {
     let contextLine = url
       ? `[Page context — URL: ${url}${title ? ` — Title: ${title}` : ''}]\n\n`
       : '';
+
+    if (this.apiAllowedTabs.has(tabId) && !this.apiAllowedInjected.has(tabId)) {
+      contextLine += `[USER OVERRIDE — /allow-api: For this conversation the user has explicitly authorized you to use API mutations (POST/PUT/PATCH/DELETE via fetch_url, or fetch() with mutation methods via execute_js) when you judge API to be more reliable than UI for a specific step. The default UI-first rule still applies — only reach for the API when UI has actually failed or is genuinely unworkable. Before any destructive API call, state the URL, method, and payload in plain text in your response so the user can see what you're about to do.]\n\n`;
+      this.apiAllowedInjected.add(tabId);
+    }
 
     if (this.useSiteAdapters && url) {
       const adapter = getActiveAdapter(url);

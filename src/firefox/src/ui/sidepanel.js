@@ -150,9 +150,49 @@ async function testConnection() {
 
 // --- Message Sending ---
 
+// Per-conversation API mutation override (set via /allow-api).
+let apiMutationsAllowed = false;
+
+function parseSlashCommands(text) {
+  const m = text.match(/^\/allow-api\b\s*/i);
+  if (m) {
+    const wasAlreadyAllowed = apiMutationsAllowed;
+    apiMutationsAllowed = true;
+    updateApiBadge();
+    if (!wasAlreadyAllowed) {
+      addMessage('system', '🔓 <strong>API mutations enabled</strong> for this conversation. The agent may now use POST/PUT/PATCH/DELETE via fetch_url and execute_js when it judges API to be more reliable than UI for a step. UI-first remains the default. This flag clears when you reset the conversation.');
+    }
+    return text.slice(m[0].length).trim();
+  }
+  return text;
+}
+
+function updateApiBadge() {
+  let badge = document.getElementById('api-badge');
+  if (apiMutationsAllowed) {
+    if (!badge) {
+      badge = document.createElement('div');
+      badge.id = 'api-badge';
+      badge.className = 'api-badge';
+      badge.innerHTML = '<span>🔓 API mutations allowed</span>';
+      const inputArea = document.getElementById('input-area');
+      inputArea?.parentNode?.insertBefore(badge, inputArea);
+    }
+  } else if (badge) {
+    badge.remove();
+  }
+}
+
 async function sendMessage() {
-  const text = inputEl.value.trim();
+  let text = inputEl.value.trim();
   if (!text || isProcessing) return;
+
+  text = parseSlashCommands(text);
+  if (!text) {
+    inputEl.value = '';
+    autoResizeInput();
+    return;
+  }
 
   isProcessing = true;
   abortRequested = false;
@@ -170,6 +210,7 @@ async function sendMessage() {
       tabId: currentTabId,
       text,
       mode: agentMode,
+      apiMutationsAllowed,
     });
 
     if (abortRequested) {
@@ -777,6 +818,8 @@ clearBtn.addEventListener('click', async () => {
   await sendToBackground('clear_conversation', { tabId: currentTabId });
   messagesEl.innerHTML = '';
   addMessage('system', 'Conversation cleared. How can I help?');
+  apiMutationsAllowed = false;
+  updateApiBadge();
 });
 
 providerSelect.addEventListener('change', async () => {

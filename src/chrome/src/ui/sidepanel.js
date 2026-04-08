@@ -253,9 +253,60 @@ async function testConnection() {
 
 // --- Message Sending ---
 
+// Per-conversation flag for API mutation override (set via /allow-api).
+// Reset on clearConversation. Visible to the user in the chat as a system
+// message and as a sticky badge near the input area.
+let apiMutationsAllowed = false;
+
+/**
+ * Parse leading slash commands out of the user's message. Currently:
+ *   /allow-api  → enable API mutation override for this conversation.
+ * Returns the cleaned text. May trigger UI side effects (toast, badge).
+ */
+function parseSlashCommands(text) {
+  const m = text.match(/^\/allow-api\b\s*/i);
+  if (m) {
+    const wasAlreadyAllowed = apiMutationsAllowed;
+    apiMutationsAllowed = true;
+    updateApiBadge();
+    if (!wasAlreadyAllowed) {
+      addMessage('system', '🔓 <strong>API mutations enabled</strong> for this conversation. The agent may now use POST/PUT/PATCH/DELETE via fetch_url and execute_js when it judges API to be more reliable than UI for a step. UI-first remains the default. This flag clears when you reset the conversation.');
+    }
+    return text.slice(m[0].length).trim();
+  }
+  return text;
+}
+
+function updateApiBadge() {
+  let badge = document.getElementById('api-badge');
+  if (apiMutationsAllowed) {
+    if (!badge) {
+      badge = document.createElement('div');
+      badge.id = 'api-badge';
+      badge.className = 'api-badge';
+      badge.innerHTML = '<span>🔓 API mutations allowed</span>';
+      const inputArea = document.getElementById('input-area');
+      inputArea?.parentNode?.insertBefore(badge, inputArea);
+    }
+  } else if (badge) {
+    badge.remove();
+  }
+}
+
 async function sendMessage() {
-  const text = inputEl.value.trim();
+  let text = inputEl.value.trim();
   if (!text || isProcessing) return;
+
+  // Parse any leading slash command. parseSlashCommands may strip the
+  // command from `text` and toggle apiMutationsAllowed as a side effect.
+  text = parseSlashCommands(text);
+  // If the entire message was just the slash command, there's nothing
+  // left to send to the agent — bail out after the side effect.
+  if (!text) {
+    inputEl.value = '';
+    autoResizeInput();
+    return;
+  }
 
   isProcessing = true;
   abortRequested = false;
@@ -273,6 +324,7 @@ async function sendMessage() {
       tabId: currentTabId,
       text,
       mode: agentMode,
+      apiMutationsAllowed,
     });
 
     if (abortRequested) {
@@ -906,6 +958,9 @@ clearBtn.addEventListener('click', async () => {
     tabChats.delete(currentTabId);
     chrome.storage.session?.remove(TAB_CHAT_PREFIX + currentTabId).catch(() => {});
   }
+  // Per-conversation flags reset on clear.
+  apiMutationsAllowed = false;
+  updateApiBadge();
 });
 
 providerSelect.addEventListener('change', async () => {

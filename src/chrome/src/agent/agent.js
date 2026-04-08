@@ -44,6 +44,29 @@ export class Agent {
     // unrelated noise between them, catching the "click missing its target,
     // model retries forever" failure mode in 2-3 attempts instead of never.
     this.recentCoordClicks = new Map(); // tabId -> [{ key, ts }]
+    // Per-tab opt-in: when true, the agent is allowed to use API mutations
+    // (POST/PUT/PATCH/DELETE via fetch_url, mutation fetch() via execute_js)
+    // for steps where it judges API to be more reliable than UI. Set via
+    // the /allow-api slash command in the sidebar; cleared on
+    // clearConversation. Persisted with the conversation so a service
+    // worker restart preserves it.
+    this.apiAllowedTabs = new Set();
+    // Track which tabs have already had the [API ALLOWED] preamble
+    // injected for the current run, so we don't push it on every turn.
+    this.apiAllowedInjected = new Set();
+  }
+
+  /**
+   * Toggle the per-tab API-mutation allowlist. Called by background.js
+   * when the sidebar reports the user typed /allow-api.
+   */
+  setApiMutationsAllowed(tabId, allowed) {
+    if (allowed) {
+      this.apiAllowedTabs.add(tabId);
+    } else {
+      this.apiAllowedTabs.delete(tabId);
+      this.apiAllowedInjected.delete(tabId);
+    }
   }
 
   // ---- Loop detection ----
@@ -218,6 +241,14 @@ export class Agent {
     let contextLine = url
       ? `[Page context — URL: ${url}${title ? ` — Title: ${title}` : ''}]\n\n`
       : '';
+
+    // API mutation override: prepend a strong note when the user has set
+    // /allow-api for this tab. Inject only once per "allowed run" to avoid
+    // bloating every subsequent turn.
+    if (this.apiAllowedTabs.has(tabId) && !this.apiAllowedInjected.has(tabId)) {
+      contextLine += `[USER OVERRIDE — /allow-api: For this conversation the user has explicitly authorized you to use API mutations (POST/PUT/PATCH/DELETE via fetch_url, or fetch() with mutation methods via execute_js) when you judge API to be more reliable than UI for a specific step. The default UI-first rule still applies — only reach for the API when UI has actually failed or is genuinely unworkable. Before any destructive API call (anything that creates, deletes, transfers, or charges), state the URL, method, and payload in plain text in your response so the user can see what you're about to do.]\n\n`;
+      this.apiAllowedInjected.add(tabId);
+    }
 
     // Site adapter notes: if the URL matches a known site, inject the
     // non-obvious quirks the model would otherwise have to discover by trial.
@@ -689,6 +720,8 @@ export class Agent {
     this.conversations.delete(tabId);
     this.conversationModes.delete(tabId);
     this.hydratedTabs.delete(tabId);
+    this.apiAllowedTabs.delete(tabId);
+    this.apiAllowedInjected.delete(tabId);
     this._clearLoopState(tabId);
     const t = this.persistTimers.get(tabId);
     if (t) { clearTimeout(t); this.persistTimers.delete(tabId); }

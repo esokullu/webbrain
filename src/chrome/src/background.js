@@ -192,6 +192,11 @@ async function handleMessage(msg, sender) {
       if (!tabId) throw new Error('No tab ID');
       const mode = msg.mode || 'ask';
 
+      // /allow-api flag is per-conversation. The sidebar tracks it locally
+      // but sends it on every chat call so the agent stays in sync after a
+      // service worker restart.
+      if (msg.apiMutationsAllowed) agent.setApiMutationsAllowed(tabId, true);
+
       const updates = [];
       const result = await agent.processMessage(tabId, msg.text, (type, data) => {
         updates.push({ type, data });
@@ -210,6 +215,8 @@ async function handleMessage(msg, sender) {
       const tabId = msg.tabId || sender.tab?.id;
       if (!tabId) throw new Error('No tab ID');
       const mode = msg.mode || 'ask';
+
+      if (msg.apiMutationsAllowed) agent.setApiMutationsAllowed(tabId, true);
 
       const result = await agent.processMessageStream(tabId, msg.text, (type, data) => {
         chrome.runtime.sendMessage({

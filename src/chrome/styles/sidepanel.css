@@ -121,6 +121,19 @@ body {
   background: var(--accent-dim);
 }
 
+/* Sticky badge above the input area when /allow-api is set. */
+.api-badge {
+  margin: 0 12px 6px 12px;
+  padding: 6px 10px;
+  background: rgba(255, 152, 0, 0.12);
+  border: 1px solid rgba(255, 152, 0, 0.45);
+  border-radius: var(--radius);
+  font-size: 11px;
+  color: var(--text);
+  text-align: center;
+}
+.api-badge span { font-weight: 600; }
+
 /* Page Inspection Banner */
 #inspection-banner {
   display: flex;

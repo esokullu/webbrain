@@ -133,7 +133,25 @@ Key difference: Chrome uses Manifest V3 (service worker, `chrome.scripting`, `si
 | `wait_for_element` | No | Yes | Wait for a selector to appear |
 | `execute_js` | No | Yes | Run custom JavaScript |
 | `new_tab` | No | Yes | Open a new tab |
+| `fetch_url` | Yes | Yes | Fetch a URL from the background with the user's cookies. Best for JSON APIs, READMEs, plain HTML. |
+| `research_url` | Yes | Yes | Open a URL in a hidden tab, wait for JS rendering, return main content. Best for SPAs. |
+| `list_downloads` | Yes | Yes | List recent downloads with status and source URLs. |
+| `read_downloaded_file` | No | Yes | Re-fetch a downloaded file's content (text or base64). |
+| `download_file` | No | Yes | Download a single file from a URL. |
+| `download_files` | No | Yes | Download multiple files in parallel (max 3 concurrent). |
+| `download_resource_from_page` | No | Yes | Download an `<img>`/`<video>`/blob URL from the current page. |
+| `iframe_read` / `iframe_click` / `iframe_type` | No | Yes | Read/click/type inside cross-origin iframes (Stripe, embedded forms). |
 | `done` | Yes | Yes | Signal task completion |
+
+## Slash Commands
+
+WebBrain accepts a small set of slash commands as the first thing on a line in the input box:
+
+| Command | What it does |
+|---------|--------------|
+| `/allow-api` | **Per-conversation API mutation override.** By default WebBrain refuses to use API endpoints (POST/PUT/PATCH/DELETE via `fetch_url` or `execute_js`) for any action that creates, modifies, deletes, or sends — it always goes through the visible UI of the current page so you can see what's happening. Type `/allow-api` (optionally followed by a task description) to lift that restriction *for the current conversation only*. The agent will still prefer UI when UI works, but may fall back to API mutations when UI is genuinely failing or unworkable. A sticky badge appears above the input area while the override is active. The flag clears when you reset the conversation. |
+
+The default UI-first rule exists because API actions are invisible (you don't see what's being sent), often require separate auth tokens you may not have configured, and can have a much larger blast radius than a visible mis-click. Only use `/allow-api` when you've decided you want that tradeoff for a specific job.
 
 ## Known Issues
 
