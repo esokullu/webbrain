@@ -434,10 +434,16 @@ TYPING — read this:
 CLICKING — read this:
 - For buttons and links you can SEE (in a screenshot or in get_interactive_elements output), the BEST way to click them is by visible text: \`click({text: "Publish release"})\`. This finds the first matching button/link and clicks it. No selector guessing required.
 - Order of preference:
-  1. \`click({text: "..."})\` — visible button/link text. Most reliable for buttons you can see.
-  2. \`click({index: N})\` — index from a recent get_interactive_elements call.
+  1. \`click({text: "..."})\` — visible button/link text. Most reliable.
+  2. \`click({index: N})\` — index from a get_interactive_elements call MADE THIS SAME TURN.
   3. \`click({selector: "..."})\` — when you have an exact CSS selector you're sure about.
   4. \`click({x: ..., y: ...})\` — coordinates, last resort.
+
+INDEX INSTABILITY — read this:
+- Indices from \`get_interactive_elements\` are NOT stable identifiers. They change between page loads, between scrolls, after any DOM update, after any navigation, and even between two consecutive get_interactive_elements calls if the page mutated in between.
+- NEVER reuse an index from a previous turn. If you need to click element #N, you must have called \`get_interactive_elements\` in the SAME assistant turn that you're emitting the click. If you called it earlier and then did anything else, those indices are stale.
+- NEVER guess an index based on what you remember from a similar page in your training data. Pages drift; #38 on one GitHub release page may be the tag picker, but on another it's a header link.
+- If you're unsure whether an index is still valid, prefer \`click({text: "..."})\` — it re-resolves on every call.
 - DO NOT use jQuery or Playwright/Cypress pseudo-classes like \`:contains()\`, \`:has-text()\`, \`:has()\`, \`:visible\`. These are NOT valid CSS — browsers will reject them. Use \`click({text: ...})\` instead.
 - DO NOT guess at \`data-testid\`, \`data-cy\`, \`data-test\`, etc. attributes. They only exist if the site has actually defined them, and most don't. Use text or index instead.
 - Coordinates from a screenshot map 1:1 to CSS pixels — image pixel (X, Y) = click(x:X, y:Y). Don't apply any scaling.

@@ -377,10 +377,15 @@ CLICKING — read this:
 - For buttons and links you can SEE, the BEST way is to click by visible text: \`click({text: "Publish release"})\`. No selector guessing.
 - Order of preference:
   1. \`click({text: "..."})\` — visible text. Most reliable.
-  2. \`click({index: N})\` — index from get_interactive_elements.
+  2. \`click({index: N})\` — index from get_interactive_elements MADE THIS SAME TURN.
   3. \`click({selector: "..."})\` — when you have an exact selector.
   4. \`click({x: ..., y: ...})\` — last resort.
-- DO NOT use jQuery/Playwright pseudo-classes like \`:contains()\`, \`:has-text()\`, \`:has()\`, \`:visible\`. They are NOT valid CSS and browsers reject them. Use \`click({text: ...})\`.
-- DO NOT guess at \`data-testid\`, \`data-cy\`, \`data-test\` attributes. They only exist if the site defined them, and most don't.
-- Coordinates from a screenshot map 1:1 to CSS pixels — image pixel (X, Y) = click(x:X, y:Y). Don't apply any scaling.
+
+INDEX INSTABILITY — read this:
+- Indices from \`get_interactive_elements\` are NOT stable identifiers. They change between page loads, scrolls, navigations, and DOM updates.
+- NEVER reuse an index from a previous turn. If you need to click element #N, you must have called \`get_interactive_elements\` in the SAME turn.
+- NEVER guess an index from training-data memory. Pages drift; #38 on one GitHub release page may be the tag picker, but on another it's a header link that takes you to /pulls.
+- When in doubt, prefer \`click({text: "..."})\` — it re-resolves every call.
+- DO NOT use jQuery/Playwright pseudo-classes like \`:contains()\`, \`:has-text()\`. They are NOT valid CSS.
+- DO NOT guess at \`data-testid\`, \`data-cy\`, \`data-test\` attributes.
 - If a click "succeeds" but the page doesn't visibly change, DO NOT retry the same call. Take a fresh screenshot, call get_interactive_elements, or try a different approach.`;

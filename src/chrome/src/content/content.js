@@ -319,48 +319,87 @@
   }
 
   function getInteractiveElementsFull() {
-    const pierceShadow = (root, results, idx) => {
-      const selectors = [
-        'a[href]', 'button', 'input', 'textarea', 'select',
-        '[role="button"]', '[role="link"]', '[role="tab"]',
-        '[onclick]', '[data-action]', 'summary', 'label'
-      ];
+    const collected = []; // {el, rect, inShadow}
+    const seen = new Set(); // dedupe nested wrappers (button > span > svg etc.)
 
+    const isUsable = (el, rect) => {
+      // Visible and in viewport. Aggressive filtering on purpose: a global
+      // header link scrolled offscreen creates noise indices that shift
+      // every page and confuse models that trust index across turns.
+      if (rect.width < 2 || rect.height < 2) return false;
+      if (rect.bottom < 0 || rect.top > window.innerHeight) return false;
+      if (rect.right < 0 || rect.left > window.innerWidth) return false;
+      const cs = getComputedStyle(el);
+      if (cs.visibility === 'hidden' || cs.display === 'none') return false;
+      if (cs.pointerEvents === 'none') return false;
+      // Skip elements that are descendants of an already-collected element
+      // with the same approximate bounds (e.g. <button><span>X</span></button>
+      // — both match selectors, only the button is useful).
+      let parent = el.parentElement;
+      while (parent) {
+        if (seen.has(parent)) {
+          const pRect = parent.getBoundingClientRect();
+          if (Math.abs(pRect.left - rect.left) < 4 && Math.abs(pRect.top - rect.top) < 4) {
+            return false;
+          }
+        }
+        parent = parent.parentElement;
+      }
+      return true;
+    };
+
+    const pierceShadow = (root) => {
+      const selectors = [
+        'a[href]', 'button', 'input:not([type="hidden"])', 'textarea', 'select',
+        '[role="button"]', '[role="link"]', '[role="tab"]', '[role="menuitem"]',
+        '[onclick]', '[data-action]', 'summary',
+      ];
       selectors.forEach(sel => {
         try {
-          const all = root.querySelectorAll(sel);
-          all.forEach(el => {
+          root.querySelectorAll(sel).forEach(el => {
+            if (seen.has(el)) return;
             const rect = el.getBoundingClientRect();
-            if (rect.width === 0 && rect.height === 0) return;
-
-            results.push({
-              index: idx.current++,
-              tag: el.tagName.toLowerCase(),
-              type: el.type || '',
-              role: el.getAttribute('role') || '',
-              text: (el.innerText || el.value || el.placeholder || el.title || el.ariaLabel || '').trim().slice(0, 100),
-              id: el.id || '',
-              name: el.name || '',
-              href: el.href || '',
-              rect: { x: Math.round(rect.x), y: Math.round(rect.y), w: Math.round(rect.width), h: Math.round(rect.height) },
-              inShadowDOM: root !== document,
-            });
+            if (!isUsable(el, rect)) return;
+            seen.add(el);
+            collected.push({ el, rect, inShadow: root !== document });
           });
         } catch (e) {}
       });
-
-      const hosts = root.querySelectorAll('*');
-      hosts.forEach(host => {
-        if (host.shadowRoot) {
-          pierceShadow(host.shadowRoot, results, idx);
-        }
-      });
+      // Recurse into open shadow roots.
+      try {
+        root.querySelectorAll('*').forEach(host => {
+          if (host.shadowRoot) pierceShadow(host.shadowRoot);
+        });
+      } catch (e) {}
     };
 
-    const results = [];
-    const idx = { current: 0 };
-    pierceShadow(document, results, idx);
-    return results;
+    pierceShadow(document);
+
+    // Sort by visual position (top-to-bottom, then left-to-right) so indices
+    // correspond to reading order — stable enough that two get_interactive_
+    // elements calls in a row on the same scrollstate produce the same
+    // numbering, even if the DOM has minor reorderings.
+    collected.sort((a, b) => {
+      const dy = a.rect.top - b.rect.top;
+      if (Math.abs(dy) > 6) return dy;
+      return a.rect.left - b.rect.left;
+    });
+
+    return collected.map((c, i) => {
+      const el = c.el;
+      return {
+        index: i,
+        tag: el.tagName.toLowerCase(),
+        type: el.type || '',
+        role: el.getAttribute('role') || '',
+        text: (el.innerText || el.value || el.placeholder || el.title || el.ariaLabel || '').trim().slice(0, 100),
+        id: el.id || '',
+        name: el.name || '',
+        href: el.href || '',
+        rect: { x: Math.round(c.rect.x), y: Math.round(c.rect.y), w: Math.round(c.rect.width), h: Math.round(c.rect.height) },
+        inShadowDOM: c.inShadow,
+      };
+    });
   }
 
   window.__webbrain_getNodeById = (nodeId) => {

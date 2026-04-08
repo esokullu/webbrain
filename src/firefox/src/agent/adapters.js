@@ -25,9 +25,10 @@ const ADAPTERS = [
     category: 'general',
     match: (url) => /^https?:\/\/(www\.)?github\.com\//.test(url),
     notes: `
-- Creating a release: navigate to /<owner>/<repo>/releases/new (not /releases). The tag selector is a combobox — type the tag name then click "Create new tag: vX.Y.Z on publish".
-- Release body is a CodeMirror editor, not a textarea. Click the editor surface before typing.
-- The green "Publish release" button is at the bottom; the gray "Save draft" sits next to it. Don't confuse them.
+- Creating a release: navigate to /<owner>/<repo>/releases/new (not /releases). The tag selector is a combobox labeled "Choose a tag" — click({text: "Choose a tag"}) to open it, type the tag name, then click({text: "Create new tag"}) to confirm.
+- DO NOT use index-based clicks on the release page. GitHub's global header pollutes the index space and the release form is deep in the DOM. Always use click({text:"..."}) for buttons. Specifically: never click element #38 from memory — that's a learned anti-pattern from training data, and on the live site #38 is the "Pull requests" header link that navigates away from the release form.
+- Release body is a CodeMirror editor, not a textarea. Click the editor surface (click({text:"Describe this release"}) on the placeholder works) then type with no selector.
+- The green "Publish release" button is at the bottom of the form. Click it with click({text: "Publish release"}). The gray "Save draft" is right next to it — don't confuse them.
 - Issue/PR comments use the same CodeMirror editor; markdown preview is on a separate tab.
 - File browser: pressing "t" opens the fuzzy file finder (faster than navigating folders).
 - Settings/admin actions often require re-entering the repo name as a confirmation — read the modal carefully.`,
