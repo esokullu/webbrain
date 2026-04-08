@@ -44,10 +44,11 @@ export const AGENT_TOOLS = [
     type: 'function',
     function: {
       name: 'click',
-      description: 'Click an element on the page. Provide either a CSS selector, an element index from get_interactive_elements, or x/y coordinates.',
+      description: 'Click an element. FOUR ways to use it: (1) CSS selector, (2) visible text — `click({text: "Publish release"})` finds the first button/link/clickable element whose text contains the string (case-insensitive), (3) element index from get_interactive_elements, (4) x/y coordinates. PREFER text or index over selectors when possible — selectors are easy to get wrong. Note: jQuery/Playwright pseudo-classes like `:contains()` and `:has-text()` are NOT valid CSS and will fail; use the `text` parameter instead.',
       parameters: {
         type: 'object',
         properties: {
+          text: { type: 'string', description: 'Visible text to match — finds the first button/link/clickable element whose text contains this string (case-insensitive). Use this for buttons you can see in a screenshot.' },
           selector: { type: 'string', description: 'CSS selector for the element to click' },
           index: { type: 'number', description: 'Index from get_interactive_elements result' },
           x: { type: 'number', description: 'X coordinate to click' },
@@ -431,10 +432,13 @@ TYPING — read this:
 - If you're filling multiple fields, click each one before typing into it, even if it looks like Tab would work.
 
 CLICKING — read this:
-- ALWAYS prefer a selector-based click (\`click({selector: "..."})\`) or an index-based click from get_interactive_elements (\`click({index: N})\`) over coordinate clicks. Selectors are exact; coordinates are guesses.
-- BEFORE your first coordinate click on any page, call \`get_interactive_elements\` to get a list of clickable elements with selectors and indices. Pick from that list.
-- Only fall back to coordinate clicks (\`click({x: ..., y: ...})\`) when:
-  (a) the target genuinely has no usable selector or interactive-element index (e.g. canvas-rendered widget, raw image map), AND
-  (b) you have a screenshot of the current viewport in this very turn that shows the target.
+- For buttons and links you can SEE (in a screenshot or in get_interactive_elements output), the BEST way to click them is by visible text: \`click({text: "Publish release"})\`. This finds the first matching button/link and clicks it. No selector guessing required.
+- Order of preference:
+  1. \`click({text: "..."})\` — visible button/link text. Most reliable for buttons you can see.
+  2. \`click({index: N})\` — index from a recent get_interactive_elements call.
+  3. \`click({selector: "..."})\` — when you have an exact CSS selector you're sure about.
+  4. \`click({x: ..., y: ...})\` — coordinates, last resort.
+- DO NOT use jQuery or Playwright/Cypress pseudo-classes like \`:contains()\`, \`:has-text()\`, \`:has()\`, \`:visible\`. These are NOT valid CSS — browsers will reject them. Use \`click({text: ...})\` instead.
+- DO NOT guess at \`data-testid\`, \`data-cy\`, \`data-test\`, etc. attributes. They only exist if the site has actually defined them, and most don't. Use text or index instead.
 - Coordinates from a screenshot map 1:1 to CSS pixels — image pixel (X, Y) = click(x:X, y:Y). Don't apply any scaling.
-- If a click "succeeds" (returns success:true) but the page doesn't visibly change, the click probably missed. DO NOT immediately retry the same coordinates. Instead: take a fresh screenshot, call get_interactive_elements, or try a selector-based click for the same element.`;
+- If a click "succeeds" (returns success:true) but the page doesn't visibly change, the click probably missed. DO NOT immediately retry the same coordinates or selector. Instead: take a fresh screenshot, call get_interactive_elements, or try a different approach.`;

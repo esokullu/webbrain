@@ -1019,6 +1019,61 @@ export class Agent {
     if (name === 'click') {
       try {
         await cdpClient.attach(tabId);
+        // Detect common LLM mistakes: jQuery / Playwright pseudo-classes
+        // that look like CSS but aren't.
+        if (args.selector && /:contains\(|:has-text\(/.test(args.selector)) {
+          return {
+            success: false,
+            error: `Invalid selector: ":contains()" and ":has-text()" are not valid CSS — they are jQuery/Playwright extensions and browsers do not understand them. Use click({text: "..."}) to click by visible text instead, or click({index: N}) using an index from get_interactive_elements.`,
+          };
+        }
+        if (args.text) {
+          // Text-based click: find the first interactive element whose text
+          // contains the given string (case-insensitive). Resolves in JS via
+          // a simple walker over common interactive selectors. Then clicks
+          // via the same robust CDP path.
+          const result = await cdpClient.evaluate(tabId, `
+            (() => {
+              const needle = ${JSON.stringify(args.text.toLowerCase())};
+              const sels = 'a, button, [role="button"], [role="link"], [role="tab"], [role="menuitem"], input[type="button"], input[type="submit"], summary, [onclick], [data-action]';
+              const all = Array.from(document.querySelectorAll(sels));
+              // Prefer exact text match, then prefix, then substring.
+              const exact = all.find(el => (el.innerText || el.value || el.ariaLabel || '').trim().toLowerCase() === needle);
+              const prefix = all.find(el => (el.innerText || el.value || el.ariaLabel || '').trim().toLowerCase().startsWith(needle));
+              const sub = all.find(el => (el.innerText || el.value || el.ariaLabel || '').toLowerCase().includes(needle));
+              const el = exact || prefix || sub;
+              if (!el) return { found: false };
+              try { el.scrollIntoView({ block: 'center', inline: 'center' }); } catch (e) {}
+              const r = el.getBoundingClientRect();
+              return {
+                found: true,
+                x: r.left + r.width / 2,
+                y: r.top + r.height / 2,
+                tag: el.tagName,
+                text: (el.innerText || el.value || '').slice(0, 80),
+              };
+            })()
+          `);
+          const info = result?.result?.value;
+          if (!info?.found) {
+            return {
+              success: false,
+              error: `No clickable element found containing text "${args.text}". Try get_interactive_elements to see what's actually on the page, or take a screenshot.`,
+            };
+          }
+          // Wait for scroll to settle, then dispatch a real click via CDP.
+          await new Promise(r => setTimeout(r, 100));
+          await cdpClient.dispatchMouseEvent(tabId, 'mouseMoved', info.x, info.y);
+          await cdpClient.dispatchMouseEvent(tabId, 'mousePressed', info.x, info.y);
+          await cdpClient.dispatchMouseEvent(tabId, 'mouseReleased', info.x, info.y);
+          return {
+            success: true,
+            method: 'cdp-by-text',
+            tag: info.tag,
+            text: info.text,
+            matched: args.text,
+          };
+        }
         if (args.selector) {
           return await cdpClient.clickElement(tabId, args.selector);
         }

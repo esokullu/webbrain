@@ -183,7 +183,28 @@
    */
   function clickElement(params) {
     let el;
-    if (params.selector) {
+    // Reject jQuery/Playwright selectors with a clear error.
+    if (params.selector && /:contains\(|:has-text\(/.test(params.selector)) {
+      return {
+        success: false,
+        error: 'Invalid selector: ":contains()" and ":has-text()" are jQuery/Playwright extensions, not valid CSS. Use click({text: "..."}) to click by visible text instead.',
+      };
+    }
+    // Text-based: find the first interactive element whose text contains the
+    // given string, case-insensitive. Prefer exact match, then prefix, then
+    // substring.
+    if (params.text) {
+      const needle = params.text.toLowerCase();
+      const sels = 'a, button, [role="button"], [role="link"], [role="tab"], [role="menuitem"], input[type="button"], input[type="submit"], summary, [onclick], [data-action]';
+      const all = Array.from(document.querySelectorAll(sels));
+      const exact = all.find(e => (e.innerText || e.value || e.ariaLabel || '').trim().toLowerCase() === needle);
+      const prefix = all.find(e => (e.innerText || e.value || e.ariaLabel || '').trim().toLowerCase().startsWith(needle));
+      const sub = all.find(e => (e.innerText || e.value || e.ariaLabel || '').toLowerCase().includes(needle));
+      el = exact || prefix || sub;
+      if (!el) {
+        return { success: false, error: `No clickable element found containing text "${params.text}"` };
+      }
+    } else if (params.selector) {
       el = document.querySelector(params.selector);
     } else if (params.index != null) {
       const interactive = document.querySelectorAll(
