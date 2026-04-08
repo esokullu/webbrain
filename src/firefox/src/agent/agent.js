@@ -583,6 +583,111 @@ export class Agent {
       return { done: true, summary: args.summary };
     }
 
+    // Iframe tools — use browser.tabs.executeScript with allFrames:true.
+    // Extensions with <all_urls> permission can inject into any frame
+    // regardless of origin, bypassing the same-origin policy.
+    if (name === 'iframe_read') {
+      try {
+        const urlFilter = args.urlFilter || '';
+        const selector = args.selector || 'body';
+        const code = `
+          (() => {
+            try {
+              const el = document.querySelector(${JSON.stringify(selector)});
+              return {
+                ok: !!el,
+                url: location.href,
+                title: document.title || '',
+                text: el ? (el.innerText || '').slice(0, 4000) : '',
+                html: el ? (el.innerHTML || '').slice(0, 4000) : '',
+                tag: el ? el.tagName : null,
+              };
+            } catch (e) { return { ok: false, url: location.href, error: e.message }; }
+          })()
+        `;
+        const results = await browser.tabs.executeScript(tabId, { code, allFrames: true });
+        const frames = (results || []).filter(r => r && (!urlFilter || (r.url && r.url.includes(urlFilter))));
+        return { success: true, frameCount: frames.length, frames };
+      } catch (e) {
+        return { success: false, error: `Iframe read failed: ${e.message}` };
+      }
+    }
+
+    if (name === 'iframe_click') {
+      try {
+        const urlFilter = args.urlFilter || '';
+        const selector = args.selector;
+        if (!selector) return { success: false, error: 'selector is required' };
+        const code = `
+          (() => {
+            const filter = ${JSON.stringify(urlFilter)};
+            if (filter && !location.href.includes(filter)) return { ok: false, skipped: 'url-filter', url: location.href };
+            try {
+              const el = document.querySelector(${JSON.stringify(selector)});
+              if (!el) return { ok: false, url: location.href, reason: 'not-found' };
+              el.scrollIntoView({ block: 'center', inline: 'center' });
+              const rect = el.getBoundingClientRect();
+              const opts = { bubbles: true, cancelable: true, view: window, clientX: rect.left + rect.width/2, clientY: rect.top + rect.height/2, button: 0 };
+              try { el.dispatchEvent(new PointerEvent('pointerdown', opts)); } catch (e) {}
+              el.dispatchEvent(new MouseEvent('mousedown', opts));
+              try { el.dispatchEvent(new PointerEvent('pointerup', opts)); } catch (e) {}
+              el.dispatchEvent(new MouseEvent('mouseup', opts));
+              el.click();
+              return { ok: true, url: location.href, tag: el.tagName, text: (el.innerText || el.value || '').slice(0, 80) };
+            } catch (e) { return { ok: false, url: location.href, error: e.message }; }
+          })()
+        `;
+        const results = await browser.tabs.executeScript(tabId, { code, allFrames: true });
+        const successes = (results || []).filter(r => r && r.ok);
+        if (successes.length > 0) return { success: true, method: 'iframe-click', frame: successes[0] };
+        const candidates = (results || []).filter(r => r && !r.skipped);
+        return { success: false, error: 'Element not found in any matching iframe', searchedFrames: candidates.length, frameUrls: candidates.map(c => c.url).slice(0, 5) };
+      } catch (e) {
+        return { success: false, error: `Iframe click failed: ${e.message}` };
+      }
+    }
+
+    if (name === 'iframe_type') {
+      try {
+        const urlFilter = args.urlFilter || '';
+        const selector = args.selector;
+        const text = args.text || '';
+        const clear = !!args.clear;
+        if (!selector) return { success: false, error: 'selector is required' };
+        const code = `
+          (() => {
+            const filter = ${JSON.stringify(urlFilter)};
+            if (filter && !location.href.includes(filter)) return { ok: false, skipped: 'url-filter', url: location.href };
+            try {
+              const el = document.querySelector(${JSON.stringify(selector)});
+              if (!el) return { ok: false, url: location.href, reason: 'not-found' };
+              el.focus();
+              if (el.isContentEditable) {
+                if (${clear}) el.textContent = '';
+                el.textContent += ${JSON.stringify(text)};
+                el.dispatchEvent(new InputEvent('input', { bubbles: true, data: ${JSON.stringify(text)} }));
+                return { ok: true, url: location.href, method: 'contenteditable', value: el.textContent.slice(0, 100) };
+              }
+              const proto = el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+              const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set;
+              const newVal = (${clear} ? '' : (el.value || '')) + ${JSON.stringify(text)};
+              if (setter) setter.call(el, newVal); else el.value = newVal;
+              el.dispatchEvent(new Event('input', { bubbles: true }));
+              el.dispatchEvent(new Event('change', { bubbles: true }));
+              return { ok: true, url: location.href, method: 'native-setter', value: (el.value || '').slice(0, 100) };
+            } catch (e) { return { ok: false, url: location.href, error: e.message }; }
+          })()
+        `;
+        const results = await browser.tabs.executeScript(tabId, { code, allFrames: true });
+        const successes = (results || []).filter(r => r && r.ok);
+        if (successes.length > 0) return { success: true, frame: successes[0] };
+        const candidates = (results || []).filter(r => r && !r.skipped);
+        return { success: false, error: 'Input not found in any matching iframe', searchedFrames: candidates.length, frameUrls: candidates.map(c => c.url).slice(0, 5) };
+      } catch (e) {
+        return { success: false, error: `Iframe type failed: ${e.message}` };
+      }
+    }
+
     // Map tool names to content script actions
     const actionMap = {
       'read_page': 'get_page_info_cdp',

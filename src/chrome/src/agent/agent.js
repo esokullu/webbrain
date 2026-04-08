@@ -840,31 +840,151 @@ export class Agent {
 
     if (name === 'iframe_read') {
       try {
-        await cdpClient.attach(tabId);
-        const result = await cdpClient.evaluate(tabId, `
-          (() => {
-            const frames = window.frames;
-            for (let i = 0; i < frames.length; i++) {
-              try {
-                const frame = frames[i];
-                const sel = '${(args.selector || 'body').replace(/'/g, "\\'")}';
-                const el = frame.document?.querySelector ? frame.document.querySelector(sel) : null;
-                if (el) {
-                  return {
-                    frameIndex: i,
-                    frameName: frame.name || '',
-                    content: el.innerText || '',
-                    html: el.innerHTML?.slice(0, 5000) || '',
-                  };
-                }
-              } catch (e) {}
+        // chrome.scripting.executeScript with allFrames:true injects into
+        // every frame in the tab, INCLUDING cross-origin iframes. This
+        // bypasses the same-origin policy that page JS is subject to —
+        // extensions with <all_urls> host_permission have this superpower
+        // by design. Each result entry includes the frame's URL so we can
+        // filter post-hoc.
+        const urlFilter = args.urlFilter || '';
+        const selector = args.selector || 'body';
+        const results = await chrome.scripting.executeScript({
+          target: { tabId, allFrames: true },
+          func: (sel) => {
+            try {
+              const el = document.querySelector(sel);
+              return {
+                ok: !!el,
+                url: location.href,
+                title: document.title || '',
+                text: el ? (el.innerText || '').slice(0, 4000) : '',
+                html: el ? (el.innerHTML || '').slice(0, 4000) : '',
+                tag: el ? el.tagName : null,
+              };
+            } catch (e) {
+              return { ok: false, url: location.href, error: e.message };
             }
-            return { error: 'Could not access iframe content (cross-origin)' };
-          })()
-        `);
-        return { success: true, ...result?.result?.value };
+          },
+          args: [selector],
+        });
+        // results is an array of {frameId, result} entries — one per frame.
+        const frames = results
+          .map(r => r.result)
+          .filter(r => r && (!urlFilter || (r.url && r.url.includes(urlFilter))));
+        return { success: true, frameCount: frames.length, frames };
       } catch (e) {
         return { success: false, error: `Iframe read failed: ${e.message}` };
+      }
+    }
+
+    if (name === 'iframe_click') {
+      try {
+        // Inject into all frames; in each frame, see if the selector resolves
+        // and if the URL matches the optional filter, then click. Returns the
+        // first successful frame.
+        const urlFilter = args.urlFilter || '';
+        const selector = args.selector;
+        if (!selector) return { success: false, error: 'selector is required' };
+        const results = await chrome.scripting.executeScript({
+          target: { tabId, allFrames: true },
+          func: (sel, filter) => {
+            if (filter && !location.href.includes(filter)) {
+              return { ok: false, skipped: 'url-filter', url: location.href };
+            }
+            try {
+              const el = document.querySelector(sel);
+              if (!el) return { ok: false, url: location.href, reason: 'not-found' };
+              el.scrollIntoView({ block: 'center', inline: 'center' });
+              // Trigger a real-ish click sequence (frameworks often need
+              // pointer events, not just click).
+              const rect = el.getBoundingClientRect();
+              const cx = rect.left + rect.width / 2;
+              const cy = rect.top + rect.height / 2;
+              const opts = { bubbles: true, cancelable: true, view: window, clientX: cx, clientY: cy, button: 0 };
+              try { el.dispatchEvent(new PointerEvent('pointerdown', opts)); } catch (e) {}
+              el.dispatchEvent(new MouseEvent('mousedown', opts));
+              try { el.dispatchEvent(new PointerEvent('pointerup', opts)); } catch (e) {}
+              el.dispatchEvent(new MouseEvent('mouseup', opts));
+              el.click();
+              return {
+                ok: true,
+                url: location.href,
+                tag: el.tagName,
+                text: (el.innerText || el.value || '').slice(0, 80),
+              };
+            } catch (e) {
+              return { ok: false, url: location.href, error: e.message };
+            }
+          },
+          args: [selector, urlFilter],
+        });
+        const successes = results.map(r => r.result).filter(r => r && r.ok);
+        if (successes.length > 0) {
+          return { success: true, method: 'iframe-click', frame: successes[0] };
+        }
+        const candidates = results.map(r => r.result).filter(r => r && !r.skipped);
+        return {
+          success: false,
+          error: 'Element not found in any matching iframe',
+          searchedFrames: candidates.length,
+          frameUrls: candidates.map(c => c.url).slice(0, 5),
+        };
+      } catch (e) {
+        return { success: false, error: `Iframe click failed: ${e.message}` };
+      }
+    }
+
+    if (name === 'iframe_type') {
+      try {
+        const urlFilter = args.urlFilter || '';
+        const selector = args.selector;
+        const text = args.text || '';
+        const clear = !!args.clear;
+        if (!selector) return { success: false, error: 'selector is required' };
+        const results = await chrome.scripting.executeScript({
+          target: { tabId, allFrames: true },
+          func: (sel, txt, clr, filter) => {
+            if (filter && !location.href.includes(filter)) {
+              return { ok: false, skipped: 'url-filter', url: location.href };
+            }
+            try {
+              const el = document.querySelector(sel);
+              if (!el) return { ok: false, url: location.href, reason: 'not-found' };
+              el.focus();
+              if (el.isContentEditable) {
+                if (clr) el.textContent = '';
+                el.textContent += txt;
+                el.dispatchEvent(new InputEvent('input', { bubbles: true, data: txt }));
+                return { ok: true, url: location.href, method: 'contenteditable', value: el.textContent.slice(0, 100) };
+              }
+              const proto = el instanceof HTMLTextAreaElement
+                ? HTMLTextAreaElement.prototype
+                : HTMLInputElement.prototype;
+              const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set;
+              const newVal = (clr ? '' : (el.value || '')) + txt;
+              if (setter) setter.call(el, newVal); else el.value = newVal;
+              el.dispatchEvent(new Event('input', { bubbles: true }));
+              el.dispatchEvent(new Event('change', { bubbles: true }));
+              return { ok: true, url: location.href, method: 'native-setter', value: (el.value || '').slice(0, 100) };
+            } catch (e) {
+              return { ok: false, url: location.href, error: e.message };
+            }
+          },
+          args: [selector, text, clear, urlFilter],
+        });
+        const successes = results.map(r => r.result).filter(r => r && r.ok);
+        if (successes.length > 0) {
+          return { success: true, frame: successes[0] };
+        }
+        const candidates = results.map(r => r.result).filter(r => r && !r.skipped);
+        return {
+          success: false,
+          error: 'Input not found in any matching iframe',
+          searchedFrames: candidates.length,
+          frameUrls: candidates.map(c => c.url).slice(0, 5),
+        };
+      } catch (e) {
+        return { success: false, error: `Iframe type failed: ${e.message}` };
       }
     }
 

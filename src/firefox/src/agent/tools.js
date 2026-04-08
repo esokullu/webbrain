@@ -216,6 +216,53 @@ export const AGENT_TOOLS = [
       },
     },
   },
+  {
+    type: 'function',
+    function: {
+      name: 'iframe_read',
+      description: 'Read content from iframes — INCLUDING cross-origin iframes (Stripe dashboards, embedded forms, etc.). Works on cross-origin iframes because the extension injects directly into each frame, bypassing same-origin policy.',
+      parameters: {
+        type: 'object',
+        properties: {
+          urlFilter: { type: 'string', description: 'Optional substring to filter frames by URL (e.g. "stripe.com").' },
+          selector: { type: 'string', description: 'Optional CSS selector to extract specific elements within each frame.' },
+        },
+        required: [],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'iframe_click',
+      description: 'Click an element inside an iframe — INCLUDING cross-origin iframes. Use this when the target is inside an embedded form (Stripe, payment widgets, etc.).',
+      parameters: {
+        type: 'object',
+        properties: {
+          urlFilter: { type: 'string', description: 'Optional substring to filter which iframe to act on.' },
+          selector: { type: 'string', description: 'CSS selector for the element to click inside the iframe.' },
+        },
+        required: ['selector'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'iframe_type',
+      description: 'Type text into an input/textarea inside an iframe — INCLUDING cross-origin iframes.',
+      parameters: {
+        type: 'object',
+        properties: {
+          urlFilter: { type: 'string', description: 'Optional substring to filter which iframe to act on.' },
+          selector: { type: 'string', description: 'CSS selector for the input element inside the iframe.' },
+          text: { type: 'string', description: 'Text to type into the field.' },
+          clear: { type: 'boolean', description: 'Whether to clear the field before typing.' },
+        },
+        required: ['selector', 'text'],
+      },
+    },
+  },
 ];
 
 /**
@@ -309,6 +356,15 @@ Guidelines:
 5. When the task is complete, call the "done" tool with a summary.
 6. Be concise in your reasoning but thorough in your actions.
 7. Speak naturally — explain what you're doing and what you found in plain language.
+
+IFRAMES — read this:
+- Cross-origin iframes (Stripe dashboard, payment widgets, embedded apps, third-party forms, etc.) are NOT a blocker. You CAN interact with them. The "same-origin policy" only restricts page JavaScript — extension scripts bypass it because we have host_permissions for all URLs.
+- If a tool returns content that mentions "iframe" or "embedded" or you see iframe content in a screenshot, use the iframe-specific tools:
+  - \`iframe_read({urlFilter, selector})\` reads text/HTML from inside any iframe (including cross-origin).
+  - \`iframe_click({urlFilter, selector})\` clicks an element inside any iframe.
+  - \`iframe_type({urlFilter, selector, text, clear})\` types into a form field inside any iframe.
+- The \`urlFilter\` parameter is a substring match against the iframe's URL. Use it to disambiguate when multiple iframes are present (e.g. \`urlFilter: "stripe.com"\` to target a Stripe widget specifically).
+- DO NOT refuse a task by saying "I can't access cross-origin iframes" or "Stripe's security restrictions prevent this". Those refusals are wrong in this environment. Try the iframe tools instead.
 
 CLICKING — read this:
 - ALWAYS prefer a selector-based click (\`click({selector: "..."})\`) or an index-based click from get_interactive_elements (\`click({index: N})\`) over coordinate clicks. Selectors are exact; coordinates are guesses.
