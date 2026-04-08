@@ -121,6 +121,63 @@ export class Agent {
     return false;
   }
 
+  async _currentUrl(tabId) {
+    try {
+      const tab = await browser.tabs.get(tabId);
+      return tab?.url || '';
+    } catch (e) { return ''; }
+  }
+
+  _normalizeUrl(url) {
+    if (!url) return '';
+    try {
+      const u = new URL(url);
+      return u.origin + u.pathname;
+    } catch (e) { return url; }
+  }
+
+  async _getVisibleInteractiveElements(tabId) {
+    try {
+      const code = `
+        (() => {
+          const sels = 'a[href], button, [role="button"], [role="link"], [role="tab"], [role="menuitem"], input:not([type="hidden"]), textarea, select, summary, [onclick]';
+          const all = Array.from(document.querySelectorAll(sels));
+          const out = [];
+          for (const el of all) {
+            const r = el.getBoundingClientRect();
+            if (r.width === 0 || r.height === 0) continue;
+            if (r.bottom < 0 || r.top > window.innerHeight) continue;
+            if (r.right < 0 || r.left > window.innerWidth) continue;
+            const text = (el.innerText || el.value || el.placeholder || el.ariaLabel || el.title || '').trim().slice(0, 50);
+            if (!text && el.tagName !== 'INPUT' && el.tagName !== 'TEXTAREA' && el.tagName !== 'SELECT') continue;
+            out.push({
+              x: Math.round(r.left + r.width / 2),
+              y: Math.round(r.top + r.height / 2),
+              tag: el.tagName.toLowerCase(),
+              type: el.type || '',
+              text: text || '<' + el.tagName.toLowerCase() + '>',
+            });
+            if (out.length >= 25) break;
+          }
+          return out;
+        })()
+      `;
+      const result = await browser.tabs.executeScript(tabId, { code });
+      return (result && result[0]) || [];
+    } catch (e) {
+      return [];
+    }
+  }
+
+  _formatElementsList(elements) {
+    if (!elements || elements.length === 0) return '';
+    const lines = elements.map(e => {
+      const tagInfo = e.type ? `${e.tag}[${e.type}]` : e.tag;
+      return `  (${e.x},${e.y}) ${tagInfo} "${e.text}"`;
+    });
+    return `\nVisible interactive elements at these positions (use these names with click({text:"..."}) — much more reliable than guessing coordinates from the image):\n${lines.join('\n')}`;
+  }
+
   /**
    * Re-inject site adapter notes if the user navigated to a different
    * adapted site mid-conversation.
@@ -155,6 +212,9 @@ export class Agent {
    */
   async _executeToolBatch(tabId, toolCalls, messages, onUpdate, provider, partialAssistantText = null) {
     let didStateChange = false;
+    const NAV_PRONE_TOOLS = new Set(['click', 'navigate', 'execute_js', 'iframe_click']);
+    const navNotices = [];
+
     for (const tc of toolCalls) {
       if (this._checkAbort(tabId)) {
         const value = partialAssistantText || '[Stopped by user]';
@@ -170,9 +230,25 @@ export class Agent {
       } catch {
         fnArgs = {};
       }
+
+      let beforeUrl = '';
+      if (NAV_PRONE_TOOLS.has(fnName)) {
+        beforeUrl = await this._currentUrl(tabId);
+      }
+
       onUpdate('tool_call', { name: fnName, args: fnArgs });
       const toolResult = await this.executeTool(tabId, fnName, fnArgs);
       onUpdate('tool_result', { name: fnName, result: toolResult });
+
+      if (NAV_PRONE_TOOLS.has(fnName) && beforeUrl && !toolResult?.error) {
+        await new Promise(r => setTimeout(r, 200));
+        const afterUrl = await this._currentUrl(tabId);
+        const beforeNorm = this._normalizeUrl(beforeUrl);
+        const afterNorm = this._normalizeUrl(afterUrl);
+        if (beforeNorm && afterNorm && beforeNorm !== afterNorm && fnName !== 'navigate') {
+          navNotices.push({ before: beforeUrl, after: afterUrl, viaTool: fnName });
+        }
+      }
 
       if (toolResult && toolResult.done) {
         const finalResponse = toolResult.summary || partialAssistantText || 'Task completed.';
@@ -228,6 +304,22 @@ export class Agent {
       }
     }
 
+    if (navNotices.length > 0) {
+      const last = navNotices[navNotices.length - 1];
+      const noticeText =
+        `[NAVIGATION OCCURRED — the page changed as a side effect of your last action.\n` +
+        `  Was on: ${last.before}\n` +
+        `  Now on: ${last.after}\n` +
+        `  Triggered by: ${last.viaTool}\n` +
+        `\n` +
+        `The previous page is GONE. Any plan you had for that page no longer applies. ` +
+        `DO NOT continue executing steps from the previous page's plan — those elements no longer exist. ` +
+        `STOP, take a fresh screenshot, call get_interactive_elements, decide whether this new page is what you wanted, ` +
+        `and re-plan from scratch. If this navigation was unintended, navigate back with \`navigate({url: "${last.before}"})\` and try a more specific click.]`;
+      messages.push({ role: 'user', content: noticeText });
+      onUpdate('warning', { message: 'Page navigated unexpectedly — agent notified.' });
+    }
+
     if (didStateChange && provider.supportsVision) {
       const lastTs = this.lastAutoScreenshotTs.get(tabId) || 0;
       if (Date.now() - lastTs >= 500) {
@@ -235,15 +327,18 @@ export class Agent {
         const shot = await this._captureAutoScreenshot(tabId);
         if (shot) {
           this.lastAutoScreenshotTs.set(tabId, Date.now());
+          const visible = await this._getVisibleInteractiveElements(tabId);
+          const elementsText = this._formatElementsList(visible);
+          const textBlock = `[Auto-screenshot of current viewport after the action above. Image is ${shot.width}×${shot.height} pixels = the CSS viewport at 1:1. A click at image pixel (X, Y) maps directly to click(x:X, y:Y). Use this to confirm the result and plan the next step. Prefer click({text:"..."}) over coordinate clicks — coordinates are a last resort.]${elementsText}`;
           messages.push({
             role: 'user',
             content: [
-              { type: 'text', text: `[Auto-screenshot of current viewport after the action above. Image is ${shot.width}×${shot.height} pixels = the CSS viewport at 1:1. A click at image pixel (X, Y) maps directly to click(x:X, y:Y). Use this to confirm the result and plan the next step. Prefer selector-based clicks when an element is identifiable; coordinate clicks are a last resort.]` },
+              { type: 'text', text: textBlock },
               { type: 'image_url', image_url: { url: shot.dataUrl } },
             ],
           });
           onUpdate('tool_call', { name: 'auto_screenshot', args: {} });
-          onUpdate('tool_result', { name: 'auto_screenshot', result: { success: true, bytes: shot.dataUrl.length } });
+          onUpdate('tool_result', { name: 'auto_screenshot', result: { success: true, bytes: shot.dataUrl.length, elements: visible.length } });
         }
       }
     }

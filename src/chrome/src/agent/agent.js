@@ -286,6 +286,29 @@ export class Agent {
   }
 
   /**
+   * Cheap helper to read the current URL of a tab without throwing.
+   */
+  async _currentUrl(tabId) {
+    try {
+      const tab = await chrome.tabs.get(tabId);
+      return tab?.url || '';
+    } catch (e) { return ''; }
+  }
+
+  /**
+   * Strip query params + hash for "did the URL meaningfully change" comparison.
+   * Lets things like ?utm_source=... or hash anchors slide without triggering
+   * the navigation notice, while still catching real route changes.
+   */
+  _normalizeUrl(url) {
+    if (!url) return '';
+    try {
+      const u = new URL(url);
+      return u.origin + u.pathname;
+    } catch (e) { return url; }
+  }
+
+  /**
    * Execute one assistant turn's worth of tool calls. Both the non-streaming
    * and streaming paths call this so they share identical loop-detection,
    * persistence, and auto-screenshot behavior.
@@ -297,6 +320,12 @@ export class Agent {
    */
   async _executeToolBatch(tabId, toolCalls, messages, onUpdate, provider, partialAssistantText = null) {
     let didStateChange = false;
+    // Set of tools whose side effect can navigate the page. We snapshot the
+    // URL before these and re-check after, so we can warn the model when an
+    // unintended navigation happens (the most common cause of "model keeps
+    // executing the original plan on a totally different page").
+    const NAV_PRONE_TOOLS = new Set(['click', 'navigate', 'execute_js', 'iframe_click']);
+    const navNotices = []; // accumulated for injection after the loop
 
     for (const tc of toolCalls) {
       // Abort check before each tool call.
@@ -316,9 +345,32 @@ export class Agent {
         fnArgs = {};
       }
 
+      // Snapshot URL before nav-prone tools.
+      let beforeUrl = '';
+      if (NAV_PRONE_TOOLS.has(fnName)) {
+        beforeUrl = await this._currentUrl(tabId);
+      }
+
       onUpdate('tool_call', { name: fnName, args: fnArgs });
       const toolResult = await this.executeTool(tabId, fnName, fnArgs);
       onUpdate('tool_result', { name: fnName, result: toolResult });
+
+      // Detect unintended navigation. Give the page a beat to fire SPA
+      // history events / commit a real nav before re-reading the URL.
+      if (NAV_PRONE_TOOLS.has(fnName) && beforeUrl && !toolResult?.error) {
+        await new Promise(r => setTimeout(r, 200));
+        const afterUrl = await this._currentUrl(tabId);
+        const beforeNorm = this._normalizeUrl(beforeUrl);
+        const afterNorm = this._normalizeUrl(afterUrl);
+        if (beforeNorm && afterNorm && beforeNorm !== afterNorm) {
+          // The `navigate` tool intentionally goes somewhere — don't warn.
+          // For everything else (click, execute_js, iframe_click) the nav
+          // is a side effect the model may not have anticipated.
+          if (fnName !== 'navigate') {
+            navNotices.push({ before: beforeUrl, after: afterUrl, viaTool: fnName });
+          }
+        }
+      }
 
       // done() short-circuit — push result, persist, and bail out.
       if (toolResult && toolResult.done) {
@@ -385,6 +437,25 @@ export class Agent {
       }
     }
 
+    // Inject any navigation notices BEFORE the auto-screenshot, so the
+    // model sees the warning and the new viewport in the same turn.
+    if (navNotices.length > 0) {
+      const last = navNotices[navNotices.length - 1];
+      const noticeText =
+        `[NAVIGATION OCCURRED — the page changed as a side effect of your last action.\n` +
+        `  Was on: ${last.before}\n` +
+        `  Now on: ${last.after}\n` +
+        `  Triggered by: ${last.viaTool}\n` +
+        `\n` +
+        `The previous page is GONE. Any plan you had for that page no longer applies. ` +
+        `DO NOT continue executing steps from the previous page's plan — those elements no longer exist. ` +
+        `STOP, take a fresh screenshot, call get_interactive_elements, decide whether this new page is what you wanted, ` +
+        `and re-plan from scratch. If this navigation was unintended (you clicked the wrong thing), navigate back ` +
+        `with \`navigate({url: "${last.before}"})\` and try a more specific click.]`;
+      messages.push({ role: 'user', content: noticeText });
+      onUpdate('warning', { message: 'Page navigated unexpectedly — agent notified.' });
+    }
+
     // Auto-screenshot once per batch, debounced 500ms.
     if (didStateChange && provider.supportsVision) {
       const lastTs = this.lastAutoScreenshotTs.get(tabId) || 0;
@@ -393,21 +464,80 @@ export class Agent {
         const shot = await this._captureAutoScreenshot(tabId);
         if (shot) {
           this.lastAutoScreenshotTs.set(tabId, Date.now());
+          // Pair the image with a textual list of visible clickables so
+          // the model can ground "the Publish button" by name instead of
+          // guessing pixels — fixes the "click landed on the wrong thing"
+          // failure mode for local vision models.
+          const visible = await this._getVisibleInteractiveElements(tabId);
+          const elementsText = this._formatElementsList(visible);
+          const textBlock = `[Auto-screenshot of current viewport after the action above. Image is ${shot.width}×${shot.height} pixels = the CSS viewport at 1:1. A click at image pixel (X, Y) maps directly to click(x:X, y:Y). Use this to confirm the result and plan the next step. Prefer click({text:"..."}) over coordinate clicks — coordinates are a last resort.]${elementsText}`;
           messages.push({
             role: 'user',
             content: [
-              { type: 'text', text: `[Auto-screenshot of current viewport after the action above. Image is ${shot.width}×${shot.height} pixels = the CSS viewport at 1:1. A click at image pixel (X, Y) maps directly to click(x:X, y:Y). Use this to confirm the result and plan the next step. Prefer selector-based clicks when an element is identifiable; coordinate clicks are a last resort.]` },
+              { type: 'text', text: textBlock },
               { type: 'image_url', image_url: { url: shot.dataUrl } },
             ],
           });
           onUpdate('tool_call', { name: 'auto_screenshot', args: {} });
-          onUpdate('tool_result', { name: 'auto_screenshot', result: { success: true, bytes: shot.dataUrl.length } });
+          onUpdate('tool_result', { name: 'auto_screenshot', result: { success: true, bytes: shot.dataUrl.length, elements: visible.length } });
         }
       }
     }
 
     this._persist(tabId);
     return { action: 'continue' };
+  }
+
+  /**
+   * Quick scan of visible interactive elements with their CSS-pixel
+   * positions, used to annotate screenshots. The model gets BOTH the image
+   * and a compact list of what's clickable where, so it can resolve "the
+   * Publish button" without guessing pixels — just by name.
+   */
+  async _getVisibleInteractiveElements(tabId) {
+    try {
+      const result = await cdpClient.evaluate(tabId, `
+        (() => {
+          const sels = 'a[href], button, [role="button"], [role="link"], [role="tab"], [role="menuitem"], input:not([type="hidden"]), textarea, select, summary, [onclick]';
+          const all = Array.from(document.querySelectorAll(sels));
+          const out = [];
+          for (const el of all) {
+            const r = el.getBoundingClientRect();
+            // Visible + in viewport
+            if (r.width === 0 || r.height === 0) continue;
+            if (r.bottom < 0 || r.top > window.innerHeight) continue;
+            if (r.right < 0 || r.left > window.innerWidth) continue;
+            const text = (el.innerText || el.value || el.placeholder || el.ariaLabel || el.title || '').trim().slice(0, 50);
+            if (!text && el.tagName !== 'INPUT' && el.tagName !== 'TEXTAREA' && el.tagName !== 'SELECT') continue;
+            out.push({
+              x: Math.round(r.left + r.width / 2),
+              y: Math.round(r.top + r.height / 2),
+              tag: el.tagName.toLowerCase(),
+              type: el.type || '',
+              text: text || \`<\${el.tagName.toLowerCase()}>\`,
+            });
+            if (out.length >= 25) break;
+          }
+          return out;
+        })()
+      `);
+      return result?.result?.value || [];
+    } catch (e) {
+      return [];
+    }
+  }
+
+  /**
+   * Format interactive elements as a compact text block for inclusion in
+   * the screenshot's accompanying message.
+   */
+  _formatElementsList(elements) {
+    if (!elements || elements.length === 0) return '';
+    const lines = elements.map(e => {
+      const tagInfo = e.type ? `${e.tag}[${e.type}]` : e.tag;
+      return `  (${e.x},${e.y}) ${tagInfo} "${e.text}"`;
+    });
+    return `\nVisible interactive elements at these positions (use these names with click({text:"..."}) — much more reliable than guessing coordinates from the image):\n${lines.join('\n')}`;
   }
 
   /**

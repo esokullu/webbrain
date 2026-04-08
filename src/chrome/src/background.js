@@ -143,25 +143,25 @@ chrome.tabs.onRemoved.addListener((tabId) => {
 // navigations and expose them on globalThis so cdpClient.resolveSelector can
 // extend its retry budget when a click/type fires soon after a nav (the new
 // route may still be hydrating).
-const lastNavByTab = new Map(); // tabId -> { ts, type }
+const lastNavByTab = new Map(); // tabId -> { ts, type, url }
 globalThis.__webbrainLastNav = lastNavByTab;
 
-function recordNav(tabId, type) {
+function recordNav(tabId, type, url) {
   if (tabId == null) return;
-  lastNavByTab.set(tabId, { ts: Date.now(), type });
+  lastNavByTab.set(tabId, { ts: Date.now(), type, url: url || '' });
 }
 
 chrome.webNavigation?.onHistoryStateUpdated?.addListener((details) => {
-  if (details.frameId === 0) recordNav(details.tabId, 'history');
+  if (details.frameId === 0) recordNav(details.tabId, 'history', details.url);
 });
 chrome.webNavigation?.onReferenceFragmentUpdated?.addListener((details) => {
-  if (details.frameId === 0) recordNav(details.tabId, 'fragment');
+  if (details.frameId === 0) recordNav(details.tabId, 'fragment', details.url);
 });
 chrome.webNavigation?.onCommitted?.addListener((details) => {
-  if (details.frameId === 0) recordNav(details.tabId, 'committed');
+  if (details.frameId === 0) recordNav(details.tabId, 'committed', details.url);
 });
 chrome.webNavigation?.onCompleted?.addListener((details) => {
-  if (details.frameId === 0) recordNav(details.tabId, 'completed');
+  if (details.frameId === 0) recordNav(details.tabId, 'completed', details.url);
 });
 
 chrome.tabs.onRemoved.addListener((tabId) => lastNavByTab.delete(tabId));
