@@ -264,6 +264,95 @@ export const AGENT_TOOLS = [
       },
     },
   },
+  {
+    type: 'function',
+    function: {
+      name: 'fetch_url',
+      description: 'Fetch a URL directly from the background and return its text content. Sends the user\'s cookies, so authenticated endpoints work. Best for: JSON APIs, RSS, plain HTML, raw text files, REST endpoints. Auto-trims HTML to readable text. NOT good for SPAs — use research_url for those. Returns ~8000 chars.',
+      parameters: {
+        type: 'object',
+        properties: {
+          url: { type: 'string', description: 'URL to fetch' },
+          method: { type: 'string', description: 'HTTP method (default GET)' },
+          headers: { type: 'object', description: 'Optional request headers' },
+          body: { type: 'string', description: 'Optional request body' },
+        },
+        required: ['url'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'research_url',
+      description: 'Open a URL in a hidden background tab, wait for JS rendering, extract main content, close the tab. Use for SPAs and content sites. Slower (~2-5s) but handles modern web apps. Returns title, text, and outbound links.',
+      parameters: {
+        type: 'object',
+        properties: {
+          url: { type: 'string', description: 'URL to open' },
+          timeout: { type: 'number', description: 'Max wait in ms (default 8000, max 30000)' },
+        },
+        required: ['url'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'list_downloads',
+      description: 'List recent downloads with state, filename, and source URL.',
+      parameters: {
+        type: 'object',
+        properties: {
+          limit: { type: 'number', description: 'Max to return (default 10, max 50)' },
+        },
+        required: [],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'read_downloaded_file',
+      description: 'Read the content of a previously downloaded file. Returns text or base64 depending on type.',
+      parameters: {
+        type: 'object',
+        properties: {
+          downloadId: { type: 'number', description: 'Download ID from list_downloads or download_file' },
+        },
+        required: ['downloadId'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'download_resource_from_page',
+      description: 'Download a resource from the current page by selector. Handles regular URLs and blob: URLs.',
+      parameters: {
+        type: 'object',
+        properties: {
+          selector: { type: 'string', description: 'CSS selector for the element with the resource' },
+          filename: { type: 'string', description: 'Optional filename' },
+        },
+        required: ['selector'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'download_files',
+      description: 'Download multiple files in parallel (max 3 concurrent, max 50 total).',
+      parameters: {
+        type: 'object',
+        properties: {
+          urls: { type: 'array', items: { type: 'string' }, description: 'Array of URLs' },
+        },
+        required: ['urls'],
+      },
+    },
+  },
 ];
 
 /**
@@ -272,6 +361,7 @@ export const AGENT_TOOLS = [
 export const ASK_ONLY_TOOLS = [
   'read_page', 'screenshot', 'get_interactive_elements', 'scroll',
   'extract_data', 'get_selection', 'done',
+  'fetch_url', 'research_url', 'list_downloads',
 ];
 
 /**

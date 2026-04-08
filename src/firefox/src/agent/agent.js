@@ -1,5 +1,13 @@
 import { AGENT_TOOLS, getToolsForMode, SYSTEM_PROMPT_ASK, SYSTEM_PROMPT_ACT } from './tools.js';
 import { getActiveAdapter } from './adapters.js';
+import {
+  fetchUrl,
+  researchUrl,
+  listDownloads,
+  readDownloadedFile,
+  downloadResourceFromPage,
+  downloadFiles,
+} from '../network/network-tools.js';
 
 /**
  * The WebBrain Agent — orchestrates multi-step LLM + tool-use loops.
@@ -676,6 +684,26 @@ export class Agent {
 
     if (name === 'done') {
       return { done: true, summary: args.summary };
+    }
+
+    // Network & download tools (background context, with user cookies).
+    if (name === 'fetch_url') {
+      return await fetchUrl(args.url, args);
+    }
+    if (name === 'research_url') {
+      return await researchUrl(args.url, args);
+    }
+    if (name === 'list_downloads') {
+      return await listDownloads(args);
+    }
+    if (name === 'read_downloaded_file') {
+      return await readDownloadedFile(args.downloadId);
+    }
+    if (name === 'download_resource_from_page') {
+      return await downloadResourceFromPage(tabId, args);
+    }
+    if (name === 'download_files') {
+      return await downloadFiles(args);
     }
 
     // Iframe tools — use browser.tabs.executeScript with allFrames:true.

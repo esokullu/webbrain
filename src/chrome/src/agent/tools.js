@@ -294,8 +294,97 @@ export const AGENT_TOOLS = [
   {
     type: 'function',
     function: {
+      name: 'fetch_url',
+      description: 'Fetch a URL directly from the background and return its text content. Sends the user\'s cookies, so authenticated endpoints (GitHub API, internal tools, signed-in pages) work without any extra setup. Best for: JSON APIs, RSS, plain HTML, raw text files, GitHub raw blobs, REST endpoints. Auto-trims HTML to readable text. NOT good for SPAs that need JS rendering — use research_url for those. Returns ~8000 chars of text.',
+      parameters: {
+        type: 'object',
+        properties: {
+          url: { type: 'string', description: 'URL to fetch' },
+          method: { type: 'string', description: 'HTTP method (default GET)' },
+          headers: { type: 'object', description: 'Optional request headers' },
+          body: { type: 'string', description: 'Optional request body for POST/PUT' },
+        },
+        required: ['url'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'research_url',
+      description: 'Open a URL in a hidden background tab, wait for it to fully render (including JS), extract the main content, and close the tab. Use this for SPAs, dashboards, news sites, anything that requires JS to populate the page. Slower (~2-5s) than fetch_url but handles modern sites. Returns title, text (~8000 chars), and outbound links.',
+      parameters: {
+        type: 'object',
+        properties: {
+          url: { type: 'string', description: 'URL to open and read' },
+          timeout: { type: 'number', description: 'Max wait for load in ms (default 8000, max 30000)' },
+        },
+        required: ['url'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'list_downloads',
+      description: 'List the user\'s most recent downloads with state, filename, source URL, and bytes received. Use this to verify a download you triggered actually completed.',
+      parameters: {
+        type: 'object',
+        properties: {
+          limit: { type: 'number', description: 'Max number of downloads to return (default 10, max 50)' },
+        },
+        required: [],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'read_downloaded_file',
+      description: 'Read the content of a previously downloaded file. Returns text for text-y files (txt, csv, json, html, xml, code, log, etc.) up to ~16k chars. Returns base64 for small binary files. For large binaries, returns the on-disk path. Pass the downloadId from list_downloads or download_file.',
+      parameters: {
+        type: 'object',
+        properties: {
+          downloadId: { type: 'number', description: 'Download ID from list_downloads or download_file' },
+        },
+        required: ['downloadId'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'download_resource_from_page',
+      description: 'Download a resource (image, video, audio, file) from the current page by selector. Reads src/href/currentSrc/data-src. Handles blob: URLs (custom viewers, in-browser uploads). The file is saved to the user\'s downloads folder.',
+      parameters: {
+        type: 'object',
+        properties: {
+          selector: { type: 'string', description: 'CSS selector for the element with the resource URL' },
+          filename: { type: 'string', description: 'Optional filename for the saved file' },
+        },
+        required: ['selector'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'download_files',
+      description: 'Download multiple files in parallel (max 3 concurrent, max 50 total). Returns per-URL results with downloadIds. Use list_downloads after to verify completion.',
+      parameters: {
+        type: 'object',
+        properties: {
+          urls: { type: 'array', items: { type: 'string' }, description: 'Array of file URLs to download' },
+        },
+        required: ['urls'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
       name: 'download_file',
-      description: 'Download a file from a URL. The file will be saved to the downloads folder.',
+      description: 'Download a single file from a URL. The file will be saved to the downloads folder.',
       parameters: {
         type: 'object',
         properties: {
@@ -329,6 +418,10 @@ export const AGENT_TOOLS = [
 export const ASK_ONLY_TOOLS = [
   'read_page', 'screenshot', 'get_interactive_elements', 'scroll',
   'extract_data', 'get_selection', 'done',
+  // Read-only network tools — safe in Ask mode because they don't modify
+  // the active page or take destructive actions. They DO send the user's
+  // cookies though, so they have access to authenticated read endpoints.
+  'fetch_url', 'research_url', 'list_downloads',
 ];
 
 /**
