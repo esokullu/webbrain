@@ -1041,6 +1041,34 @@ export class Agent {
         if (args.selector) {
           return await cdpClient.typeText(tabId, args.selector, args.text || '', !!args.clear);
         }
+        // No selector and no index → type into the currently focused element
+        // via CDP Input.insertText. The model is expected to have just
+        // clicked the field in a prior tool call. This is the most reliable
+        // path for forms with weird selectors (GitHub release[name],
+        // Stripe-style nested inputs, etc.) — no resolution needed.
+        if (args.index == null) {
+          if (args.clear) {
+            await cdpClient.sendCommand(tabId, 'Input.dispatchKeyEvent', {
+              type: 'keyDown', key: 'a', code: 'KeyA', modifiers: 2, windowsVirtualKeyCode: 65,
+            });
+            await cdpClient.sendCommand(tabId, 'Input.dispatchKeyEvent', {
+              type: 'keyUp', key: 'a', code: 'KeyA', modifiers: 2, windowsVirtualKeyCode: 65,
+            });
+            await cdpClient.sendCommand(tabId, 'Input.dispatchKeyEvent', {
+              type: 'keyDown', key: 'Delete', code: 'Delete', windowsVirtualKeyCode: 46,
+            });
+            await cdpClient.sendCommand(tabId, 'Input.dispatchKeyEvent', {
+              type: 'keyUp', key: 'Delete', code: 'Delete', windowsVirtualKeyCode: 46,
+            });
+          }
+          await cdpClient.sendCommand(tabId, 'Input.insertText', { text: args.text || '' });
+          return {
+            success: true,
+            method: 'cdp-insert-focused',
+            text: (args.text || '').slice(0, 100),
+            note: 'Typed into the currently focused element. If the page did not visibly update, no element was actually focused — click the target field first, then call type_text again with no selector.',
+          };
+        }
         // index-based: fall through to content-script path.
       } catch (e) {
         return { success: false, error: `Type failed: ${e.message}` };

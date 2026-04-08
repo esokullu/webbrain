@@ -211,32 +211,47 @@
     } else if (params.index != null) {
       const inputs = document.querySelectorAll('input, textarea, select, [contenteditable="true"]');
       el = inputs[params.index];
+    } else {
+      // No selector and no index → type into the currently focused element.
+      // Most reliable for click-then-type flows on forms with weird selectors.
+      el = document.activeElement;
+      if (!el || el === document.body) {
+        return { success: false, error: 'No element is currently focused. Click the target field first, then call type_text again with no selector.' };
+      }
     }
 
     if (!el) return { success: false, error: 'Element not found' };
 
     el.focus();
+
+    // contenteditable path (Notion, Google Docs comments, rich editors)
+    if (el.isContentEditable) {
+      if (params.clear) el.textContent = '';
+      el.textContent += params.text;
+      el.dispatchEvent(new InputEvent('input', { bubbles: true, data: params.text }));
+      return { success: true, method: 'contenteditable', value: el.textContent.slice(0, 100) };
+    }
+
     if (params.clear) {
       el.value = '';
     }
 
     // Use input events for React/Vue compatibility
-    const nativeInputValueSetter = Object.getOwnPropertyDescriptor(
-      window.HTMLInputElement.prototype, 'value'
-    )?.set || Object.getOwnPropertyDescriptor(
-      window.HTMLTextAreaElement.prototype, 'value'
-    )?.set;
+    const proto = el instanceof HTMLTextAreaElement
+      ? HTMLTextAreaElement.prototype
+      : HTMLInputElement.prototype;
+    const nativeInputValueSetter = Object.getOwnPropertyDescriptor(proto, 'value')?.set;
 
     if (nativeInputValueSetter) {
-      nativeInputValueSetter.call(el, (params.clear ? '' : el.value) + params.text);
+      nativeInputValueSetter.call(el, (params.clear ? '' : (el.value || '')) + params.text);
     } else {
-      el.value = (params.clear ? '' : el.value) + params.text;
+      el.value = (params.clear ? '' : (el.value || '')) + params.text;
     }
 
     el.dispatchEvent(new Event('input', { bubbles: true }));
     el.dispatchEvent(new Event('change', { bubbles: true }));
 
-    return { success: true, value: el.value.slice(0, 100) };
+    return { success: true, value: (el.value || '').slice(0, 100) };
   }
 
   /**

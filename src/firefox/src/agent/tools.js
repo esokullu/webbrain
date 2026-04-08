@@ -60,14 +60,14 @@ export const AGENT_TOOLS = [
     type: 'function',
     function: {
       name: 'type_text',
-      description: 'Type text into an input field or textarea. Provide either a CSS selector or element index.',
+      description: 'Type text into an input field. THREE WAYS to use it: (1) CSS selector, (2) element index from get_interactive_elements, or (3) ONLY text (no selector, no index) to type into the currently focused element — use this RIGHT AFTER clicking a field. The third form is most reliable for forms with weird selectors (GitHub release[name], Stripe nested inputs).',
       parameters: {
         type: 'object',
         properties: {
-          selector: { type: 'string', description: 'CSS selector for the input element' },
-          index: { type: 'number', description: 'Index of the input element' },
-          text: { type: 'string', description: 'Text to type into the element' },
-          clear: { type: 'boolean', description: 'Clear existing content before typing (default: false)' },
+          selector: { type: 'string', description: 'OPTIONAL CSS selector. Omit to type into the currently focused element.' },
+          index: { type: 'number', description: 'OPTIONAL element index from get_interactive_elements.' },
+          text: { type: 'string', description: 'Text to type.' },
+          clear: { type: 'boolean', description: 'Clear existing content before typing (default: false).' },
         },
         required: ['text'],
       },
@@ -365,6 +365,12 @@ IFRAMES — read this:
   - \`iframe_type({urlFilter, selector, text, clear})\` types into a form field inside any iframe.
 - The \`urlFilter\` parameter is a substring match against the iframe's URL. Use it to disambiguate when multiple iframes are present (e.g. \`urlFilter: "stripe.com"\` to target a Stripe widget specifically).
 - DO NOT refuse a task by saying "I can't access cross-origin iframes" or "Stripe's security restrictions prevent this". Those refusals are wrong in this environment. Try the iframe tools instead.
+
+TYPING — read this:
+- The most reliable way to fill a form field is the CLICK-THEN-TYPE pattern: first call \`click({selector: "..."})\` to focus the field, then immediately call \`type_text({text: "..."})\` WITH NO SELECTOR. The text goes into whatever's focused. Works even when you can't guess the field's selector (GitHub uses \`release[name]\` with literal brackets, Stripe wraps inputs in custom Web Components, etc.).
+- If you DO know the exact selector, \`type_text({selector: "...", text: "..."})\` also works.
+- If \`type_text\` returns success but the field doesn't visibly contain your text, focus was lost — re-click the field and try again.
+- Click each field before typing into it, even if Tab seems like it would work.
 
 CLICKING — read this:
 - ALWAYS prefer a selector-based click (\`click({selector: "..."})\`) or an index-based click from get_interactive_elements (\`click({index: N})\`) over coordinate clicks. Selectors are exact; coordinates are guesses.
