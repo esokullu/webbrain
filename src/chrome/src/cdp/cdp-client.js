@@ -510,22 +510,59 @@ export class CDPClient {
     await this.sendCommand(tabId, 'DOM.enable');
     await this.sendCommand(tabId, 'DOM.getDocument', { depth: -1, pierce: true });
 
+    // NOTE: this logic is intentionally kept in sync with
+    // src/chrome/src/content/content.js (queryInteractive +
+    // isVisiblyInteractive). If you change one, change the other —
+    // index N from this function must map to the same element as
+    // index N in the content-script fallback path, otherwise
+    // click({index})/type_text({index}) will target the wrong node
+    // on pages where the two paths race (shadow DOM, overlays, etc.).
     const result = await this.evaluate(tabId, `
       (() => {
-        const elements = [];
-        const selectors = [
-          'a[href]', 'button', 'input', 'textarea', 'select',
-          '[role="button"]', '[role="link"]', '[role="tab"]',
+        const SELECTORS = [
+          'a[href]', 'button', 'input:not([type="hidden"])', 'textarea', 'select',
+          '[role="button"]', '[role="link"]', '[role="tab"]', '[role="menuitem"]',
+          '[role="textbox"]', '[role="combobox"]', '[role="searchbox"]',
+          '[contenteditable=""]', '[contenteditable="true"]', '[contenteditable="plaintext-only"]',
           '[onclick]', '[data-action]', 'summary', 'label'
         ];
 
-        const all = document.querySelectorAll(selectors.join(', '));
-        all.forEach((el, index) => {
+        function isVisiblyInteractive(el) {
+          if (!el || el.tagName === 'BODY' || el.tagName === 'HTML') return false;
+          if (el.closest('[aria-hidden="true"], [inert]')) return false;
+          const style = window.getComputedStyle(el);
+          if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return false;
           const rect = el.getBoundingClientRect();
-          if (rect.width === 0 && rect.height === 0) return;
+          if (rect.width > 0 && rect.height > 0) return true;
+          // Styled-wrapper: real input is 0x0 but a visible label/wrapper exists.
+          const tag = el.tagName;
+          if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') {
+            if (el.id) {
+              try {
+                const lab = document.querySelector('label[for="' + (window.CSS && CSS.escape ? CSS.escape(el.id) : el.id) + '"]');
+                if (lab) {
+                  const lr = lab.getBoundingClientRect();
+                  if (lr.width > 0 && lr.height > 0) return true;
+                }
+              } catch (e) {}
+            }
+            let p = el.parentElement;
+            for (let i = 0; i < 3 && p; i++, p = p.parentElement) {
+              const pr = p.getBoundingClientRect();
+              if (pr.width > 0 && pr.height > 0) return true;
+            }
+          }
+          return false;
+        }
 
+        const elements = [];
+        const all = document.querySelectorAll(SELECTORS.join(', '));
+        let index = 0;
+        all.forEach((el) => {
+          if (!isVisiblyInteractive(el)) return;
+          const rect = el.getBoundingClientRect();
           elements.push({
-            index,
+            index: index++,
             tag: el.tagName.toLowerCase(),
             type: el.type || '',
             role: el.getAttribute('role') || '',
@@ -533,6 +570,7 @@ export class CDPClient {
             id: el.id || '',
             name: el.name || '',
             href: el.href || '',
+            editable: el.isContentEditable || false,
             rect: { x: Math.round(rect.x), y: Math.round(rect.y), w: Math.round(rect.width), h: Math.round(rect.height) },
             isInShadowDOM: el.getRootNode() !== document,
           });

@@ -100,24 +100,82 @@
     };
   }
 
+  // ---------------------------------------------------------------------
+  // Interactive-element discovery — single source of truth for
+  // getInteractiveElements / click({index}) / type_text({index}). Kept
+  // in lockstep with src/chrome/src/content/content.js (and the CDP
+  // mirror in src/chrome/src/cdp/cdp-client.js). See that file for
+  // rationale.
+  // ---------------------------------------------------------------------
+  const INTERACTIVE_SELECTORS = [
+    'a[href]',
+    'button',
+    'input:not([type="hidden"])',
+    'textarea',
+    'select',
+    '[role="button"]',
+    '[role="link"]',
+    '[role="tab"]',
+    '[role="menuitem"]',
+    '[role="textbox"]',
+    '[role="combobox"]',
+    '[role="searchbox"]',
+    '[contenteditable=""]',
+    '[contenteditable="true"]',
+    '[contenteditable="plaintext-only"]',
+    '[onclick]',
+    '[data-action]',
+    'summary',
+    'label',
+  ];
+
+  function isVisiblyInteractive(el) {
+    if (!el || el.tagName === 'BODY' || el.tagName === 'HTML') return false;
+    if (el.closest('[aria-hidden="true"], [inert]')) return false;
+    const style = el.ownerDocument.defaultView.getComputedStyle(el);
+    if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') {
+      return false;
+    }
+    const rect = el.getBoundingClientRect();
+    if (rect.width > 0 && rect.height > 0) return true;
+    // Styled-wrapper pattern: real input is 0x0 but a visible label or
+    // wrapper makes it reachable.
+    const tag = el.tagName;
+    if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') {
+      if (el.id) {
+        try {
+          const label = document.querySelector(`label[for="${CSS.escape(el.id)}"]`);
+          if (label) {
+            const lrect = label.getBoundingClientRect();
+            if (lrect.width > 0 && lrect.height > 0) return true;
+          }
+        } catch {}
+      }
+      let p = el.parentElement;
+      for (let i = 0; i < 3 && p; i++, p = p.parentElement) {
+        const pr = p.getBoundingClientRect();
+        if (pr.width > 0 && pr.height > 0) return true;
+      }
+    }
+    return false;
+  }
+
+  function queryInteractive() {
+    const all = document.querySelectorAll(INTERACTIVE_SELECTORS.join(', '));
+    const out = [];
+    for (const el of all) {
+      if (isVisiblyInteractive(el)) out.push(el);
+    }
+    return out;
+  }
+
   /**
    * Get a simplified DOM snapshot for the agent.
    */
   function getInteractiveElements() {
-    const elements = [];
-    const selectors = [
-      'a[href]', 'button', 'input', 'textarea', 'select',
-      '[role="button"]', '[role="link"]', '[role="tab"]',
-      '[onclick]', '[data-action]',
-    ];
-
-    const all = document.querySelectorAll(selectors.join(', '));
-    all.forEach((el, index) => {
+    return queryInteractive().map((el, index) => {
       const rect = el.getBoundingClientRect();
-      if (rect.width === 0 && rect.height === 0) return;
-      if (el.offsetParent === null && el.tagName !== 'BODY') return;
-
-      elements.push({
+      return {
         index,
         tag: el.tagName.toLowerCase(),
         type: el.type || '',
@@ -126,11 +184,10 @@
         id: el.id || '',
         name: el.name || '',
         href: el.href || '',
+        editable: el.isContentEditable || false,
         rect: { x: Math.round(rect.x), y: Math.round(rect.y), w: Math.round(rect.width), h: Math.round(rect.height) },
-      });
+      };
     });
-
-    return elements;
   }
 
   function getInteractiveElementsFull() {
@@ -235,10 +292,8 @@
     } else if (params.selector) {
       el = document.querySelector(params.selector);
     } else if (params.index != null) {
-      const interactive = document.querySelectorAll(
-        'a[href], button, input, textarea, select, [role="button"], [role="link"], [onclick]'
-      );
-      el = interactive[params.index];
+      // Same traversal as getInteractiveElements — index stability.
+      el = queryInteractive()[params.index];
     } else if (params.x != null && params.y != null) {
       el = document.elementFromPoint(params.x, params.y);
     }
@@ -258,8 +313,7 @@
     if (params.selector) {
       el = document.querySelector(params.selector);
     } else if (params.index != null) {
-      const inputs = document.querySelectorAll('input, textarea, select, [contenteditable="true"]');
-      el = inputs[params.index];
+      el = queryInteractive()[params.index];
     } else {
       // No selector and no index → type into the currently focused element.
       // Most reliable for click-then-type flows on forms with weird selectors.
@@ -273,12 +327,33 @@
 
     el.focus();
 
-    // contenteditable path (Notion, Google Docs comments, rich editors)
+    // contenteditable path (Notion, Google Docs comments, Lexical,
+    // ProseMirror, Slate, Draft — all need the beforeinput → input →
+    // change sequence with a real inputType, or their internal state
+    // won't update).
     if (el.isContentEditable) {
       if (params.clear) el.textContent = '';
       el.textContent += params.text;
-      el.dispatchEvent(new InputEvent('input', { bubbles: true, data: params.text }));
+      el.dispatchEvent(new InputEvent('beforeinput', { bubbles: true, cancelable: true, inputType: 'insertText', data: params.text }));
+      el.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: params.text }));
+      el.dispatchEvent(new Event('change', { bubbles: true }));
       return { success: true, method: 'contenteditable', value: el.textContent.slice(0, 100) };
+    }
+
+    // <select>: match by value or option text.
+    if (el instanceof HTMLSelectElement) {
+      const needle = (params.text || '').trim();
+      const byValue = Array.from(el.options).find(o => o.value === needle);
+      const byText = Array.from(el.options).find(o => o.text.trim() === needle)
+        || Array.from(el.options).find(o => o.text.trim().toLowerCase().includes(needle.toLowerCase()));
+      const match = byValue || byText;
+      if (!match) {
+        return { success: false, error: `No <option> matching "${params.text}" in select.` };
+      }
+      el.value = match.value;
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+      return { success: true, method: 'select', value: el.value };
     }
 
     if (params.clear) {

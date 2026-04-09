@@ -50,24 +50,95 @@
     };
   }
 
+  // ---------------------------------------------------------------------
+  // Interactive-element discovery.
+  //
+  // IMPORTANT: this is the single source of truth for what counts as an
+  // "interactive element" on a page. `getInteractiveElements`,
+  // `clickElement({index})` and `typeText({index})` MUST all go through
+  // `queryInteractive()` so that index N means the same element in all
+  // three code paths. Historically they used three different selector
+  // lists, which caused the "missing inputs" / "clicked the wrong thing"
+  // bug on complex pages (shadow DOM, overlays, rich editors).
+  // ---------------------------------------------------------------------
+  const INTERACTIVE_SELECTORS = [
+    'a[href]',
+    'button',
+    'input:not([type="hidden"])',
+    'textarea',
+    'select',
+    '[role="button"]',
+    '[role="link"]',
+    '[role="tab"]',
+    '[role="menuitem"]',
+    '[role="textbox"]',
+    '[role="combobox"]',
+    '[role="searchbox"]',
+    '[contenteditable=""]',
+    '[contenteditable="true"]',
+    '[contenteditable="plaintext-only"]',
+    '[onclick]',
+    '[data-action]',
+    'summary',
+    'label',
+  ];
+
+  function isVisiblyInteractive(el) {
+    if (!el || el.tagName === 'BODY' || el.tagName === 'HTML') return false;
+    // aria-hidden / inert subtrees are non-interactive for assistive tech
+    // and should be for us too.
+    if (el.closest('[aria-hidden="true"], [inert]')) return false;
+
+    const style = el.ownerDocument.defaultView.getComputedStyle(el);
+    if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') {
+      return false;
+    }
+
+    const rect = el.getBoundingClientRect();
+    if (rect.width > 0 && rect.height > 0) return true;
+
+    // Styled-wrapper pattern: the real <input>/<select> is sized 0×0
+    // (e.g. visually-hidden, clipped, or wrapped in a custom component
+    // that overlays its own control). If a visible <label for=id> or a
+    // visible containing wrapper exists, we still want the agent to be
+    // able to target it. Common on Stripe, Radix, Material, etc.
+    const tag = el.tagName;
+    if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') {
+      if (el.id) {
+        try {
+          const label = document.querySelector(`label[for="${CSS.escape(el.id)}"]`);
+          if (label) {
+            const lrect = label.getBoundingClientRect();
+            if (lrect.width > 0 && lrect.height > 0) return true;
+          }
+        } catch {}
+      }
+      // Walk up a couple of levels looking for a visible wrapper.
+      let p = el.parentElement;
+      for (let i = 0; i < 3 && p; i++, p = p.parentElement) {
+        const pr = p.getBoundingClientRect();
+        if (pr.width > 0 && pr.height > 0) return true;
+      }
+    }
+    return false;
+  }
+
+  function queryInteractive() {
+    const all = document.querySelectorAll(INTERACTIVE_SELECTORS.join(', '));
+    const out = [];
+    for (const el of all) {
+      if (isVisiblyInteractive(el)) out.push(el);
+    }
+    return out;
+  }
+
   /**
    * Get a simplified DOM snapshot for the agent.
    */
   function getInteractiveElements() {
-    const elements = [];
-    const selectors = [
-      'a[href]', 'button', 'input', 'textarea', 'select',
-      '[role="button"]', '[role="link"]', '[role="tab"]',
-      '[onclick]', '[data-action]',
-    ];
-
-    const all = document.querySelectorAll(selectors.join(', '));
-    all.forEach((el, index) => {
+    return queryInteractive().map((el, index) => {
       const rect = el.getBoundingClientRect();
-      if (rect.width === 0 && rect.height === 0) return; // hidden
-      if (el.offsetParent === null && el.tagName !== 'BODY') return; // not visible
-
-      elements.push({
+      return {
         index,
         tag: el.tagName.toLowerCase(),
         type: el.type || '',
@@ -76,11 +147,10 @@
         id: el.id || '',
         name: el.name || '',
         href: el.href || '',
+        editable: el.isContentEditable || false,
         rect: { x: Math.round(rect.x), y: Math.round(rect.y), w: Math.round(rect.width), h: Math.round(rect.height) },
-      });
+      };
     });
-
-    return elements;
   }
 
   /**
@@ -108,9 +178,9 @@
     } else if (params.selector) {
       el = document.querySelector(params.selector);
     } else if (params.index != null) {
-      const interactive = document.querySelectorAll(
-        'a[href], button, input, textarea, select, [role="button"], [role="link"], [onclick]'
-      );
+      // Must use the SAME traversal as getInteractiveElements so the
+      // index the agent saw is the index we resolve.
+      const interactive = queryInteractive();
       el = interactive[params.index];
     } else if (params.x != null && params.y != null) {
       el = document.elementFromPoint(params.x, params.y);
@@ -131,8 +201,8 @@
     if (params.selector) {
       el = document.querySelector(params.selector);
     } else if (params.index != null) {
-      const inputs = document.querySelectorAll('input, textarea, select, [contenteditable="true"]');
-      el = inputs[params.index];
+      // Same index space as getInteractiveElements / clickElement.
+      el = queryInteractive()[params.index];
     } else {
       // Fallback path: type into the currently focused element. Used when
       // CDP isn't available or as the secondary path. Usually unreached on
@@ -150,8 +220,28 @@
     if (el.isContentEditable) {
       if (params.clear) el.textContent = '';
       el.textContent += params.text;
-      el.dispatchEvent(new InputEvent('input', { bubbles: true, data: params.text }));
+      // beforeinput → input → change, so frameworks (React, Lexical,
+      // ProseMirror) actually see a trusted-looking edit.
+      el.dispatchEvent(new InputEvent('beforeinput', { bubbles: true, cancelable: true, inputType: 'insertText', data: params.text }));
+      el.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: params.text }));
+      el.dispatchEvent(new Event('change', { bubbles: true }));
       return { success: true, method: 'contenteditable', value: el.textContent.slice(0, 100) };
+    }
+
+    // <select>: match by value, then by visible option text.
+    if (el instanceof HTMLSelectElement) {
+      const needle = (params.text || '').trim();
+      const byValue = Array.from(el.options).find(o => o.value === needle);
+      const byText = Array.from(el.options).find(o => o.text.trim() === needle)
+        || Array.from(el.options).find(o => o.text.trim().toLowerCase().includes(needle.toLowerCase()));
+      const match = byValue || byText;
+      if (!match) {
+        return { success: false, error: `No <option> matching "${params.text}" in select.` };
+      }
+      el.value = match.value;
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+      return { success: true, method: 'select', value: el.value };
     }
 
     if (params.clear) {
