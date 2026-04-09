@@ -8,7 +8,6 @@
     "activeTab",
     "scripting",
     "storage",
-    "tabs",
     "webNavigation",
     "debugger",
     "downloads"
