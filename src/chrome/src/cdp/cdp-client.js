@@ -335,13 +335,19 @@ export class CDPClient {
    */
   async dispatchMouseEvent(tabId, type, x, y, button = 'left') {
     await this.sendCommand(tabId, 'Input.enable');
-    const buttonMap = { left: 0, middle: 1, right: 2 };
+    // Use string button names as required by CDP Input.dispatchMouseEvent.
+    // 'buttons' is a bitmask: 1 = left held. clickCount must be 1 on BOTH
+    // mousePressed AND mouseReleased for the browser to synthesize a 'click'
+    // DOM event — without it, React and other frameworks never see the click.
+    const isDown = type === 'mousePressed';
+    const isMove = type === 'mouseMoved';
     return await this.sendCommand(tabId, 'Input.dispatchMouseEvent', {
       type,
       x,
       y,
-      button: buttonMap[button] ?? 0,
-      clickCount: type === 'mousePressed' ? 1 : 0,
+      button: isMove ? 'none' : button,
+      buttons: isDown ? 1 : 0,
+      clickCount: isMove ? 0 : 1,
     });
   }
 
