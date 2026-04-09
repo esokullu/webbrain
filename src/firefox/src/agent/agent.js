@@ -605,6 +605,43 @@ export class Agent {
   }
 
   /**
+   * Build a copy of `messages` for sending to the LLM that retains only the
+   * `keep` most-recent screenshots. Older image_url blocks are replaced with
+   * a small text placeholder, and base64 image data embedded in old tool
+   * results is stripped. The persisted history is left untouched.
+   */
+  _pruneOldImages(messages, keep = 1) {
+    let imgsKept = 0;
+    const out = new Array(messages.length);
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const msg = messages[i];
+      if (Array.isArray(msg.content)) {
+        const newContent = msg.content.map(block => {
+          if (block && (block.type === 'image_url' || block.type === 'image')) {
+            if (imgsKept < keep) {
+              imgsKept++;
+              return block;
+            }
+            return { type: 'text', text: '[older screenshot omitted to save tokens]' };
+          }
+          return block;
+        });
+        out[i] = { ...msg, content: newContent };
+      } else if (msg.role === 'tool' && typeof msg.content === 'string' && msg.content.includes('data:image/')) {
+        if (imgsKept < keep) {
+          imgsKept++;
+          out[i] = msg;
+        } else {
+          out[i] = { ...msg, content: msg.content.replace(/data:image\/[a-zA-Z0-9+.-]+;base64,[A-Za-z0-9+/=\\]+/g, '[older screenshot omitted to save tokens]') };
+        }
+      } else {
+        out[i] = msg;
+      }
+    }
+    return out;
+  }
+
+  /**
    * Detect if an error is a context overflow from any provider.
    */
   _isContextOverflow(error) {
@@ -920,7 +957,7 @@ export class Agent {
       let result;
       try {
         const useTools = provider.supportsTools;
-        result = await provider.chat(messages, {
+        result = await provider.chat(this._pruneOldImages(messages), {
           tools: useTools ? tools : undefined,
           temperature: 0.3,
           maxTokens: 4096,
@@ -932,7 +969,7 @@ export class Agent {
           this._emergencyTrim(messages);
           try {
             const useTools = provider.supportsTools;
-            result = await provider.chat(messages, {
+            result = await provider.chat(this._pruneOldImages(messages), {
               tools: useTools ? tools : undefined,
               temperature: 0.3,
               maxTokens: 4096,
@@ -1030,7 +1067,7 @@ export class Agent {
         let toolCallsAccumulator = {};
         let hasToolCalls = false;
 
-        for await (const chunk of provider.chatStream(messages, {
+        for await (const chunk of provider.chatStream(this._pruneOldImages(messages), {
           tools: provider.supportsTools ? tools : undefined,
           temperature: 0.3,
           maxTokens: 4096,
