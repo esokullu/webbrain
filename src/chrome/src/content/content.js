@@ -276,18 +276,54 @@
       return { success: false, error: `Unsupported key "${key}". V1 supports Escape, Tab, and Enter.` };
     }
 
+    const keyMeta = {
+      Escape: { code: 'Escape', keyCode: 27 },
+      Tab: { code: 'Tab', keyCode: 9 },
+      Enter: { code: 'Enter', keyCode: 13 },
+    }[key];
     const target = (document.activeElement && document.activeElement !== document.body)
       ? document.activeElement
       : document;
 
+    const moveTabFocus = () => {
+      const focusables = Array.from(document.querySelectorAll(
+        'a[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+      )).filter(el => {
+        const style = window.getComputedStyle(el);
+        return style.display !== 'none' && style.visibility !== 'hidden';
+      });
+      if (focusables.length === 0) return;
+      const active = document.activeElement;
+      const currentIndex = focusables.indexOf(active);
+      const nextIndex = (currentIndex + 1 + focusables.length) % focusables.length;
+      try { focusables[nextIndex].focus(); } catch (e) {}
+    };
+
     for (let i = 0; i < repeat; i++) {
-      const down = new KeyboardEvent('keydown', { key, code: key, bubbles: true, cancelable: true });
-      const up = new KeyboardEvent('keyup', { key, code: key, bubbles: true, cancelable: true });
+      const down = new KeyboardEvent('keydown', {
+        key,
+        code: keyMeta.code,
+        keyCode: keyMeta.keyCode,
+        which: keyMeta.keyCode,
+        bubbles: true,
+        cancelable: true,
+      });
+      const up = new KeyboardEvent('keyup', {
+        key,
+        code: keyMeta.code,
+        keyCode: keyMeta.keyCode,
+        which: keyMeta.keyCode,
+        bubbles: true,
+        cancelable: true,
+      });
       target.dispatchEvent(down);
+      document.dispatchEvent(down);
       target.dispatchEvent(up);
+      document.dispatchEvent(up);
+      if (key === 'Tab') moveTabFocus();
     }
 
-    return { success: true, key, repeat, method: 'keyboardevent' };
+    return { success: true, key, repeat, method: 'keyboardevent', focusedTag: document.activeElement?.tagName || null };
   }
 
   /**
