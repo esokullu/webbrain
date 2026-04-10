@@ -266,6 +266,31 @@
   }
 
   /**
+   * Press supported keyboard keys.
+   */
+  function pressKeys(params) {
+    const key = params?.key;
+    const repeatRaw = Number(params?.repeat ?? 1);
+    const repeat = Math.max(1, Math.min(3, Number.isFinite(repeatRaw) ? Math.floor(repeatRaw) : 1));
+    if (!['Escape', 'Tab', 'Enter'].includes(key)) {
+      return { success: false, error: `Unsupported key "${key}". V1 supports Escape, Tab, and Enter.` };
+    }
+
+    const target = (document.activeElement && document.activeElement !== document.body)
+      ? document.activeElement
+      : document;
+
+    for (let i = 0; i < repeat; i++) {
+      const down = new KeyboardEvent('keydown', { key, code: key, bubbles: true, cancelable: true });
+      const up = new KeyboardEvent('keyup', { key, code: key, bubbles: true, cancelable: true });
+      target.dispatchEvent(down);
+      target.dispatchEvent(up);
+    }
+
+    return { success: true, key, repeat, method: 'keyboardevent' };
+  }
+
+  /**
    * Scroll the page.
    */
   function scrollPage(params) {
@@ -512,6 +537,7 @@
       'get_interactive_elements_cdp': () => getInteractiveElementsFull(),
       'click': () => clickElement(msg.params || {}),
       'type': () => typeText(msg.params || {}),
+      'press_keys': () => pressKeys(msg.params || {}),
       'scroll': () => scrollPage(msg.params || {}),
       'extract_data': () => extractData(msg.params || {}),
       'wait_for_element': () => waitForElement(msg.params || {}),

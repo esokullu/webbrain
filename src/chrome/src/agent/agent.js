@@ -194,7 +194,7 @@ export class Agent {
   // Tools whose successful completion should trigger an auto-screenshot when
   // the corresponding mode is active.
   static NAV_TOOLS = new Set(['navigate', 'new_tab']);
-  static STATE_CHANGE_TOOLS = new Set(['navigate', 'new_tab', 'click', 'type_text', 'scroll']);
+  static STATE_CHANGE_TOOLS = new Set(['navigate', 'new_tab', 'click', 'type_text', 'press_keys', 'scroll']);
 
   /**
    * Decide whether to capture an auto-screenshot after a tool call, based on
@@ -1361,12 +1361,50 @@ export class Agent {
       }
     }
 
+    if (name === 'press_keys') {
+      const key = args.key;
+      const repeatRaw = Number(args.repeat ?? 1);
+      const repeat = Math.max(1, Math.min(3, Number.isFinite(repeatRaw) ? Math.floor(repeatRaw) : 1));
+      if (!['Escape', 'Tab', 'Enter'].includes(key)) {
+        return { success: false, error: `Unsupported key "${key}". V1 supports Escape, Tab, and Enter.` };
+      }
+
+      try {
+        await cdpClient.attach(tabId);
+        const keyMeta = {
+          Escape: { code: 'Escape', windowsVirtualKeyCode: 27 },
+          Tab: { code: 'Tab', windowsVirtualKeyCode: 9 },
+          Enter: { code: 'Enter', windowsVirtualKeyCode: 13 },
+        }[key];
+
+        for (let i = 0; i < repeat; i++) {
+          await cdpClient.sendCommand(tabId, 'Input.dispatchKeyEvent', {
+            type: 'keyDown',
+            key,
+            code: keyMeta.code,
+            windowsVirtualKeyCode: keyMeta.windowsVirtualKeyCode,
+          });
+          await cdpClient.sendCommand(tabId, 'Input.dispatchKeyEvent', {
+            type: 'keyUp',
+            key,
+            code: keyMeta.code,
+            windowsVirtualKeyCode: keyMeta.windowsVirtualKeyCode,
+          });
+        }
+
+        return { success: true, method: 'cdp-key', key, repeat };
+      } catch (e) {
+        // Fall through to content-script path if CDP is unavailable.
+      }
+    }
+
     // Map tool names to content script actions
     const actionMap = {
       'read_page': 'get_page_info_cdp',
       'get_interactive_elements': 'get_interactive_elements_cdp',
       'click': 'click',
       'type_text': 'type',
+      'press_keys': 'press_keys',
       'scroll': 'scroll',
       'extract_data': 'extract_data',
       'wait_for_element': 'wait_for_element',
