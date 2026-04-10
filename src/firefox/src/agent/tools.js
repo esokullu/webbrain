@@ -77,6 +77,21 @@ export const AGENT_TOOLS = [
   {
     type: 'function',
     function: {
+      name: 'press_keys',
+      description: 'Press keyboard keys. V1 supports Escape, Tab, and Enter. Useful for dismissing modals/dropdowns (Escape), moving focus (Tab), and confirming dialogs/forms (Enter).',
+      parameters: {
+        type: 'object',
+        properties: {
+          key: { type: 'string', enum: ['Escape', 'Tab', 'Enter'], description: 'Key to press.' },
+          repeat: { type: 'number', description: 'How many times to press the key (default: 1, max: 3).' },
+        },
+        required: ['key'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
       name: 'scroll',
       description: 'Scroll the page in a given direction.',
       parameters: {
