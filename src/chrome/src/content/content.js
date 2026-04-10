@@ -166,15 +166,30 @@
     }
     if (params.text) {
       const needle = params.text.toLowerCase();
+      const mode = params.textMatch || 'exact';
       const sels = 'a, button, [role="button"], [role="link"], [role="tab"], [role="menuitem"], input[type="button"], input[type="submit"], summary, [onclick], [data-action]';
       const all = Array.from(document.querySelectorAll(sels));
-      const exact = all.find(e => (e.innerText || e.value || e.ariaLabel || '').trim().toLowerCase() === needle);
-      const prefix = all.find(e => (e.innerText || e.value || e.ariaLabel || '').trim().toLowerCase().startsWith(needle));
-      const sub = all.find(e => (e.innerText || e.value || e.ariaLabel || '').toLowerCase().includes(needle));
-      el = exact || prefix || sub;
-      if (!el) {
-        return { success: false, error: `No clickable element found containing text "${params.text}"` };
+      const normalized = all.map(e => ({
+        e,
+        txt: (e.innerText || e.value || e.ariaLabel || '').trim().toLowerCase(),
+      })).filter(x => !!x.txt);
+      let matches = [];
+      if (mode === 'exact') matches = normalized.filter(x => x.txt === needle);
+      else if (mode === 'prefix') matches = normalized.filter(x => x.txt.startsWith(needle));
+      else if (mode === 'contains') matches = normalized.filter(x => x.txt.includes(needle));
+      else return { success: false, error: `Invalid textMatch "${mode}". Use exact, prefix, or contains.` };
+
+      if (matches.length === 0) {
+        return { success: false, error: `No clickable element found for text "${params.text}" (mode=${mode})` };
       }
+      if (matches.length > 1) {
+        return {
+          success: false,
+          error: `Ambiguous text match for "${params.text}" (mode=${mode}, matches=${matches.length}).`,
+          candidates: matches.slice(0, 5).map(m => m.txt.slice(0, 80)),
+        };
+      }
+      el = matches[0].e;
     } else if (params.selector) {
       el = document.querySelector(params.selector);
     } else if (params.index != null) {
@@ -263,6 +278,67 @@
     el.dispatchEvent(new Event('change', { bubbles: true }));
 
     return { success: true, value: (el.value || '').slice(0, 100) };
+  }
+
+  /**
+   * Press supported keyboard keys.
+   */
+  function pressKeys(params) {
+    const key = params?.key;
+    const repeatRaw = Number(params?.repeat ?? 1);
+    const repeat = Math.max(1, Math.min(3, Number.isFinite(repeatRaw) ? Math.floor(repeatRaw) : 1));
+    if (!['Escape', 'Tab', 'Enter'].includes(key)) {
+      return { success: false, error: `Unsupported key "${key}". V1 supports Escape, Tab, and Enter.` };
+    }
+
+    const keyMeta = {
+      Escape: { code: 'Escape', keyCode: 27 },
+      Tab: { code: 'Tab', keyCode: 9 },
+      Enter: { code: 'Enter', keyCode: 13 },
+    }[key];
+    const target = (document.activeElement && document.activeElement !== document.body)
+      ? document.activeElement
+      : document;
+
+    const moveTabFocus = () => {
+      const focusables = Array.from(document.querySelectorAll(
+        'a[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+      )).filter(el => {
+        const style = window.getComputedStyle(el);
+        return style.display !== 'none' && style.visibility !== 'hidden';
+      });
+      if (focusables.length === 0) return;
+      const active = document.activeElement;
+      const currentIndex = focusables.indexOf(active);
+      const nextIndex = (currentIndex + 1 + focusables.length) % focusables.length;
+      try { focusables[nextIndex].focus(); } catch (e) {}
+    };
+
+    for (let i = 0; i < repeat; i++) {
+      const down = new KeyboardEvent('keydown', {
+        key,
+        code: keyMeta.code,
+        keyCode: keyMeta.keyCode,
+        which: keyMeta.keyCode,
+        bubbles: true,
+        cancelable: true,
+      });
+      const up = new KeyboardEvent('keyup', {
+        key,
+        code: keyMeta.code,
+        keyCode: keyMeta.keyCode,
+        which: keyMeta.keyCode,
+        bubbles: true,
+        cancelable: true,
+      });
+      target.dispatchEvent(down);
+      document.dispatchEvent(down);
+      target.dispatchEvent(up);
+      document.dispatchEvent(up);
+      if (key === 'Tab') moveTabFocus();
+    }
+
+    return { success: true, key, repeat, method: 'keyboardevent', focusedTag: document.activeElement?.tagName || null };
   }
 
   /**
@@ -512,6 +588,7 @@
       'get_interactive_elements_cdp': () => getInteractiveElementsFull(),
       'click': () => clickElement(msg.params || {}),
       'type': () => typeText(msg.params || {}),
+      'press_keys': () => pressKeys(msg.params || {}),
       'scroll': () => scrollPage(msg.params || {}),
       'extract_data': () => extractData(msg.params || {}),
       'wait_for_element': () => waitForElement(msg.params || {}),

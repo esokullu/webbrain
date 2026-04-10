@@ -194,7 +194,7 @@ export class Agent {
   // Tools whose successful completion should trigger an auto-screenshot when
   // the corresponding mode is active.
   static NAV_TOOLS = new Set(['navigate', 'new_tab']);
-  static STATE_CHANGE_TOOLS = new Set(['navigate', 'new_tab', 'click', 'type_text', 'scroll']);
+  static STATE_CHANGE_TOOLS = new Set(['navigate', 'new_tab', 'click', 'type_text', 'press_keys', 'scroll']);
 
   /**
    * Decide whether to capture an auto-screenshot after a tool call, based on
@@ -1259,25 +1259,45 @@ export class Agent {
           };
         }
         if (args.text) {
-          // Text-based click: find the first interactive element whose text
-          // contains the given string (case-insensitive). Resolves in JS via
-          // a simple walker over common interactive selectors. Then clicks
-          // via the same robust CDP path.
+          // Text-based click with explicit match mode.
+          // Default is exact (safest): if multiple exact matches exist, fail
+          // with an ambiguity error instead of clicking an arbitrary one.
           const result = await cdpClient.evaluate(tabId, `
             (() => {
               const needle = ${JSON.stringify(args.text.toLowerCase())};
+              const mode = ${JSON.stringify(args.textMatch || 'exact')};
               const sels = 'a, button, [role="button"], [role="link"], [role="tab"], [role="menuitem"], input[type="button"], input[type="submit"], summary, [onclick], [data-action]';
               const all = Array.from(document.querySelectorAll(sels));
-              // Prefer exact text match, then prefix, then substring.
-              const exact = all.find(el => (el.innerText || el.value || el.ariaLabel || '').trim().toLowerCase() === needle);
-              const prefix = all.find(el => (el.innerText || el.value || el.ariaLabel || '').trim().toLowerCase().startsWith(needle));
-              const sub = all.find(el => (el.innerText || el.value || el.ariaLabel || '').toLowerCase().includes(needle));
-              const el = exact || prefix || sub;
-              if (!el) return { found: false };
+              const normalized = all.map(el => ({
+                el,
+                txt: (el.innerText || el.value || el.ariaLabel || '').trim().toLowerCase(),
+              })).filter(x => !!x.txt);
+              let matches = [];
+              if (mode === 'exact') {
+                matches = normalized.filter(x => x.txt === needle);
+              } else if (mode === 'prefix') {
+                matches = normalized.filter(x => x.txt.startsWith(needle));
+              } else if (mode === 'contains') {
+                matches = normalized.filter(x => x.txt.includes(needle));
+              } else {
+                return { found: false, error: 'Invalid textMatch. Use exact, prefix, or contains.' };
+              }
+              if (matches.length === 0) return { found: false, mode };
+              if (matches.length > 1) {
+                return {
+                  found: false,
+                  ambiguous: true,
+                  mode,
+                  count: matches.length,
+                  candidates: matches.slice(0, 5).map(m => m.txt.slice(0, 80)),
+                };
+              }
+              const el = matches[0].el;
               try { el.scrollIntoView({ block: 'center', inline: 'center' }); } catch (e) {}
               const r = el.getBoundingClientRect();
               return {
                 found: true,
+                mode,
                 x: r.left + r.width / 2,
                 y: r.top + r.height / 2,
                 tag: el.tagName,
@@ -1287,9 +1307,19 @@ export class Agent {
           `);
           const info = result?.result?.value;
           if (!info?.found) {
+            if (info?.error) {
+              return { success: false, error: info.error };
+            }
+            if (info?.ambiguous) {
+              return {
+                success: false,
+                error: `Ambiguous text match for "${args.text}" (mode=${info.mode}, matches=${info.count}). Use a more specific text, click({index:N}) from get_interactive_elements, or selector/x,y.`,
+                candidates: info.candidates || [],
+              };
+            }
             return {
               success: false,
-              error: `No clickable element found containing text "${args.text}". Try get_interactive_elements to see what's actually on the page, or take a screenshot.`,
+              error: `No clickable element found for text "${args.text}" (mode=${info?.mode || (args.textMatch || 'exact')}). Try a different textMatch (prefix/contains), get_interactive_elements, or a selector.`,
             };
           }
           // Wait for scroll to settle, then dispatch a real click via CDP.
@@ -1300,6 +1330,7 @@ export class Agent {
           return {
             success: true,
             method: 'cdp-by-text',
+            textMatch: info.mode || (args.textMatch || 'exact'),
             tag: info.tag,
             text: info.text,
             matched: args.text,
@@ -1361,12 +1392,50 @@ export class Agent {
       }
     }
 
+    if (name === 'press_keys') {
+      const key = args.key;
+      const repeatRaw = Number(args.repeat ?? 1);
+      const repeat = Math.max(1, Math.min(3, Number.isFinite(repeatRaw) ? Math.floor(repeatRaw) : 1));
+      if (!['Escape', 'Tab', 'Enter'].includes(key)) {
+        return { success: false, error: `Unsupported key "${key}". V1 supports Escape, Tab, and Enter.` };
+      }
+
+      try {
+        await cdpClient.attach(tabId);
+        const keyMeta = {
+          Escape: { code: 'Escape', windowsVirtualKeyCode: 27 },
+          Tab: { code: 'Tab', windowsVirtualKeyCode: 9 },
+          Enter: { code: 'Enter', windowsVirtualKeyCode: 13 },
+        }[key];
+
+        for (let i = 0; i < repeat; i++) {
+          await cdpClient.sendCommand(tabId, 'Input.dispatchKeyEvent', {
+            type: 'keyDown',
+            key,
+            code: keyMeta.code,
+            windowsVirtualKeyCode: keyMeta.windowsVirtualKeyCode,
+          });
+          await cdpClient.sendCommand(tabId, 'Input.dispatchKeyEvent', {
+            type: 'keyUp',
+            key,
+            code: keyMeta.code,
+            windowsVirtualKeyCode: keyMeta.windowsVirtualKeyCode,
+          });
+        }
+
+        return { success: true, method: 'cdp-key', key, repeat };
+      } catch (e) {
+        // Fall through to content-script path if CDP is unavailable.
+      }
+    }
+
     // Map tool names to content script actions
     const actionMap = {
       'read_page': 'get_page_info_cdp',
       'get_interactive_elements': 'get_interactive_elements_cdp',
       'click': 'click',
       'type_text': 'type',
+      'press_keys': 'press_keys',
       'scroll': 'scroll',
       'extract_data': 'extract_data',
       'wait_for_element': 'wait_for_element',

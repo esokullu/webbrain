@@ -44,11 +44,12 @@ export const AGENT_TOOLS = [
     type: 'function',
     function: {
       name: 'click',
-      description: 'Click an element. FOUR ways to use it: (1) CSS selector, (2) visible text — `click({text: "Publish release"})` finds the first button/link/clickable element whose text contains the string (case-insensitive), (3) element index from get_interactive_elements, (4) x/y coordinates. PREFER text or index over selectors when possible — selectors are easy to get wrong. Note: jQuery/Playwright pseudo-classes like `:contains()` and `:has-text()` are NOT valid CSS and will fail; use the `text` parameter instead.',
+      description: 'Click an element. FOUR ways to use it: (1) CSS selector, (2) visible text, (3) element index from get_interactive_elements, (4) x/y coordinates. For text clicks, default matching is EXACT and case-insensitive. You can opt into broader matching with `textMatch: "prefix"` or `textMatch: "contains"`. Note: jQuery/Playwright pseudo-classes like `:contains()` and `:has-text()` are NOT valid CSS and will fail; use the `text` parameter instead.',
       parameters: {
         type: 'object',
         properties: {
-          text: { type: 'string', description: 'Visible text to match — finds the first button/link/clickable element whose text contains this string (case-insensitive). Use this for buttons you can see in a screenshot.' },
+          text: { type: 'string', description: 'Visible text to match against clickable elements.' },
+          textMatch: { type: 'string', enum: ['exact', 'prefix', 'contains'], description: 'Text matching mode for `text`. Default is `exact` (safest).' },
           selector: { type: 'string', description: 'CSS selector for the element to click' },
           index: { type: 'number', description: 'Index from get_interactive_elements result' },
           x: { type: 'number', description: 'X coordinate to click' },
@@ -71,6 +72,21 @@ export const AGENT_TOOLS = [
           clear: { type: 'boolean', description: 'Clear existing content before typing (default: false). Works for all three forms.' },
         },
         required: ['text'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'press_keys',
+      description: 'Press keyboard keys. V1 supports Escape, Tab, and Enter. Useful for dismissing modals/dropdowns (Escape), moving focus (Tab), and confirming dialogs/forms (Enter).',
+      parameters: {
+        type: 'object',
+        properties: {
+          key: { type: 'string', enum: ['Escape', 'Tab', 'Enter'], description: 'Key to press.' },
+          repeat: { type: 'number', description: 'How many times to press the key (default: 1, max: 3).' },
+        },
+        required: ['key'],
       },
     },
   },

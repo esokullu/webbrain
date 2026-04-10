@@ -129,7 +129,7 @@ export class Agent {
   }
 
   static NAV_TOOLS = new Set(['navigate', 'new_tab']);
-  static STATE_CHANGE_TOOLS = new Set(['navigate', 'new_tab', 'click', 'type_text', 'scroll']);
+  static STATE_CHANGE_TOOLS = new Set(['navigate', 'new_tab', 'click', 'type_text', 'press_keys', 'scroll']);
 
   _shouldAutoScreenshot(toolName) {
     const mode = this.autoScreenshot;
@@ -872,6 +872,7 @@ export class Agent {
       'get_frames': 'get_frames',
       'click': 'click',
       'type_text': 'type',
+      'press_keys': 'press_keys',
       'scroll': 'scroll',
       'extract_data': 'extract_data',
       'wait_for_element': 'wait_for_element',
