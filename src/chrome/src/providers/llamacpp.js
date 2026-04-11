@@ -43,11 +43,17 @@ export class LlamaCppProvider extends BaseLLMProvider {
       body.tool_choice = options.toolChoice || 'auto';
     }
 
-    const res = await fetch(`${this.baseUrl}/v1/chat/completions`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    });
+    const url = `${this.baseUrl}/v1/chat/completions`;
+    let res;
+    try {
+      res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+    } catch (e) {
+      throw new Error(`llama.cpp network error — could not reach ${url} (${e.message}). Is the server running?`);
+    }
 
     if (!res.ok) {
       const err = await res.text();
@@ -83,11 +89,17 @@ export class LlamaCppProvider extends BaseLLMProvider {
       body.tool_choice = options.toolChoice || 'auto';
     }
 
-    const res = await fetch(`${this.baseUrl}/v1/chat/completions`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    });
+    const streamUrl = `${this.baseUrl}/v1/chat/completions`;
+    let res;
+    try {
+      res = await fetch(streamUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+    } catch (e) {
+      throw new Error(`llama.cpp network error — could not reach ${streamUrl} (${e.message}). Is the server running?`);
+    }
 
     if (!res.ok) {
       const err = await res.text();

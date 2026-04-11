@@ -16,12 +16,10 @@
     "<all_urls>",
     "http://localhost/*",
     "http://127.0.0.1/*",
-    "http://192.168.0.0/16",
-    "http://10.0.0.0/8",
-    "http://172.16.0.0/12"
+    "http://*/*"
   ],
   "content_security_policy": {
-    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'; connect-src * data: blob: http://* ws://*;"
+    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'; connect-src * data: blob:;"
   },
   "background": {
     "service_worker": "src/background.js",
