@@ -1259,35 +1259,51 @@ export class Agent {
           };
         }
         if (args.text) {
-          // Text-based click with explicit match mode.
-          // Default is exact (safest): if multiple exact matches exist, fail
-          // with an ambiguity error instead of clicking an arbitrary one.
+          // Text-based click with auto-fallback matching.
+          // When textMatch is not specified (default), tries exact → prefix →
+          // contains in order. At each level, if multiple elements match, an
+          // ambiguity error is returned instead of clicking an arbitrary one.
+          // When textMatch IS specified, only that mode is used.
           const result = await cdpClient.evaluate(tabId, `
             (() => {
               const needle = ${JSON.stringify(args.text.toLowerCase())};
-              const mode = ${JSON.stringify(args.textMatch || 'exact')};
-              const sels = 'a, button, [role="button"], [role="link"], [role="tab"], [role="menuitem"], input[type="button"], input[type="submit"], summary, [onclick], [data-action]';
+              const explicit = ${JSON.stringify(args.textMatch || '')};
+              const sels = 'a, button, [role="button"], [role="link"], [role="tab"], [role="menuitem"], input[type="button"], input[type="submit"], summary, label, [onclick], [data-action]';
               const all = Array.from(document.querySelectorAll(sels));
               const normalized = all.map(el => ({
                 el,
                 txt: (el.innerText || el.value || el.ariaLabel || '').trim().toLowerCase(),
               })).filter(x => !!x.txt);
-              let matches = [];
-              if (mode === 'exact') {
-                matches = normalized.filter(x => x.txt === needle);
-              } else if (mode === 'prefix') {
-                matches = normalized.filter(x => x.txt.startsWith(needle));
-              } else if (mode === 'contains') {
-                matches = normalized.filter(x => x.txt.includes(needle));
-              } else {
+
+              function tryMode(mode) {
+                if (mode === 'exact') return normalized.filter(x => x.txt === needle);
+                if (mode === 'prefix') return normalized.filter(x => x.txt.startsWith(needle));
+                if (mode === 'contains') return normalized.filter(x => x.txt.includes(needle));
+                return [];
+              }
+
+              // Determine which modes to try.
+              const modes = explicit ? [explicit] : ['exact', 'prefix', 'contains'];
+              if (explicit && !['exact', 'prefix', 'contains'].includes(explicit)) {
                 return { found: false, error: 'Invalid textMatch. Use exact, prefix, or contains.' };
               }
-              if (matches.length === 0) return { found: false, mode };
+
+              let matches = [];
+              let usedMode = modes[0];
+              for (const m of modes) {
+                matches = tryMode(m);
+                usedMode = m;
+                if (matches.length === 1) break; // unique match — use it
+                if (matches.length > 1) break;   // ambiguous — report it
+                // 0 matches — try next mode
+              }
+
+              if (matches.length === 0) return { found: false, mode: usedMode };
               if (matches.length > 1) {
                 return {
                   found: false,
                   ambiguous: true,
-                  mode,
+                  mode: usedMode,
                   count: matches.length,
                   candidates: matches.slice(0, 5).map(m => m.txt.slice(0, 80)),
                 };
@@ -1297,7 +1313,7 @@ export class Agent {
               const r = el.getBoundingClientRect();
               return {
                 found: true,
-                mode,
+                mode: usedMode,
                 x: r.left + r.width / 2,
                 y: r.top + r.height / 2,
                 tag: el.tagName,
@@ -1319,7 +1335,7 @@ export class Agent {
             }
             return {
               success: false,
-              error: `No clickable element found for text "${args.text}" (mode=${info?.mode || (args.textMatch || 'exact')}). Try a different textMatch (prefix/contains), get_interactive_elements, or a selector.`,
+              error: `No clickable element found for text "${args.text}". Try get_interactive_elements to see what's on the page, or use a selector.`,
             };
           }
           // Wait for scroll to settle, then dispatch a real click via CDP.

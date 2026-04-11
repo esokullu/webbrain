@@ -492,7 +492,9 @@ TYPING — read this:
 - Click each field before typing into it, even if Tab seems like it would work.
 
 CLICKING — read this:
-- For buttons and links you can SEE, the BEST way is to click by visible text: \`click({text: "Publish release"})\`. No selector guessing.
+- For buttons and links you can SEE, click by visible text: \`click({text: "Publish release"})\`. Default matching is EXACT (case-insensitive). If exact fails (no match), the system automatically tries prefix then substring matching — but if multiple elements match at any level, it returns an ambiguity error instead of guessing.
+- If you get an ambiguity error, use a more specific text string, switch to \`click({index: N})\` from \`get_interactive_elements\`, or use a selector.
+- You can explicitly control matching with \`textMatch\`: \`"exact"\` (default), \`"prefix"\`, or \`"contains"\`.
 - Order of preference:
   1. \`click({text: "..."})\` — visible text. Most reliable.
   2. \`click({index: N})\` — index from get_interactive_elements MADE THIS SAME TURN.

@@ -1,11 +1,7 @@
 {
   "manifest_version": 3,
   "name": "WebBrain",
-<<<<<<< codex/investigate-keypress-control-options
   "version": "1.7.0",
-=======
-  "version": "1.6.8",
->>>>>>> main
   "description": "Open-source AI browser agent — chat with pages, automate tasks, multi-provider LLM support.",
   "permissions": [
     "sidePanel",

@@ -555,7 +555,9 @@ TYPING — read this:
 - If you're filling multiple fields, click each one before typing into it, even if it looks like Tab would work.
 
 CLICKING — read this:
-- For buttons and links you can SEE (in a screenshot or in get_interactive_elements output), the BEST way to click them is by visible text: \`click({text: "Publish release"})\`. This finds the first matching button/link and clicks it. No selector guessing required.
+- For buttons and links you can SEE, click by visible text: \`click({text: "Publish release"})\`. Default matching is EXACT (case-insensitive). If exact fails (no match), the system automatically tries prefix then substring matching — but if multiple elements match at any level, it returns an ambiguity error instead of guessing.
+- If you get an ambiguity error, use a more specific text string, switch to \`click({index: N})\` from \`get_interactive_elements\`, or use a selector.
+- You can explicitly control matching with \`textMatch\`: \`"exact"\` (default), \`"prefix"\`, or \`"contains"\`.
 - Order of preference:
   1. \`click({text: "..."})\` — visible button/link text. Most reliable.
   2. \`click({index: N})\` — index from a get_interactive_elements call MADE THIS SAME TURN.
