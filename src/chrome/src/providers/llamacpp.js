@@ -1,4 +1,5 @@
 import { BaseLLMProvider } from './base.js';
+import { fetchWithFallback } from './fetch-with-fallback.js';
 
 /**
  * Provider for local llama.cpp server (OpenAI-compatible API on localhost).
@@ -46,7 +47,7 @@ export class LlamaCppProvider extends BaseLLMProvider {
     const url = `${this.baseUrl}/v1/chat/completions`;
     let res;
     try {
-      res = await fetch(url, {
+      res = await fetchWithFallback(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
@@ -92,7 +93,7 @@ export class LlamaCppProvider extends BaseLLMProvider {
     const streamUrl = `${this.baseUrl}/v1/chat/completions`;
     let res;
     try {
-      res = await fetch(streamUrl, {
+      res = await fetchWithFallback(streamUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),

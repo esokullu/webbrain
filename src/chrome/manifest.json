@@ -11,6 +11,7 @@
     "webNavigation",
     "debugger",
     "downloads",
+    "offscreen",
     "privateNetworkAccess"
   ],
   "host_permissions": [

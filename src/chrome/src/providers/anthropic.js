@@ -1,4 +1,5 @@
 import { BaseLLMProvider } from './base.js';
+import { fetchWithFallback } from './fetch-with-fallback.js';
 
 /**
  * Provider for Anthropic Claude API (native, not OpenAI-compatible).
@@ -141,7 +142,7 @@ export class AnthropicProvider extends BaseLLMProvider {
       body.tools = this._convertTools(options.tools);
     }
 
-    const res = await fetch(`${this.baseUrl}/v1/messages`, {
+    const res = await fetchWithFallback(`${this.baseUrl}/v1/messages`, {
       method: 'POST',
       headers: this._headers(),
       body: JSON.stringify(body),
@@ -202,7 +203,7 @@ export class AnthropicProvider extends BaseLLMProvider {
       body.tools = this._convertTools(options.tools);
     }
 
-    const res = await fetch(`${this.baseUrl}/v1/messages`, {
+    const res = await fetchWithFallback(`${this.baseUrl}/v1/messages`, {
       method: 'POST',
       headers: this._headers(),
       body: JSON.stringify(body),

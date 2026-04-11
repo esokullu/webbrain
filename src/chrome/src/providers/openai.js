@@ -1,4 +1,5 @@
 import { BaseLLMProvider } from './base.js';
+import { fetchWithFallback } from './fetch-with-fallback.js';
 
 /**
  * Provider for OpenAI-compatible APIs (ChatGPT, OpenRouter, any OpenAI-compatible endpoint).
@@ -90,7 +91,7 @@ export class OpenAICompatibleProvider extends BaseLLMProvider {
     const url = `${this.baseUrl}/chat/completions`;
     let res;
     try {
-      res = await fetch(url, {
+      res = await fetchWithFallback(url, {
         method: 'POST',
         headers: this._headers(),
         body: JSON.stringify(body),
@@ -133,7 +134,7 @@ export class OpenAICompatibleProvider extends BaseLLMProvider {
     const streamUrl = `${this.baseUrl}/chat/completions`;
     let res;
     try {
-      res = await fetch(streamUrl, {
+      res = await fetchWithFallback(streamUrl, {
         method: 'POST',
         headers: this._headers(),
         body: JSON.stringify(body),
