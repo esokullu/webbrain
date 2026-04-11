@@ -1,6 +1,6 @@
 # WebBrain Firefox Extension — Architecture
 
-> Version 1.7.1 · Manifest V2 · Background Page
+> Version 2.1.0 · Manifest V2 · Background Page
 
 ## How Firefox Differs from Chrome
 
@@ -10,7 +10,7 @@ Firefox uses Manifest V2 (background page, not service worker) and has **no acce
 - **No pixel-perfect screenshots** — uses `browser.tabs.captureVisibleTab()` instead of CDP `Page.captureScreenshot`
 - **No conversation persistence** — conversations are lost when the sidebar closes (no session storage equivalent)
 - **No shadow DOM piercing** — content script can read shadow DOM via `element.shadowRoot`, but can't pierce closed shadow roots
-- **Fewer tools** — 26 vs Chrome's 29 (missing full-page screenshot, shadow DOM query, file upload)
+- **Fewer tools** — 27 vs Chrome's 30 (missing full-page screenshot, shadow DOM query, file upload)
 
 Everything else — the agent loop, LLM providers, site adapters, loop detection — is architecturally identical.
 
@@ -52,7 +52,7 @@ src/firefox/
 │   ├── background.html      # Background page (MV2 requirement)
 │   ├── background.js        # Message router
 │   ├── agent/
-│   │   ├── agent.js          # Core agent loop (~1170 lines)
+│   │   ├── agent.js          # Core agent loop (~1300 lines)
 │   │   ├── tools.js          # Tool schemas + system prompts
 │   │   └── adapters.js       # Per-site guidance (identical to Chrome)
 │   ├── content/
@@ -106,7 +106,7 @@ User message
 _enrichFirstUserMessage()     ← same as Chrome (URL/title + screenshot + adapter)
     │
     ▼
-Main Loop (max 60 steps)
+Main Loop (max 120 steps)
     │
     ├─ provider.chat(messages, {tools, temp:0.3, maxTokens:4096})
     ├─ If tool_calls → _executeToolBatch() → push results → continue
@@ -147,7 +147,7 @@ The LLM request format is identical to Chrome — the same OpenAI-compatible mes
       ]
     }
   ],
-  "tools": [ /* 26 tools in OpenAI function-calling format */ ],
+  "tools": [ /* 27 tools in OpenAI function-calling format */ ],
   "tool_choice": "auto",
   "temperature": 0.3,
   "max_tokens": 4096
@@ -200,7 +200,7 @@ Most sites work fine with synthetic clicks. But some (banking, captchas, certain
 
 ## Tools
 
-### Tool list (26 tools — 3 fewer than Chrome)
+### Tool list (27 tools — 3 fewer than Chrome)
 
 | Tool | Description | Ask | Act | Chrome-only? |
 |------|-------------|-----|-----|-------------|
@@ -228,6 +228,7 @@ Most sites work fine with synthetic clicks. But some (banking, captchas, certain
 | `read_downloaded_file` | Read downloaded file | | ✓ | |
 | `download_resource_from_page` | Download from page | | ✓ | |
 | `download_files` | Download by URL | | ✓ | |
+| `verify_form` | Read form field values + screenshot before submit | | ✓ | |
 | `done` | Signal completion | ✓ | ✓ | |
 | `full_page_screenshot` | Full-page capture | | | ✓ (Chrome only) |
 | `shadow_dom_query` | CDP shadow pierce | | | ✓ (Chrome only) |
@@ -275,6 +276,15 @@ const idx = focusable.indexOf(document.activeElement);
 focusable[(idx + 1) % focusable.length].focus();
 ```
 
+### Verify form (v2.1)
+
+Pre-submission safety check. Reads all form field values via `browser.tabs.executeScript()` and captures a viewport screenshot via `browser.tabs.captureVisibleTab()`. Same behavior as Chrome but uses content script injection instead of CDP.
+
+- If `selector` is omitted, uses the form containing the focused element, or the first form on the page
+- Hidden and submit-type inputs are excluded
+- Screenshot requires the tab to be active (Firefox limitation)
+- System prompt guides the LLM to call this before submitting important multi-field forms
+
 ---
 
 ## Content Script
@@ -311,7 +321,7 @@ Elements are filtered for visibility (computed style, dimensions, aria-hidden) a
 
 ## Provider System
 
-Identical to Chrome. Same four providers (OpenAI, Anthropic, llama.cpp, and generic OpenAI-compatible) with the same message format and conversion logic.
+Identical to Chrome. Same five providers (OpenAI, Anthropic, llama.cpp, Ollama, and generic OpenAI-compatible) with the same message format and conversion logic. Ollama uses the OpenAI-compatible provider with `localhost:11434/v1`.
 
 Uses `browser.storage.local` instead of `chrome.storage.local` for config persistence.
 
@@ -350,11 +360,11 @@ Identical to Chrome:
 Same three levels as Chrome:
 - **Normal**: compact step labels
 - **Verbose ON**: full JSON tool args + results
-- **Deep verbose**: right-click verbose button → console dump of full LLM payloads
+- **Deep verbose**: Shift+click verbose button → console dump of full LLM payloads
 
 ### Deep verbose
 
-Works identically to Chrome. The agent stores a ring buffer of LLM requests/responses (max 200 entries). Right-clicking the verbose button fetches and dumps to DevTools console with color-coded groups.
+Works identically to Chrome. The agent stores a ring buffer of LLM requests/responses (max 200 entries). Shift+clicking the verbose button fetches and dumps to DevTools console with color-coded groups.
 
 ---
 

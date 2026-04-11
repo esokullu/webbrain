@@ -1,6 +1,6 @@
 # WebBrain Chrome Extension — Architecture
 
-> Version 1.7.1 · Manifest V3 · Service Worker background
+> Version 2.1.0 · Manifest V3 · Service Worker background
 
 ## High-Level Overview
 
@@ -37,7 +37,7 @@ src/chrome/
 ├── src/
 │   ├── background.js        # Service worker — message router
 │   ├── agent/
-│   │   ├── agent.js          # Core agent loop (1760+ lines)
+│   │   ├── agent.js          # Core agent loop (1820+ lines)
 │   │   ├── tools.js          # Tool schemas + system prompts
 │   │   └── adapters.js       # Per-site guidance (GitHub, Stripe, etc.)
 │   ├── cdp/
@@ -98,7 +98,7 @@ User message
 └───────────────────────────────────────────────────────────┘
     │
     ▼
-┌─ Main Loop (max 60 steps) ───────────────────────────────┐
+┌─ Main Loop (max 120 steps) ──────────────────────────────┐
 │  1. Call provider.chat(messages, {tools, temp, maxTokens})│
 │  2. If response has tool_calls:                           │
 │     a. Execute each tool via _executeToolBatch()          │
@@ -197,7 +197,7 @@ User message
         }
       }
     }
-    // ... 26 more tools (screenshot, scroll, navigate, press_keys, etc.)
+    // ... 27 more tools (screenshot, scroll, navigate, verify_form, press_keys, etc.)
   ],
   "tool_choice": "auto",
   "temperature": 0.3,
@@ -271,7 +271,7 @@ The messages array grows with each tool call/result cycle:
 
 ## Tools
 
-### Full tool list (29 tools)
+### Full tool list (30 tools)
 
 | Tool | Description | Ask | Act |
 |------|-------------|-----|-----|
@@ -299,6 +299,7 @@ The messages array grows with each tool call/result cycle:
 | `read_downloaded_file` | Read a downloaded file's content | | ✓ |
 | `download_resource_from_page` | Download a resource from current page | | ✓ |
 | `download_files` | Download files by URL | | ✓ |
+| `verify_form` | Read form field values + screenshot before submit | | ✓ |
 | `done` | Signal task completion with summary | ✓ | ✓ |
 
 ### Click tool — text matching behavior
@@ -318,6 +319,32 @@ The `click({text: "..."})` tool uses a cascading match strategy:
 ### Press keys (v1)
 
 Limited to three safe keys: `Escape`, `Tab`, `Enter`. Uses CDP `Input.dispatchKeyEvent` for trusted events. Primary use case: dismissing modals, advancing focus, submitting forms.
+
+### Verify form (v2.1)
+
+Pre-submission safety check. Reads all `<input>`, `<select>`, and `<textarea>` values from a form and captures a viewport screenshot. The LLM compares returned values against what it intended to type, catching silent `type_text` failures (focus lost, field cleared by JS, wrong target).
+
+```
+verify_form({selector: "#checkout-form"})
+→ {
+    success: true,
+    action: "https://example.com/checkout",
+    method: "post",
+    fieldCount: 4,
+    fields: [
+      { name: "email", type: "email", value: "user@example.com", placeholder: "Email" },
+      { name: "card",  type: "text",  value: "4242...4242",      placeholder: "Card number" },
+      { name: "plan",  type: "select", value: "Pro [$49/mo]",    placeholder: "" },
+      { name: "terms", type: "checkbox", value: "on",            placeholder: "" }
+    ],
+    image: "data:image/png;base64,..."
+  }
+```
+
+- If `selector` is omitted, uses the form containing the focused element, or the first form on the page
+- Hidden and submit-type inputs are excluded
+- Chrome uses CDP `Runtime.evaluate` + `Page.captureScreenshot`
+- System prompt guides the LLM to call this before submitting important multi-field forms (not search boxes or logins)
 
 ---
 
@@ -367,6 +394,7 @@ class BaseProvider {
 | `OpenAIProvider` | `/v1/chat/completions` | Model name regex (`gpt-4o`, `gpt-5`, vision models) | Also handles LM Studio, OpenRouter |
 | `AnthropicProvider` | `/v1/messages` | `claude-(3\|sonnet-4\|opus-4)` patterns | Converts OpenAI format → Anthropic blocks |
 | `LlamaCppProvider` | `localhost:8080/v1/chat/completions` | Explicit opt-in via config | Local inference, OpenAI-compatible |
+| Ollama (via `OpenAIProvider`) | `localhost:11434/v1/chat/completions` | Explicit opt-in via config | Uses OpenAI-compatible API, apiKey='ollama' |
 
 ### Anthropic message conversion
 
@@ -390,13 +418,13 @@ Three independent detectors run in parallel, strongest action wins:
 ### 1. General repeat detector
 - Records last 6 tool calls (name + args hash + success/error)
 - **Nudge** (warning injected into context): 3 identical calls, or ABAB oscillation
-- **Stop** (conversation halted): nudge threshold hit twice without 3 healthy calls between
+- **Stop** (conversation halted): 8 nudges without 2 consecutive healthy calls between
 
 ### 2. Coordinate click detector
 - Buckets clicks to 5px radius
-- **Nudge** at 2 identical coordinate clicks
-- **Stop** at 3 — with message explaining the coordinates hit empty space
-- Separate window of 8 entries (independent of general detector)
+- **Nudge** at 5 identical coordinate clicks
+- **Stop** at 8 — with message explaining the coordinates hit empty space
+- Separate window of 12 entries (independent of general detector)
 
 ### 3. Navigation detector
 - Snapshots URL before `click`, `navigate`, `execute_js`, `iframe_click`
@@ -469,7 +497,7 @@ Adapters are re-injected mid-conversation if the user navigates to a different m
 ### Verbose mode
 - **Normal**: shows compact step labels ("clicking 'Submit'", "typing 'hello'")
 - **Verbose ON**: shows full JSON tool call args + truncated results
-- **Deep verbose** (hidden): right-click the verbose button → dumps full LLM request/response log to DevTools console
+- **Deep verbose** (hidden): Shift+click the verbose button → dumps full LLM request/response log to DevTools console
 
 ### Deep verbose log
 
@@ -483,7 +511,7 @@ The agent maintains a ring buffer (`_debugLog`, max 200 entries) of every LLM ca
 { type: 'llm_stream_request', step: 3, provider: 'AnthropicProvider', messages: [...], ... }
 ```
 
-Right-clicking the verbose button sends `get_debug_log` to the background, which returns the full buffer. The sidepanel dumps it to `console.log` with color-coded, collapsible groups.
+Shift+clicking the verbose button sends `get_debug_log` to the background, which returns the full buffer. The sidepanel dumps it to `console.log` with color-coded, collapsible groups.
 
 ---
 
