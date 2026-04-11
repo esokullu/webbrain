@@ -46,8 +46,8 @@ class LoopDetectorShim {
     const counts = new Map();
     for (const e of buf) counts.set(e.key, (counts.get(e.key) || 0) + 1);
     const n = counts.get(key) || 0;
-    if (n >= 5) return { kind: 'stop', x: bx, y: by };
-    if (n >= 3) return { kind: 'nudge', x: bx, y: by };
+    if (n >= 8) return { kind: 'stop', x: bx, y: by };
+    if (n >= 5) return { kind: 'nudge', x: bx, y: by };
     return { kind: 'none' };
   }
   _recordCall(tabId, name, args, result) {
@@ -85,7 +85,7 @@ class LoopDetectorShim {
     if (!loop) {
       const healthy = (this.healthyCallsSinceLoop.get(tabId) || 0) + 1;
       this.healthyCallsSinceLoop.set(tabId, healthy);
-      if (healthy >= 3) {
+      if (healthy >= 2) {
         this.loopNudges.delete(tabId);
         this.healthyCallsSinceLoop.delete(tabId);
       }
@@ -94,7 +94,7 @@ class LoopDetectorShim {
     this.healthyCallsSinceLoop.delete(tabId);
     const nudges = (this.loopNudges.get(tabId) || 0) + 1;
     this.loopNudges.set(tabId, nudges);
-    if (nudges >= 4) {
+    if (nudges >= 8) {
       return { kind: 'stop' };
     }
     return { kind: 'nudge' };
@@ -261,17 +261,18 @@ test('ABAB oscillation triggers nudge', () => {
   assert.equal(result.kind, 'nudge');
 });
 
-test('fourth consecutive loop triggers stop', () => {
+test('eighth consecutive loop triggers stop', () => {
   const d = new LoopDetectorShim();
   const tab = 6;
-  // First nudge
+  // First nudge (calls 1-3)
   d._checkLoop(tab, 'click', { selector: '#submit' }, { success: true });
   d._checkLoop(tab, 'click', { selector: '#submit' }, { success: true });
   assert.equal(d._checkLoop(tab, 'click', { selector: '#submit' }, { success: true }).kind, 'nudge');
-  // Continue looping — nudges 2 and 3 are still nudges.
-  assert.equal(d._checkLoop(tab, 'click', { selector: '#submit' }, { success: true }).kind, 'nudge');
-  assert.equal(d._checkLoop(tab, 'click', { selector: '#submit' }, { success: true }).kind, 'nudge');
-  // Fourth nudge → stop.
+  // Nudges 2-7 are still nudges (6 more calls)
+  for (let i = 0; i < 6; i++) {
+    assert.equal(d._checkLoop(tab, 'click', { selector: '#submit' }, { success: true }).kind, 'nudge');
+  }
+  // Eighth nudge → stop.
   const result = d._checkLoop(tab, 'click', { selector: '#submit' }, { success: true });
   assert.equal(result.kind, 'stop');
 });
@@ -298,7 +299,7 @@ test('nudge counter resets after a sustained healthy streak', () => {
   d._checkLoop(tab, 'click', { selector: '#a' }, { success: true });
   d._checkLoop(tab, 'click', { selector: '#a' }, { success: true });
   assert.equal(d._checkLoop(tab, 'click', { selector: '#a' }, { success: true }).kind, 'nudge');
-  // Four distinct healthy calls — resets nudge state (threshold is 3) AND
+  // Four distinct healthy calls — resets nudge state (threshold is 2) AND
   // pushes old #a entries out of the 6-element buffer window.
   for (let i = 0; i < 4; i++) {
     d._checkLoop(tab, 'read_page', { i }, { ok: true });
@@ -327,33 +328,30 @@ test('coord click: first call → none', () => {
   assert.equal(d._checkCoordClickLoop(1, 100, 200).kind, 'none');
 });
 
-test('coord click: second identical → none (relaxed thresholds)', () => {
+test('coord click: fourth identical → none (relaxed thresholds)', () => {
   const d = new LoopDetectorShim();
+  d._checkCoordClickLoop(1, 100, 200);
+  d._checkCoordClickLoop(1, 100, 200);
   d._checkCoordClickLoop(1, 100, 200);
   assert.equal(d._checkCoordClickLoop(1, 100, 200).kind, 'none');
 });
 
-test('coord click: third identical → nudge', () => {
+test('coord click: fifth identical → nudge', () => {
   const d = new LoopDetectorShim();
-  d._checkCoordClickLoop(1, 100, 200);
-  d._checkCoordClickLoop(1, 100, 200);
+  for (let i = 0; i < 4; i++) d._checkCoordClickLoop(1, 100, 200);
   assert.equal(d._checkCoordClickLoop(1, 100, 200).kind, 'nudge');
 });
 
-test('coord click: fifth identical → stop', () => {
+test('coord click: eighth identical → stop', () => {
   const d = new LoopDetectorShim();
-  d._checkCoordClickLoop(1, 100, 200);
-  d._checkCoordClickLoop(1, 100, 200);
-  d._checkCoordClickLoop(1, 100, 200);
-  d._checkCoordClickLoop(1, 100, 200);
+  for (let i = 0; i < 7; i++) d._checkCoordClickLoop(1, 100, 200);
   assert.equal(d._checkCoordClickLoop(1, 100, 200).kind, 'stop');
 });
 
 test('coord click: 5px drift collapses to same bucket', () => {
   const d = new LoopDetectorShim();
-  d._checkCoordClickLoop(1, 100, 200);
-  d._checkCoordClickLoop(1, 100, 200);
-  // (102, 199) rounds to (100, 200) — third identical bucket → nudge
+  for (let i = 0; i < 4; i++) d._checkCoordClickLoop(1, 100, 200);
+  // (102, 199) rounds to (100, 200) — fifth identical bucket → nudge
   assert.equal(d._checkCoordClickLoop(1, 102, 199).kind, 'nudge');
 });
 
@@ -365,20 +363,16 @@ test('coord click: 10px drift = different bucket', () => {
 });
 
 test('coord click: survives interleaved noise (the failure mode this fixes)', () => {
-  // This is the exact pattern from the user trace: click(267,226), then a
-  // bunch of unrelated calls, then click(267,226) again. The general
-  // detector misses it because the unrelated calls fragment the buffer
-  // hash. The coordinate detector should catch it.
+  // Coord clicks accumulate across interleaved noise. Nudge at 5, stop at 8.
   const d = new LoopDetectorShim();
-  d._checkCoordClickLoop(1, 267, 226); // 1st
-  d._checkCoordClickLoop(1, 267, 226); // 2nd — still none
-  assert.equal(d._checkCoordClickLoop(1, 267, 226).kind, 'nudge'); // 3rd → nudge
-  // Even with many other coord clicks in between, the fifth (267,226) stops.
+  for (let i = 0; i < 4; i++) d._checkCoordClickLoop(1, 267, 226);
+  assert.equal(d._checkCoordClickLoop(1, 267, 226).kind, 'nudge'); // 5th → nudge
+  // Interleaved noise doesn't reset the count
   d._checkCoordClickLoop(1, 500, 500);
   d._checkCoordClickLoop(1, 600, 100);
-  d._checkCoordClickLoop(1, 50, 50);
-  assert.equal(d._checkCoordClickLoop(1, 267, 226).kind, 'nudge'); // 4th → nudge
-  assert.equal(d._checkCoordClickLoop(1, 267, 226).kind, 'stop'); // 5th → stop
+  assert.equal(d._checkCoordClickLoop(1, 267, 226).kind, 'nudge'); // 6th → still nudge
+  assert.equal(d._checkCoordClickLoop(1, 267, 226).kind, 'nudge'); // 7th → still nudge
+  assert.equal(d._checkCoordClickLoop(1, 267, 226).kind, 'stop');  // 8th → stop
 });
 
 test('coord click: tabs are isolated', () => {

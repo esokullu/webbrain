@@ -141,8 +141,8 @@ export class Agent {
     const counts = new Map();
     for (const e of buf) counts.set(e.key, (counts.get(e.key) || 0) + 1);
     const n = counts.get(key) || 0;
-    if (n >= 5) return { kind: 'stop', x: bx, y: by };
-    if (n >= 3) return { kind: 'nudge', x: bx, y: by };
+    if (n >= 8) return { kind: 'stop', x: bx, y: by };
+    if (n >= 5) return { kind: 'nudge', x: bx, y: by };
     return { kind: 'none' };
   }
 
@@ -162,7 +162,7 @@ export class Agent {
       // a sustained run of healthy calls (a full window's worth).
       const healthy = (this.healthyCallsSinceLoop.get(tabId) || 0) + 1;
       this.healthyCallsSinceLoop.set(tabId, healthy);
-      if (healthy >= 3) {
+      if (healthy >= 2) {
         this.loopNudges.delete(tabId);
         this.healthyCallsSinceLoop.delete(tabId);
       }
@@ -174,7 +174,7 @@ export class Agent {
     const nudges = (this.loopNudges.get(tabId) || 0) + 1;
     this.loopNudges.set(tabId, nudges);
 
-    if (nudges >= 4) {
+    if (nudges >= 8) {
       this._clearLoopState(tabId);
       const desc = loop.type === 'repeat'
         ? `the same call to ${loop.name}`
