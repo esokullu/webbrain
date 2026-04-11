@@ -19,6 +19,8 @@ export class Agent {
     this.abortFlags = new Map(); // tabId -> boolean
     this.maxSteps = 60; // safety limit for autonomous loops (configurable via settings)
     this.maxContextMessages = 50; // trim beyond this
+    this._debugLog = []; // ring buffer for deep verbose (LLM requests/responses)
+    this._debugLogMax = 200; // max entries before oldest are dropped
     this.maxContextChars = 80000; // rough char budget (~20k tokens)
     this.autoScreenshot = 'state_change';
     this.useSiteAdapters = true;
@@ -917,6 +919,24 @@ export class Agent {
     return this.processMessage(tabId, 'Please continue from where you left off.', onUpdate, mode);
   }
 
+  // ── Deep verbose / debug log ──────────────────────────────────────────
+  _logDebug(entry) {
+    entry.timestamp = new Date().toISOString();
+    this._debugLog.push(entry);
+    if (this._debugLog.length > this._debugLogMax) {
+      this._debugLog.splice(0, this._debugLog.length - this._debugLogMax);
+    }
+  }
+
+  getDebugLog() {
+    return this._debugLog;
+  }
+
+  clearDebugLog() {
+    this._debugLog = [];
+  }
+  // ─────────────────────────────────────────────────────────────────────
+
   /**
    * Process a single user message — may trigger a multi-step tool-use loop.
    * @param {number} tabId
@@ -958,24 +978,26 @@ export class Agent {
       let result;
       try {
         const useTools = provider.supportsTools;
-        result = await provider.chat(this._pruneOldImages(messages), {
-          tools: useTools ? tools : undefined,
-          temperature: 0.3,
-          maxTokens: 4096,
-        });
+        const chatOpts = { tools: useTools ? tools : undefined, temperature: 0.3, maxTokens: 4096 };
+        const prunedMessages = this._pruneOldImages(messages);
+        this._logDebug({ type: 'llm_request', step: steps, provider: provider.constructor.name, messages: prunedMessages, options: chatOpts });
+        result = await provider.chat(prunedMessages, chatOpts);
+        this._logDebug({ type: 'llm_response', step: steps, content: result.content, toolCalls: result.toolCalls });
       } catch (e) {
+        this._logDebug({ type: 'llm_error', step: steps, error: e.message });
         // If context overflow, trim aggressively and retry once
         if (this._isContextOverflow(e.message)) {
           onUpdate('thinking', { step: steps, note: 'Context too large, trimming...' });
           this._emergencyTrim(messages);
           try {
             const useTools = provider.supportsTools;
-            result = await provider.chat(this._pruneOldImages(messages), {
-              tools: useTools ? tools : undefined,
-              temperature: 0.3,
-              maxTokens: 4096,
-            });
+            const chatOpts = { tools: useTools ? tools : undefined, temperature: 0.3, maxTokens: 4096 };
+            const prunedMessages = this._pruneOldImages(messages);
+            this._logDebug({ type: 'llm_request_retry', step: steps, provider: provider.constructor.name, messages: prunedMessages, options: chatOpts });
+            result = await provider.chat(prunedMessages, chatOpts);
+            this._logDebug({ type: 'llm_response_retry', step: steps, content: result.content, toolCalls: result.toolCalls });
           } catch (e2) {
+            this._logDebug({ type: 'llm_error_retry', step: steps, error: e2.message });
             onUpdate('error', { message: `Context still too large after trimming: ${e2.message}` });
             finalResponse = 'The conversation got too long. Please start a new conversation (click the + button).';
             messages.push({ role: 'assistant', content: finalResponse });
@@ -1068,11 +1090,11 @@ export class Agent {
         let toolCallsAccumulator = {};
         let hasToolCalls = false;
 
-        for await (const chunk of provider.chatStream(this._pruneOldImages(messages), {
-          tools: provider.supportsTools ? tools : undefined,
-          temperature: 0.3,
-          maxTokens: 4096,
-        })) {
+        const streamOpts = { tools: provider.supportsTools ? tools : undefined, temperature: 0.3, maxTokens: 4096 };
+        const prunedMessages = this._pruneOldImages(messages);
+        this._logDebug({ type: 'llm_stream_request', step: steps, provider: provider.constructor.name, messages: prunedMessages, options: streamOpts });
+
+        for await (const chunk of provider.chatStream(prunedMessages, streamOpts)) {
           if (chunk.type === 'text') {
             fullText += chunk.content;
             onUpdate('text_delta', { content: chunk.content });
@@ -1107,6 +1129,7 @@ export class Agent {
 
         if (hasToolCalls) {
           const toolCalls = Object.values(toolCallsAccumulator);
+          this._logDebug({ type: 'llm_stream_response', step: steps, content: fullText, toolCalls });
           messages.push({
             role: 'assistant',
             content: fullText || null,
@@ -1122,10 +1145,12 @@ export class Agent {
         }
 
         // No tool calls — final response
+        this._logDebug({ type: 'llm_stream_response', step: steps, content: fullText, toolCalls: null });
         messages.push({ role: 'assistant', content: fullText });
         return fullText;
 
       } catch (e) {
+        this._logDebug({ type: 'llm_stream_error', step: steps, error: e.message });
         // If context overflow, trim and retry
         if (this._isContextOverflow(e.message)) {
           onUpdate('thinking', { step: steps, note: 'Context too large, trimming...' });

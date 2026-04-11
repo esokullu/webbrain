@@ -137,6 +137,15 @@ async function handleMessage(msg, sender) {
       return { ok: true };
     }
 
+    case 'get_debug_log': {
+      return { log: agent.getDebugLog() };
+    }
+
+    case 'clear_debug_log': {
+      agent.clearDebugLog();
+      return { ok: true };
+    }
+
     case 'get_providers': {
       return { providers: providerManager.getAll(), active: providerManager.activeProviderId };
     }
