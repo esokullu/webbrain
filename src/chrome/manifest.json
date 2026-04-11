@@ -10,7 +10,8 @@
     "storage",
     "webNavigation",
     "debugger",
-    "downloads"
+    "downloads",
+    "privateNetworkAccess"
   ],
   "host_permissions": [
     "<all_urls>",
