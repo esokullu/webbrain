@@ -1532,6 +1532,7 @@ export class Agent {
    *   - <tool_call>{"name":"...","arguments":{...}}</tool_call>
    *   - <|tool_call|>...<|/tool_call|>  or  <|tool_call>...<tool_call|>
    *   - <functioncall>{"name":"...","arguments":{...}}</functioncall>
+   *   - call:toolName{key:<|"|>value<|"|>}  (custom quote-token format)
    *   - Bare JSON objects with a known tool name
    * Returns an array of tool call objects in OpenAI format, or [] if nothing
    * was found. Only tool names present in AGENT_TOOL_NAMES are accepted.
@@ -1553,12 +1554,38 @@ export class Agent {
     for (const re of patterns) {
       let m;
       while ((m = re.exec(text)) !== null) {
+        const inner = m[1].trim();
+        // Try JSON first (most common).
         try {
-          const obj = JSON.parse(m[1].trim());
+          const obj = JSON.parse(inner);
           if (obj && obj.name && AGENT_TOOL_NAMES.has(obj.name)) {
             results.push(obj);
+            continue;
           }
-        } catch { /* not valid JSON, skip */ }
+        } catch { /* not JSON — try call:name{} format below */ }
+
+        // call:toolName{key:<|"|>value<|"|>, ...} format.
+        // Some local models use <|"|> as quote tokens and call:name as the
+        // invocation syntax.  Normalize to JSON and parse.
+        const callMatch = /^call:(\w+)\s*\{([\s\S]*)\}$/.exec(inner);
+        if (callMatch && AGENT_TOOL_NAMES.has(callMatch[1])) {
+          const toolName = callMatch[1];
+          let argsBody = callMatch[2]
+            .replace(/<\|"\|>/g, '"')  // replace quote tokens with real quotes
+            .replace(/<\|'\\?\|>/g, "'");  // handle single-quote tokens if any
+          // argsBody is now like: url:"https://example.com",text:"hello"
+          // Wrap unquoted keys to make valid JSON: key:"val" → "key":"val"
+          argsBody = argsBody.replace(/(?<=^|,)\s*(\w+)\s*:/g, '"$1":');
+          try {
+            const args = JSON.parse(`{${argsBody}}`);
+            results.push({ name: toolName, arguments: args });
+          } catch {
+            // If JSON parse still fails, try treating entire body as single
+            // string argument for zero-arg or simple calls.
+            results.push({ name: toolName, arguments: {} });
+          }
+          continue;
+        }
       }
     }
 
@@ -1575,6 +1602,26 @@ export class Agent {
             results.push(obj);
           }
         } catch { /* skip */ }
+      }
+    }
+
+    // Last resort: call:toolName{...} outside of any wrapper tags.
+    if (results.length === 0) {
+      const callRe = /call:(\w+)\s*\{([\s\S]*?)\}/g;
+      let m;
+      while ((m = callRe.exec(text)) !== null) {
+        if (!AGENT_TOOL_NAMES.has(m[1])) continue;
+        const toolName = m[1];
+        let argsBody = m[2]
+          .replace(/<\|"\|>/g, '"')
+          .replace(/<\|'\\?\|>/g, "'");
+        argsBody = argsBody.replace(/(?<=^|,)\s*(\w+)\s*:/g, '"$1":');
+        try {
+          const args = JSON.parse(`{${argsBody}}`);
+          results.push({ name: toolName, arguments: args });
+        } catch {
+          results.push({ name: toolName, arguments: {} });
+        }
       }
     }
 
