@@ -441,6 +441,12 @@ export const ASK_ONLY_TOOLS = [
 ];
 
 /**
+ * Set of all known tool names — used by the text fallback parser to validate
+ * tool calls extracted from raw LLM output.
+ */
+export const AGENT_TOOL_NAMES = new Set(AGENT_TOOLS.map(t => t.function.name));
+
+/**
  * Get tools filtered by mode.
  */
 export function getToolsForMode(mode) {

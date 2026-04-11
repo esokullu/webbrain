@@ -49,6 +49,16 @@ export class ProviderManager {
         supportsVision: false,
         enabled: true,
       },
+      ollama: {
+        type: 'openai',
+        label: 'Ollama (Local)',
+        providerName: 'ollama',
+        baseUrl: 'http://localhost:11434/v1',
+        model: 'llama3.1',
+        apiKey: 'ollama',
+        supportsVision: false,
+        enabled: true,
+      },
       lmstudio: {
         type: 'openai',
         label: 'LM Studio (Local)',

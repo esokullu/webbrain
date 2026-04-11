@@ -1,4 +1,4 @@
-import { AGENT_TOOLS, getToolsForMode, SYSTEM_PROMPT_ASK, SYSTEM_PROMPT_ACT } from './tools.js';
+import { AGENT_TOOLS, AGENT_TOOL_NAMES, getToolsForMode, SYSTEM_PROMPT_ASK, SYSTEM_PROMPT_ACT } from './tools.js';
 import { getActiveAdapter } from './adapters.js';
 import {
   fetchUrl,
@@ -935,6 +935,65 @@ export class Agent {
   clearDebugLog() {
     this._debugLog = [];
   }
+
+  /**
+   * Attempt to parse tool calls from raw LLM text output.
+   * Some local models emit tool calls as text markup instead of using the
+   * structured tool_calls field. This catches the most common formats:
+   *   - <tool_call>{"name":"...","arguments":{...}}</tool_call>
+   *   - <|tool_call|>...<|/tool_call|>  or  <|tool_call>...<tool_call|>
+   *   - <functioncall>{"name":"...","arguments":{...}}</functioncall>
+   *   - Bare JSON objects with a known tool name
+   * Returns an array of tool call objects in OpenAI format, or [] if nothing
+   * was found. Only tool names present in AGENT_TOOL_NAMES are accepted.
+   */
+  _tryParseToolCallsFromText(text) {
+    if (!text || text.length > 10000) return [];
+
+    const results = [];
+    const patterns = [
+      /<tool_call>\s*([\s\S]*?)\s*<\/tool_call>/gi,
+      /<\|tool_call\|?>\s*([\s\S]*?)\s*<\|?\/?tool_call\|?>/gi,
+      /<functioncall>\s*([\s\S]*?)\s*<\/functioncall>/gi,
+    ];
+
+    for (const re of patterns) {
+      let m;
+      while ((m = re.exec(text)) !== null) {
+        try {
+          const obj = JSON.parse(m[1].trim());
+          if (obj && obj.name && AGENT_TOOL_NAMES.has(obj.name)) {
+            results.push(obj);
+          }
+        } catch { /* not valid JSON, skip */ }
+      }
+    }
+
+    if (results.length === 0) {
+      const bareRe = /\{[^{}]*"name"\s*:\s*"(\w+)"[^{}]*\}/g;
+      let m;
+      while ((m = bareRe.exec(text)) !== null) {
+        if (!AGENT_TOOL_NAMES.has(m[1])) continue;
+        try {
+          const obj = JSON.parse(m[0]);
+          if (obj && obj.name && AGENT_TOOL_NAMES.has(obj.name)) {
+            results.push(obj);
+          }
+        } catch { /* skip */ }
+      }
+    }
+
+    return results.map((obj, i) => ({
+      id: `fallback_call_${Date.now()}_${i}`,
+      type: 'function',
+      function: {
+        name: obj.name,
+        arguments: typeof obj.arguments === 'string'
+          ? obj.arguments
+          : JSON.stringify(obj.arguments || obj.parameters || {}),
+      },
+    }));
+  }
   // ─────────────────────────────────────────────────────────────────────
 
   /**
@@ -1017,6 +1076,17 @@ export class Agent {
         onUpdate('warning', { message: 'Stopped by user.' });
         messages.push({ role: 'assistant', content: finalResponse });
         break;
+      }
+
+      // Fallback: if the LLM emitted tool calls as raw text instead of
+      // using the structured tool_calls field, try to parse them out.
+      if ((!result.toolCalls || result.toolCalls.length === 0) && result.content) {
+        const fallback = this._tryParseToolCallsFromText(result.content);
+        if (fallback.length > 0) {
+          this._logDebug({ type: 'llm_text_fallback_parse', step: steps, parsed: fallback.map(tc => tc.function.name) });
+          result.toolCalls = fallback;
+          result.content = null;
+        }
       }
 
       if (result.toolCalls && result.toolCalls.length > 0) {
@@ -1124,6 +1194,17 @@ export class Agent {
             }
           } else if (chunk.type === 'done') {
             break;
+          }
+        }
+
+        // Fallback: parse tool calls from streamed text if structured calls are missing.
+        if (!hasToolCalls && fullText) {
+          const fallback = this._tryParseToolCallsFromText(fullText);
+          if (fallback.length > 0) {
+            this._logDebug({ type: 'llm_text_fallback_parse', step: steps, parsed: fallback.map(tc => tc.function.name) });
+            hasToolCalls = true;
+            fallback.forEach((tc, i) => { toolCallsAccumulator[i] = tc; });
+            fullText = '';
           }
         }
 

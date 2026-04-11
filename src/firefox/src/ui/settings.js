@@ -71,6 +71,13 @@ function renderProviders() {
         { key: 'supportsVision', label: 'Model supports vision (multimodal)', type: 'checkbox' },
       ],
     },
+    ollama: {
+      fields: [
+        { key: 'baseUrl', label: 'Server URL', type: 'text', placeholder: 'http://localhost:11434/v1' },
+        { key: 'model', label: 'Model', type: 'text', placeholder: 'llama3.1' },
+        { key: 'supportsVision', label: 'Model supports vision (multimodal)', type: 'checkbox' },
+      ],
+    },
     lmstudio: {
       fields: [
         { key: 'baseUrl', label: 'Server URL', type: 'text', placeholder: 'http://localhost:1234/v1' },
