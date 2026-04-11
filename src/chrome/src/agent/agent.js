@@ -21,7 +21,7 @@ export class Agent {
     this.hydratedTabs = new Set(); // tabIds we've already pulled from storage
     this.persistTimers = new Map(); // tabId -> debounce handle
     this.abortFlags = new Map(); // tabId -> boolean
-    this.maxSteps = 60; // safety limit for autonomous loops (configurable via settings)
+    this.maxSteps = 120; // safety limit for autonomous loops (configurable via settings)
     this.maxContextMessages = 50; // trim beyond this
     this._debugLog = []; // ring buffer for deep verbose (LLM requests/responses)
     this._debugLogMax = 200; // max entries before oldest are dropped
@@ -126,10 +126,8 @@ export class Agent {
    * of 8 — generous, since the goal is to survive interleaved noise like
    * execute_js / type_text / read_page calls between coord retries.
    *
-   * Returns 'nudge' on the 2nd repeat (much earlier than the general
-   * detector's 3-of-same), and 'stop' on the 3rd. The reasoning: a coord
-   * click that "succeeds" but doesn't change anything is the highest-cost
-   * failure mode and should be caught fastest.
+   * Returns 'nudge' on the 3rd repeat and 'stop' on the 5th. Gives the
+   * agent more room to retry on pages with loading states or animations.
    */
   _checkCoordClickLoop(tabId, x, y) {
     const bx = Math.round(x / 5) * 5;
@@ -137,14 +135,14 @@ export class Agent {
     const key = `${bx},${by}`;
     const buf = this.recentCoordClicks.get(tabId) || [];
     buf.push({ key, ts: Date.now() });
-    if (buf.length > 8) buf.shift();
+    if (buf.length > 12) buf.shift();
     this.recentCoordClicks.set(tabId, buf);
 
     const counts = new Map();
     for (const e of buf) counts.set(e.key, (counts.get(e.key) || 0) + 1);
     const n = counts.get(key) || 0;
-    if (n >= 3) return { kind: 'stop', x: bx, y: by };
-    if (n >= 2) return { kind: 'nudge', x: bx, y: by };
+    if (n >= 5) return { kind: 'stop', x: bx, y: by };
+    if (n >= 3) return { kind: 'nudge', x: bx, y: by };
     return { kind: 'none' };
   }
 
@@ -164,7 +162,7 @@ export class Agent {
       // a sustained run of healthy calls (a full window's worth).
       const healthy = (this.healthyCallsSinceLoop.get(tabId) || 0) + 1;
       this.healthyCallsSinceLoop.set(tabId, healthy);
-      if (healthy >= 6) {
+      if (healthy >= 3) {
         this.loopNudges.delete(tabId);
         this.healthyCallsSinceLoop.delete(tabId);
       }
@@ -176,19 +174,19 @@ export class Agent {
     const nudges = (this.loopNudges.get(tabId) || 0) + 1;
     this.loopNudges.set(tabId, nudges);
 
-    if (nudges >= 2) {
+    if (nudges >= 4) {
       this._clearLoopState(tabId);
       const desc = loop.type === 'repeat'
         ? `the same call to ${loop.name}`
         : `between ${loop.a} and ${loop.b}`;
       return {
         kind: 'stop',
-        message: `Stopped: I detected I was looping on ${desc} without making progress, even after a warning to try something different. Please tell me what's blocking, give me a different instruction, or take a look at the page yourself.`,
+        message: `Stopped: I detected I was looping on ${desc} without making progress after multiple warnings. Please tell me what's blocking, give me a different instruction, or take a look at the page yourself.`,
       };
     }
 
     const warning = loop.type === 'repeat'
-      ? `[LOOP DETECTED: You've just called ${loop.name} ${loop.count} times with the same arguments and the same outcome. The current approach is NOT working. Do something fundamentally different on your next step: a different selector, a different tool, scroll to find a different element, take a screenshot to see what's actually on screen, or call done() if the task is impossible. DO NOT repeat this exact call again.]`
+      ? `[LOOP DETECTED: You've just called ${loop.name} ${loop.count} times with the same arguments and the same outcome. The current approach is NOT working. Try something fundamentally different: a different selector, a different tool, scroll to find a different element, or take a screenshot to see what's actually on screen. DO NOT repeat this exact call again — try a creative alternative.]`
       : `[LOOP DETECTED: You're oscillating between ${loop.a} and ${loop.b} without making progress. Stop. Take a screenshot to see what's actually happening, then try a completely different approach.]`;
     return { kind: 'nudge', warning };
   }
@@ -439,14 +437,14 @@ export class Agent {
       if (loopCheck.kind === 'stop' || coordCheck.kind === 'stop') {
         effectiveKind = 'stop';
         if (coordCheck.kind === 'stop') {
-          stopMessage = `Stopped: I clicked at (or near) coordinates (${coordCheck.x}, ${coordCheck.y}) three times and the page never responded. That position is hitting empty space, an overlay, or the wrong element. Either there's no clickable target there, or you need a selector-based click instead. Please give a different instruction or check the page yourself.`;
+          stopMessage = `Stopped: I clicked at (or near) coordinates (${coordCheck.x}, ${coordCheck.y}) multiple times and the page never responded. That position is hitting empty space, an overlay, or the wrong element. Please give a different instruction or check the page yourself.`;
         } else {
           stopMessage = loopCheck.message;
         }
       } else if (loopCheck.kind === 'nudge' || coordCheck.kind === 'nudge') {
         effectiveKind = 'nudge';
         if (coordCheck.kind === 'nudge') {
-          nudgeWarning = `[COORDINATE LOOP DETECTED: You've clicked at or near (${coordCheck.x}, ${coordCheck.y}) twice with no visible page change. The click is missing its target — that position is empty space, an overlay, or the wrong element. STOP using these coordinates. Either: (a) call get_interactive_elements to find a real selector for the element you actually want, (b) call click({selector: "..."}) using a selector you've already discovered earlier in this conversation (look back at your prior tool calls), or (c) take a fresh screenshot and look more carefully at where the actual button is. DO NOT click these coordinates again — the next attempt will be hard-stopped.]`;
+          nudgeWarning = `[COORDINATE CLICK WARNING: You've clicked at or near (${coordCheck.x}, ${coordCheck.y}) several times with no visible page change. The click may be missing its target. Try: (a) call get_interactive_elements to find a real selector, (b) click({text: "..."}) to target by visible text, or (c) take a fresh screenshot and look more carefully at element positions. Try a different approach before clicking these coordinates again.]`;
         } else {
           nudgeWarning = loopCheck.warning;
         }
@@ -1705,10 +1703,21 @@ export class Agent {
             break;
           }
         } else {
-          onUpdate('error', { message: e.message });
-          finalResponse = `Error communicating with LLM: ${e.message}`;
-          messages.push({ role: 'assistant', content: finalResponse });
-          break;
+          // Retry once after a short delay for transient errors (rate limits, network).
+          this._logDebug({ type: 'llm_error_retrying', step: steps, error: e.message });
+          await new Promise(r => setTimeout(r, 2000));
+          try {
+            const useTools2 = provider.supportsTools;
+            const chatOpts2 = { tools: useTools2 ? tools : undefined, temperature: 0.3, maxTokens: 4096 };
+            result = await provider.chat(this._pruneOldImages(messages), chatOpts2);
+            this._logDebug({ type: 'llm_response_after_retry', step: steps, content: result.content, toolCalls: result.toolCalls });
+          } catch (e2) {
+            this._logDebug({ type: 'llm_error_final', step: steps, error: e2.message });
+            onUpdate('error', { message: e2.message });
+            finalResponse = `Error communicating with LLM: ${e2.message}`;
+            messages.push({ role: 'assistant', content: finalResponse });
+            break;
+          }
         }
       }
 

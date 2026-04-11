@@ -41,13 +41,13 @@ class LoopDetectorShim {
     const key = `${bx},${by}`;
     const buf = this.recentCoordClicks.get(tabId) || [];
     buf.push({ key, ts: Date.now() });
-    if (buf.length > 8) buf.shift();
+    if (buf.length > 12) buf.shift();
     this.recentCoordClicks.set(tabId, buf);
     const counts = new Map();
     for (const e of buf) counts.set(e.key, (counts.get(e.key) || 0) + 1);
     const n = counts.get(key) || 0;
-    if (n >= 3) return { kind: 'stop', x: bx, y: by };
-    if (n >= 2) return { kind: 'nudge', x: bx, y: by };
+    if (n >= 5) return { kind: 'stop', x: bx, y: by };
+    if (n >= 3) return { kind: 'nudge', x: bx, y: by };
     return { kind: 'none' };
   }
   _recordCall(tabId, name, args, result) {
@@ -85,7 +85,7 @@ class LoopDetectorShim {
     if (!loop) {
       const healthy = (this.healthyCallsSinceLoop.get(tabId) || 0) + 1;
       this.healthyCallsSinceLoop.set(tabId, healthy);
-      if (healthy >= 6) {
+      if (healthy >= 3) {
         this.loopNudges.delete(tabId);
         this.healthyCallsSinceLoop.delete(tabId);
       }
@@ -94,7 +94,7 @@ class LoopDetectorShim {
     this.healthyCallsSinceLoop.delete(tabId);
     const nudges = (this.loopNudges.get(tabId) || 0) + 1;
     this.loopNudges.set(tabId, nudges);
-    if (nudges >= 2) {
+    if (nudges >= 4) {
       return { kind: 'stop' };
     }
     return { kind: 'nudge' };
@@ -261,15 +261,17 @@ test('ABAB oscillation triggers nudge', () => {
   assert.equal(result.kind, 'nudge');
 });
 
-test('second consecutive loop triggers stop', () => {
+test('fourth consecutive loop triggers stop', () => {
   const d = new LoopDetectorShim();
   const tab = 6;
   // First nudge
   d._checkLoop(tab, 'click', { selector: '#submit' }, { success: true });
   d._checkLoop(tab, 'click', { selector: '#submit' }, { success: true });
   assert.equal(d._checkLoop(tab, 'click', { selector: '#submit' }, { success: true }).kind, 'nudge');
-  // Buffer is now full of identical calls — the very next identical one
-  // is still a loop, and since loopNudges is at 1, it escalates to stop.
+  // Continue looping — nudges 2 and 3 are still nudges.
+  assert.equal(d._checkLoop(tab, 'click', { selector: '#submit' }, { success: true }).kind, 'nudge');
+  assert.equal(d._checkLoop(tab, 'click', { selector: '#submit' }, { success: true }).kind, 'nudge');
+  // Fourth nudge → stop.
   const result = d._checkLoop(tab, 'click', { selector: '#submit' }, { success: true });
   assert.equal(result.kind, 'stop');
 });
@@ -281,15 +283,12 @@ test('nudge counter persists across one healthy call (slow loop)', () => {
   d._checkLoop(tab, 'click', { selector: '#submit' }, { success: true });
   d._checkLoop(tab, 'click', { selector: '#submit' }, { success: true });
   assert.equal(d._checkLoop(tab, 'click', { selector: '#submit' }, { success: true }).kind, 'nudge');
-  // One healthy interleaved call — must NOT reset nudge state.
+  // One healthy interleaved call — must NOT reset nudge state (need 3 to reset).
   d._checkLoop(tab, 'read_page', {}, { ok: true });
-  // Resume the loop. The window now has [#submit, #submit, #submit, read_page,
-  // #submit, ...]. After this one click the buffer's last 6 entries contain
-  // 4× #submit and 1× read_page; that's 4 ≥ 3 so loop is still detected.
-  // loopNudges is still 1 (one healthy call doesn't reset), so this becomes
-  // the second nudge → stop.
+  // Resume the loop. The window still has enough #submit entries to detect.
+  // loopNudges is still 1 (one healthy call doesn't reset), so this is nudge #2.
   const result = d._checkLoop(tab, 'click', { selector: '#submit' }, { success: true });
-  assert.equal(result.kind, 'stop', `expected stop, got ${result.kind}`);
+  assert.equal(result.kind, 'nudge', `expected nudge, got ${result.kind}`);
 });
 
 test('nudge counter resets after a sustained healthy streak', () => {
@@ -299,12 +298,12 @@ test('nudge counter resets after a sustained healthy streak', () => {
   d._checkLoop(tab, 'click', { selector: '#a' }, { success: true });
   d._checkLoop(tab, 'click', { selector: '#a' }, { success: true });
   assert.equal(d._checkLoop(tab, 'click', { selector: '#a' }, { success: true }).kind, 'nudge');
-  // Six healthy calls — should reset both buffer pressure and nudge state.
-  for (let i = 0; i < 6; i++) {
+  // Four distinct healthy calls — resets nudge state (threshold is 3) AND
+  // pushes old #a entries out of the 6-element buffer window.
+  for (let i = 0; i < 4; i++) {
     d._checkLoop(tab, 'read_page', { i }, { ok: true });
   }
-  // Now nudges should be cleared. Six fresh distinct calls means buffer
-  // doesn't have 3 of the same, so detector returns 'none' on next call.
+  // Now nudges should be cleared and buffer doesn't have 3× #a.
   const result = d._checkLoop(tab, 'click', { selector: '#a' }, { success: true });
   assert.equal(result.kind, 'none');
 });
@@ -328,14 +327,23 @@ test('coord click: first call → none', () => {
   assert.equal(d._checkCoordClickLoop(1, 100, 200).kind, 'none');
 });
 
-test('coord click: second identical → nudge (faster than general detector)', () => {
+test('coord click: second identical → none (relaxed thresholds)', () => {
   const d = new LoopDetectorShim();
+  d._checkCoordClickLoop(1, 100, 200);
+  assert.equal(d._checkCoordClickLoop(1, 100, 200).kind, 'none');
+});
+
+test('coord click: third identical → nudge', () => {
+  const d = new LoopDetectorShim();
+  d._checkCoordClickLoop(1, 100, 200);
   d._checkCoordClickLoop(1, 100, 200);
   assert.equal(d._checkCoordClickLoop(1, 100, 200).kind, 'nudge');
 });
 
-test('coord click: third identical → stop', () => {
+test('coord click: fifth identical → stop', () => {
   const d = new LoopDetectorShim();
+  d._checkCoordClickLoop(1, 100, 200);
+  d._checkCoordClickLoop(1, 100, 200);
   d._checkCoordClickLoop(1, 100, 200);
   d._checkCoordClickLoop(1, 100, 200);
   assert.equal(d._checkCoordClickLoop(1, 100, 200).kind, 'stop');
@@ -344,7 +352,8 @@ test('coord click: third identical → stop', () => {
 test('coord click: 5px drift collapses to same bucket', () => {
   const d = new LoopDetectorShim();
   d._checkCoordClickLoop(1, 100, 200);
-  // (102, 199) rounds to (100, 200)
+  d._checkCoordClickLoop(1, 100, 200);
+  // (102, 199) rounds to (100, 200) — third identical bucket → nudge
   assert.equal(d._checkCoordClickLoop(1, 102, 199).kind, 'nudge');
 });
 
@@ -361,14 +370,15 @@ test('coord click: survives interleaved noise (the failure mode this fixes)', ()
   // detector misses it because the unrelated calls fragment the buffer
   // hash. The coordinate detector should catch it.
   const d = new LoopDetectorShim();
-  d._checkCoordClickLoop(1, 267, 226);
-  // ... interleaved tools (not coord clicks, so they don't enter this buffer)
-  assert.equal(d._checkCoordClickLoop(1, 267, 226).kind, 'nudge');
-  // Even with many other coord clicks in between, the third (267,226) stops.
+  d._checkCoordClickLoop(1, 267, 226); // 1st
+  d._checkCoordClickLoop(1, 267, 226); // 2nd — still none
+  assert.equal(d._checkCoordClickLoop(1, 267, 226).kind, 'nudge'); // 3rd → nudge
+  // Even with many other coord clicks in between, the fifth (267,226) stops.
   d._checkCoordClickLoop(1, 500, 500);
   d._checkCoordClickLoop(1, 600, 100);
   d._checkCoordClickLoop(1, 50, 50);
-  assert.equal(d._checkCoordClickLoop(1, 267, 226).kind, 'stop');
+  assert.equal(d._checkCoordClickLoop(1, 267, 226).kind, 'nudge'); // 4th → nudge
+  assert.equal(d._checkCoordClickLoop(1, 267, 226).kind, 'stop'); // 5th → stop
 });
 
 test('coord click: tabs are isolated', () => {
@@ -379,11 +389,11 @@ test('coord click: tabs are isolated', () => {
   assert.equal(d._checkCoordClickLoop(2, 100, 200).kind, 'none');
 });
 
-test('coord click: window of 8 — old entries roll out', () => {
+test('coord click: window of 12 — old entries roll out', () => {
   const d = new LoopDetectorShim();
   d._checkCoordClickLoop(1, 100, 200); // first
-  // 8 distinct intervening clicks
-  for (let i = 0; i < 8; i++) {
+  // 12 distinct intervening clicks
+  for (let i = 0; i < 12; i++) {
     d._checkCoordClickLoop(1, 50 + i * 20, 50);
   }
   // The original (100,200) has been pushed out. Next (100,200) is fresh.

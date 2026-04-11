@@ -90,46 +90,47 @@ async function init() {
 }
 
 if (verboseBtn) {
-  verboseBtn.addEventListener('click', () => {
+  verboseBtn.addEventListener('click', async (e) => {
+    // Shift+click → dump deep debug log to DevTools console (hidden feature)
+    if (e.shiftKey) {
+      try {
+        const response = await sendToBackground('get_debug_log');
+        if (response?.log?.length) {
+          console.group('%c[WebBrain Deep Verbose] %d entries', 'color:#7c3aed;font-weight:bold', response.log.length);
+          for (const entry of response.log) {
+            const label = entry.type || 'unknown';
+            const ts = entry.timestamp || '';
+            if (label.includes('request')) {
+              console.groupCollapsed(`%c→ ${label} %c[step ${entry.step}] ${ts}`, 'color:#2563eb;font-weight:bold', 'color:#6b7280');
+              console.log('Provider:', entry.provider);
+              console.log('Messages:', entry.messages);
+              console.log('Options:', entry.options);
+              console.groupEnd();
+            } else if (label.includes('response')) {
+              console.groupCollapsed(`%c← ${label} %c[step ${entry.step}] ${ts}`, 'color:#059669;font-weight:bold', 'color:#6b7280');
+              console.log('Content:', entry.content);
+              console.log('Tool calls:', entry.toolCalls);
+              console.groupEnd();
+            } else if (label.includes('error')) {
+              console.log(`%c✗ ${label} [step ${entry.step}] ${ts}: %c${entry.error}`, 'color:#dc2626;font-weight:bold', 'color:#dc2626');
+            } else {
+              console.log(`${label} [step ${entry.step}] ${ts}`, entry);
+            }
+          }
+          console.groupEnd();
+        } else {
+          console.log('%c[WebBrain Deep Verbose] No entries yet — run a query first.', 'color:#7c3aed');
+        }
+      } catch (err) {
+        console.error('[WebBrain Deep Verbose] Failed to fetch debug log:', err);
+      }
+      return; // don't toggle verbose mode
+    }
+
+    // Normal click → toggle verbose mode
     verboseMode = !verboseMode;
     verboseBtn.classList.toggle('active', verboseMode);
     browser.storage.local.set({ verboseMode }).catch(() => {});
-  });
-
-  // Right-click verbose button → dump deep debug log to DevTools console
-  verboseBtn.addEventListener('contextmenu', async (e) => {
-    e.preventDefault();
-    try {
-      const response = await sendToBackground('get_debug_log');
-      if (response?.log?.length) {
-        console.group('%c[WebBrain Deep Verbose] %d entries', 'color:#7c3aed;font-weight:bold', response.log.length);
-        for (const entry of response.log) {
-          const label = entry.type || 'unknown';
-          const ts = entry.timestamp || '';
-          if (label.includes('request')) {
-            console.groupCollapsed(`%c→ ${label} %c[step ${entry.step}] ${ts}`, 'color:#2563eb;font-weight:bold', 'color:#6b7280');
-            console.log('Provider:', entry.provider);
-            console.log('Messages:', entry.messages);
-            console.log('Options:', entry.options);
-            console.groupEnd();
-          } else if (label.includes('response')) {
-            console.groupCollapsed(`%c← ${label} %c[step ${entry.step}] ${ts}`, 'color:#059669;font-weight:bold', 'color:#6b7280');
-            console.log('Content:', entry.content);
-            console.log('Tool calls:', entry.toolCalls);
-            console.groupEnd();
-          } else if (label.includes('error')) {
-            console.log(`%c✗ ${label} [step ${entry.step}] ${ts}: %c${entry.error}`, 'color:#dc2626;font-weight:bold', 'color:#dc2626');
-          } else {
-            console.log(`${label} [step ${entry.step}] ${ts}`, entry);
-          }
-        }
-        console.groupEnd();
-      } else {
-        console.log('%c[WebBrain Deep Verbose] No entries yet — run a query with verbose mode ON first.', 'color:#7c3aed');
-      }
-    } catch (err) {
-      console.error('[WebBrain Deep Verbose] Failed to fetch debug log:', err);
-    }
   });
 }
 
