@@ -1259,25 +1259,61 @@ export class Agent {
           };
         }
         if (args.text) {
-          // Text-based click: find the first interactive element whose text
-          // contains the given string (case-insensitive). Resolves in JS via
-          // a simple walker over common interactive selectors. Then clicks
-          // via the same robust CDP path.
+          // Text-based click with auto-fallback matching.
+          // When textMatch is not specified (default), tries exact → prefix →
+          // contains in order. At each level, if multiple elements match, an
+          // ambiguity error is returned instead of clicking an arbitrary one.
+          // When textMatch IS specified, only that mode is used.
           const result = await cdpClient.evaluate(tabId, `
             (() => {
               const needle = ${JSON.stringify(args.text.toLowerCase())};
-              const sels = 'a, button, [role="button"], [role="link"], [role="tab"], [role="menuitem"], input[type="button"], input[type="submit"], summary, [onclick], [data-action]';
+              const explicit = ${JSON.stringify(args.textMatch || '')};
+              const sels = 'a, button, [role="button"], [role="link"], [role="tab"], [role="menuitem"], input[type="button"], input[type="submit"], summary, label, [onclick], [data-action]';
               const all = Array.from(document.querySelectorAll(sels));
-              // Prefer exact text match, then prefix, then substring.
-              const exact = all.find(el => (el.innerText || el.value || el.ariaLabel || '').trim().toLowerCase() === needle);
-              const prefix = all.find(el => (el.innerText || el.value || el.ariaLabel || '').trim().toLowerCase().startsWith(needle));
-              const sub = all.find(el => (el.innerText || el.value || el.ariaLabel || '').toLowerCase().includes(needle));
-              const el = exact || prefix || sub;
-              if (!el) return { found: false };
+              const normalized = all.map(el => ({
+                el,
+                txt: (el.innerText || el.value || el.ariaLabel || '').trim().toLowerCase(),
+              })).filter(x => !!x.txt);
+
+              function tryMode(mode) {
+                if (mode === 'exact') return normalized.filter(x => x.txt === needle);
+                if (mode === 'prefix') return normalized.filter(x => x.txt.startsWith(needle));
+                if (mode === 'contains') return normalized.filter(x => x.txt.includes(needle));
+                return [];
+              }
+
+              // Determine which modes to try.
+              const modes = explicit ? [explicit] : ['exact', 'prefix', 'contains'];
+              if (explicit && !['exact', 'prefix', 'contains'].includes(explicit)) {
+                return { found: false, error: 'Invalid textMatch. Use exact, prefix, or contains.' };
+              }
+
+              let matches = [];
+              let usedMode = modes[0];
+              for (const m of modes) {
+                matches = tryMode(m);
+                usedMode = m;
+                if (matches.length === 1) break; // unique match — use it
+                if (matches.length > 1) break;   // ambiguous — report it
+                // 0 matches — try next mode
+              }
+
+              if (matches.length === 0) return { found: false, mode: usedMode };
+              if (matches.length > 1) {
+                return {
+                  found: false,
+                  ambiguous: true,
+                  mode: usedMode,
+                  count: matches.length,
+                  candidates: matches.slice(0, 5).map(m => m.txt.slice(0, 80)),
+                };
+              }
+              const el = matches[0].el;
               try { el.scrollIntoView({ block: 'center', inline: 'center' }); } catch (e) {}
               const r = el.getBoundingClientRect();
               return {
                 found: true,
+                mode: usedMode,
                 x: r.left + r.width / 2,
                 y: r.top + r.height / 2,
                 tag: el.tagName,
@@ -1287,9 +1323,19 @@ export class Agent {
           `);
           const info = result?.result?.value;
           if (!info?.found) {
+            if (info?.error) {
+              return { success: false, error: info.error };
+            }
+            if (info?.ambiguous) {
+              return {
+                success: false,
+                error: `Ambiguous text match for "${args.text}" (mode=${info.mode}, matches=${info.count}). Use a more specific text, click({index:N}) from get_interactive_elements, or selector/x,y.`,
+                candidates: info.candidates || [],
+              };
+            }
             return {
               success: false,
-              error: `No clickable element found containing text "${args.text}". Try get_interactive_elements to see what's actually on the page, or take a screenshot.`,
+              error: `No clickable element found for text "${args.text}". Try get_interactive_elements to see what's on the page, or use a selector.`,
             };
           }
           // Wait for scroll to settle, then dispatch a real click via CDP.
@@ -1300,6 +1346,7 @@ export class Agent {
           return {
             success: true,
             method: 'cdp-by-text',
+            textMatch: info.mode || (args.textMatch || 'exact'),
             tag: info.tag,
             text: info.text,
             matched: args.text,

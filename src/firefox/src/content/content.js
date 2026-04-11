@@ -280,15 +280,46 @@
     // substring.
     if (params.text) {
       const needle = params.text.toLowerCase();
-      const sels = 'a, button, [role="button"], [role="link"], [role="tab"], [role="menuitem"], input[type="button"], input[type="submit"], summary, [onclick], [data-action]';
+      const explicit = params.textMatch || '';
+      const sels = 'a, button, [role="button"], [role="link"], [role="tab"], [role="menuitem"], input[type="button"], input[type="submit"], summary, label, [onclick], [data-action]';
       const all = Array.from(document.querySelectorAll(sels));
-      const exact = all.find(e => (e.innerText || e.value || e.ariaLabel || '').trim().toLowerCase() === needle);
-      const prefix = all.find(e => (e.innerText || e.value || e.ariaLabel || '').trim().toLowerCase().startsWith(needle));
-      const sub = all.find(e => (e.innerText || e.value || e.ariaLabel || '').toLowerCase().includes(needle));
-      el = exact || prefix || sub;
-      if (!el) {
-        return { success: false, error: `No clickable element found containing text "${params.text}"` };
+      const normalized = all.map(e => ({
+        e,
+        txt: (e.innerText || e.value || e.ariaLabel || '').trim().toLowerCase(),
+      })).filter(x => !!x.txt);
+
+      function tryMode(mode) {
+        if (mode === 'exact') return normalized.filter(x => x.txt === needle);
+        if (mode === 'prefix') return normalized.filter(x => x.txt.startsWith(needle));
+        if (mode === 'contains') return normalized.filter(x => x.txt.includes(needle));
+        return [];
       }
+
+      const modes = explicit ? [explicit] : ['exact', 'prefix', 'contains'];
+      if (explicit && !['exact', 'prefix', 'contains'].includes(explicit)) {
+        return { success: false, error: `Invalid textMatch "${explicit}". Use exact, prefix, or contains.` };
+      }
+
+      let matches = [];
+      let usedMode = modes[0];
+      for (const m of modes) {
+        matches = tryMode(m);
+        usedMode = m;
+        if (matches.length === 1) break;
+        if (matches.length > 1) break;
+      }
+
+      if (matches.length === 0) {
+        return { success: false, error: `No clickable element found for text "${params.text}"` };
+      }
+      if (matches.length > 1) {
+        return {
+          success: false,
+          error: `Ambiguous text match for "${params.text}" (mode=${usedMode}, matches=${matches.length}).`,
+          candidates: matches.slice(0, 5).map(m => m.txt.slice(0, 80)),
+        };
+      }
+      el = matches[0].e;
     } else if (params.selector) {
       el = document.querySelector(params.selector);
     } else if (params.index != null) {

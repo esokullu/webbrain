@@ -44,11 +44,12 @@ export const AGENT_TOOLS = [
     type: 'function',
     function: {
       name: 'click',
-      description: 'Click an element. FOUR ways to use it: (1) CSS selector, (2) visible text — `click({text: "Publish release"})` finds the first button/link/clickable element whose text contains the string (case-insensitive), (3) element index from get_interactive_elements, (4) x/y coordinates. PREFER text or index over selectors when possible — selectors are easy to get wrong. Note: jQuery/Playwright pseudo-classes like `:contains()` and `:has-text()` are NOT valid CSS and will fail; use the `text` parameter instead.',
+      description: 'Click an element. FOUR ways to use it: (1) CSS selector, (2) visible text, (3) element index from get_interactive_elements, (4) x/y coordinates. For text clicks, default matching is EXACT and case-insensitive. You can opt into broader matching with `textMatch: "prefix"` or `textMatch: "contains"`. Note: jQuery/Playwright pseudo-classes like `:contains()` and `:has-text()` are NOT valid CSS and will fail; use the `text` parameter instead.',
       parameters: {
         type: 'object',
         properties: {
-          text: { type: 'string', description: 'Visible text to match — finds the first button/link/clickable element whose text contains this string (case-insensitive). Use this for buttons you can see in a screenshot.' },
+          text: { type: 'string', description: 'Visible text to match against clickable elements.' },
+          textMatch: { type: 'string', enum: ['exact', 'prefix', 'contains'], description: 'Text matching mode for `text`. Default is `exact` (safest).' },
           selector: { type: 'string', description: 'CSS selector for the element to click' },
           index: { type: 'number', description: 'Index from get_interactive_elements result' },
           x: { type: 'number', description: 'X coordinate to click' },
@@ -554,7 +555,9 @@ TYPING — read this:
 - If you're filling multiple fields, click each one before typing into it, even if it looks like Tab would work.
 
 CLICKING — read this:
-- For buttons and links you can SEE (in a screenshot or in get_interactive_elements output), the BEST way to click them is by visible text: \`click({text: "Publish release"})\`. This finds the first matching button/link and clicks it. No selector guessing required.
+- For buttons and links you can SEE, click by visible text: \`click({text: "Publish release"})\`. Default matching is EXACT (case-insensitive). If exact fails (no match), the system automatically tries prefix then substring matching — but if multiple elements match at any level, it returns an ambiguity error instead of guessing.
+- If you get an ambiguity error, use a more specific text string, switch to \`click({index: N})\` from \`get_interactive_elements\`, or use a selector.
+- You can explicitly control matching with \`textMatch\`: \`"exact"\` (default), \`"prefix"\`, or \`"contains"\`.
 - Order of preference:
   1. \`click({text: "..."})\` — visible button/link text. Most reliable.
   2. \`click({index: N})\` — index from a get_interactive_elements call MADE THIS SAME TURN.
