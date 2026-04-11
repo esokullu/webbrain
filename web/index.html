@@ -521,21 +521,22 @@
     .providers-row {
       display: flex;
       justify-content: center;
-      gap: 32px;
-      flex-wrap: wrap;
+      gap: 14px;
+      flex-wrap: nowrap;
       margin-top: 40px;
     }
     .provider-badge {
       display: flex;
       align-items: center;
-      gap: 10px;
+      gap: 8px;
       background: var(--bg-card);
       border: 1px solid var(--border);
       border-radius: var(--radius-sm);
-      padding: 14px 24px;
-      font-size: 14px;
+      padding: 12px 16px;
+      font-size: 13px;
       font-weight: 600;
       transition: all 0.2s;
+      white-space: nowrap;
     }
     .provider-badge:hover {
       border-color: var(--accent);
@@ -555,6 +556,7 @@
     .provider-badge .p-icon.anthropic { background: rgba(204,149,96,0.15); color: #cc9560; }
     .provider-badge .p-icon.openrouter { background: rgba(108,99,255,0.15); color: var(--accent2); }
     .provider-badge .p-icon.studiolm { background: rgba(245,158,11,0.15); color: #f59e0b; }
+    .provider-badge .p-icon.vllm { background: rgba(99,102,241,0.15); color: #6366f1; }
 
     /* ================================================================
        MODES
@@ -783,6 +785,7 @@
       .side-panel { width: 100%; border-left: none; border-top: 1px solid var(--border); min-height: 260px; }
       .modes-grid { grid-template-columns: 1fr; }
       .nav-links a:not(.nav-cta) { display: none; }
+      .providers-row { flex-wrap: wrap; justify-content: center; }
     }
     @media (max-width: 480px) {
       .hero { padding: 60px 16px 50px; }
@@ -931,7 +934,7 @@
     <div class="feature-card">
       <div class="feature-icon">🔌</div>
       <h3>Multi-Provider LLM</h3>
-      <p>Works with local llama.cpp, OpenAI, Anthropic Claude, and OpenRouter. Use your preferred model — or run completely offline with local AI.</p>
+      <p>Works with local llama.cpp, OpenAI, Claude, and OpenRouter. Use your preferred model — or run completely offline with local AI.</p>
     </div>
     <div class="feature-card">
       <div class="feature-icon">🛡️</div>
@@ -955,7 +958,7 @@
   <div class="providers-row">
     <div class="provider-badge">
       <div class="p-icon local">🦙</div>
-      llama.cpp (Local)
+      llama.cpp
     </div>
     <div class="provider-badge">
       <div class="p-icon ollama">◉</div>
@@ -967,7 +970,7 @@
     </div>
     <div class="provider-badge">
       <div class="p-icon anthropic">◈</div>
-      Anthropic Claude
+      Claude
     </div>
     <div class="provider-badge">
       <div class="p-icon openrouter">◆</div>
@@ -976,6 +979,10 @@
     <div class="provider-badge">
       <div class="p-icon studiolm">✦</div>
       StudioLM
+    </div>
+    <div class="provider-badge">
+      <div class="p-icon vllm">▣</div>
+      VLLM
     </div>
   </div>
 </section>
@@ -1117,7 +1124,7 @@
 
     <details class="faq-item">
       <summary>Which AI models does WebBrain support?</summary>
-      <p>WebBrain supports four provider types: llama.cpp (any local GGUF model), OpenAI (GPT-4o, GPT-4, etc.), Anthropic Claude (Claude Opus, Sonnet, Haiku via native API), and OpenRouter (access to 100+ models from various providers). Any OpenAI-compatible API endpoint works, so you can also use services like Together AI, Groq, Mistral, or any local server with an OpenAI-compatible interface.</p>
+      <p>WebBrain supports four provider types: llama.cpp (any local GGUF model), OpenAI (GPT-4o, GPT-4, etc.), Claude (Claude Opus, Sonnet, Haiku via native API), and OpenRouter (access to 100+ models from various providers). Any OpenAI-compatible API endpoint works, so you can also use services like Together AI, Groq, Mistral, or any local server with an OpenAI-compatible interface.</p>
     </details>
 
     <details class="faq-item">
