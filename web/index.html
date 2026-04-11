@@ -84,7 +84,7 @@
         "name": "Why do I get 'Failed to fetch' when connecting to vLLM or a local LLM server on my network?",
         "acceptedAnswer": {
           "@type": "Answer",
-          "text": "Chrome blocks requests from extensions to local network servers (192.168.x.x, 10.x.x.x) unless the server sends CORS headers. For vLLM, start with --allowed-origins \"*\". For Ollama, set OLLAMA_ORIGINS=* before starting. llama.cpp enables CORS by default. Also make sure your base URL ends with /v1 (e.g. http://192.168.1.47:8000/v1)."
+          "text": "Chrome blocks requests from extensions to local network servers (192.168.x.x, 10.x.x.x) unless the server sends CORS headers. For vLLM, start with --allowed-origins '[\"*\"]' (JSON list). For Ollama, set OLLAMA_ORIGINS=* before starting. llama.cpp enables CORS by default. Also make sure your base URL ends with /v1 (e.g. http://192.168.1.47:8000/v1)."
         }
       },
       {
@@ -1138,7 +1138,7 @@
     <details class="faq-item">
       <summary>I'm getting "Failed to fetch" when connecting to a local LLM server (vLLM, Ollama, llama.cpp) on my network</summary>
       <p>If your LLM server is on a different machine on your local network (e.g. <code>http://192.168.1.x:8000</code>), Chrome blocks the request unless the server sends <strong>CORS headers</strong>. The fix depends on your server:</p>
-      <p><strong>vLLM:</strong> Start with <code>--allowed-origins "*"</code> (or <code>--cors-allow-origins "*"</code> in older versions).<br>
+      <p><strong>vLLM:</strong> Start with <code>--allowed-origins '["*"]'</code> (the value must be a JSON list).<br>
       <strong>Ollama:</strong> Set the environment variable <code>OLLAMA_ORIGINS=*</code> before starting.<br>
       <strong>llama.cpp:</strong> CORS is enabled by default — no changes needed.</p>
       <p>If your server runs on <code>localhost</code> (same machine as the browser), CORS is usually not required. The issue only affects cross-machine connections on the local network. Make sure your base URL in WebBrain settings ends with <code>/v1</code> (e.g. <code>http://192.168.1.47:8000/v1</code>).</p>
