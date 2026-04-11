@@ -761,6 +761,61 @@ export class Agent {
       return await downloadFiles(args);
     }
 
+    if (name === 'verify_form') {
+      try {
+        const code = `
+          (() => {
+            const sel = ${JSON.stringify(args.selector || '')};
+            let form;
+            if (sel) {
+              form = document.querySelector(sel);
+            } else {
+              const focused = document.activeElement;
+              form = focused?.closest('form') || document.querySelector('form');
+            }
+            if (!form) return { found: false, error: 'No form found on page' };
+
+            const fields = [];
+            for (const el of form.querySelectorAll('input, select, textarea')) {
+              const n = el.name || el.id || el.getAttribute('aria-label') || '';
+              const t = el.type || el.tagName.toLowerCase();
+              if (t === 'hidden' || t === 'submit') continue;
+              let v;
+              if (t === 'checkbox' || t === 'radio') {
+                v = el.checked ? (el.value || 'on') : '(unchecked)';
+              } else if (el.tagName === 'SELECT') {
+                const o = el.options[el.selectedIndex];
+                v = o ? o.text + ' [' + o.value + ']' : '';
+              } else {
+                v = el.value;
+              }
+              fields.push({ name: n, type: t, value: v, placeholder: el.placeholder || '' });
+            }
+            return { found: true, action: form.action || '', method: form.method || 'get', fieldCount: fields.length, fields };
+          })()
+        `;
+        const results = await browser.tabs.executeScript(tabId, { code });
+        const result = (results && results[0]) || { found: false, error: 'Script returned no data' };
+
+        // Capture screenshot (requires active tab)
+        try {
+          const tab = await browser.tabs.get(tabId);
+          if (tab?.active) {
+            result.image = await browser.tabs.captureVisibleTab(tab.windowId, { format: 'png', quality: 80 });
+          } else {
+            result.screenshotFailed = true;
+          }
+        } catch {
+          result.screenshotFailed = true;
+        }
+
+        result.success = !!result.found;
+        return result;
+      } catch (e) {
+        return { success: false, error: `verify_form failed: ${e.message}` };
+      }
+    }
+
     // Iframe tools — use browser.tabs.executeScript with allFrames:true.
     // Extensions with <all_urls> permission can inject into any frame
     // regardless of origin, bypassing the same-origin policy.

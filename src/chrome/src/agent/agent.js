@@ -1010,6 +1010,63 @@ export class Agent {
       }
     }
 
+    if (name === 'verify_form') {
+      try {
+        await cdpClient.attach(tabId);
+
+        // 1. Read form fields
+        const formData = await cdpClient.evaluate(tabId, `
+          (() => {
+            const sel = ${JSON.stringify(args.selector || '')};
+            let form;
+            if (sel) {
+              form = document.querySelector(sel);
+            } else {
+              const focused = document.activeElement;
+              form = focused?.closest('form') || document.querySelector('form');
+            }
+            if (!form) return { found: false, error: 'No form found on page' };
+
+            const fields = [];
+            for (const el of form.querySelectorAll('input, select, textarea')) {
+              const n = el.name || el.id || el.getAttribute('aria-label') || '';
+              const t = el.type || el.tagName.toLowerCase();
+              if (t === 'hidden' || t === 'submit') continue;
+              let v;
+              if (t === 'checkbox' || t === 'radio') {
+                v = el.checked ? (el.value || 'on') : '(unchecked)';
+              } else if (el.tagName === 'SELECT') {
+                const o = el.options[el.selectedIndex];
+                v = o ? o.text + ' [' + o.value + ']' : '';
+              } else {
+                v = el.value;
+              }
+              fields.push({ name: n, type: t, value: v, placeholder: el.placeholder || '' });
+            }
+            return { found: true, action: form.action || '', method: form.method || 'get', fieldCount: fields.length, fields };
+          })()
+        `);
+
+        const result = formData?.result?.value || { found: false, error: 'Evaluation returned no data' };
+
+        // 2. Capture screenshot
+        try {
+          await cdpClient.sendCommand(tabId, 'Page.enable');
+          const shot = await cdpClient.sendCommand(tabId, 'Page.captureScreenshot', {
+            format: 'png', quality: 100, fromSurface: true,
+          });
+          result.image = `data:image/png;base64,${shot.data}`;
+        } catch {
+          result.screenshotFailed = true;
+        }
+
+        result.success = !!result.found;
+        return result;
+      } catch (e) {
+        return { success: false, error: `verify_form failed: ${e.message}` };
+      }
+    }
+
     if (name === 'get_shadow_dom') {
       try {
         await cdpClient.attach(tabId);

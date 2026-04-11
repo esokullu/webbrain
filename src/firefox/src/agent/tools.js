@@ -369,6 +369,23 @@ export const AGENT_TOOLS = [
       },
     },
   },
+  {
+    type: 'function',
+    function: {
+      name: 'verify_form',
+      description: 'Read all form field values and capture a viewport screenshot. Call this BEFORE submitting important forms to confirm every field has the intended value. Returns field names, types, current values, plus a screenshot.',
+      parameters: {
+        type: 'object',
+        properties: {
+          selector: {
+            type: 'string',
+            description: 'CSS selector for the <form> element. If omitted, uses the form containing the focused element, or the first form on the page.',
+          },
+        },
+        required: [],
+      },
+    },
+  },
 ];
 
 /**
@@ -452,6 +469,7 @@ Available tools:
 - execute_js: Run custom JavaScript
 - new_tab: Open a new tab
 - done: Signal task completion
+- verify_form: Verify form fields before submitting
 
 IMPORTANT — Current Page Priority:
 - ALWAYS start by reading the CURRENT PAGE to understand what the user is looking at.
@@ -514,4 +532,10 @@ INDEX INSTABILITY — read this:
 - When in doubt, prefer \`click({text: "..."})\` — it re-resolves every call.
 - DO NOT use jQuery/Playwright pseudo-classes like \`:contains()\`, \`:has-text()\`. They are NOT valid CSS.
 - DO NOT guess at \`data-testid\`, \`data-cy\`, \`data-test\` attributes.
-- If a click "succeeds" but the page doesn't visibly change, DO NOT retry the same call. Take a fresh screenshot, call get_interactive_elements, or try a different approach.`;
+- If a click "succeeds" but the page doesn't visibly change, DO NOT retry the same call. Take a fresh screenshot, call get_interactive_elements, or try a different approach.
+
+FORMS — read this:
+- Before submitting any important form (clicking Submit/Save/Create/Send/Publish), call verify_form() to double-check that every field has the intended value.
+- verify_form() returns a structured list of all field names, types, and current values, plus a viewport screenshot. Compare each field against what you intended to type.
+- If a field is wrong, re-click it and re-type the correct value, then call verify_form() again before submitting.
+- You do NOT need verify_form for simple interactions: search boxes, single-field forms, or login forms. Use it for multi-field forms where wrong data has consequences (checkout, profile, issue creation, releases, etc.).`;

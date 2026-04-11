@@ -426,6 +426,23 @@ export const AGENT_TOOLS = [
       },
     },
   },
+  {
+    type: 'function',
+    function: {
+      name: 'verify_form',
+      description: 'Read all form field values and capture a viewport screenshot. Call this BEFORE submitting important forms to confirm every field has the intended value. Returns field names, types, current values, plus a screenshot.',
+      parameters: {
+        type: 'object',
+        properties: {
+          selector: {
+            type: 'string',
+            description: 'CSS selector for the <form> element. If omitted, uses the form containing the focused element, or the first form on the page.',
+          },
+        },
+        required: [],
+      },
+    },
+  },
 ];
 
 /**
@@ -512,6 +529,7 @@ Available tools:
 - execute_js: Run custom JavaScript
 - new_tab: Open a new tab
 - done: Signal task completion
+- verify_form: Verify form fields before submitting
 
 IMPORTANT — Current Page Priority:
 - ALWAYS start by reading the CURRENT PAGE to understand what the user is looking at.
@@ -578,4 +596,10 @@ INDEX INSTABILITY — read this:
 - DO NOT use jQuery or Playwright/Cypress pseudo-classes like \`:contains()\`, \`:has-text()\`, \`:has()\`, \`:visible\`. These are NOT valid CSS — browsers will reject them. Use \`click({text: ...})\` instead.
 - DO NOT guess at \`data-testid\`, \`data-cy\`, \`data-test\`, etc. attributes. They only exist if the site has actually defined them, and most don't. Use text or index instead.
 - Coordinates from a screenshot map 1:1 to CSS pixels — image pixel (X, Y) = click(x:X, y:Y). Don't apply any scaling.
-- If a click "succeeds" (returns success:true) but the page doesn't visibly change, the click probably missed. DO NOT immediately retry the same coordinates or selector. Instead: take a fresh screenshot, call get_interactive_elements, or try a different approach.`;
+- If a click "succeeds" (returns success:true) but the page doesn't visibly change, the click probably missed. DO NOT immediately retry the same coordinates or selector. Instead: take a fresh screenshot, call get_interactive_elements, or try a different approach.
+
+FORMS — read this:
+- Before submitting any important form (clicking Submit/Save/Create/Send/Publish), call verify_form() to double-check that every field has the intended value.
+- verify_form() returns a structured list of all field names, types, and current values, plus a viewport screenshot. Compare each field against what you intended to type.
+- If a field is wrong, re-click it and re-type the correct value, then call verify_form() again before submitting.
+- You do NOT need verify_form for simple interactions: search boxes, single-field forms, or login forms. Use it for multi-field forms where wrong data has consequences (checkout, profile, issue creation, releases, etc.).`;
