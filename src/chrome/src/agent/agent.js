@@ -972,11 +972,16 @@ export class Agent {
     }
 
     if (name === 'done') {
-      // In act mode, require a verification screenshot before completing.
+      // In act mode, require a verification screenshot + page info before completing.
       const mode = this.conversationModes.get(tabId) || 'ask';
       if (mode === 'act') {
         try {
           await cdpClient.attach(tabId);
+          // Capture page URL and title for verification context
+          const pageInfo = await cdpClient.evaluate(tabId, `
+            ({ url: location.href, title: document.title })
+          `);
+          const info = pageInfo?.result?.value || {};
           await cdpClient.sendCommand(tabId, 'Page.enable');
           const shot = await cdpClient.sendCommand(tabId, 'Page.captureScreenshot', {
             format: 'png', quality: 80, fromSurface: true,
@@ -984,11 +989,16 @@ export class Agent {
           return {
             done: true,
             summary: args.summary,
-            verificationScreenshot: `data:image/png;base64,${shot.data}`,
+            verification: {
+              pageUrl: info.url || '',
+              pageTitle: info.title || '',
+              screenshot: `data:image/png;base64,${shot.data}`,
+              note: 'Review this screenshot carefully. Does it confirm the task was completed successfully? If the page shows an existing item from the past (check dates), you may NOT have actually created anything new.',
+            },
           };
         } catch (_) {
           // Screenshot failed — still allow done but note it
-          return { done: true, summary: args.summary, verificationScreenshot: null };
+          return { done: true, summary: args.summary, verification: null };
         }
       }
       return { done: true, summary: args.summary };
