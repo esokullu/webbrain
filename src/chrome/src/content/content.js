@@ -226,7 +226,38 @@
 
   function getInteractiveElements() {
     return queryInteractive().map((el, index) => {
-      const rect = el.getBoundingClientRect();
+      let rect = el.getBoundingClientRect();
+      // If the element itself has zero dimensions (hidden/styled input
+      // inside a custom wrapper — common on Stripe, Radix, Material),
+      // use the visible label or wrapper rect instead so coordinates
+      // are useful for clicking.
+      if (rect.width === 0 || rect.height === 0) {
+        const tag = el.tagName;
+        if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') {
+          let fallbackRect = null;
+          // Try explicit label
+          if (el.id) {
+            try {
+              const lbl = document.querySelector('label[for="' + CSS.escape(el.id) + '"]');
+              if (lbl) { const lr = lbl.getBoundingClientRect(); if (lr.width > 0 && lr.height > 0) fallbackRect = lr; }
+            } catch {}
+          }
+          // Try wrapping label
+          if (!fallbackRect) {
+            const wl = el.closest('label');
+            if (wl) { const lr = wl.getBoundingClientRect(); if (lr.width > 0 && lr.height > 0) fallbackRect = lr; }
+          }
+          // Try parent wrapper
+          if (!fallbackRect) {
+            let p = el.parentElement;
+            for (let i = 0; i < 3 && p; i++, p = p.parentElement) {
+              const pr = p.getBoundingClientRect();
+              if (pr.width > 0 && pr.height > 0) { fallbackRect = pr; break; }
+            }
+          }
+          if (fallbackRect) rect = fallbackRect;
+        }
+      }
       const entry = {
         index,
         tag: el.tagName.toLowerCase(),
@@ -820,7 +851,15 @@
       // Visible and in viewport. Aggressive filtering on purpose: a global
       // header link scrolled offscreen creates noise indices that shift
       // every page and confuse models that trust index across turns.
-      if (rect.width < 2 || rect.height < 2) return false;
+      // Exception: form inputs may have zero dimensions if they use styled
+      // wrappers (Stripe, Radix, Material). We still want to include them.
+      if (rect.width < 2 || rect.height < 2) {
+        if (/^(INPUT|SELECT|TEXTAREA)$/i.test(el.tagName)) {
+          // Allow through — getInteractiveElementsFull will use wrapper rect
+        } else {
+          return false;
+        }
+      }
       if (rect.bottom < 0 || rect.top > window.innerHeight) return false;
       if (rect.right < 0 || rect.left > window.innerWidth) return false;
       const cs = getComputedStyle(el);
@@ -852,7 +891,15 @@
         try {
           root.querySelectorAll(sel).forEach(el => {
             if (seen.has(el)) return;
-            const rect = el.getBoundingClientRect();
+            let rect = el.getBoundingClientRect();
+            // Use wrapper rect for zero-dimension form inputs
+            if ((rect.width < 2 || rect.height < 2) && /^(INPUT|SELECT|TEXTAREA)$/i.test(el.tagName)) {
+              let fb = null;
+              if (el.id) { try { const lbl = document.querySelector('label[for="'+CSS.escape(el.id)+'"]'); if (lbl) { const lr = lbl.getBoundingClientRect(); if (lr.width > 0 && lr.height > 0) fb = lr; } } catch {} }
+              if (!fb) { const wl = el.closest('label'); if (wl) { const lr = wl.getBoundingClientRect(); if (lr.width > 0 && lr.height > 0) fb = lr; } }
+              if (!fb) { let p = el.parentElement; for (let i = 0; i < 3 && p; i++, p = p.parentElement) { const pr = p.getBoundingClientRect(); if (pr.width > 0 && pr.height > 0) { fb = pr; break; } } }
+              if (fb) rect = fb;
+            }
             if (!isUsable(el, rect)) return;
             seen.add(el);
             collected.push({ el, rect, inShadow: root !== document });

@@ -236,7 +236,33 @@
    */
   function getInteractiveElements() {
     return queryInteractive().map((el, index) => {
-      const rect = el.getBoundingClientRect();
+      let rect = el.getBoundingClientRect();
+      // If element has zero dimensions (hidden input in styled wrapper),
+      // use the visible label or wrapper rect instead.
+      if (rect.width === 0 || rect.height === 0) {
+        const tag = el.tagName;
+        if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') {
+          let fallbackRect = null;
+          if (el.id) {
+            try {
+              const lbl = document.querySelector('label[for="' + CSS.escape(el.id) + '"]');
+              if (lbl) { const lr = lbl.getBoundingClientRect(); if (lr.width > 0 && lr.height > 0) fallbackRect = lr; }
+            } catch {}
+          }
+          if (!fallbackRect) {
+            const wl = el.closest('label');
+            if (wl) { const lr = wl.getBoundingClientRect(); if (lr.width > 0 && lr.height > 0) fallbackRect = lr; }
+          }
+          if (!fallbackRect) {
+            let p = el.parentElement;
+            for (let i = 0; i < 3 && p; i++, p = p.parentElement) {
+              const pr = p.getBoundingClientRect();
+              if (pr.width > 0 && pr.height > 0) { fallbackRect = pr; break; }
+            }
+          }
+          if (fallbackRect) rect = fallbackRect;
+        }
+      }
       const entry = {
         index,
         tag: el.tagName.toLowerCase(),

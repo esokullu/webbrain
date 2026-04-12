@@ -591,9 +591,32 @@ export class Agent {
           }
 
           for (const el of prioritized) {
-            const r = el.getBoundingClientRect();
-            // Visible + in viewport
-            if (r.width === 0 || r.height === 0) continue;
+            let r = el.getBoundingClientRect();
+            // If element has zero dimensions, try label/wrapper rect instead
+            // (Stripe, Radix, Material use hidden inputs inside styled wrappers)
+            if ((r.width === 0 || r.height === 0) && /^(INPUT|SELECT|TEXTAREA)$/i.test(el.tagName)) {
+              let fallback = null;
+              if (el.id) {
+                try {
+                  const lbl = document.querySelector('label[for="' + CSS.escape(el.id) + '"]');
+                  if (lbl) { const lr = lbl.getBoundingClientRect(); if (lr.width > 0 && lr.height > 0) fallback = lr; }
+                } catch {}
+              }
+              if (!fallback) {
+                const wl = el.closest('label');
+                if (wl) { const lr = wl.getBoundingClientRect(); if (lr.width > 0 && lr.height > 0) fallback = lr; }
+              }
+              if (!fallback) {
+                let p = el.parentElement;
+                for (let i = 0; i < 3 && p; i++, p = p.parentElement) {
+                  const pr = p.getBoundingClientRect();
+                  if (pr.width > 0 && pr.height > 0) { fallback = pr; break; }
+                }
+              }
+              if (fallback) r = fallback; else continue;
+            } else if (r.width === 0 || r.height === 0) {
+              continue;
+            }
             if (r.bottom < 0 || r.top > window.innerHeight) continue;
             if (r.right < 0 || r.left > window.innerWidth) continue;
             const text = (el.innerText || el.value || el.placeholder || el.ariaLabel || el.title || '').trim().slice(0, 50);
