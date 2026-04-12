@@ -128,6 +128,91 @@
       --radius: 16px;
       --radius-sm: 10px;
       --max-w: 1100px;
+      --nav-bg: rgba(11,14,23,0.8);
+      --url-bg: rgba(0,0,0,0.3);
+      --placeholder-bg: rgba(255,255,255,0.04);
+      --panel-bg: #1a1a2e;
+      --assistant-msg-bg: #16213e;
+      --input-bg: #1e2746;
+      --card-shadow: rgba(0,0,0,0.3);
+      --hero-shadow: rgba(0,0,0,0.4);
+      --row-hover: rgba(108,99,255,0.04);
+      --nav-cta-hover: #5a52d5;
+    }
+
+    :root[data-theme="orange"] {
+      --bg: #160d04;
+      --bg-card: #23160b;
+      --bg-card-hover: #302012;
+      --surface: #2a190e;
+      --border: rgba(255,196,129,0.16);
+      --text: #fff1de;
+      --text-dim: #d7b99a;
+      --accent: #f97316;
+      --accent-glow: rgba(249,115,22,0.3);
+      --accent2: #fb923c;
+      --success: #22c55e;
+      --warning: #f59e0b;
+      --nav-bg: rgba(22,13,4,0.82);
+      --url-bg: rgba(40,24,11,0.8);
+      --placeholder-bg: rgba(255,212,168,0.09);
+      --panel-bg: #2b1a0f;
+      --assistant-msg-bg: #3b2311;
+      --input-bg: #36210f;
+      --card-shadow: rgba(0,0,0,0.34);
+      --hero-shadow: rgba(0,0,0,0.45);
+      --row-hover: rgba(249,115,22,0.08);
+      --nav-cta-hover: #ea580c;
+    }
+
+    :root[data-theme="whitish"] {
+      --bg: #f7f8fc;
+      --bg-card: #ffffff;
+      --bg-card-hover: #f3f5ff;
+      --surface: #edf1fb;
+      --border: rgba(18,31,57,0.12);
+      --text: #13213d;
+      --text-dim: #5f6f8d;
+      --accent: #4f46e5;
+      --accent-glow: rgba(79,70,229,0.22);
+      --accent2: #7c3aed;
+      --success: #16a34a;
+      --warning: #d97706;
+      --nav-bg: rgba(247,248,252,0.85);
+      --url-bg: rgba(208,217,237,0.6);
+      --placeholder-bg: rgba(19,33,61,0.08);
+      --panel-bg: #eef2ff;
+      --assistant-msg-bg: #e2e8ff;
+      --input-bg: #dfe7ff;
+      --card-shadow: rgba(17,24,39,0.12);
+      --hero-shadow: rgba(17,24,39,0.16);
+      --row-hover: rgba(79,70,229,0.08);
+      --nav-cta-hover: #4338ca;
+    }
+
+    :root[data-theme="rosy"] {
+      --bg: #1a1018;
+      --bg-card: #251526;
+      --bg-card-hover: #311d33;
+      --surface: #2f1e31;
+      --border: rgba(255,184,216,0.18);
+      --text: #ffe9f4;
+      --text-dim: #d9aac7;
+      --accent: #ec4899;
+      --accent-glow: rgba(236,72,153,0.28);
+      --accent2: #f472b6;
+      --success: #34d399;
+      --warning: #f59e0b;
+      --nav-bg: rgba(26,16,24,0.82);
+      --url-bg: rgba(49,29,51,0.75);
+      --placeholder-bg: rgba(255,199,224,0.08);
+      --panel-bg: #321d33;
+      --assistant-msg-bg: #3b2342;
+      --input-bg: #46274a;
+      --card-shadow: rgba(0,0,0,0.35);
+      --hero-shadow: rgba(0,0,0,0.44);
+      --row-hover: rgba(236,72,153,0.1);
+      --nav-cta-hover: #db2777;
     }
 
     html { scroll-behavior: smooth; }
@@ -178,7 +263,7 @@
       top: 0;
       z-index: 100;
       backdrop-filter: blur(20px);
-      background: rgba(11,14,23,0.8);
+      background: var(--nav-bg);
       border-bottom: 1px solid var(--border);
     }
     .nav-inner {
@@ -218,7 +303,7 @@
       font-size: 13px;
       transition: background 0.2s, transform 0.1s;
     }
-    .nav-cta:hover { background: #5a52d5 !important; transform: translateY(-1px); text-decoration: none !important; }
+    .nav-cta:hover { background: var(--nav-cta-hover) !important; transform: translateY(-1px); text-decoration: none !important; }
 
     /* ================================================================
        HERO
@@ -240,6 +325,41 @@
       font-size: 13px;
       color: var(--text-dim);
       margin-bottom: 28px;
+    }
+    .theme-switcher {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin: 0 auto 24px;
+      max-width: 640px;
+    }
+    .theme-switcher-label {
+      font-size: 12px;
+      color: var(--text-dim);
+      margin-right: 4px;
+    }
+    .theme-chip {
+      border: 1px solid var(--border);
+      background: var(--bg-card);
+      color: var(--text);
+      border-radius: 999px;
+      padding: 6px 12px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .theme-chip:hover {
+      border-color: var(--accent);
+      transform: translateY(-1px);
+    }
+    .theme-chip.active {
+      background: var(--accent);
+      color: #fff;
+      border-color: var(--accent);
+      box-shadow: 0 6px 18px var(--accent-glow);
     }
     .hero-badge .dot {
       width: 8px; height: 8px;
@@ -291,7 +411,7 @@
       color: #fff;
       box-shadow: 0 4px 24px var(--accent-glow);
     }
-    .btn-primary:hover { background: #5a52d5; transform: translateY(-2px); text-decoration: none; color: #fff; }
+    .btn-primary:hover { background: var(--nav-cta-hover); transform: translateY(-2px); text-decoration: none; color: #fff; }
     .btn-secondary {
       background: var(--surface);
       color: var(--text);
@@ -312,7 +432,7 @@
       border: 1px solid var(--border);
       border-radius: var(--radius);
       overflow: hidden;
-      box-shadow: 0 24px 80px rgba(0,0,0,0.4);
+      box-shadow: 0 24px 80px var(--hero-shadow);
     }
     .browser-bar {
       display: flex;
@@ -333,7 +453,7 @@
     .browser-url {
       flex: 1;
       margin-left: 12px;
-      background: rgba(0,0,0,0.3);
+      background: var(--url-bg);
       border-radius: 6px;
       padding: 5px 12px;
       font-size: 12px;
@@ -353,7 +473,7 @@
     .browser-page h3 { color: var(--text); margin-bottom: 8px; font-size: 16px; }
     .browser-page .placeholder-line {
       height: 10px;
-      background: rgba(255,255,255,0.04);
+      background: var(--placeholder-bg);
       border-radius: 4px;
       margin-bottom: 8px;
     }
@@ -364,7 +484,7 @@
     .side-panel {
       width: 300px;
       border-left: 1px solid var(--border);
-      background: #1a1a2e;
+      background: var(--panel-bg);
       display: flex;
       flex-direction: column;
       flex-shrink: 0;
@@ -415,7 +535,7 @@
       animation-delay: 0.2s;
     }
     .sp-msg.assistant {
-      background: #16213e;
+      background: var(--assistant-msg-bg);
       border: 1px solid rgba(255,255,255,0.06);
       align-self: flex-start;
       animation-delay: 0.5s;
@@ -436,7 +556,7 @@
     .sp-input-box {
       display: flex;
       align-items: center;
-      background: #1e2746;
+      background: var(--input-bg);
       border: 1px solid var(--border);
       border-radius: 10px;
       padding: 8px 12px;
@@ -492,7 +612,7 @@
       background: var(--bg-card-hover);
       border-color: rgba(108,99,255,0.2);
       transform: translateY(-4px);
-      box-shadow: 0 12px 40px rgba(0,0,0,0.3);
+      box-shadow: 0 12px 40px var(--card-shadow);
     }
     .feature-icon {
       width: 44px; height: 44px;
@@ -578,7 +698,7 @@
     }
     .mode-card:hover {
       transform: translateY(-4px);
-      box-shadow: 0 12px 40px rgba(0,0,0,0.3);
+      box-shadow: 0 12px 40px var(--card-shadow);
     }
     .mode-card.ask { border-top: 3px solid var(--accent); }
     .mode-card.act { border-top: 3px solid var(--warning); }
@@ -611,7 +731,7 @@
     .download-card:hover {
       border-color: var(--accent);
       transform: translateY(-4px);
-      box-shadow: 0 12px 40px rgba(0,0,0,0.3);
+      box-shadow: 0 12px 40px var(--card-shadow);
     }
     .download-card .browser-icon { font-size: 42px; margin-bottom: 16px; }
     .download-card h3 { font-size: 18px; margin-bottom: 6px; }
@@ -694,7 +814,7 @@
       transition: background 0.15s;
     }
     .compare-table tbody tr:hover {
-      background: rgba(108,99,255,0.04);
+      background: var(--row-hover);
     }
 
     /* ================================================================
@@ -767,7 +887,7 @@
       overflow: hidden;
       border: 1px solid var(--border);
       background: #000;
-      box-shadow: 0 20px 40px rgba(0,0,0,0.35);
+      box-shadow: 0 20px 40px var(--card-shadow);
     }
     .video-frame iframe {
       position: absolute;
@@ -828,6 +948,13 @@
   <div class="hero-badge">
     <span class="dot"></span>
     Open Source &middot; Free Forever
+  </div>
+  <div class="theme-switcher" aria-label="Theme switcher">
+    <span class="theme-switcher-label">Theme:</span>
+    <button class="theme-chip active" type="button" data-theme="dark">Dark</button>
+    <button class="theme-chip" type="button" data-theme="orange">Orange</button>
+    <button class="theme-chip" type="button" data-theme="whitish">Whitish</button>
+    <button class="theme-chip" type="button" data-theme="rosy">Rosy</button>
   </div>
   <h1>
     The Open-Source AI <span class="gradient">Browser Agent</span>
@@ -1187,6 +1314,37 @@
     </div>
   </div>
 </footer>
+
+<script>
+  (() => {
+    const root = document.documentElement;
+    const chips = Array.from(document.querySelectorAll('.theme-chip'));
+    const storageKey = 'webbrain-theme';
+
+    const applyTheme = (theme) => {
+      if (theme === 'dark') {
+        root.removeAttribute('data-theme');
+      } else {
+        root.setAttribute('data-theme', theme);
+      }
+      chips.forEach((chip) => {
+        chip.classList.toggle('active', chip.dataset.theme === theme);
+      });
+    };
+
+    const savedTheme = localStorage.getItem(storageKey);
+    const initialTheme = chips.some((chip) => chip.dataset.theme === savedTheme) ? savedTheme : 'dark';
+    applyTheme(initialTheme);
+
+    chips.forEach((chip) => {
+      chip.addEventListener('click', () => {
+        const theme = chip.dataset.theme || 'dark';
+        applyTheme(theme);
+        localStorage.setItem(storageKey, theme);
+      });
+    });
+  })();
+</script>
 
 </body>
 </html>
