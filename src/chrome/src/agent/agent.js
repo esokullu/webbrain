@@ -536,13 +536,9 @@ export class Agent {
    * Publish button" without guessing pixels — just by name.
    */
   async _getVisibleInteractiveElements(tabId) {
-    // For compact-prompt providers (small models), cap at 12 elements to
-    // reduce noise. Full-size models get up to 25.
+    // Element cap: 25 for all providers. (Compact-prompt check disabled
+    // while compact prompts are globally off.)
     let maxElements = 25;
-    try {
-      const provider = this.providerManager.getActive();
-      if (provider.useCompactPrompt) maxElements = 12;
-    } catch { /* default 25 */ }
 
     try {
       const result = await cdpClient.evaluate(tabId, `
@@ -888,10 +884,13 @@ export class Agent {
    * Small/local models get a compact prompt to save context budget.
    */
   _getActPrompt() {
-    try {
-      const provider = this.providerManager.getActive();
-      if (provider.useCompactPrompt) return SYSTEM_PROMPT_ACT_COMPACT;
-    } catch { /* provider not ready yet — use full prompt */ }
+    // Compact prompt temporarily disabled — all providers get the full
+    // prompt. The UI checkbox and provider config are preserved so it
+    // can be re-enabled later by uncommenting the block below.
+    // try {
+    //   const provider = this.providerManager.getActive();
+    //   if (provider.useCompactPrompt) return SYSTEM_PROMPT_ACT_COMPACT;
+    // } catch { /* provider not ready yet — use full prompt */ }
     return SYSTEM_PROMPT_ACT;
   }
 
@@ -1416,7 +1415,7 @@ export class Agent {
             try {
               const el = document.querySelector(sel);
               if (!el) return { ok: false, url: location.href, reason: 'not-found' };
-              el.scrollIntoView({ block: 'center', inline: 'center' });
+              if (el.tagName !== 'SELECT') el.scrollIntoView({ block: 'center', inline: 'center' });
               // Trigger a real-ish click sequence (frameworks often need
               // pointer events, not just click).
               const rect = el.getBoundingClientRect();
@@ -1738,7 +1737,12 @@ export class Agent {
                 }
               }
 
-              try { el.scrollIntoView({ block: 'center', inline: 'center' }); } catch (e) {}
+              // Do NOT scrollIntoView on SELECT elements — hidden/opacity:0
+              // selects inside modals (Stripe) cause the modal to jump to
+              // the top, creating an infinite loop.
+              if (el.tagName !== 'SELECT') {
+                try { el.scrollIntoView({ block: 'center', inline: 'center' }); } catch (e) {}
+              }
               let r = el.getBoundingClientRect();
               // Fallback for zero-dimension inputs
               if ((r.width === 0 || r.height === 0) && /^(INPUT|SELECT|TEXTAREA)$/i.test(el.tagName)) {
@@ -1838,7 +1842,7 @@ export class Agent {
 
                   // Passive tag → interactive ancestor
                   if (_PASSIVE_TAGS.has(el.tagName) && !_isInteractive(el)) { let anc = el.parentElement; for (let i=0;i<5&&anc;i++,anc=anc.parentElement) { if (_isInteractive(anc)) { el=anc; break; } } }
-                  try { el.scrollIntoView({block:'center',inline:'center'}); } catch(e){}
+                  if (el.tagName !== 'SELECT') { try { el.scrollIntoView({block:'center',inline:'center'}); } catch(e){} }
                   let r = el.getBoundingClientRect();
                   // Fallback for zero-dimension inputs
                   if ((r.width === 0 || r.height === 0) && /^(INPUT|SELECT|TEXTAREA)$/i.test(el.tagName)) {
@@ -1901,10 +1905,10 @@ export class Agent {
             `);
             const opts = optionsInfo?.result?.value;
             return {
-              success: true,
+              success: false,
               tag: 'SELECT',
               text: opts?.current || info.text,
-              hint: 'This is a <select> dropdown. Do NOT try to click individual options — the native dropdown cannot be controlled via click. Instead, use type_text({text: "option name"}) to select an option.' + (opts?.options ? ' Available options: ' + opts.options.join(', ') : ''),
+              error: 'CANNOT CLICK a <select> dropdown — clicking opens a native OS popup that cannot be controlled. The dropdown is now focused. Use type_text({text: "option name"}) to change the value.' + (opts?.options ? ' Available options: ' + opts.options.join(', ') : ''),
             };
           }
 
@@ -1988,10 +1992,10 @@ export class Agent {
           if (postClickSel1?.result?.value) {
             const pOpts = postClickSel1.result.value;
             return {
-              success: true,
+              success: false,
               tag: 'SELECT',
               text: pOpts.current,
-              hint: `A <select> dropdown was activated by this click (current: "${pOpts.current}"). Do NOT click it — use type_text({text: "option name"}) to change the value. Available options: ${pOpts.options.join(', ')}`,
+              error: `CANNOT CLICK a <select> dropdown — clicking opens a native OS popup that cannot be controlled. The dropdown is now focused (current: "${pOpts.current}"). Use type_text({text: "option name"}) to change the value. Available options: ${pOpts.options.join(', ')}`,
             };
           }
 
@@ -2072,10 +2076,10 @@ export class Agent {
           const coordTag = coordTagCheck?.result?.value;
           if (coordTag?.isSelect) {
             return {
-              success: true,
+              success: false,
               tag: 'SELECT',
               text: coordTag.current,
-              hint: `The element at (${args.x}, ${args.y}) is a <select> dropdown (current: "${coordTag.current}"). Use type_text({text: "option name"}) to change it. Available options: ${coordTag.options.join(', ')}`,
+              error: `CANNOT CLICK a <select> dropdown at (${args.x}, ${args.y}) — clicking opens a native OS popup that cannot be controlled. The dropdown is now focused (current: "${coordTag.current}"). Use type_text({text: "option name"}) to change the value. Available options: ${coordTag.options.join(', ')}`,
             };
           }
           // Smart coordinate redirect: if (x,y) lands on a label, wrapper,
@@ -2088,9 +2092,15 @@ export class Agent {
               if (!el) return null;
 
               // Already on an input — just focus it, click as-is
-              if (/^(INPUT|TEXTAREA|SELECT)$/i.test(el.tagName)) {
+              if (/^(INPUT|TEXTAREA)$/i.test(el.tagName)) {
                 el.focus();
                 return null; // no redirect needed
+              }
+              // SELECT: focus but flag it so we can intercept before mouse events
+              if (el.tagName === 'SELECT') {
+                el.focus();
+                const opts = Array.from(el.options).map(o => o.text.trim());
+                return { isSelect: true, current: el.options[el.selectedIndex]?.text?.trim() || '', options: opts };
               }
 
               // Find the real input target
@@ -2128,7 +2138,7 @@ export class Agent {
               if (!target) return null;
 
               // Focus the input and return its center coordinates
-              target.scrollIntoView({ block: 'center', inline: 'center' });
+              if (target.tagName !== 'SELECT') target.scrollIntoView({ block: 'center', inline: 'center' });
               target.focus();
               let r = target.getBoundingClientRect();
 
@@ -2149,6 +2159,18 @@ export class Agent {
             })()
           `);
           const redir = coordRedirect?.result?.value;
+
+          // If coordinate redirect detected a SELECT, don't dispatch mouse
+          // events — return error so the model uses type_text instead.
+          if (redir?.isSelect) {
+            return {
+              success: false,
+              tag: 'SELECT',
+              text: redir.current,
+              error: `CANNOT CLICK a <select> dropdown at (${args.x}, ${args.y}) — clicking opens a native OS popup that cannot be controlled. The dropdown is now focused (current: "${redir.current}"). Use type_text({text: "option name"}) to change the value. Available options: ${redir.options.join(', ')}`,
+            };
+          }
+
           const clickX = redir ? redir.x : args.x;
           const clickY = redir ? redir.y : args.y;
 
@@ -2170,10 +2192,10 @@ export class Agent {
           if (postClickSel2?.result?.value) {
             const pOpts2 = postClickSel2.result.value;
             return {
-              success: true,
+              success: false,
               tag: 'SELECT',
               text: pOpts2.current,
-              hint: `A <select> dropdown was activated by this click (current: "${pOpts2.current}"). Do NOT click it — use type_text({text: "option name"}) to change the value. Available options: ${pOpts2.options.join(', ')}`,
+              error: `CANNOT CLICK a <select> dropdown — clicking opens a native OS popup that cannot be controlled. The dropdown is now focused (current: "${pOpts2.current}"). Use type_text({text: "option name"}) to change the value. Available options: ${pOpts2.options.join(', ')}`,
             };
           }
 

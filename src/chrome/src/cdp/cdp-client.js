@@ -724,7 +724,7 @@ export class CDPClient {
         const found = queryDeep(document);
         if (!found) return { found: false };
         if (found.__error) return { found: false, error: found.__error };
-        try { found.scrollIntoView({ block: 'center', inline: 'center' }); } catch (e) {}
+        if (found.tagName !== 'SELECT') { try { found.scrollIntoView({ block: 'center', inline: 'center' }); } catch (e) {} }
         const r = found.getBoundingClientRect();
         const cx = r.left + r.width / 2;
         const cy = r.top + r.height / 2;
@@ -886,10 +886,10 @@ export class CDPClient {
       `);
       const opts = optRes?.result?.value;
       return {
-        success: true,
+        success: false,
         tag: 'SELECT',
         text: opts?.current || info.text,
-        hint: `This is a <select> dropdown (current: "${opts?.current || ''}"). Do NOT click — use type_text({text: "option name"}) to select an option.` + (opts?.options ? ' Available: ' + opts.options.join(', ') : ''),
+        error: `CANNOT CLICK a <select> dropdown — clicking opens a native OS popup that cannot be controlled. The dropdown is now focused (current: "${opts?.current || ''}"). Use type_text({text: "option name"}) to change the value.` + (opts?.options ? ' Available: ' + opts.options.join(', ') : ''),
       };
     }
 
