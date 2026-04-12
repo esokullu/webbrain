@@ -368,9 +368,31 @@
 
     if (!el) return { success: false, error: 'Element not found' };
 
+    // ── Auto-select: if click text matches a <select> option, select it ──
+    if (params.text) {
+      const needle = params.text.trim();
+      const lc = needle.toLowerCase();
+      const allSels = document.querySelectorAll('select');
+      for (const sel of allSels) {
+        const opts = Array.from(sel.options);
+        const match = opts.find(o => o.text.trim() === needle)
+          || opts.find(o => o.text.trim().toLowerCase() === lc)
+          || opts.find(o => o.value === needle)
+          || opts.find(o => o.value.toLowerCase() === lc);
+        if (match && sel.selectedIndex !== match.index) {
+          sel.focus();
+          const nativeSetter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')?.set;
+          if (nativeSetter) nativeSetter.call(sel, match.value);
+          else sel.value = match.value;
+          sel.dispatchEvent(new Event('input', { bubbles: true }));
+          sel.dispatchEvent(new Event('change', { bubbles: true }));
+          return { success: true, method: 'auto-select', selectedText: match.text.trim(), selectedValue: match.value };
+        }
+      }
+    }
+
     // <select> guidance: clicking opens a native dropdown that cannot be
-    // interacted with programmatically. Focus the element (so follow-up
-    // type_text finds it as activeElement) and tell the model to use type_text.
+    // interacted with programmatically. Focus + return guidance.
     if (el instanceof HTMLSelectElement) {
       el.focus();
       const options = Array.from(el.options).map(o => o.text.trim());
@@ -378,8 +400,29 @@
         success: true,
         tag: 'SELECT',
         text: el.options[el.selectedIndex]?.text?.trim() || '',
-        hint: `This is a <select> dropdown (current value: "${el.options[el.selectedIndex]?.text?.trim() || ''}"). Do NOT try to click individual options — the native dropdown cannot be controlled via click. Instead, use type_text({index: ${params.index != null ? params.index : 'N'}, text: "option name"}) to select an option. Available options: ${options.join(', ')}`,
+        hint: `This is a <select> dropdown (current value: "${el.options[el.selectedIndex]?.text?.trim() || ''}"). Use type_text({index: ${params.index != null ? params.index : 'N'}, text: "option name"}) to change it. Available options: ${options.join(', ')}`,
       };
+    }
+
+    // Also check if the target element is near a SELECT (sibling pattern)
+    if (!(el instanceof HTMLSelectElement)) {
+      const p = el.parentElement;
+      let nearbySel = null;
+      if (p) { for (const sib of p.children) { if (sib.tagName === 'SELECT') { nearbySel = sib; break; } } }
+      if (!nearbySel) {
+        const anc = el.closest ? el.closest('[class]') : null;
+        if (anc) nearbySel = anc.querySelector('select');
+      }
+      if (nearbySel) {
+        nearbySel.focus();
+        const options = Array.from(nearbySel.options).map(o => o.text.trim());
+        return {
+          success: true,
+          tag: 'SELECT',
+          text: nearbySel.options[nearbySel.selectedIndex]?.text?.trim() || '',
+          hint: `A <select> dropdown is near this element (current: "${nearbySel.options[nearbySel.selectedIndex]?.text?.trim() || ''}"). Use type_text({text: "option name"}) to change it. Available options: ${options.join(', ')}`,
+        };
+      }
     }
 
     el.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -396,7 +439,7 @@
         success: true,
         tag: 'SELECT',
         text: postActive.options[postActive.selectedIndex]?.text?.trim() || '',
-        hint: `A <select> dropdown was activated by this click (current: "${postActive.options[postActive.selectedIndex]?.text?.trim() || ''}"). Do NOT try to click individual options — use type_text({text: "option name"}) instead. Available options: ${postOpts.join(', ')}`,
+        hint: `A <select> dropdown was activated by this click (current: "${postActive.options[postActive.selectedIndex]?.text?.trim() || ''}"). Use type_text({text: "option name"}) to change it. Available options: ${postOpts.join(', ')}`,
       };
     }
 

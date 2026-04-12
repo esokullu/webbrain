@@ -626,6 +626,114 @@ export class Agent {
   }
 
   /**
+   * Auto-select a <select> option by keyboard arrows.
+   * Scans ALL selects on the page. If `optionText` matches a non-current
+   * option, focuses that select, sends ArrowDown/Up via CDP, verifies,
+   * and returns a success result.  Returns null if no match found.
+   *
+   * When `optionText` matches the ALREADY-SELECTED option, returns a
+   * result telling the agent it's already set (no action needed).
+   */
+  async _autoSelectOption(tabId, cdpClient, optionText) {
+    const needle = (optionText || '').trim();
+    if (!needle) return null;
+    const scanResult = await cdpClient.evaluate(tabId, `
+      (() => {
+        const needle = ${JSON.stringify(needle)};
+        const lc = needle.toLowerCase();
+        const sels = document.querySelectorAll('select');
+        for (const sel of sels) {
+          const opts = Array.from(sel.options);
+          const match = opts.find(o => o.text.trim() === needle)
+            || opts.find(o => o.text.trim().toLowerCase() === lc)
+            || opts.find(o => o.value === needle)
+            || opts.find(o => o.value.toLowerCase() === lc);
+          if (match) {
+            sel.focus();
+            const cur = sel.selectedIndex;
+            return {
+              found: true,
+              alreadySelected: cur === match.index,
+              currentIndex: cur,
+              targetIndex: match.index,
+              targetText: match.text.trim(),
+              targetValue: match.value,
+              currentText: sel.options[cur]?.text?.trim() || '',
+              allOptions: opts.map(o => o.text.trim()),
+            };
+          }
+        }
+        return { found: false };
+      })()
+    `);
+    const scan = scanResult?.result?.value;
+    if (!scan?.found) return null;
+
+    if (scan.alreadySelected) {
+      return {
+        success: true,
+        method: 'select-already-set',
+        selectedText: scan.targetText,
+        selectedValue: scan.targetValue,
+        note: `"${scan.targetText}" is already selected. Available options: ${scan.allOptions.join(', ')}`,
+      };
+    }
+
+    // Close any open native dropdown
+    await cdpClient.sendCommand(tabId, 'Input.dispatchKeyEvent', {
+      type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27,
+    });
+    await cdpClient.sendCommand(tabId, 'Input.dispatchKeyEvent', {
+      type: 'keyUp', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27,
+    });
+    // Re-focus the select (Escape may have blurred it)
+    await cdpClient.evaluate(tabId, `
+      (() => {
+        const el = document.activeElement;
+        if (el && el.tagName === 'SELECT') return;
+        const sels = document.querySelectorAll('select');
+        for (const sel of sels) {
+          const opts = Array.from(sel.options);
+          if (opts.some(o => o.text.trim() === ${JSON.stringify(needle)} || o.text.trim().toLowerCase() === ${JSON.stringify(needle.toLowerCase())})) {
+            sel.focus(); return;
+          }
+        }
+      })()
+    `);
+
+    // Navigate with ArrowDown/ArrowUp
+    const delta = scan.targetIndex - scan.currentIndex;
+    const arrowKey = delta > 0 ? 'ArrowDown' : 'ArrowUp';
+    const arrowVK = delta > 0 ? 40 : 38;
+    for (let i = 0; i < Math.abs(delta); i++) {
+      await cdpClient.sendCommand(tabId, 'Input.dispatchKeyEvent', {
+        type: 'keyDown', key: arrowKey, code: arrowKey, windowsVirtualKeyCode: arrowVK,
+      });
+      await cdpClient.sendCommand(tabId, 'Input.dispatchKeyEvent', {
+        type: 'keyUp', key: arrowKey, code: arrowKey, windowsVirtualKeyCode: arrowVK,
+      });
+    }
+
+    // Verify
+    const verify = await cdpClient.evaluate(tabId, `
+      (() => {
+        const el = document.activeElement;
+        if (!el || el.tagName !== 'SELECT') return { verified: false };
+        return { verified: true, selectedText: el.options[el.selectedIndex]?.text?.trim(), selectedValue: el.value };
+      })()
+    `);
+    const v = verify?.result?.value;
+
+    return {
+      success: true,
+      method: 'auto-select-keyboard',
+      selectedText: v?.selectedText || scan.targetText,
+      selectedValue: v?.selectedValue || scan.targetValue,
+      keyPresses: Math.abs(delta),
+    };
+  }
+
+  /**
    * Format interactive elements as a compact text block for inclusion in
    * the screenshot's accompanying message.
    */
@@ -1420,10 +1528,33 @@ export class Agent {
         await cdpClient.evaluate(tabId, `
           if (!window.__wb_sel_guard) {
             window.__wb_sel_guard = true;
-            ['mousedown','pointerdown'].forEach(evt => {
+            function findNearbySelect(el) {
+              if (!el) return null;
+              if (el.tagName === 'SELECT') return el;
+              // Walk up ancestors
+              let t = el;
+              for (let i = 0; i < 5 && t; i++) {
+                if (t.tagName === 'SELECT') return t;
+                t = t.parentElement;
+              }
+              // Check siblings (Stripe pattern: <a> and <select> are siblings)
+              const p = el.parentElement;
+              if (p) {
+                for (const sib of p.children) {
+                  if (sib.tagName === 'SELECT') return sib;
+                }
+              }
+              // Check if an ancestor wraps a select
+              const anc = el.closest ? el.closest('[class]') : null;
+              if (anc) {
+                const s = anc.querySelector('select');
+                if (s) return s;
+              }
+              return null;
+            }
+            ['mousedown','pointerdown','click'].forEach(evt => {
               document.addEventListener(evt, e => {
-                const sel = e.target.tagName === 'SELECT' ? e.target
-                  : e.target.closest ? e.target.closest('select') : null;
+                const sel = findNearbySelect(e.target);
                 if (sel) { e.preventDefault(); e.stopPropagation(); sel.focus(); }
               }, true);
             });
@@ -1439,6 +1570,14 @@ export class Agent {
           };
         }
         if (args.text) {
+          // ── Auto-select: if text matches a <select> option, select it ──
+          // This catches cases like click({text:"Yearly"}) where the model
+          // is trying to click an option inside a native/custom dropdown.
+          // Instead of clicking (which fails for native selects), we select
+          // the option directly via keyboard arrows.
+          const autoSelResult = await this._autoSelectOption(tabId, cdpClient, args.text);
+          if (autoSelResult) return autoSelResult;
+
           // Text-based click with auto-fallback matching.
           // When textMatch is not specified (default), tries exact → prefix →
           // contains in order. At each level, if multiple elements match, an
@@ -1628,37 +1767,51 @@ export class Agent {
 
           // Secondary SELECT check: the text resolved to a non-SELECT element,
           // but the click coordinates might land on/near a SELECT (e.g. text
-          // "Monthly" resolves to a label but coords overlap the select).
+          // "Monthly" resolves to a label/button but a sibling/nearby select exists).
           const coordSelCheck = await cdpClient.evaluate(tabId, `
             (() => {
               const el = document.elementFromPoint(${info.x}, ${info.y});
               if (!el) return null;
-              let t = el;
-              for (let i = 0; i < 5 && t; i++) {
-                if (t.tagName === 'SELECT') {
-                  t.focus();
-                  return { isSelect: true, current: t.options[t.selectedIndex]?.text?.trim() || '', options: Array.from(t.options).map(o => o.text.trim()) };
+              function findSelect(node) {
+                // Walk up ancestors
+                let t = node;
+                for (let i = 0; i < 5 && t; i++) {
+                  if (t.tagName === 'SELECT') return t;
+                  t = t.parentElement;
                 }
-                t = t.parentElement;
+                // Check siblings (Stripe pattern)
+                const p = node.parentElement;
+                if (p) { for (const sib of p.children) { if (sib.tagName === 'SELECT') return sib; } }
+                // Check ancestor wrapper
+                const anc = node.closest ? (node.closest('[class*="select"]') || node.closest('[class*="dropdown"]') || node.closest('[class]')) : null;
+                if (anc) { const s = anc.querySelector('select'); if (s) return s; }
+                // Check labels
+                const lbl = node.closest ? node.closest('label') : null;
+                if (lbl) {
+                  const forId = lbl.htmlFor || lbl.getAttribute('for');
+                  if (forId) { const s = document.getElementById(forId); if (s?.tagName === 'SELECT') return s; }
+                  const s = lbl.querySelector('select');
+                  if (s) return s;
+                }
+                return null;
               }
-              // Check if it's a label for a select
-              const lbl = el.closest ? el.closest('label') : null;
-              if (lbl) {
-                const forId = lbl.htmlFor || lbl.getAttribute('for');
-                if (forId) { const s = document.getElementById(forId); if (s?.tagName === 'SELECT') { s.focus(); return { isSelect: true, current: s.options[s.selectedIndex]?.text?.trim() || '', options: Array.from(s.options).map(o => o.text.trim()) }; } }
-                const s = lbl.querySelector('select');
-                if (s) { s.focus(); return { isSelect: true, current: s.options[s.selectedIndex]?.text?.trim() || '', options: Array.from(s.options).map(o => o.text.trim()) }; }
-              }
-              return null;
+              const sel = findSelect(el);
+              if (!sel) return null;
+              sel.focus();
+              return { isSelect: true, current: sel.options[sel.selectedIndex]?.text?.trim() || '', options: Array.from(sel.options).map(o => o.text.trim()) };
             })()
           `);
           if (coordSelCheck?.result?.value?.isSelect) {
+            // Instead of returning a hint, try auto-selecting if the
+            // clicked text matches an option (already handled above).
+            // If we got here, the text matched the current value or a
+            // non-option label. Return guidance but also focus the select.
             const cs = coordSelCheck.result.value;
             return {
               success: true,
               tag: 'SELECT',
               text: cs.current,
-              hint: `This is a <select> dropdown (current: "${cs.current}"). Do NOT click it — use type_text({text: "option name"}) to select an option. Available options: ${cs.options.join(', ')}`,
+              hint: `This is a <select> dropdown (current: "${cs.current}"). Use type_text({text: "option name"}) to change it. Available options: ${cs.options.join(', ')}`,
             };
           }
 
@@ -1744,21 +1897,31 @@ export class Agent {
           return await cdpClient.clickElement(tabId, args.selector);
         }
         if (args.x != null && args.y != null) {
-          // Check if the element at these coordinates is a <select> before clicking.
-          // If it is, focus the element (so type_text finds it) and return guidance.
+          // Check if the element at these coordinates is or is near a <select>.
           const coordTagCheck = await cdpClient.evaluate(tabId, `
             (() => {
               const el = document.elementFromPoint(${args.x}, ${args.y});
               if (!el) return null;
-              // Walk up a couple levels — sometimes the click lands on a child of the select
+              // Walk up ancestors
               let target = el;
-              for (let i = 0; i < 3 && target; i++) {
+              for (let i = 0; i < 5 && target; i++) {
                 if (target.tagName === 'SELECT') {
                   target.focus();
                   const opts = Array.from(target.options).map(o => o.text.trim());
                   return { isSelect: true, current: target.options[target.selectedIndex]?.text?.trim() || '', options: opts };
                 }
                 target = target.parentElement;
+              }
+              // Check siblings (Stripe pattern)
+              const p = el.parentElement;
+              if (p) {
+                for (const sib of p.children) {
+                  if (sib.tagName === 'SELECT') {
+                    sib.focus();
+                    const opts = Array.from(sib.options).map(o => o.text.trim());
+                    return { isSelect: true, current: sib.options[sib.selectedIndex]?.text?.trim() || '', options: opts };
+                  }
+                }
               }
               return { isSelect: false };
             })()
@@ -1769,7 +1932,7 @@ export class Agent {
               success: true,
               tag: 'SELECT',
               text: coordTag.current,
-              hint: `The element at (${args.x}, ${args.y}) is a <select> dropdown (current: "${coordTag.current}"). Do NOT click it — use type_text({text: "option name"}) to select an option. Available options: ${coordTag.options.join(', ')}`,
+              hint: `The element at (${args.x}, ${args.y}) is a <select> dropdown (current: "${coordTag.current}"). Use type_text({text: "option name"}) to change it. Available options: ${coordTag.options.join(', ')}`,
             };
           }
           await cdpClient.dispatchMouseEvent(tabId, 'mouseMoved', args.x, args.y);
