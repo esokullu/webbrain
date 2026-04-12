@@ -1610,12 +1610,26 @@ export class Agent {
             (() => {
               const needle = ${JSON.stringify(args.text.toLowerCase())};
               const explicit = ${JSON.stringify(args.textMatch || '')};
-              const sels = 'a, button, [role="button"], [role="link"], [role="tab"], [role="menuitem"], input[type="button"], input[type="submit"], summary, label, [onclick], [data-action]';
+              // Include inputs/select/textarea so we can match by placeholder,
+              // value, or aria-label — not just visible button/link text.
+              const sels = 'a, button, [role="button"], [role="link"], [role="tab"], [role="menuitem"], input:not([type="hidden"]), textarea, select, input[type="button"], input[type="submit"], summary, label, [onclick], [data-action]';
               const all = Array.from(document.querySelectorAll(sels));
               const normalized = all.map(el => ({
                 el,
-                txt: (el.innerText || el.value || el.ariaLabel || '').trim().toLowerCase(),
+                txt: (el.innerText || el.value || el.placeholder || el.ariaLabel || '').trim().toLowerCase(),
               })).filter(x => !!x.txt);
+
+              // Also build a label→input map so we can match label text
+              // and resolve to the associated input field.
+              const labelMap = new Map();
+              document.querySelectorAll('label').forEach(lbl => {
+                const txt = (lbl.innerText || '').trim().toLowerCase();
+                if (!txt) return;
+                let target = null;
+                if (lbl.htmlFor) target = document.getElementById(lbl.htmlFor);
+                if (!target) target = lbl.querySelector('input,textarea,select');
+                if (target) labelMap.set(txt, target);
+              });
 
               function tryMode(mode) {
                 if (mode === 'exact') return normalized.filter(x => x.txt === needle);
@@ -1635,12 +1649,35 @@ export class Agent {
               for (const m of modes) {
                 matches = tryMode(m);
                 usedMode = m;
-                if (matches.length === 1) break; // unique match — use it
-                if (matches.length > 1) break;   // ambiguous — report it
-                // 0 matches — try next mode
+                if (matches.length === 1) break;
+                if (matches.length > 1) break;
               }
 
-              if (matches.length === 0) return { found: false, mode: usedMode };
+              // If no direct match, try matching against label text → input
+              if (matches.length === 0) {
+                for (const [ltxt, inp] of labelMap) {
+                  const ok = (needle === ltxt) || ltxt.startsWith(needle) || ltxt.includes(needle);
+                  if (ok) {
+                    inp.scrollIntoView({ block: 'center', inline: 'center' });
+                    inp.focus();
+                    let r = inp.getBoundingClientRect();
+                    // Fallback for zero-dimension inputs (styled wrappers)
+                    if (r.width === 0 || r.height === 0) {
+                      let p = inp.parentElement;
+                      for (let i = 0; i < 3 && p; i++, p = p.parentElement) {
+                        const pr = p.getBoundingClientRect();
+                        if (pr.width > 0 && pr.height > 0) { r = pr; break; }
+                      }
+                    }
+                    return {
+                      found: true, mode: 'label', x: r.left + r.width / 2,
+                      y: r.top + r.height / 2, tag: inp.tagName,
+                      text: ltxt.slice(0, 80), focusedInput: true,
+                    };
+                  }
+                }
+                return { found: false, mode: usedMode };
+              }
 
               // --- Prioritize interactive elements over passive children ---
               const _INTERACTIVE_TAGS = new Set(['BUTTON', 'A', 'INPUT', 'SELECT', 'TEXTAREA']);
@@ -1670,8 +1707,27 @@ export class Agent {
                 }
               }
 
-              // --- Parent traversal: resolve passive child to interactive ancestor ---
+              // --- Resolve element: label→input, passive→interactive ancestor ---
               let el = matches[0].el;
+
+              // If it's a LABEL, follow to associated input
+              if (el.tagName === 'LABEL') {
+                let target = null;
+                if (el.htmlFor) target = document.getElementById(el.htmlFor);
+                if (!target) target = el.querySelector('input,textarea,select');
+                // Also check next sibling
+                if (!target && el.nextElementSibling) {
+                  const ns = el.nextElementSibling;
+                  if (/^(INPUT|TEXTAREA|SELECT)$/i.test(ns.tagName)) target = ns;
+                  else target = ns.querySelector('input,textarea,select');
+                }
+                if (target) {
+                  target.focus();
+                  el = target;
+                }
+              }
+
+              // Passive tag → walk up to interactive ancestor
               if (_PASSIVE_TAGS.has(el.tagName) && !_isInteractive(el)) {
                 let ancestor = el.parentElement;
                 for (let i = 0; i < 5 && ancestor; i++, ancestor = ancestor.parentElement) {
@@ -1683,7 +1739,15 @@ export class Agent {
               }
 
               try { el.scrollIntoView({ block: 'center', inline: 'center' }); } catch (e) {}
-              const r = el.getBoundingClientRect();
+              let r = el.getBoundingClientRect();
+              // Fallback for zero-dimension inputs
+              if ((r.width === 0 || r.height === 0) && /^(INPUT|SELECT|TEXTAREA)$/i.test(el.tagName)) {
+                let p = el.parentElement;
+                for (let i = 0; i < 3 && p; i++, p = p.parentElement) {
+                  const pr = p.getBoundingClientRect();
+                  if (pr.width > 0 && pr.height > 0) { r = pr; break; }
+                }
+              }
               return {
                 found: true,
                 mode: usedMode,
@@ -1706,9 +1770,21 @@ export class Agent {
                 (() => {
                   const needle = ${JSON.stringify(args.text.toLowerCase())};
                   const explicit = ${JSON.stringify(args.textMatch || '')};
-                  const sels = 'a, button, [role="button"], [role="link"], [role="tab"], [role="menuitem"], input[type="button"], input[type="submit"], summary, label, [onclick], [data-action]';
+                  const sels = 'a, button, [role="button"], [role="link"], [role="tab"], [role="menuitem"], input:not([type="hidden"]), textarea, select, input[type="button"], input[type="submit"], summary, label, [onclick], [data-action]';
                   const all = Array.from(document.querySelectorAll(sels));
-                  const normalized = all.map(el => ({ el, txt: (el.innerText || el.value || el.ariaLabel || '').trim().toLowerCase() })).filter(x => !!x.txt);
+                  const normalized = all.map(el => ({ el, txt: (el.innerText || el.value || el.placeholder || el.ariaLabel || '').trim().toLowerCase() })).filter(x => !!x.txt);
+
+                  // Label→input map
+                  const labelMap = new Map();
+                  document.querySelectorAll('label').forEach(lbl => {
+                    const txt = (lbl.innerText || '').trim().toLowerCase();
+                    if (!txt) return;
+                    let target = null;
+                    if (lbl.htmlFor) target = document.getElementById(lbl.htmlFor);
+                    if (!target) target = lbl.querySelector('input,textarea,select');
+                    if (target) labelMap.set(txt, target);
+                  });
+
                   function tryMode(mode) {
                     if (mode === 'exact') return normalized.filter(x => x.txt === needle);
                     if (mode === 'prefix') return normalized.filter(x => x.txt.startsWith(needle));
@@ -1718,16 +1794,60 @@ export class Agent {
                   const modes = explicit ? [explicit] : ['exact', 'prefix', 'contains'];
                   let matches = []; let usedMode = modes[0];
                   for (const m of modes) { matches = tryMode(m); usedMode = m; if (matches.length >= 1) break; }
-                  if (matches.length === 0) return { found: false };
+
+                  // If no direct match, try label→input map
+                  if (matches.length === 0) {
+                    for (const [ltxt, inp] of labelMap) {
+                      const ok = (needle === ltxt) || ltxt.startsWith(needle) || ltxt.includes(needle);
+                      if (ok) {
+                        inp.scrollIntoView({ block: 'center', inline: 'center' });
+                        inp.focus();
+                        let r = inp.getBoundingClientRect();
+                        if (r.width === 0 || r.height === 0) {
+                          let p = inp.parentElement;
+                          for (let i = 0; i < 3 && p; i++, p = p.parentElement) {
+                            const pr = p.getBoundingClientRect();
+                            if (pr.width > 0 && pr.height > 0) { r = pr; break; }
+                          }
+                        }
+                        return { found: true, mode: 'label', x: r.left + r.width / 2, y: r.top + r.height / 2, tag: inp.tagName, text: ltxt.slice(0, 80), focusedInput: true };
+                      }
+                    }
+                    return { found: false };
+                  }
+
                   const _INTERACTIVE_TAGS = new Set(['BUTTON','A','INPUT','SELECT','TEXTAREA']);
                   const _INTERACTIVE_ROLES = new Set(['button','link','tab','menuitem','option']);
                   const _PASSIVE_TAGS = new Set(['LABEL','SPAN','DIV','P','STRONG','EM','I','B','SMALL','SVG','IMG']);
                   function _isInteractive(n) { return _INTERACTIVE_TAGS.has(n.tagName) || _INTERACTIVE_ROLES.has((n.getAttribute&&n.getAttribute('role'))||'') || (n.hasAttribute&&(n.hasAttribute('onclick')||n.hasAttribute('data-action'))); }
                   if (matches.length > 1) { const inter = matches.filter(m => _isInteractive(m.el)); if (inter.length === 1) matches = inter; else return { found: false, ambiguous: true, mode: usedMode, count: matches.length, candidates: matches.slice(0,5).map(m=>m.txt.slice(0,80)) }; }
                   let el = matches[0].el;
+
+                  // LABEL → associated input
+                  if (el.tagName === 'LABEL') {
+                    let target = null;
+                    if (el.htmlFor) target = document.getElementById(el.htmlFor);
+                    if (!target) target = el.querySelector('input,textarea,select');
+                    if (!target && el.nextElementSibling) {
+                      const ns = el.nextElementSibling;
+                      if (/^(INPUT|TEXTAREA|SELECT)$/i.test(ns.tagName)) target = ns;
+                      else target = ns.querySelector('input,textarea,select');
+                    }
+                    if (target) { target.focus(); el = target; }
+                  }
+
+                  // Passive tag → interactive ancestor
                   if (_PASSIVE_TAGS.has(el.tagName) && !_isInteractive(el)) { let anc = el.parentElement; for (let i=0;i<5&&anc;i++,anc=anc.parentElement) { if (_isInteractive(anc)) { el=anc; break; } } }
                   try { el.scrollIntoView({block:'center',inline:'center'}); } catch(e){}
-                  const r = el.getBoundingClientRect();
+                  let r = el.getBoundingClientRect();
+                  // Fallback for zero-dimension inputs
+                  if ((r.width === 0 || r.height === 0) && /^(INPUT|SELECT|TEXTAREA)$/i.test(el.tagName)) {
+                    let p = el.parentElement;
+                    for (let i = 0; i < 3 && p; i++, p = p.parentElement) {
+                      const pr = p.getBoundingClientRect();
+                      if (pr.width > 0 && pr.height > 0) { r = pr; break; }
+                    }
+                  }
                   return { found: true, mode: usedMode, x: r.left+r.width/2, y: r.top+r.height/2, tag: el.tagName, text: (el.innerText||el.value||'').slice(0,80) };
                 })()
               `);
@@ -1958,9 +2078,83 @@ export class Agent {
               hint: `The element at (${args.x}, ${args.y}) is a <select> dropdown (current: "${coordTag.current}"). Use type_text({text: "option name"}) to change it. Available options: ${coordTag.options.join(', ')}`,
             };
           }
-          await cdpClient.dispatchMouseEvent(tabId, 'mouseMoved', args.x, args.y);
-          await cdpClient.dispatchMouseEvent(tabId, 'mousePressed', args.x, args.y);
-          await cdpClient.dispatchMouseEvent(tabId, 'mouseReleased', args.x, args.y);
+          // Smart coordinate redirect: if (x,y) lands on a label, wrapper,
+          // or non-input element, find the nearby input and redirect the
+          // click to its center — like a human clicking inside the text box,
+          // not on the label above it.
+          const coordRedirect = await cdpClient.evaluate(tabId, `
+            (() => {
+              const el = document.elementFromPoint(${args.x}, ${args.y});
+              if (!el) return null;
+
+              // Already on an input — just focus it, click as-is
+              if (/^(INPUT|TEXTAREA|SELECT)$/i.test(el.tagName)) {
+                el.focus();
+                return null; // no redirect needed
+              }
+
+              // Find the real input target
+              let target = null;
+
+              // 1. Label association (htmlFor, inner input, next sibling)
+              const lbl = el.closest('label') || (el.tagName === 'LABEL' ? el : null);
+              if (lbl) {
+                if (lbl.htmlFor) target = document.getElementById(lbl.htmlFor);
+                if (!target) target = lbl.querySelector('input,textarea,select');
+                if (!target && lbl.nextElementSibling) {
+                  const ns = lbl.nextElementSibling;
+                  if (/^(INPUT|TEXTAREA|SELECT)$/i.test(ns.tagName)) target = ns;
+                  else target = ns.querySelector('input,textarea,select');
+                }
+              }
+
+              // 2. Wrapper: element or parent contains an input
+              if (!target) {
+                target = el.querySelector('input:not([type="hidden"]),textarea,select');
+              }
+              if (!target && el.parentElement) {
+                target = el.parentElement.querySelector('input:not([type="hidden"]),textarea,select');
+              }
+
+              // 3. Walk up to find a form-group-like wrapper with an input
+              if (!target) {
+                let p = el.parentElement;
+                for (let i = 0; i < 5 && p; i++, p = p.parentElement) {
+                  const inp = p.querySelector('input:not([type="hidden"]),textarea,select');
+                  if (inp) { target = inp; break; }
+                }
+              }
+
+              if (!target) return null;
+
+              // Focus the input and return its center coordinates
+              target.scrollIntoView({ block: 'center', inline: 'center' });
+              target.focus();
+              let r = target.getBoundingClientRect();
+
+              // Zero-width input fallback (Stripe pattern)
+              if (r.width === 0 || r.height === 0) {
+                let p = target.parentElement;
+                for (let i = 0; i < 3 && p; i++, p = p.parentElement) {
+                  const pr = p.getBoundingClientRect();
+                  if (pr.width > 0 && pr.height > 0) { r = pr; break; }
+                }
+              }
+
+              return {
+                x: Math.round(r.left + r.width / 2),
+                y: Math.round(r.top + r.height / 2),
+                tag: target.tagName,
+              };
+            })()
+          `);
+          const redir = coordRedirect?.result?.value;
+          const clickX = redir ? redir.x : args.x;
+          const clickY = redir ? redir.y : args.y;
+
+          await cdpClient.dispatchMouseEvent(tabId, 'mouseMoved', clickX, clickY);
+          await cdpClient.dispatchMouseEvent(tabId, 'mousePressed', clickX, clickY);
+          await cdpClient.dispatchMouseEvent(tabId, 'mouseReleased', clickX, clickY);
 
           // Post-click SELECT detection (same as text-based path above).
           await new Promise(r => setTimeout(r, 200));

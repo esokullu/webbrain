@@ -323,12 +323,24 @@
     if (params.text) {
       const needle = params.text.toLowerCase();
       const explicit = params.textMatch || '';
-      const sels = 'a, button, [role="button"], [role="link"], [role="tab"], [role="menuitem"], input[type="button"], input[type="submit"], summary, label, [onclick], [data-action]';
+      // Include inputs/select/textarea so we can match by placeholder, value, or aria-label
+      const sels = 'a, button, [role="button"], [role="link"], [role="tab"], [role="menuitem"], input:not([type="hidden"]), textarea, select, input[type="button"], input[type="submit"], summary, label, [onclick], [data-action]';
       const all = Array.from(document.querySelectorAll(sels));
       const normalized = all.map(e => ({
         e,
-        txt: (e.innerText || e.value || e.ariaLabel || '').trim().toLowerCase(),
+        txt: (e.innerText || e.value || e.placeholder || e.ariaLabel || '').trim().toLowerCase(),
       })).filter(x => !!x.txt);
+
+      // Build label→input map so we can match label text and resolve to associated input
+      const labelMap = new Map();
+      document.querySelectorAll('label').forEach(lbl => {
+        const txt = (lbl.innerText || '').trim().toLowerCase();
+        if (!txt) return;
+        let target = null;
+        if (lbl.htmlFor) target = document.getElementById(lbl.htmlFor);
+        if (!target) target = lbl.querySelector('input,textarea,select');
+        if (target) labelMap.set(txt, target);
+      });
 
       function tryMode(mode) {
         if (mode === 'exact') return normalized.filter(x => x.txt === needle);
@@ -351,14 +363,27 @@
         if (matches.length > 1) break;
       }
 
+      // If no direct match, try label→input map
       if (matches.length === 0) {
+        for (const [ltxt, inp] of labelMap) {
+          const ok = (needle === ltxt) || ltxt.startsWith(needle) || ltxt.includes(needle);
+          if (ok) {
+            inp.scrollIntoView({ block: 'center', inline: 'center' });
+            inp.focus();
+            el = inp;
+            break;
+          }
+        }
+      }
+
+      if (!el && matches.length === 0) {
         // Auto-scroll retry: scroll down up to 3 times to find elements below the fold
         for (let scrollAttempt = 0; scrollAttempt < 3 && matches.length === 0; scrollAttempt++) {
           window.scrollBy(0, Math.round(window.innerHeight * 0.7));
           const allRetry = Array.from(document.querySelectorAll(sels));
           const normRetry = allRetry.map(e => ({
             e,
-            txt: (e.innerText || e.value || e.ariaLabel || '').trim().toLowerCase(),
+            txt: (e.innerText || e.value || e.placeholder || e.ariaLabel || '').trim().toLowerCase(),
           })).filter(x => !!x.txt);
           for (const m of modes) {
             if (m === 'exact') matches = normRetry.filter(x => x.txt === needle);
@@ -367,12 +392,34 @@
             usedMode = m;
             if (matches.length >= 1) break;
           }
+          // Also retry label→input map after scroll
+          if (matches.length === 0) {
+            const labelMap2 = new Map();
+            document.querySelectorAll('label').forEach(lbl => {
+              const txt = (lbl.innerText || '').trim().toLowerCase();
+              if (!txt) return;
+              let target = null;
+              if (lbl.htmlFor) target = document.getElementById(lbl.htmlFor);
+              if (!target) target = lbl.querySelector('input,textarea,select');
+              if (target) labelMap2.set(txt, target);
+            });
+            for (const [ltxt, inp] of labelMap2) {
+              const ok = (needle === ltxt) || ltxt.startsWith(needle) || ltxt.includes(needle);
+              if (ok) {
+                inp.scrollIntoView({ block: 'center', inline: 'center' });
+                inp.focus();
+                el = inp;
+                break;
+              }
+            }
+            if (el) break;
+          }
         }
-        if (matches.length === 0) {
+        if (!el && matches.length === 0) {
           return { success: false, error: `No clickable element found for text "${params.text}" (also tried scrolling down)` };
         }
       }
-      if (matches.length > 1) {
+      if (!el && matches.length > 1) {
         // Prefer interactive elements over passive children (label, span, etc.)
         const interactiveMatches = matches.filter(m => _isInteractive(m.e));
         if (interactiveMatches.length === 1) {
@@ -385,7 +432,22 @@
           };
         }
       }
-      el = _resolveInteractiveAncestor(matches[0].e);
+      if (!el) {
+        let resolved = matches[0].e;
+        // LABEL → associated input resolution
+        if (resolved.tagName === 'LABEL') {
+          let target = null;
+          if (resolved.htmlFor) target = document.getElementById(resolved.htmlFor);
+          if (!target) target = resolved.querySelector('input,textarea,select');
+          if (!target && resolved.nextElementSibling) {
+            const ns = resolved.nextElementSibling;
+            if (/^(INPUT|TEXTAREA|SELECT)$/i.test(ns.tagName)) target = ns;
+            else target = ns.querySelector('input,textarea,select');
+          }
+          if (target) { target.focus(); resolved = target; }
+        }
+        el = _resolveInteractiveAncestor(resolved);
+      }
     } else if (params.selector) {
       el = document.querySelector(params.selector);
     } else if (params.index != null) {
