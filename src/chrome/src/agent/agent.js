@@ -1410,6 +1410,26 @@ export class Agent {
     if (name === 'click') {
       try {
         await cdpClient.attach(tabId);
+
+        // ── Global SELECT guard ─────────────────────────────────────────
+        // Inject a capture-phase mousedown+click listener that prevents
+        // native <select> dropdown popups from opening via ANY mouse path
+        // (CDP events, el.click(), label activation, execute_js, etc.).
+        // The listener also focuses the select so type_text can work.
+        // Idempotent — the __wb_sel_guard flag prevents double-injection.
+        await cdpClient.evaluate(tabId, `
+          if (!window.__wb_sel_guard) {
+            window.__wb_sel_guard = true;
+            ['mousedown','pointerdown'].forEach(evt => {
+              document.addEventListener(evt, e => {
+                const sel = e.target.tagName === 'SELECT' ? e.target
+                  : e.target.closest ? e.target.closest('select') : null;
+                if (sel) { e.preventDefault(); e.stopPropagation(); sel.focus(); }
+              }, true);
+            });
+          }
+        `);
+
         // Detect common LLM mistakes: jQuery / Playwright pseudo-classes
         // that look like CSS but aren't.
         if (args.selector && /:contains\(|:has-text\(/.test(args.selector)) {
@@ -1606,6 +1626,42 @@ export class Agent {
             };
           }
 
+          // Secondary SELECT check: the text resolved to a non-SELECT element,
+          // but the click coordinates might land on/near a SELECT (e.g. text
+          // "Monthly" resolves to a label but coords overlap the select).
+          const coordSelCheck = await cdpClient.evaluate(tabId, `
+            (() => {
+              const el = document.elementFromPoint(${info.x}, ${info.y});
+              if (!el) return null;
+              let t = el;
+              for (let i = 0; i < 5 && t; i++) {
+                if (t.tagName === 'SELECT') {
+                  t.focus();
+                  return { isSelect: true, current: t.options[t.selectedIndex]?.text?.trim() || '', options: Array.from(t.options).map(o => o.text.trim()) };
+                }
+                t = t.parentElement;
+              }
+              // Check if it's a label for a select
+              const lbl = el.closest ? el.closest('label') : null;
+              if (lbl) {
+                const forId = lbl.htmlFor || lbl.getAttribute('for');
+                if (forId) { const s = document.getElementById(forId); if (s?.tagName === 'SELECT') { s.focus(); return { isSelect: true, current: s.options[s.selectedIndex]?.text?.trim() || '', options: Array.from(s.options).map(o => o.text.trim()) }; } }
+                const s = lbl.querySelector('select');
+                if (s) { s.focus(); return { isSelect: true, current: s.options[s.selectedIndex]?.text?.trim() || '', options: Array.from(s.options).map(o => o.text.trim()) }; }
+              }
+              return null;
+            })()
+          `);
+          if (coordSelCheck?.result?.value?.isSelect) {
+            const cs = coordSelCheck.result.value;
+            return {
+              success: true,
+              tag: 'SELECT',
+              text: cs.current,
+              hint: `This is a <select> dropdown (current: "${cs.current}"). Do NOT click it — use type_text({text: "option name"}) to select an option. Available options: ${cs.options.join(', ')}`,
+            };
+          }
+
           // Wait for scroll to settle, then dispatch a real click via CDP.
           await new Promise(r => setTimeout(r, 100));
           await cdpClient.dispatchMouseEvent(tabId, 'mouseMoved', info.x, info.y);
@@ -1613,36 +1669,33 @@ export class Agent {
           await cdpClient.dispatchMouseEvent(tabId, 'mouseReleased', info.x, info.y);
 
           // Post-click SELECT detection: the click may have activated a
-          // <select> via a label, wrapper, or overlapping element. If so,
-          // close the native dropdown and return guidance.
-          await new Promise(r => setTimeout(r, 50));
+          // <select> via a label, wrapper, or overlapping element. The
+          // global guard prevents the native dropdown from opening, but we
+          // still need to detect and return guidance.
+          await new Promise(r => setTimeout(r, 200));
           const postClickSel1 = await cdpClient.evaluate(tabId, `
             (() => {
               const el = document.activeElement;
-              if (!el || el.tagName !== 'SELECT') return null;
-              el.blur(); el.focus(); // close native popup, keep focus
-              return {
-                current: el.options[el.selectedIndex]?.text?.trim() || '',
-                options: Array.from(el.options).map(o => o.text.trim()),
-              };
+              if (el?.tagName === 'SELECT') {
+                return { current: el.options[el.selectedIndex]?.text?.trim() || '', options: Array.from(el.options).map(o => o.text.trim()) };
+              }
+              // Also check all selects — one might have been focused then blurred
+              const sels = document.querySelectorAll('select');
+              for (const s of sels) {
+                if (s === document.activeElement || s.matches(':focus-within')) {
+                  return { current: s.options[s.selectedIndex]?.text?.trim() || '', options: Array.from(s.options).map(o => o.text.trim()) };
+                }
+              }
+              return null;
             })()
           `);
           if (postClickSel1?.result?.value) {
-            // Press Escape to ensure the native dropdown is closed
-            await cdpClient.sendCommand(tabId, 'Input.dispatchKeyEvent', {
-              type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27,
-            });
-            await cdpClient.sendCommand(tabId, 'Input.dispatchKeyEvent', {
-              type: 'keyUp', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27,
-            });
-            // Re-focus the select so type_text finds it
-            await cdpClient.evaluate(tabId, `document.activeElement?.tagName !== 'SELECT' && (() => { const s = document.querySelector('select:focus') || Array.from(document.querySelectorAll('select')).find(s => s.matches(':focus')); if (s) s.focus(); })()`);
             const pOpts = postClickSel1.result.value;
             return {
               success: true,
               tag: 'SELECT',
               text: pOpts.current,
-              hint: `A <select> dropdown was activated by this click (current: "${pOpts.current}"). Do NOT try to click individual options in the native dropdown — use type_text({text: "option name"}) instead. Available options: ${pOpts.options.join(', ')}`,
+              hint: `A <select> dropdown was activated by this click (current: "${pOpts.current}"). Do NOT click it — use type_text({text: "option name"}) to change the value. Available options: ${pOpts.options.join(', ')}`,
             };
           }
 
@@ -1724,31 +1777,23 @@ export class Agent {
           await cdpClient.dispatchMouseEvent(tabId, 'mouseReleased', args.x, args.y);
 
           // Post-click SELECT detection (same as text-based path above).
-          await new Promise(r => setTimeout(r, 50));
+          await new Promise(r => setTimeout(r, 200));
           const postClickSel2 = await cdpClient.evaluate(tabId, `
             (() => {
               const el = document.activeElement;
-              if (!el || el.tagName !== 'SELECT') return null;
-              el.blur(); el.focus();
-              return {
-                current: el.options[el.selectedIndex]?.text?.trim() || '',
-                options: Array.from(el.options).map(o => o.text.trim()),
-              };
+              if (el?.tagName === 'SELECT') {
+                return { current: el.options[el.selectedIndex]?.text?.trim() || '', options: Array.from(el.options).map(o => o.text.trim()) };
+              }
+              return null;
             })()
           `);
           if (postClickSel2?.result?.value) {
-            await cdpClient.sendCommand(tabId, 'Input.dispatchKeyEvent', {
-              type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27,
-            });
-            await cdpClient.sendCommand(tabId, 'Input.dispatchKeyEvent', {
-              type: 'keyUp', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27,
-            });
             const pOpts2 = postClickSel2.result.value;
             return {
               success: true,
               tag: 'SELECT',
               text: pOpts2.current,
-              hint: `A <select> dropdown was activated by this click (current: "${pOpts2.current}"). Do NOT try to click individual options in the native dropdown — use type_text({text: "option name"}) instead. Available options: ${pOpts2.options.join(', ')}`,
+              hint: `A <select> dropdown was activated by this click (current: "${pOpts2.current}"). Do NOT click it — use type_text({text: "option name"}) to change the value. Available options: ${pOpts2.options.join(', ')}`,
             };
           }
 

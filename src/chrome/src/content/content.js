@@ -90,9 +90,11 @@
     if (el.closest('[aria-hidden="true"], [inert]')) return false;
 
     const style = el.ownerDocument.defaultView.getComputedStyle(el);
-    if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') {
-      return false;
-    }
+    if (style.display === 'none' || style.visibility === 'hidden') return false;
+    // Allow opacity-0 SELECT elements — sites like Stripe overlay a
+    // transparent native <select> on top of a custom styled button.
+    // These are functional and the agent MUST know about them.
+    if (style.opacity === '0' && el.tagName !== 'SELECT') return false;
 
     const rect = el.getBoundingClientRect();
     if (rect.width > 0 && rect.height > 0) return true;
