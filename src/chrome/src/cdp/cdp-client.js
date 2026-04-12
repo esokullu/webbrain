@@ -869,6 +869,28 @@ export class CDPClient {
     if (!info) return { success: false, error: 'Element not found' };
     if (info.error) return { success: false, error: info.error };
 
+    // <select> intercept: don't click — return guidance to use type_text.
+    if (info.tag === 'SELECT') {
+      const selectorJSON = JSON.stringify(selector);
+      const optRes = await this.evaluate(tabId, `
+        (() => {
+          const el = document.querySelector(${selectorJSON});
+          if (!el || el.tagName !== 'SELECT') return null;
+          return {
+            current: el.options[el.selectedIndex]?.text?.trim() || '',
+            options: Array.from(el.options).map(o => o.text.trim()),
+          };
+        })()
+      `);
+      const opts = optRes?.result?.value;
+      return {
+        success: true,
+        tag: 'SELECT',
+        text: opts?.current || info.text,
+        hint: `This is a <select> dropdown (current: "${opts?.current || ''}"). Do NOT click — use type_text({selector: ${JSON.stringify(selector)}, text: "option name"}) instead.` + (opts?.options ? ' Available: ' + opts.options.join(', ') : ''),
+      };
+    }
+
     // Step 1: real mouse events at center coordinates.
     if (info.inViewport && info.hitOk) {
       try {

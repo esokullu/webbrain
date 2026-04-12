@@ -560,6 +560,36 @@ export class Agent {
             if (!aIsInput && bIsInput) return 1;
             return 0;
           });
+          // Helper: find the visible label associated with a form element.
+          function getLabel(el) {
+            // 1. Explicit <label for="...">
+            if (el.id) {
+              const lbl = document.querySelector('label[for="' + CSS.escape(el.id) + '"]');
+              if (lbl) return lbl.innerText.trim().slice(0, 40);
+            }
+            // 2. Wrapping <label>
+            const parent = el.closest('label');
+            if (parent) {
+              const t = parent.innerText.trim().slice(0, 40);
+              if (t && t !== (el.value || '').trim()) return t;
+            }
+            // 3. aria-label / aria-labelledby
+            if (el.ariaLabel) return el.ariaLabel.trim().slice(0, 40);
+            if (el.getAttribute('aria-labelledby')) {
+              const lbl = document.getElementById(el.getAttribute('aria-labelledby'));
+              if (lbl) return lbl.innerText.trim().slice(0, 40);
+            }
+            // 4. Preceding sibling or parent text that looks like a label
+            const prev = el.previousElementSibling;
+            if (prev && (prev.tagName === 'LABEL' || prev.tagName === 'SPAN' || prev.tagName === 'DIV')) {
+              const t = prev.innerText.trim().slice(0, 40);
+              if (t && t.length < 40) return t;
+            }
+            // 5. name attribute as last resort
+            if (el.name) return el.name;
+            return '';
+          }
+
           for (const el of prioritized) {
             const r = el.getBoundingClientRect();
             // Visible + in viewport
@@ -568,13 +598,22 @@ export class Agent {
             if (r.right < 0 || r.left > window.innerWidth) continue;
             const text = (el.innerText || el.value || el.placeholder || el.ariaLabel || el.title || '').trim().slice(0, 50);
             if (!text && el.tagName !== 'INPUT' && el.tagName !== 'TEXTAREA' && el.tagName !== 'SELECT') continue;
-            out.push({
+
+            // For form fields, include the label so the model knows what the field is for.
+            let label = '';
+            if (/^(INPUT|TEXTAREA|SELECT)$/i.test(el.tagName)) {
+              label = getLabel(el);
+            }
+
+            const entry = {
               x: Math.round(r.left + r.width / 2),
               y: Math.round(r.top + r.height / 2),
               tag: el.tagName.toLowerCase(),
               type: el.type || '',
               text: text || \`<\${el.tagName.toLowerCase()}>\`,
-            });
+            };
+            if (label) entry.label = label;
+            out.push(entry);
             if (out.length >= maxEl) break;
           }
           return out;
@@ -594,7 +633,10 @@ export class Agent {
     if (!elements || elements.length === 0) return '';
     const lines = elements.map(e => {
       const tagInfo = e.type ? `${e.tag}[${e.type}]` : e.tag;
-      return `  (${e.x},${e.y}) ${tagInfo} "${e.text}"`;
+      let line = `  (${e.x},${e.y}) ${tagInfo} "${e.text}"`;
+      if (e.label) line += ` [${e.label}]`;
+      if (e.tag === 'select') line += ' ← use type_text to change';
+      return line;
     });
     return `\nVisible interactive elements at these positions (use these names with click({text:"..."}) — much more reliable than guessing coordinates from the image):\n${lines.join('\n')}`;
   }
@@ -1586,9 +1628,56 @@ export class Agent {
           };
         }
         if (args.selector) {
+          // Check if the selector targets a <select> element before clicking.
+          const selTagCheck = await cdpClient.evaluate(tabId, `
+            (() => {
+              const el = document.querySelector(${JSON.stringify(args.selector)});
+              if (!el) return null;
+              if (el.tagName === 'SELECT') {
+                const opts = Array.from(el.options).map(o => o.text.trim());
+                return { isSelect: true, current: el.options[el.selectedIndex]?.text?.trim() || '', options: opts };
+              }
+              return { isSelect: false };
+            })()
+          `);
+          const selTag = selTagCheck?.result?.value;
+          if (selTag?.isSelect) {
+            return {
+              success: true,
+              tag: 'SELECT',
+              text: selTag.current,
+              hint: `This is a <select> dropdown (current: "${selTag.current}"). Do NOT click it — use type_text({selector: ${JSON.stringify(args.selector)}, text: "option name"}) instead. Available options: ${selTag.options.join(', ')}`,
+            };
+          }
           return await cdpClient.clickElement(tabId, args.selector);
         }
         if (args.x != null && args.y != null) {
+          // Check if the element at these coordinates is a <select> before clicking.
+          const coordTagCheck = await cdpClient.evaluate(tabId, `
+            (() => {
+              const el = document.elementFromPoint(${args.x}, ${args.y});
+              if (!el) return null;
+              // Walk up a couple levels — sometimes the click lands on a child of the select
+              let target = el;
+              for (let i = 0; i < 3 && target; i++) {
+                if (target.tagName === 'SELECT') {
+                  const opts = Array.from(target.options).map(o => o.text.trim());
+                  return { isSelect: true, current: target.options[target.selectedIndex]?.text?.trim() || '', options: opts };
+                }
+                target = target.parentElement;
+              }
+              return { isSelect: false };
+            })()
+          `);
+          const coordTag = coordTagCheck?.result?.value;
+          if (coordTag?.isSelect) {
+            return {
+              success: true,
+              tag: 'SELECT',
+              text: coordTag.current,
+              hint: `The element at (${args.x}, ${args.y}) is a <select> dropdown (current: "${coordTag.current}"). Do NOT click it — use type_text({text: "option name"}) after clicking the select to focus it, or use type_text with a selector. Available options: ${coordTag.options.join(', ')}`,
+            };
+          }
           await cdpClient.dispatchMouseEvent(tabId, 'mouseMoved', args.x, args.y);
           await cdpClient.dispatchMouseEvent(tabId, 'mousePressed', args.x, args.y);
           await cdpClient.dispatchMouseEvent(tabId, 'mouseReleased', args.x, args.y);

@@ -206,13 +206,39 @@
     return out;
   }
 
+  /** Find the visible label associated with a form element. */
+  function _getFieldLabel(el) {
+    if (el.id) {
+      try {
+        const lbl = document.querySelector('label[for="' + CSS.escape(el.id) + '"]');
+        if (lbl) return lbl.innerText.trim().slice(0, 50);
+      } catch {}
+    }
+    const parent = el.closest('label');
+    if (parent) {
+      const t = parent.innerText.trim().slice(0, 50);
+      if (t && t !== (el.value || '').trim()) return t;
+    }
+    if (el.ariaLabel) return el.ariaLabel.trim().slice(0, 50);
+    if (el.getAttribute('aria-labelledby')) {
+      const lbl = document.getElementById(el.getAttribute('aria-labelledby'));
+      if (lbl) return lbl.innerText.trim().slice(0, 50);
+    }
+    const prev = el.previousElementSibling;
+    if (prev && /^(LABEL|SPAN|DIV)$/i.test(prev.tagName)) {
+      const t = prev.innerText.trim().slice(0, 50);
+      if (t && t.length < 50) return t;
+    }
+    return '';
+  }
+
   /**
    * Get a simplified DOM snapshot for the agent.
    */
   function getInteractiveElements() {
     return queryInteractive().map((el, index) => {
       const rect = el.getBoundingClientRect();
-      return {
+      const entry = {
         index,
         tag: el.tagName.toLowerCase(),
         type: el.type || '',
@@ -224,6 +250,15 @@
         editable: el.isContentEditable || false,
         rect: { x: Math.round(rect.x), y: Math.round(rect.y), w: Math.round(rect.width), h: Math.round(rect.height) },
       };
+      if (/^(INPUT|TEXTAREA|SELECT)$/i.test(el.tagName)) {
+        const label = _getFieldLabel(el);
+        if (label) entry.label = label;
+      }
+      if (el.tagName === 'SELECT') {
+        entry.hint = 'Use type_text({index: ' + index + ', text: "option"}) to change this dropdown';
+        entry.options = Array.from(el.options).map(o => o.text.trim()).slice(0, 10);
+      }
+      return entry;
     });
   }
 
