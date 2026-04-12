@@ -738,6 +738,19 @@ export class Agent {
     }
 
     if (name === 'done') {
+      // In act mode, require a verification screenshot before completing.
+      const mode = this.conversationModes.get(tabId) || 'ask';
+      if (mode === 'act') {
+        try {
+          const tab = await browser.tabs.get(tabId);
+          if (tab?.active) {
+            const dataUrl = await browser.tabs.captureVisibleTab(tab.windowId, { format: 'png', quality: 80 });
+            return { done: true, summary: args.summary, verificationScreenshot: dataUrl };
+          }
+        } catch (_) {
+          // Screenshot failed — still allow done but note it
+        }
+      }
       return { done: true, summary: args.summary };
     }
 

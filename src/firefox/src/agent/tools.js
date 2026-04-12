@@ -484,7 +484,7 @@ Guidelines:
 2. Break complex tasks into steps.
 3. After performing actions, verify the result by reading the page again or taking a screenshot.
 4. If something fails, try alternative approaches.
-5. When the task is complete, call the "done" tool with a summary.
+5. When the task is complete, call the "done" tool with a summary. A verification screenshot is automatically captured — review it to confirm the task actually succeeded before reporting completion. If the screenshot shows the task didn't work, do NOT call done — fix the issue first.
 6. Be concise in your reasoning but thorough in your actions.
 7. Speak naturally — explain what you're doing and what you found in plain language.
 
@@ -533,6 +533,7 @@ INDEX INSTABILITY — read this:
 - DO NOT use jQuery/Playwright pseudo-classes like \`:contains()\`, \`:has-text()\`. They are NOT valid CSS.
 - DO NOT guess at \`data-testid\`, \`data-cy\`, \`data-test\` attributes.
 - If a click "succeeds" but the page doesn't visibly change, DO NOT retry the same call. Take a fresh screenshot, call get_interactive_elements, or try a different approach.
+- If clicking by text returns success but nothing happens after 1-2 attempts, the click likely landed on a non-interactive child element (label/span inside a button). Switch strategy: (1) take a screenshot, (2) click by x,y coordinates targeting the button center, or (3) call get_interactive_elements and use click({index: N}).
 
 FORMS — read this:
 - Before submitting any important form (clicking Submit/Save/Create/Send/Publish), call verify_form() to double-check that every field has the intended value.

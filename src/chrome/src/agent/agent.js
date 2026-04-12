@@ -32,6 +32,8 @@ export class Agent {
     // Whether to inject site adapter notes into the first user message of
     // each conversation. Loaded from chrome.storage.local. Default true.
     this.useSiteAdapters = true;
+    // Stale click detection: per-tab last clicked element identity.
+    this._lastCdpClickIdent = new Map(); // tabId -> string
     // Loop detection: per-tab ring buffer of recent tool calls + nudge count.
     this.recentCalls = new Map(); // tabId -> [{ key, name, ts }]
     this.loopNudges = new Map();  // tabId -> consecutive-nudge counter
@@ -970,6 +972,25 @@ export class Agent {
     }
 
     if (name === 'done') {
+      // In act mode, require a verification screenshot before completing.
+      const mode = this.conversationModes.get(tabId) || 'ask';
+      if (mode === 'act') {
+        try {
+          await cdpClient.attach(tabId);
+          await cdpClient.sendCommand(tabId, 'Page.enable');
+          const shot = await cdpClient.sendCommand(tabId, 'Page.captureScreenshot', {
+            format: 'png', quality: 80, fromSurface: true,
+          });
+          return {
+            done: true,
+            summary: args.summary,
+            verificationScreenshot: `data:image/png;base64,${shot.data}`,
+          };
+        } catch (_) {
+          // Screenshot failed — still allow done but note it
+          return { done: true, summary: args.summary, verificationScreenshot: null };
+        }
+      }
       return { done: true, summary: args.summary };
     }
 
@@ -1356,16 +1377,47 @@ export class Agent {
               }
 
               if (matches.length === 0) return { found: false, mode: usedMode };
-              if (matches.length > 1) {
-                return {
-                  found: false,
-                  ambiguous: true,
-                  mode: usedMode,
-                  count: matches.length,
-                  candidates: matches.slice(0, 5).map(m => m.txt.slice(0, 80)),
-                };
+
+              // --- Prioritize interactive elements over passive children ---
+              const _INTERACTIVE_TAGS = new Set(['BUTTON', 'A', 'INPUT', 'SELECT', 'TEXTAREA']);
+              const _INTERACTIVE_ROLES = new Set(['button', 'link', 'tab', 'menuitem', 'option']);
+              const _PASSIVE_TAGS = new Set(['LABEL', 'SPAN', 'DIV', 'P', 'STRONG', 'EM', 'I', 'B', 'SMALL', 'SVG', 'IMG']);
+
+              function _isInteractive(node) {
+                if (_INTERACTIVE_TAGS.has(node.tagName)) return true;
+                const role = (node.getAttribute && node.getAttribute('role')) || '';
+                if (_INTERACTIVE_ROLES.has(role)) return true;
+                if (node.hasAttribute && (node.hasAttribute('onclick') || node.hasAttribute('data-action'))) return true;
+                return false;
               }
-              const el = matches[0].el;
+
+              if (matches.length > 1) {
+                const interactive = matches.filter(m => _isInteractive(m.el));
+                if (interactive.length === 1) {
+                  matches = interactive;
+                } else {
+                  return {
+                    found: false,
+                    ambiguous: true,
+                    mode: usedMode,
+                    count: matches.length,
+                    candidates: matches.slice(0, 5).map(m => m.txt.slice(0, 80)),
+                  };
+                }
+              }
+
+              // --- Parent traversal: resolve passive child to interactive ancestor ---
+              let el = matches[0].el;
+              if (_PASSIVE_TAGS.has(el.tagName) && !_isInteractive(el)) {
+                let ancestor = el.parentElement;
+                for (let i = 0; i < 5 && ancestor; i++, ancestor = ancestor.parentElement) {
+                  if (_isInteractive(ancestor)) {
+                    el = ancestor;
+                    break;
+                  }
+                }
+              }
+
               try { el.scrollIntoView({ block: 'center', inline: 'center' }); } catch (e) {}
               const r = el.getBoundingClientRect();
               return {
@@ -1378,7 +1430,53 @@ export class Agent {
               };
             })()
           `);
-          const info = result?.result?.value;
+          let info = result?.result?.value;
+
+          // Auto-scroll retry: if element not found, scroll down and try again
+          // (up to 3 scrolls) to find elements below the fold.
+          if (info && !info.found && !info.ambiguous && !info.error) {
+            for (let scrollAttempt = 0; scrollAttempt < 3; scrollAttempt++) {
+              await cdpClient.evaluate(tabId, `window.scrollBy(0, Math.round(window.innerHeight * 0.7))`);
+              await new Promise(r => setTimeout(r, 300));
+              const retry = await cdpClient.evaluate(tabId, result._evalScript || `
+                (() => {
+                  const needle = ${JSON.stringify(args.text.toLowerCase())};
+                  const explicit = ${JSON.stringify(args.textMatch || '')};
+                  const sels = 'a, button, [role="button"], [role="link"], [role="tab"], [role="menuitem"], input[type="button"], input[type="submit"], summary, label, [onclick], [data-action]';
+                  const all = Array.from(document.querySelectorAll(sels));
+                  const normalized = all.map(el => ({ el, txt: (el.innerText || el.value || el.ariaLabel || '').trim().toLowerCase() })).filter(x => !!x.txt);
+                  function tryMode(mode) {
+                    if (mode === 'exact') return normalized.filter(x => x.txt === needle);
+                    if (mode === 'prefix') return normalized.filter(x => x.txt.startsWith(needle));
+                    if (mode === 'contains') return normalized.filter(x => x.txt.includes(needle));
+                    return [];
+                  }
+                  const modes = explicit ? [explicit] : ['exact', 'prefix', 'contains'];
+                  let matches = []; let usedMode = modes[0];
+                  for (const m of modes) { matches = tryMode(m); usedMode = m; if (matches.length >= 1) break; }
+                  if (matches.length === 0) return { found: false };
+                  const _INTERACTIVE_TAGS = new Set(['BUTTON','A','INPUT','SELECT','TEXTAREA']);
+                  const _INTERACTIVE_ROLES = new Set(['button','link','tab','menuitem','option']);
+                  const _PASSIVE_TAGS = new Set(['LABEL','SPAN','DIV','P','STRONG','EM','I','B','SMALL','SVG','IMG']);
+                  function _isInteractive(n) { return _INTERACTIVE_TAGS.has(n.tagName) || _INTERACTIVE_ROLES.has((n.getAttribute&&n.getAttribute('role'))||'') || (n.hasAttribute&&(n.hasAttribute('onclick')||n.hasAttribute('data-action'))); }
+                  if (matches.length > 1) { const inter = matches.filter(m => _isInteractive(m.el)); if (inter.length === 1) matches = inter; else return { found: false, ambiguous: true, mode: usedMode, count: matches.length, candidates: matches.slice(0,5).map(m=>m.txt.slice(0,80)) }; }
+                  let el = matches[0].el;
+                  if (_PASSIVE_TAGS.has(el.tagName) && !_isInteractive(el)) { let anc = el.parentElement; for (let i=0;i<5&&anc;i++,anc=anc.parentElement) { if (_isInteractive(anc)) { el=anc; break; } } }
+                  try { el.scrollIntoView({block:'center',inline:'center'}); } catch(e){}
+                  const r = el.getBoundingClientRect();
+                  return { found: true, mode: usedMode, x: r.left+r.width/2, y: r.top+r.height/2, tag: el.tagName, text: (el.innerText||el.value||'').slice(0,80) };
+                })()
+              `);
+              const retryInfo = retry?.result?.value;
+              if (retryInfo?.found) {
+                info = retryInfo;
+                info._scrolledToFind = true;
+                break;
+              }
+              if (retryInfo?.ambiguous) { info = retryInfo; break; }
+            }
+          }
+
           if (!info?.found) {
             if (info?.error) {
               return { success: false, error: info.error };
@@ -1392,7 +1490,7 @@ export class Agent {
             }
             return {
               success: false,
-              error: `No clickable element found for text "${args.text}". Try get_interactive_elements to see what's on the page, or use a selector.`,
+              error: `No clickable element found for text "${args.text}" (also tried scrolling down). Try get_interactive_elements to see what's on the page, or use a selector.`,
             };
           }
           // Wait for scroll to settle, then dispatch a real click via CDP.
@@ -1400,6 +1498,15 @@ export class Agent {
           await cdpClient.dispatchMouseEvent(tabId, 'mouseMoved', info.x, info.y);
           await cdpClient.dispatchMouseEvent(tabId, 'mousePressed', info.x, info.y);
           await cdpClient.dispatchMouseEvent(tabId, 'mouseReleased', info.x, info.y);
+
+          // Stale click detection
+          const clickIdent = `${info.tag}|${(info.text || '').slice(0, 50)}`;
+          const prevIdent = this._lastCdpClickIdent.get(tabId);
+          this._lastCdpClickIdent.set(tabId, clickIdent);
+          const warning = (prevIdent === clickIdent)
+            ? 'Same element clicked again with no page change. Try click({x, y}) with coordinates from a screenshot, or click({index: N}) from get_interactive_elements.'
+            : undefined;
+
           return {
             success: true,
             method: 'cdp-by-text',
@@ -1407,6 +1514,7 @@ export class Agent {
             tag: info.tag,
             text: info.text,
             matched: args.text,
+            ...(warning ? { warning } : {}),
           };
         }
         if (args.selector) {
@@ -1429,7 +1537,18 @@ export class Agent {
       try {
         await cdpClient.attach(tabId);
         if (args.selector) {
-          return await cdpClient.typeText(tabId, args.selector, args.text || '', !!args.clear);
+          const result = await cdpClient.typeText(tabId, args.selector, args.text || '', !!args.clear);
+          // Track field for duplicate-typing detection
+          if (result.success) {
+            const fieldIdent = `sel:${args.selector}`;
+            const prev = this._lastTypeFieldIdent?.get(tabId);
+            if (prev === fieldIdent) {
+              result.warning = 'You typed into the same field twice in a row. If you intended to fill a DIFFERENT field, click it first before calling type_text.';
+            }
+            if (!this._lastTypeFieldIdent) this._lastTypeFieldIdent = new Map();
+            this._lastTypeFieldIdent.set(tabId, fieldIdent);
+          }
+          return result;
         }
         // No selector and no index → type into the currently focused element
         // via CDP Input.insertText. The model is expected to have just
@@ -1437,6 +1556,35 @@ export class Agent {
         // path for forms with weird selectors (GitHub release[name],
         // Stripe-style nested inputs, etc.) — no resolution needed.
         if (args.index == null) {
+          // Check what element is actually focused before typing
+          const focusCheck = await cdpClient.evaluate(tabId, `
+            (() => {
+              const el = document.activeElement;
+              if (!el || el === document.body || el === document.documentElement) {
+                return { focused: false };
+              }
+              const tag = el.tagName;
+              const editable = el.isContentEditable || ['INPUT','TEXTAREA','SELECT'].includes(tag);
+              return {
+                focused: true,
+                editable,
+                tag,
+                type: el.type || '',
+                name: el.name || el.id || el.getAttribute('aria-label') || '',
+                value: (el.value || '').slice(0, 50),
+              };
+            })()
+          `);
+          const focus = focusCheck?.result?.value;
+
+          if (!focus?.focused || !focus?.editable) {
+            return {
+              success: false,
+              error: 'No editable element is currently focused. Click the target input/textarea first, then call type_text with no selector.',
+              focusedElement: focus || null,
+            };
+          }
+
           if (args.clear) {
             await cdpClient.sendCommand(tabId, 'Input.dispatchKeyEvent', {
               type: 'keyDown', key: 'a', code: 'KeyA', modifiers: 2, windowsVirtualKeyCode: 65,
@@ -1452,11 +1600,23 @@ export class Agent {
             });
           }
           await cdpClient.sendCommand(tabId, 'Input.insertText', { text: args.text || '' });
+
+          // Track field for duplicate-typing detection
+          const fieldIdent = `focused:${focus.tag}|${focus.name}`;
+          const prev = this._lastTypeFieldIdent?.get(tabId);
+          let warning;
+          if (prev === fieldIdent) {
+            warning = 'You typed into the same field twice in a row. If you intended to fill a DIFFERENT field, click it first before calling type_text.';
+          }
+          if (!this._lastTypeFieldIdent) this._lastTypeFieldIdent = new Map();
+          this._lastTypeFieldIdent.set(tabId, fieldIdent);
+
           return {
             success: true,
             method: 'cdp-insert-focused',
             text: (args.text || '').slice(0, 100),
-            note: 'Typed into the currently focused element. If the page did not visibly update, no element was actually focused — click the target field first, then call type_text again with no selector.',
+            focusedField: { tag: focus.tag, type: focus.type, name: focus.name },
+            ...(warning ? { warning } : {}),
           };
         }
         // index-based: fall through to content-script path.

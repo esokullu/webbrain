@@ -263,6 +263,31 @@
     });
   }
 
+  // -- Click helpers: interactive-element detection & parent traversal --------
+  const _INTERACTIVE_TAGS = new Set(['BUTTON', 'A', 'INPUT', 'SELECT', 'TEXTAREA']);
+  const _INTERACTIVE_ROLES = new Set(['button', 'link', 'tab', 'menuitem', 'option']);
+  const _PASSIVE_TAGS = new Set(['LABEL', 'SPAN', 'DIV', 'P', 'STRONG', 'EM', 'I', 'B', 'SMALL', 'SVG', 'IMG']);
+
+  function _isInteractive(node) {
+    if (_INTERACTIVE_TAGS.has(node.tagName)) return true;
+    const role = (node.getAttribute && node.getAttribute('role')) || '';
+    if (_INTERACTIVE_ROLES.has(role)) return true;
+    if (node.hasAttribute && (node.hasAttribute('onclick') || node.hasAttribute('data-action'))) return true;
+    return false;
+  }
+
+  /** Walk up from a passive child to find its interactive ancestor (up to 5 levels). */
+  function _resolveInteractiveAncestor(el) {
+    if (!_PASSIVE_TAGS.has(el.tagName) || _isInteractive(el)) return el;
+    let ancestor = el.parentElement;
+    for (let i = 0; i < 5 && ancestor; i++, ancestor = ancestor.parentElement) {
+      if (_isInteractive(ancestor)) return ancestor;
+    }
+    return el; // no interactive ancestor found — use original
+  }
+
+  let _lastClickIdent = null;
+
   /**
    * Click an element by selector or coordinates.
    */
@@ -310,16 +335,41 @@
       }
 
       if (matches.length === 0) {
-        return { success: false, error: `No clickable element found for text "${params.text}"` };
+        // Auto-scroll retry: scroll down up to 3 times to find elements below the fold
+        for (let scrollAttempt = 0; scrollAttempt < 3 && matches.length === 0; scrollAttempt++) {
+          window.scrollBy(0, Math.round(window.innerHeight * 0.7));
+          // Re-query after scroll
+          const allRetry = Array.from(document.querySelectorAll(sels));
+          const normRetry = allRetry.map(e => ({
+            e,
+            txt: (e.innerText || e.value || e.ariaLabel || '').trim().toLowerCase(),
+          })).filter(x => !!x.txt);
+          for (const m of modes) {
+            if (m === 'exact') matches = normRetry.filter(x => x.txt === needle);
+            else if (m === 'prefix') matches = normRetry.filter(x => x.txt.startsWith(needle));
+            else if (m === 'contains') matches = normRetry.filter(x => x.txt.includes(needle));
+            usedMode = m;
+            if (matches.length >= 1) break;
+          }
+        }
+        if (matches.length === 0) {
+          return { success: false, error: `No clickable element found for text "${params.text}" (also tried scrolling down)` };
+        }
       }
       if (matches.length > 1) {
-        return {
-          success: false,
-          error: `Ambiguous text match for "${params.text}" (mode=${usedMode}, matches=${matches.length}).`,
-          candidates: matches.slice(0, 5).map(m => m.txt.slice(0, 80)),
-        };
+        // Prefer interactive elements over passive children (label, span, etc.)
+        const interactiveMatches = matches.filter(m => _isInteractive(m.e));
+        if (interactiveMatches.length === 1) {
+          matches = interactiveMatches;
+        } else {
+          return {
+            success: false,
+            error: `Ambiguous text match for "${params.text}" (mode=${usedMode}, matches=${matches.length}).`,
+            candidates: matches.slice(0, 5).map(m => m.txt.slice(0, 80)),
+          };
+        }
       }
-      el = matches[0].e;
+      el = _resolveInteractiveAncestor(matches[0].e);
     } else if (params.selector) {
       el = document.querySelector(params.selector);
     } else if (params.index != null) {
@@ -333,8 +383,18 @@
 
     el.scrollIntoView({ behavior: 'smooth', block: 'center' });
     el.click();
-    return { success: true, tag: el.tagName, text: el.innerText?.slice(0, 50) };
+
+    // Stale click detection: warn if the same element is clicked again
+    const ident = `${el.tagName}|${(el.innerText || '').slice(0, 50)}|${location.href}`;
+    let warning;
+    if (_lastClickIdent === ident) {
+      warning = 'Same element clicked again with no page change. Try click({x, y}) with coordinates from a screenshot, or click({index: N}) from get_interactive_elements.';
+    }
+    _lastClickIdent = ident;
+    return { success: true, tag: el.tagName, text: el.innerText?.slice(0, 50), ...(warning ? { warning } : {}) };
   }
+
+  let _lastTypeFieldIdent = null;
 
   /**
    * Type text into an input/textarea.
@@ -349,8 +409,16 @@
       // No selector and no index → type into the currently focused element.
       // Most reliable for click-then-type flows on forms with weird selectors.
       el = document.activeElement;
-      if (!el || el === document.body) {
-        return { success: false, error: 'No element is currently focused. Click the target field first, then call type_text again with no selector.' };
+      if (!el || el === document.body || el === document.documentElement) {
+        return { success: false, error: 'No editable element is currently focused. Click the target input/textarea first, then call type_text again with no selector.' };
+      }
+      // Verify it's actually editable
+      const editable = el.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(el.tagName);
+      if (!editable) {
+        return {
+          success: false,
+          error: `Focused element <${el.tagName.toLowerCase()}> is not an editable field. Click the target input/textarea first, then call type_text again.`,
+        };
       }
     }
 
@@ -406,7 +474,15 @@
     el.dispatchEvent(new Event('input', { bubbles: true }));
     el.dispatchEvent(new Event('change', { bubbles: true }));
 
-    return { success: true, value: (el.value || '').slice(0, 100) };
+    // Duplicate-field detection
+    const fieldIdent = `${el.tagName}|${el.name || el.id || ''}|${params.selector || 'focused'}`;
+    let typeWarning;
+    if (_lastTypeFieldIdent === fieldIdent) {
+      typeWarning = 'You typed into the same field twice in a row. If you intended to fill a DIFFERENT field, click it first before calling type_text.';
+    }
+    _lastTypeFieldIdent = fieldIdent;
+
+    return { success: true, value: (el.value || '').slice(0, 100), ...(typeWarning ? { warning: typeWarning } : {}) };
   }
 
   /**
