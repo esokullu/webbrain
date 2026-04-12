@@ -130,6 +130,51 @@
       --max-w: 1100px;
     }
 
+    :root[data-theme="orange"] {
+      --bg: #120e08;
+      --bg-card: #1f1710;
+      --bg-card-hover: #2a1f14;
+      --surface: #251b12;
+      --border: rgba(255, 171, 94, 0.2);
+      --text: #fdf0e1;
+      --text-dim: #ddb892;
+      --accent: #fb923c;
+      --accent-glow: rgba(251, 146, 60, 0.28);
+      --accent2: #fdba74;
+      --success: #4ade80;
+      --warning: #facc15;
+    }
+
+    :root[data-theme="light"] {
+      --bg: #f7f8fc;
+      --bg-card: #ffffff;
+      --bg-card-hover: #f2f5fb;
+      --surface: #eef2fb;
+      --border: rgba(30, 41, 59, 0.14);
+      --text: #1f2937;
+      --text-dim: #5b6473;
+      --accent: #4f46e5;
+      --accent-glow: rgba(79, 70, 229, 0.2);
+      --accent2: #7c3aed;
+      --success: #059669;
+      --warning: #ca8a04;
+    }
+
+    :root[data-theme="rose"] {
+      --bg: #140d16;
+      --bg-card: #231728;
+      --bg-card-hover: #2f1d34;
+      --surface: #2a1830;
+      --border: rgba(255, 146, 199, 0.2);
+      --text: #ffe7f5;
+      --text-dim: #f2b6d8;
+      --accent: #ec4899;
+      --accent-glow: rgba(236, 72, 153, 0.28);
+      --accent2: #f472b6;
+      --success: #4ade80;
+      --warning: #fbbf24;
+    }
+
     html { scroll-behavior: smooth; }
 
     body {
@@ -273,6 +318,47 @@
       gap: 14px;
       justify-content: center;
       flex-wrap: wrap;
+    }
+
+    .theme-picker {
+      margin: 0 auto 26px;
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+      justify-content: center;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      padding: 8px 12px;
+    }
+    .theme-picker-label {
+      font-size: 12px;
+      color: var(--text-dim);
+      font-weight: 600;
+      letter-spacing: 0.3px;
+      padding-left: 2px;
+    }
+    .theme-option {
+      border: 1px solid var(--border);
+      background: var(--bg-card);
+      color: var(--text);
+      padding: 6px 12px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .theme-option:hover {
+      transform: translateY(-1px);
+      border-color: var(--accent);
+    }
+    .theme-option.active {
+      background: var(--accent);
+      color: #fff;
+      border-color: var(--accent);
+      box-shadow: 0 0 0 2px var(--accent-glow);
     }
     .btn {
       display: inline-flex;
@@ -835,6 +921,13 @@
   <p>
     WebBrain is a free, open-source browser extension that brings AI agent capabilities to Chrome and Firefox. Read pages, extract data, and automate web tasks — powered by your choice of LLM. The self-hostable alternative to proprietary browser AI plugins.
   </p>
+  <div class="theme-picker" aria-label="Theme selector">
+    <span class="theme-picker-label">Try a theme:</span>
+    <button class="theme-option active" data-theme-option="dark" type="button">Dark</button>
+    <button class="theme-option" data-theme-option="orange" type="button">Orange</button>
+    <button class="theme-option" data-theme-option="light" type="button">Whitish</button>
+    <button class="theme-option" data-theme-option="rose" type="button">Rosy</button>
+  </div>
   <div class="hero-actions">
     <a href="#download" class="btn btn-primary">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
@@ -1187,6 +1280,33 @@
     </div>
   </div>
 </footer>
+
+<script>
+  const themeButtons = document.querySelectorAll('[data-theme-option]');
+  const savedTheme = localStorage.getItem('webbrain-theme') || 'dark';
+
+  const applyTheme = (theme) => {
+    if (theme === 'dark') {
+      document.documentElement.removeAttribute('data-theme');
+    } else {
+      document.documentElement.setAttribute('data-theme', theme);
+    }
+
+    themeButtons.forEach((button) => {
+      button.classList.toggle('active', button.dataset.themeOption === theme);
+    });
+  };
+
+  applyTheme(savedTheme);
+
+  themeButtons.forEach((button) => {
+    button.addEventListener('click', () => {
+      const nextTheme = button.dataset.themeOption;
+      applyTheme(nextTheme);
+      localStorage.setItem('webbrain-theme', nextTheme);
+    });
+  });
+</script>
 
 </body>
 </html>
