@@ -563,16 +563,17 @@
       }
     }
 
-    // <select> guidance: clicking opens a native dropdown that cannot be
-    // interacted with programmatically. Focus + return guidance.
+    // <select> intercept: clicking opens a native OS dropdown that cannot be
+    // controlled programmatically. Return error so the model uses type_text.
+    // Do NOT scrollIntoView (hidden selects inside modals scroll to wrong position).
     if (el instanceof HTMLSelectElement) {
       el.focus();
       const options = Array.from(el.options).map(o => o.text.trim());
       return {
-        success: true,
+        success: false,
         tag: 'SELECT',
         text: el.options[el.selectedIndex]?.text?.trim() || '',
-        hint: `This is a <select> dropdown (current value: "${el.options[el.selectedIndex]?.text?.trim() || ''}"). Use type_text({index: ${params.index != null ? params.index : 'N'}, text: "option name"}) to change it. Available options: ${options.join(', ')}`,
+        error: `CANNOT CLICK a <select> dropdown — clicking opens a native OS popup that cannot be controlled. The dropdown is now focused (current: "${el.options[el.selectedIndex]?.text?.trim() || ''}"). Use type_text({text: "option name"}) to change the value. Available options: ${options.join(', ')}`,
       };
     }
 
@@ -589,29 +590,32 @@
         nearbySel.focus();
         const options = Array.from(nearbySel.options).map(o => o.text.trim());
         return {
-          success: true,
+          success: false,
           tag: 'SELECT',
           text: nearbySel.options[nearbySel.selectedIndex]?.text?.trim() || '',
-          hint: `A <select> dropdown is near this element (current: "${nearbySel.options[nearbySel.selectedIndex]?.text?.trim() || ''}"). Use type_text({text: "option name"}) to change it. Available options: ${options.join(', ')}`,
+          error: `CANNOT CLICK — a <select> dropdown is near this element (current: "${nearbySel.options[nearbySel.selectedIndex]?.text?.trim() || ''}"). The dropdown is now focused. Use type_text({text: "option name"}) to change the value. Available options: ${options.join(', ')}`,
         };
       }
     }
 
-    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    // Do NOT scrollIntoView on SELECT elements (hidden selects in modals cause scroll jumps)
+    if (el.tagName !== 'SELECT') {
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
     el.click();
 
     // Post-click SELECT detection: the click may have activated a <select>
-    // via a label, wrapper, or overlapping element. Detect and return hint.
+    // via a label, wrapper, or overlapping element. Return error, not success.
     const postActive = document.activeElement;
     if (postActive && postActive !== el && postActive instanceof HTMLSelectElement) {
       postActive.blur();
       postActive.focus(); // close native popup, keep focus
       const postOpts = Array.from(postActive.options).map(o => o.text.trim());
       return {
-        success: true,
+        success: false,
         tag: 'SELECT',
         text: postActive.options[postActive.selectedIndex]?.text?.trim() || '',
-        hint: `A <select> dropdown was activated by this click (current: "${postActive.options[postActive.selectedIndex]?.text?.trim() || ''}"). Use type_text({text: "option name"}) to change it. Available options: ${postOpts.join(', ')}`,
+        error: `CANNOT CLICK — a <select> dropdown was activated by this click (current: "${postActive.options[postActive.selectedIndex]?.text?.trim() || ''}"). The dropdown is now focused. Use type_text({text: "option name"}) to change the value. Available options: ${postOpts.join(', ')}`,
       };
     }
 
