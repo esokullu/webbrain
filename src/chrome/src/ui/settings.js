@@ -69,6 +69,7 @@ function renderProviders() {
         { key: 'baseUrl', label: 'Server URL', type: 'text', placeholder: 'http://localhost:8080' },
         { key: 'model', label: 'Model', type: 'text', placeholder: 'qwen/qwen3.5-9b' },
         { key: 'supportsVision', label: 'Model supports vision (multimodal)', type: 'checkbox' },
+        { key: 'useCompactPrompt', label: 'Compact prompt (recommended for small models, on by default)', type: 'checkbox' },
       ],
     },
     ollama: {
@@ -76,6 +77,7 @@ function renderProviders() {
         { key: 'baseUrl', label: 'Server URL', type: 'text', placeholder: 'http://localhost:11434/v1' },
         { key: 'model', label: 'Model', type: 'text', placeholder: 'llama3.1' },
         { key: 'supportsVision', label: 'Model supports vision (multimodal)', type: 'checkbox' },
+        { key: 'useCompactPrompt', label: 'Compact prompt (recommended for small models, on by default)', type: 'checkbox' },
       ],
     },
     lmstudio: {
@@ -83,6 +85,7 @@ function renderProviders() {
         { key: 'baseUrl', label: 'Server URL', type: 'text', placeholder: 'http://localhost:1234/v1' },
         { key: 'model', label: 'Model (optional)', type: 'text', placeholder: 'leave blank to use loaded model' },
         { key: 'supportsVision', label: 'Model supports vision (multimodal)', type: 'checkbox' },
+        { key: 'useCompactPrompt', label: 'Compact prompt (recommended for small models, on by default)', type: 'checkbox' },
       ],
     },
     openai: {
@@ -118,7 +121,14 @@ function renderProviders() {
     let fieldsHTML = '';
     for (const field of fieldDefs) {
       if (field.type === 'checkbox') {
-        const checked = config[field.key] ? 'checked' : '';
+        // For useCompactPrompt on local providers, default to checked when
+        // the config key hasn't been explicitly set yet (matches provider logic).
+        let isChecked = config[field.key];
+        if (field.key === 'useCompactPrompt' && config[field.key] == null) {
+          const localProviders = ['llamacpp', 'ollama', 'lmstudio'];
+          isChecked = localProviders.includes(id);
+        }
+        const checked = isChecked ? 'checked' : '';
         fieldsHTML += `
           <div class="field" style="display:flex;align-items:center;gap:8px;flex-direction:row;">
             <input type="checkbox" data-provider="${id}" data-key="${field.key}" data-type="checkbox" ${checked}
