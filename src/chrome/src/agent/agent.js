@@ -1533,6 +1533,34 @@ export class Agent {
               error: `No clickable element found for text "${args.text}" (also tried scrolling down). Try get_interactive_elements to see what's on the page, or use a selector.`,
             };
           }
+          // <select> intercept: don't dispatch mouse events — the native
+          // dropdown popup can't be controlled via CDP. Return guidance.
+          if (info.tag === 'SELECT') {
+            const optionsInfo = await cdpClient.evaluate(tabId, `
+              (() => {
+                const sels = 'select';
+                const all = Array.from(document.querySelectorAll(sels));
+                for (const sel of all) {
+                  const t = (sel.innerText || sel.value || '').trim().toLowerCase();
+                  if (t.includes(${JSON.stringify((args.text || '').toLowerCase())})) {
+                    return {
+                      current: sel.options[sel.selectedIndex]?.text?.trim() || '',
+                      options: Array.from(sel.options).map(o => o.text.trim()),
+                    };
+                  }
+                }
+                return null;
+              })()
+            `);
+            const opts = optionsInfo?.result?.value;
+            return {
+              success: true,
+              tag: 'SELECT',
+              text: opts?.current || info.text,
+              hint: 'This is a <select> dropdown. Do NOT try to click individual options — the native dropdown cannot be controlled via click. Instead, use type_text({text: "option name"}) to select an option.' + (opts?.options ? ' Available options: ' + opts.options.join(', ') : ''),
+            };
+          }
+
           // Wait for scroll to settle, then dispatch a real click via CDP.
           await new Promise(r => setTimeout(r, 100));
           await cdpClient.dispatchMouseEvent(tabId, 'mouseMoved', info.x, info.y);
@@ -1623,6 +1651,32 @@ export class Agent {
               error: 'No editable element is currently focused. Click the target input/textarea first, then call type_text with no selector.',
               focusedElement: focus || null,
             };
+          }
+
+          // <select> fast-path: Input.insertText doesn't work for <select>.
+          // Use JS to match the option and set value + fire change events.
+          if (focus.tag === 'SELECT') {
+            const needle = JSON.stringify((args.text || '').trim());
+            const selectResult = await cdpClient.evaluate(tabId, `
+              (() => {
+                const el = document.activeElement;
+                if (!el || el.tagName !== 'SELECT') return { success: false, error: 'Focused element is not a select' };
+                const needle = ${needle};
+                const opts = Array.from(el.options);
+                const match = opts.find(o => o.value === needle)
+                  || opts.find(o => o.text.trim() === needle)
+                  || opts.find(o => o.text.trim().toLowerCase().includes(needle.toLowerCase()));
+                if (!match) {
+                  const available = opts.map(o => o.text.trim()).join(', ');
+                  return { success: false, error: 'No option matching "' + needle + '". Available: ' + available };
+                }
+                el.value = match.value;
+                el.dispatchEvent(new Event('input', { bubbles: true }));
+                el.dispatchEvent(new Event('change', { bubbles: true }));
+                return { success: true, method: 'select-js-focused', selectedText: match.text.trim(), selectedValue: match.value };
+              })()
+            `);
+            return selectResult?.result?.value || { success: false, error: 'Select interaction failed' };
           }
 
           if (args.clear) {

@@ -956,6 +956,44 @@ export class CDPClient {
     if (!info) return { success: false, error: 'Element not found' };
     if (info.error) return { success: false, error: info.error };
 
+    // ── <select> fast-path ──────────────────────────────────────────────
+    // Native <select> elements CANNOT be typed into via Input.insertText.
+    // Clicking them opens a browser-native dropdown that CDP mouse events
+    // can't interact with. Instead, use JS to match the option and set
+    // the value + dispatch change events.
+    if (info.tag === 'SELECT') {
+      const selectorJSON = JSON.stringify(selector);
+      const textJSON = JSON.stringify((text || '').trim());
+      const result = await this.evaluate(tabId, `
+        (() => {
+          const sel = ${selectorJSON};
+          const needle = ${textJSON};
+          const queryDeep = (root) => {
+            try { const h = root.querySelector(sel); if (h) return h; } catch (e) { return null; }
+            const w = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT);
+            let n = w.currentNode;
+            while (n) { if (n.shadowRoot) { const i = queryDeep(n.shadowRoot); if (i) return i; } n = w.nextNode(); }
+            return null;
+          };
+          const el = queryDeep(document);
+          if (!el || el.tagName !== 'SELECT') return { success: false, error: 'Select element not found' };
+          const opts = Array.from(el.options);
+          const match = opts.find(o => o.value === needle)
+            || opts.find(o => o.text.trim() === needle)
+            || opts.find(o => o.text.trim().toLowerCase().includes(needle.toLowerCase()));
+          if (!match) {
+            const available = opts.map(o => o.text.trim()).join(', ');
+            return { success: false, error: 'No option matching "' + needle + '". Available: ' + available };
+          }
+          el.value = match.value;
+          el.dispatchEvent(new Event('input', { bubbles: true }));
+          el.dispatchEvent(new Event('change', { bubbles: true }));
+          return { success: true, method: 'select-js', selectedText: match.text.trim(), selectedValue: match.value };
+        })()
+      `);
+      return result?.result?.value || { success: false, error: 'Select interaction failed' };
+    }
+
     let focused = false;
 
     // Focus path A: real mouse click (most reliable, fires trusted events).

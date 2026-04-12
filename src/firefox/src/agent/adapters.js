@@ -245,7 +245,8 @@ const ADAPTERS = [
 - Refunds are partial-by-default in the input — check the amount carefully.
 - Customer deletion is irreversible and detaches all their payment methods. The confirmation modal is easy to click through.
 - API keys: the secret key is shown once on creation. Don't reveal it in screenshots or chat output.
-- Subscription edits often have proration prompts ("Charge prorated amount immediately" vs "On next invoice") — read which is selected.`,
+- Subscription edits often have proration prompts ("Charge prorated amount immediately" vs "On next invoice") — read which is selected.
+- PRODUCT CATALOG — CRITICAL: The product catalog page has CONFUSABLE buttons near each other. "Export prices" and "Export products" are NOT for creating products — NEVER click them when the task is to create a product. To create a product: (1) click the green "+ Create product" button, (2) the "Add a product" overlay form appears, (3) use get_interactive_elements to find the Name input field INSIDE THE FORM — it will be an input element near the top, (4) click that input, then type_text with no selector to enter the name, (5) scroll down to the "Pricing" section for price/interval, (6) click "Add product" to submit. IMPORTANT: after the form overlay opens, ONLY interact with elements inside the form. Do NOT click anything on the page behind the form.`,
   },
   {
     name: 'finance-generic',

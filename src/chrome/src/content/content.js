@@ -123,11 +123,68 @@
     return false;
   }
 
+  /**
+   * Detect the topmost modal/overlay/dialog on the page. If one is found,
+   * only elements inside it (and the backdrop) are "reachable" — everything
+   * behind the overlay is visually blocked even though it passes visibility
+   * checks. Returns the modal container element, or null if no overlay is
+   * detected.
+   *
+   * Detection heuristics (ordered by reliability):
+   *   1. <dialog[open]> — native HTML dialog
+   *   2. [role="dialog"][aria-modal="true"] — ARIA modal pattern
+   *   3. [role="dialog"] that is visible
+   *   4. Common overlay class/attribute patterns (Stripe, Material, Radix,
+   *      Chakra, etc.): data-overlay, data-state="open", .modal.show, etc.
+   */
+  function _findTopmostModal() {
+    // 1. Native <dialog open>
+    const dialogs = document.querySelectorAll('dialog[open]');
+    if (dialogs.length > 0) return dialogs[dialogs.length - 1]; // last = topmost
+
+    // 2. ARIA modal
+    const ariaModals = document.querySelectorAll('[role="dialog"][aria-modal="true"]');
+    for (let i = ariaModals.length - 1; i >= 0; i--) {
+      const r = ariaModals[i].getBoundingClientRect();
+      if (r.width > 0 && r.height > 0) return ariaModals[i];
+    }
+
+    // 3. Visible role="dialog"
+    const roleDialogs = document.querySelectorAll('[role="dialog"]');
+    for (let i = roleDialogs.length - 1; i >= 0; i--) {
+      const r = roleDialogs[i].getBoundingClientRect();
+      if (r.width > 0 && r.height > 0) return roleDialogs[i];
+    }
+
+    // 4. Common overlay patterns — look for large, high-z-index containers
+    // that cover most of the viewport. These often contain forms/modals on
+    // sites like Stripe, GitHub, AWS, etc.
+    const candidates = document.querySelectorAll(
+      '[data-overlay], [data-state="open"][role="dialog"], ' +
+      '.modal.show, .modal-overlay, .overlay, [class*="modal"][class*="open"], ' +
+      '[class*="overlay"][class*="active"], [class*="DialogOverlay"], ' +
+      '[class*="ModalOverlay"]'
+    );
+    for (let i = candidates.length - 1; i >= 0; i--) {
+      const r = candidates[i].getBoundingClientRect();
+      if (r.width > 100 && r.height > 100) return candidates[i];
+    }
+
+    return null;
+  }
+
   function queryInteractive() {
     const all = document.querySelectorAll(INTERACTIVE_SELECTORS.join(', '));
+    const modal = _findTopmostModal();
     const out = [];
     for (const el of all) {
-      if (isVisiblyInteractive(el)) out.push(el);
+      if (!isVisiblyInteractive(el)) continue;
+      // If a modal is open, only include elements that are inside it.
+      // This prevents the agent from seeing (and accidentally clicking)
+      // elements behind the overlay — the #1 cause of "clicked Export
+      // instead of filling the form" on sites like Stripe.
+      if (modal && !modal.contains(el)) continue;
+      out.push(el);
     }
     return out;
   }
@@ -267,6 +324,18 @@
     }
 
     if (!el) return { success: false, error: 'Element not found' };
+
+    // <select> guidance: clicking opens a native dropdown that cannot be
+    // interacted with programmatically. Tell the model to use type_text instead.
+    if (el instanceof HTMLSelectElement) {
+      const options = Array.from(el.options).map(o => o.text.trim());
+      return {
+        success: true,
+        tag: 'SELECT',
+        text: el.options[el.selectedIndex]?.text?.trim() || '',
+        hint: `This is a <select> dropdown (current value: "${el.options[el.selectedIndex]?.text?.trim() || ''}"). Do NOT try to click individual options — the native dropdown cannot be controlled via click. Instead, use type_text({index: ${params.index != null ? params.index : 'N'}, text: "option name"}) to select an option. Available options: ${options.join(', ')}`,
+      };
+    }
 
     el.scrollIntoView({ behavior: 'smooth', block: 'center' });
     el.click();
@@ -439,6 +508,67 @@
     const amount = params.amount || 500;
     const direction = params.direction || 'down';
 
+    // Find the best scrollable container. On many sites (Stripe, Jira, etc.)
+    // the window itself isn't scrollable — the content lives inside a
+    // scrollable div/section. Walk ancestors of the focused or last-clicked
+    // element, or fall back to the most scrollable element on the page.
+    let target = null;
+
+    // Strategy 1: find a scrollable ancestor of the active/focused element.
+    const active = document.activeElement;
+    if (active && active !== document.body && active !== document.documentElement) {
+      let el = active.parentElement;
+      while (el && el !== document.body && el !== document.documentElement) {
+        if (el.scrollHeight > el.clientHeight + 10) {
+          const style = window.getComputedStyle(el);
+          const ov = style.overflowY;
+          if (ov === 'auto' || ov === 'scroll' || ov === 'overlay') {
+            target = el;
+            break;
+          }
+        }
+        el = el.parentElement;
+      }
+    }
+
+    // Strategy 2: find the largest scrollable container on the page.
+    if (!target) {
+      let best = null;
+      let bestArea = 0;
+      const candidates = document.querySelectorAll('div, section, main, article, [role="main"], [role="dialog"]');
+      for (const el of candidates) {
+        if (el.scrollHeight > el.clientHeight + 10) {
+          const style = window.getComputedStyle(el);
+          const ov = style.overflowY;
+          if (ov === 'auto' || ov === 'scroll' || ov === 'overlay') {
+            const rect = el.getBoundingClientRect();
+            const area = rect.width * rect.height;
+            if (area > bestArea) {
+              bestArea = area;
+              best = el;
+            }
+          }
+        }
+      }
+      // Only use the container if it takes up a meaningful portion of the viewport.
+      if (best && bestArea > window.innerWidth * window.innerHeight * 0.15) {
+        target = best;
+      }
+    }
+
+    // Strategy 3: check if window itself is scrollable; if not, fall back to
+    // the documentElement or body.
+    const windowScrollable = document.documentElement.scrollHeight > window.innerHeight + 10;
+
+    if (target) {
+      if (direction === 'down') target.scrollBy(0, amount);
+      else if (direction === 'up') target.scrollBy(0, -amount);
+      else if (direction === 'top') target.scrollTo(0, 0);
+      else if (direction === 'bottom') target.scrollTo(0, target.scrollHeight);
+    }
+
+    // Always also scroll the window in case both are needed (some pages have
+    // both window and container scrolling).
     if (direction === 'down') window.scrollBy(0, amount);
     else if (direction === 'up') window.scrollBy(0, -amount);
     else if (direction === 'top') window.scrollTo(0, 0);
@@ -449,6 +579,7 @@
       scrollY: window.scrollY,
       scrollHeight: document.body.scrollHeight,
       viewportHeight: window.innerHeight,
+      ...(target ? { scrolledContainer: true, containerScrollY: target.scrollTop, containerScrollHeight: target.scrollHeight } : {}),
     };
   }
 
