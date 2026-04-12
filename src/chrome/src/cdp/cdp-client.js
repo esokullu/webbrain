@@ -869,13 +869,15 @@ export class CDPClient {
     if (!info) return { success: false, error: 'Element not found' };
     if (info.error) return { success: false, error: info.error };
 
-    // <select> intercept: don't click — return guidance to use type_text.
+    // <select> intercept: don't click — focus the element (so type_text
+    // finds it as activeElement) and return guidance.
     if (info.tag === 'SELECT') {
       const selectorJSON = JSON.stringify(selector);
       const optRes = await this.evaluate(tabId, `
         (() => {
           const el = document.querySelector(${selectorJSON});
           if (!el || el.tagName !== 'SELECT') return null;
+          el.focus();
           return {
             current: el.options[el.selectedIndex]?.text?.trim() || '',
             options: Array.from(el.options).map(o => o.text.trim()),
@@ -887,7 +889,7 @@ export class CDPClient {
         success: true,
         tag: 'SELECT',
         text: opts?.current || info.text,
-        hint: `This is a <select> dropdown (current: "${opts?.current || ''}"). Do NOT click — use type_text({selector: ${JSON.stringify(selector)}, text: "option name"}) instead.` + (opts?.options ? ' Available: ' + opts.options.join(', ') : ''),
+        hint: `This is a <select> dropdown (current: "${opts?.current || ''}"). Do NOT click — use type_text({text: "option name"}) to select an option.` + (opts?.options ? ' Available: ' + opts.options.join(', ') : ''),
       };
     }
 
@@ -981,8 +983,9 @@ export class CDPClient {
     // ── <select> fast-path ──────────────────────────────────────────────
     // Native <select> elements CANNOT be typed into via Input.insertText.
     // Clicking them opens a browser-native dropdown that CDP mouse events
-    // can't interact with. Instead, use JS to match the option and set
-    // the value + dispatch change events.
+    // can't interact with. Instead, focus the select, find the target
+    // option index, and use CDP keyboard ArrowDown/ArrowUp events to
+    // navigate to it. This fires native browser events that React sees.
     if (info.tag === 'SELECT') {
       const selectorJSON = JSON.stringify(selector);
       const textJSON = JSON.stringify((text || '').trim());
@@ -999,6 +1002,7 @@ export class CDPClient {
           };
           const el = queryDeep(document);
           if (!el || el.tagName !== 'SELECT') return { success: false, error: 'Select element not found' };
+          el.focus();
           const opts = Array.from(el.options);
           const match = opts.find(o => o.value === needle)
             || opts.find(o => o.text.trim() === needle)
@@ -1007,13 +1011,45 @@ export class CDPClient {
             const available = opts.map(o => o.text.trim()).join(', ');
             return { success: false, error: 'No option matching "' + needle + '". Available: ' + available };
           }
-          el.value = match.value;
-          el.dispatchEvent(new Event('input', { bubbles: true }));
-          el.dispatchEvent(new Event('change', { bubbles: true }));
-          return { success: true, method: 'select-js', selectedText: match.text.trim(), selectedValue: match.value };
+          return {
+            success: true,
+            currentIndex: el.selectedIndex,
+            targetIndex: match.index,
+            targetText: match.text.trim(),
+            targetValue: match.value,
+          };
         })()
       `);
-      return result?.result?.value || { success: false, error: 'Select interaction failed' };
+      const sInfo = result?.result?.value;
+      if (!sInfo?.success) return sInfo || { success: false, error: 'Select interaction failed' };
+
+      // Close any open native dropdown
+      await this.sendCommand(tabId, 'Input.dispatchKeyEvent', {
+        type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27,
+      });
+      await this.sendCommand(tabId, 'Input.dispatchKeyEvent', {
+        type: 'keyUp', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27,
+      });
+
+      // Navigate with arrow keys
+      const delta = sInfo.targetIndex - sInfo.currentIndex;
+      const arrowKey = delta > 0 ? 'ArrowDown' : 'ArrowUp';
+      const arrowVK = delta > 0 ? 40 : 38;
+      for (let i = 0; i < Math.abs(delta); i++) {
+        await this.sendCommand(tabId, 'Input.dispatchKeyEvent', {
+          type: 'keyDown', key: arrowKey, code: arrowKey, windowsVirtualKeyCode: arrowVK,
+        });
+        await this.sendCommand(tabId, 'Input.dispatchKeyEvent', {
+          type: 'keyUp', key: arrowKey, code: arrowKey, windowsVirtualKeyCode: arrowVK,
+        });
+      }
+      return {
+        success: true,
+        method: 'select-keyboard',
+        selectedText: sInfo.targetText,
+        selectedValue: sInfo.targetValue,
+        keyPresses: Math.abs(delta),
+      };
     }
 
     let focused = false;

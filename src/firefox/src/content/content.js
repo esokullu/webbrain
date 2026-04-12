@@ -454,8 +454,10 @@
     if (!el) return { success: false, error: 'Element not found' };
 
     // <select> guidance: clicking opens a native dropdown that cannot be
-    // interacted with programmatically. Tell the model to use type_text instead.
+    // interacted with programmatically. Focus the element (so follow-up
+    // type_text finds it as activeElement) and tell the model to use type_text.
     if (el instanceof HTMLSelectElement) {
+      el.focus();
       const options = Array.from(el.options).map(o => o.text.trim());
       return {
         success: true,
@@ -467,6 +469,21 @@
 
     el.scrollIntoView({ behavior: 'smooth', block: 'center' });
     el.click();
+
+    // Post-click SELECT detection: the click may have activated a <select>
+    // via a label, wrapper, or overlapping element. Detect and return hint.
+    const postActive = document.activeElement;
+    if (postActive && postActive !== el && postActive instanceof HTMLSelectElement) {
+      postActive.blur();
+      postActive.focus(); // close native popup, keep focus
+      const postOpts = Array.from(postActive.options).map(o => o.text.trim());
+      return {
+        success: true,
+        tag: 'SELECT',
+        text: postActive.options[postActive.selectedIndex]?.text?.trim() || '',
+        hint: `A <select> dropdown was activated by this click (current: "${postActive.options[postActive.selectedIndex]?.text?.trim() || ''}"). Do NOT try to click individual options — use type_text({text: "option name"}) instead. Available options: ${postOpts.join(', ')}`,
+      };
+    }
 
     // Stale click detection: warn if the same element is clicked again
     const ident = `${el.tagName}|${(el.innerText || '').slice(0, 50)}|${location.href}`;
@@ -524,6 +541,7 @@
     }
 
     // <select>: match by value or option text.
+    // Use native setter to bypass React's value property wrapper.
     if (el instanceof HTMLSelectElement) {
       const needle = (params.text || '').trim();
       const byValue = Array.from(el.options).find(o => o.value === needle);
@@ -533,7 +551,9 @@
       if (!match) {
         return { success: false, error: `No <option> matching "${params.text}" in select.` };
       }
-      el.value = match.value;
+      const nativeSetter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')?.set;
+      if (nativeSetter) nativeSetter.call(el, match.value);
+      else el.value = match.value;
       el.dispatchEvent(new Event('input', { bubbles: true }));
       el.dispatchEvent(new Event('change', { bubbles: true }));
       return { success: true, method: 'select', value: el.value };
