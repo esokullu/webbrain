@@ -125,12 +125,91 @@
       --accent2: #a78bfa;
       --success: #34d399;
       --warning: #fbbf24;
+      --nav-bg: rgba(11,14,23,0.8);
+      --overlay-glow-2: rgba(167,139,250,0.12);
+      --browser-url-bg: rgba(0,0,0,0.3);
+      --placeholder: rgba(255,255,255,0.04);
+      --panel-bg: #1a1a2e;
+      --assistant-bg: #16213e;
+      --assistant-border: rgba(255,255,255,0.06);
+      --input-bg: #1e2746;
+      --btn-primary-hover: #5a52d5;
       --radius: 16px;
       --radius-sm: 10px;
       --max-w: 1100px;
     }
 
     html { scroll-behavior: smooth; }
+
+    body[data-theme="orange"] {
+      --bg: #140f08;
+      --bg-card: #20170c;
+      --bg-card-hover: #2c1f0f;
+      --surface: #261c11;
+      --border: rgba(255,186,102,0.18);
+      --text: #fff1de;
+      --text-dim: #d6b892;
+      --accent: #ff8a2a;
+      --accent2: #ffd166;
+      --accent-glow: rgba(255,138,42,0.3);
+      --warning: #ffb347;
+      --nav-bg: rgba(20,15,8,0.82);
+      --overlay-glow-2: rgba(255,209,102,0.15);
+      --browser-url-bg: rgba(255,209,102,0.12);
+      --placeholder: rgba(255,209,102,0.12);
+      --panel-bg: #2b1d0e;
+      --assistant-bg: #3a2713;
+      --assistant-border: rgba(255,209,102,0.2);
+      --input-bg: #352413;
+      --btn-primary-hover: #ef7a1a;
+    }
+
+    body[data-theme="whitish"] {
+      --bg: #f8fafc;
+      --bg-card: #ffffff;
+      --bg-card-hover: #f4f7ff;
+      --surface: #eef2ff;
+      --border: rgba(15,23,42,0.1);
+      --text: #0f172a;
+      --text-dim: #52607a;
+      --accent: #4f46e5;
+      --accent2: #7c3aed;
+      --accent-glow: rgba(79,70,229,0.2);
+      --warning: #d97706;
+      --nav-bg: rgba(248,250,252,0.82);
+      --overlay-glow-2: rgba(124,58,237,0.12);
+      --browser-url-bg: rgba(79,70,229,0.08);
+      --placeholder: rgba(15,23,42,0.08);
+      --panel-bg: #f7f6ff;
+      --assistant-bg: #eef2ff;
+      --assistant-border: rgba(79,70,229,0.14);
+      --input-bg: #ffffff;
+      --btn-primary-hover: #4338ca;
+    }
+
+    body[data-theme="rosy"] {
+      --bg: #1a0f16;
+      --bg-card: #261421;
+      --bg-card-hover: #321b2b;
+      --surface: #2f1c29;
+      --border: rgba(255,173,210,0.2);
+      --text: #ffeaf4;
+      --text-dim: #d7adc4;
+      --accent: #ff5ca8;
+      --accent2: #ff9ecb;
+      --accent-glow: rgba(255,92,168,0.28);
+      --warning: #f472b6;
+      --nav-bg: rgba(26,15,22,0.82);
+      --overlay-glow-2: rgba(255,158,203,0.14);
+      --browser-url-bg: rgba(255,158,203,0.12);
+      --placeholder: rgba(255,158,203,0.14);
+      --panel-bg: #341a2d;
+      --assistant-bg: #44223a;
+      --assistant-border: rgba(255,173,210,0.22);
+      --input-bg: #3e1f35;
+      --btn-primary-hover: #e64b95;
+    }
+
 
     body {
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Inter, Roboto, sans-serif;
@@ -166,7 +245,7 @@
       position: absolute;
       width: 400px; height: 400px;
       bottom: 10%; right: -100px;
-      background: radial-gradient(circle, rgba(167,139,250,0.12) 0%, transparent 70%);
+      background: radial-gradient(circle, var(--overlay-glow-2) 0%, transparent 70%);
       filter: blur(60px);
     }
 
@@ -178,7 +257,7 @@
       top: 0;
       z-index: 100;
       backdrop-filter: blur(20px);
-      background: rgba(11,14,23,0.8);
+      background: var(--nav-bg);
       border-bottom: 1px solid var(--border);
     }
     .nav-inner {
@@ -218,7 +297,7 @@
       font-size: 13px;
       transition: background 0.2s, transform 0.1s;
     }
-    .nav-cta:hover { background: #5a52d5 !important; transform: translateY(-1px); text-decoration: none !important; }
+    .nav-cta:hover { background: var(--btn-primary-hover) !important; transform: translateY(-1px); text-decoration: none !important; }
 
     /* ================================================================
        HERO
@@ -291,7 +370,7 @@
       color: #fff;
       box-shadow: 0 4px 24px var(--accent-glow);
     }
-    .btn-primary:hover { background: #5a52d5; transform: translateY(-2px); text-decoration: none; color: #fff; }
+    .btn-primary:hover { background: var(--btn-primary-hover); transform: translateY(-2px); text-decoration: none; color: #fff; }
     .btn-secondary {
       background: var(--surface);
       color: var(--text);
@@ -333,7 +412,7 @@
     .browser-url {
       flex: 1;
       margin-left: 12px;
-      background: rgba(0,0,0,0.3);
+      background: var(--browser-url-bg);
       border-radius: 6px;
       padding: 5px 12px;
       font-size: 12px;
@@ -353,7 +432,7 @@
     .browser-page h3 { color: var(--text); margin-bottom: 8px; font-size: 16px; }
     .browser-page .placeholder-line {
       height: 10px;
-      background: rgba(255,255,255,0.04);
+      background: var(--placeholder);
       border-radius: 4px;
       margin-bottom: 8px;
     }
@@ -364,7 +443,7 @@
     .side-panel {
       width: 300px;
       border-left: 1px solid var(--border);
-      background: #1a1a2e;
+      background: var(--panel-bg);
       display: flex;
       flex-direction: column;
       flex-shrink: 0;
@@ -415,8 +494,8 @@
       animation-delay: 0.2s;
     }
     .sp-msg.assistant {
-      background: #16213e;
-      border: 1px solid rgba(255,255,255,0.06);
+      background: var(--assistant-bg);
+      border: 1px solid var(--assistant-border);
       align-self: flex-start;
       animation-delay: 0.5s;
     }
@@ -436,7 +515,7 @@
     .sp-input-box {
       display: flex;
       align-items: center;
-      background: #1e2746;
+      background: var(--input-bg);
       border: 1px solid var(--border);
       border-radius: 10px;
       padding: 8px 12px;
@@ -777,6 +856,29 @@
       border: 0;
     }
 
+
+
+    .theme-picker {
+      margin: 24px auto 0;
+      display: flex;
+      gap: 10px;
+      justify-content: center;
+      flex-wrap: wrap;
+    }
+    .theme-btn {
+      border: 1px solid var(--border);
+      background: var(--bg-card);
+      color: var(--text);
+      border-radius: 999px;
+      padding: 8px 14px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .theme-btn:hover { border-color: var(--accent); transform: translateY(-1px); }
+    .theme-btn.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+
     /* ================================================================
        RESPONSIVE
        ================================================================ */
@@ -845,6 +947,13 @@
       View on GitHub
     </a>
   </div>
+  <div class="theme-picker" aria-label="Theme alternatives">
+    <button class="theme-btn active" data-theme="dark" type="button">Dark</button>
+    <button class="theme-btn" data-theme="orange" type="button">Orange</button>
+    <button class="theme-btn" data-theme="whitish" type="button">Whitish</button>
+    <button class="theme-btn" data-theme="rosy" type="button">Rosy</button>
+  </div>
+
 
   <!-- Browser mockup -->
   <div class="hero-visual">
@@ -1187,6 +1296,26 @@
     </div>
   </div>
 </footer>
+
+
+<script>
+  (function () {
+    const buttons = document.querySelectorAll('.theme-btn');
+    const storageKey = 'webbrain-theme';
+    const applyTheme = (theme) => {
+      document.body.dataset.theme = theme === 'dark' ? '' : theme;
+      buttons.forEach((btn) => btn.classList.toggle('active', btn.dataset.theme === theme));
+      localStorage.setItem(storageKey, theme);
+    };
+
+    const savedTheme = localStorage.getItem(storageKey) || 'dark';
+    applyTheme(savedTheme);
+
+    buttons.forEach((btn) => {
+      btn.addEventListener('click', () => applyTheme(btn.dataset.theme));
+    });
+  })();
+</script>
 
 </body>
 </html>
