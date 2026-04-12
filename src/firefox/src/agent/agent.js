@@ -738,14 +738,28 @@ export class Agent {
     }
 
     if (name === 'done') {
-      // In act mode, require a verification screenshot before completing.
+      // In act mode, require a verification screenshot + page info before completing.
       const mode = this.conversationModes.get(tabId) || 'ask';
       if (mode === 'act') {
         try {
           const tab = await browser.tabs.get(tabId);
           if (tab?.active) {
+            // Capture page URL and title for verification context
+            const results = await browser.tabs.executeScript(tabId, {
+              code: `({ url: location.href, title: document.title })`,
+            });
+            const info = (results && results[0]) || {};
             const dataUrl = await browser.tabs.captureVisibleTab(tab.windowId, { format: 'png', quality: 80 });
-            return { done: true, summary: args.summary, verificationScreenshot: dataUrl };
+            return {
+              done: true,
+              summary: args.summary,
+              verification: {
+                pageUrl: info.url || '',
+                pageTitle: info.title || '',
+                screenshot: dataUrl,
+                note: 'Review this screenshot carefully. Does it confirm the task was completed successfully? If the page shows an existing item from the past (check dates), you may NOT have actually created anything new.',
+              },
+            };
           }
         } catch (_) {
           // Screenshot failed — still allow done but note it
