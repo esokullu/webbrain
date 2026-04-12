@@ -30,6 +30,15 @@ export class OpenAICompatibleProvider extends BaseLLMProvider {
     return /gpt-4o|gpt-4\.1|gpt-4-turbo|gpt-5|claude|gemini|llava|qwen.*vl|qwen2.*vl|qwen3.*vl|pixtral|llama.*vision|gemma.*vision|gemma-?[34]/.test(m);
   }
 
+  get useCompactPrompt() {
+    // Explicit user setting always wins.
+    if (this.config.useCompactPrompt != null) return !!this.config.useCompactPrompt;
+    // Default to compact for local providers (Ollama, LM Studio) since they
+    // typically run smaller models with limited context windows.
+    const p = (this.config.providerName || '').toLowerCase();
+    return p === 'ollama' || p === 'lmstudio';
+  }
+
   _headers() {
     const headers = { 'Content-Type': 'application/json' };
     if (this.config.apiKey) {

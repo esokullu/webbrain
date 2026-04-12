@@ -1,4 +1,4 @@
-import { AGENT_TOOLS, AGENT_TOOL_NAMES, getToolsForMode, SYSTEM_PROMPT_ASK, SYSTEM_PROMPT_ACT } from './tools.js';
+import { AGENT_TOOLS, AGENT_TOOL_NAMES, getToolsForMode, SYSTEM_PROMPT_ASK, SYSTEM_PROMPT_ACT, SYSTEM_PROMPT_ACT_COMPACT } from './tools.js';
 import { cdpClient } from '../cdp/cdp-client.js';
 import { getActiveAdapter } from './adapters.js';
 import {
@@ -536,13 +536,31 @@ export class Agent {
    * Publish button" without guessing pixels — just by name.
    */
   async _getVisibleInteractiveElements(tabId) {
+    // For compact-prompt providers (small models), cap at 12 elements to
+    // reduce noise. Full-size models get up to 25.
+    let maxElements = 25;
+    try {
+      const provider = this.providerManager.getActive();
+      if (provider.useCompactPrompt) maxElements = 12;
+    } catch { /* default 25 */ }
+
     try {
       const result = await cdpClient.evaluate(tabId, `
         (() => {
+          const maxEl = ${maxElements};
           const sels = 'a[href], button, [role="button"], [role="link"], [role="tab"], [role="menuitem"], input:not([type="hidden"]), textarea, select, summary, [onclick]';
           const all = Array.from(document.querySelectorAll(sels));
           const out = [];
-          for (const el of all) {
+          // Prioritize form inputs and buttons over links — they're more
+          // likely to be the target of an action.
+          const prioritized = all.sort((a, b) => {
+            const aIsInput = /^(INPUT|TEXTAREA|SELECT|BUTTON)$/i.test(a.tagName) || a.getAttribute('role') === 'button';
+            const bIsInput = /^(INPUT|TEXTAREA|SELECT|BUTTON)$/i.test(b.tagName) || b.getAttribute('role') === 'button';
+            if (aIsInput && !bIsInput) return -1;
+            if (!aIsInput && bIsInput) return 1;
+            return 0;
+          });
+          for (const el of prioritized) {
             const r = el.getBoundingClientRect();
             // Visible + in viewport
             if (r.width === 0 || r.height === 0) continue;
@@ -557,7 +575,7 @@ export class Agent {
               type: el.type || '',
               text: text || \`<\${el.tagName.toLowerCase()}>\`,
             });
-            if (out.length >= 25) break;
+            if (out.length >= maxEl) break;
           }
           return out;
         })()
@@ -692,9 +710,21 @@ export class Agent {
   /**
    * Get or create a conversation for a tab.
    */
+  /**
+   * Select the appropriate ACT system prompt based on the active provider.
+   * Small/local models get a compact prompt to save context budget.
+   */
+  _getActPrompt() {
+    try {
+      const provider = this.providerManager.getActive();
+      if (provider.useCompactPrompt) return SYSTEM_PROMPT_ACT_COMPACT;
+    } catch { /* provider not ready yet — use full prompt */ }
+    return SYSTEM_PROMPT_ACT;
+  }
+
   getConversation(tabId, mode = 'ask') {
     if (!this.conversations.has(tabId)) {
-      const systemPrompt = mode === 'act' ? SYSTEM_PROMPT_ACT : SYSTEM_PROMPT_ASK;
+      const systemPrompt = mode === 'act' ? this._getActPrompt() : SYSTEM_PROMPT_ASK;
       this.conversations.set(tabId, [
         { role: 'system', content: systemPrompt },
       ]);
@@ -705,7 +735,7 @@ export class Agent {
     const lastMode = this.conversationModes.get(tabId);
     if (lastMode !== mode) {
       const messages = this.conversations.get(tabId);
-      const systemPrompt = mode === 'act' ? SYSTEM_PROMPT_ACT : SYSTEM_PROMPT_ASK;
+      const systemPrompt = mode === 'act' ? this._getActPrompt() : SYSTEM_PROMPT_ASK;
       if (messages[0]?.role === 'system') {
         messages[0].content = systemPrompt;
       }
