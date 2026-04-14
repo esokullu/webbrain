@@ -58,6 +58,11 @@ export class Agent {
     // Track which tabs have already had the [API ALLOWED] preamble
     // injected for the current run, so we don't push it on every turn.
     this.apiAllowedInjected = new Set();
+    // Last interacted region per tab (CSS-pixel rect from click_ax / type_ax).
+    // Used to draw an outline onto verification screenshots in `done` so the
+    // model can see which element it last touched. Lives for the tab's
+    // lifetime; overwritten on each ax interaction, cleared on tab close.
+    this._lastInteractionRect = new Map(); // tabId -> { x, y, w, h, ts }
   }
 
   /**
@@ -788,6 +793,7 @@ export class Agent {
     try {
       await cdpClient.attach(tabId);
       await cdpClient.sendCommand(tabId, 'Page.enable');
+      await this._bringToFrontForCapture(tabId);
       const vp = await cdpClient.evaluate(tabId, '({w: window.innerWidth, h: window.innerHeight})');
       const w = Math.max(1, Math.round(vp?.result?.value?.w || 1024));
       const h = Math.max(1, Math.round(vp?.result?.value?.h || 768));
@@ -804,6 +810,104 @@ export class Agent {
       };
     } catch (e) {
       return null;
+    }
+  }
+
+  /**
+   * Lightweight pre-capture page-health probe. Runs alongside a screenshot
+   * to give the agent a few numbers that explain what it's about to look at
+   * (is the page still loading? how heavy is it? any iframes?). Borrowed in
+   * spirit from the Claude for Chrome extension — cheap telemetry that
+   * sometimes turns a confusing screenshot into an obvious diagnosis.
+   *
+   * Never throws; returns null on any failure so screenshot paths don't get
+   * taken down by a missing CDP or a frozen tab.
+   */
+  async _captureViewportProbe(tabId) {
+    try {
+      await cdpClient.attach(tabId);
+      const probe = await cdpClient.evaluate(tabId, `
+        (() => {
+          const mem = (performance && performance.memory) ? performance.memory : null;
+          return {
+            url: location.href,
+            title: document.title || '',
+            readyState: document.readyState,
+            visibility: document.visibilityState,
+            domNodes: document.getElementsByTagName('*').length,
+            iframes: document.getElementsByTagName('iframe').length,
+            scrollX: Math.round(window.scrollX || 0),
+            scrollY: Math.round(window.scrollY || 0),
+            innerWidth: window.innerWidth,
+            innerHeight: window.innerHeight,
+            dpr: window.devicePixelRatio || 1,
+            jsHeapMb: mem ? Math.round(mem.usedJSHeapSize / 1048576) : null,
+          };
+        })()
+      `);
+      return probe?.result?.value || null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Try to bring a tab to the front via CDP before capturing. The surface
+   * screenshot path (`fromSurface: true`) can produce stale/blank frames if
+   * the page is occluded or backgrounded in some compositor states. This is
+   * best-effort — ignore failures and let the capture proceed.
+   */
+  async _bringToFrontForCapture(tabId) {
+    try {
+      await cdpClient.sendCommand(tabId, 'Page.bringToFront');
+    } catch { /* ignore */ }
+  }
+
+  /**
+   * Draw a red outline rectangle over a base64 PNG/JPEG screenshot, at the
+   * given CSS-pixel rect. Scales the rect by the ratio between the image's
+   * actual pixel dimensions and the CSS viewport so it lines up regardless
+   * of whether the capture was taken at scale=1 or native DPR.
+   *
+   * Runs in the service worker via OffscreenCanvas — no DOM required.
+   * Returns the annotated image as a data URL, or the original dataUrl on
+   * any failure (so callers can treat this as a best-effort enhancement).
+   */
+  async _annotateScreenshot(dataUrl, rect, cssViewport) {
+    try {
+      if (!dataUrl || !rect || !rect.w || !rect.h) return dataUrl;
+      const resp = await fetch(dataUrl);
+      const blob = await resp.blob();
+      const bmp = await createImageBitmap(blob);
+      const canvas = new OffscreenCanvas(bmp.width, bmp.height);
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(bmp, 0, 0);
+      // Scale CSS rect into image pixels. If we have a CSS viewport hint,
+      // compute the exact ratio; otherwise assume 1:1 (scale=1 captures).
+      const sx = cssViewport?.width ? (bmp.width / cssViewport.width) : 1;
+      const sy = cssViewport?.height ? (bmp.height / cssViewport.height) : 1;
+      const x = Math.max(0, Math.round(rect.x * sx));
+      const y = Math.max(0, Math.round(rect.y * sy));
+      const w = Math.max(1, Math.round(rect.w * sx));
+      const h = Math.max(1, Math.round(rect.h * sy));
+      // Outer glow for contrast on any background
+      ctx.lineWidth = Math.max(2, Math.round(4 * Math.min(sx, sy)));
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.9)';
+      ctx.strokeRect(x - 2, y - 2, w + 4, h + 4);
+      ctx.strokeStyle = 'rgba(255, 0, 64, 0.95)';
+      ctx.strokeRect(x, y, w, h);
+      const outBlob = await canvas.convertToBlob({ type: 'image/png' });
+      const buf = await outBlob.arrayBuffer();
+      // Base64-encode without blowing the call stack on large buffers.
+      const bytes = new Uint8Array(buf);
+      let bin = '';
+      const chunk = 0x8000;
+      for (let i = 0; i < bytes.length; i += chunk) {
+        bin += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk));
+      }
+      return `data:image/png;base64,${btoa(bin)}`;
+    } catch {
+      return dataUrl;
     }
   }
 
@@ -926,6 +1030,7 @@ export class Agent {
     this.hydratedTabs.delete(tabId);
     this.apiAllowedTabs.delete(tabId);
     this.apiAllowedInjected.delete(tabId);
+    this._lastInteractionRect.delete(tabId);
     this._clearLoopState(tabId);
     const t = this.persistTimers.get(tabId);
     if (t) { clearTimeout(t); this.persistTimers.delete(tabId); }
@@ -1135,6 +1240,11 @@ export class Agent {
         try {
           await cdpClient.attach(tabId);
           await cdpClient.sendCommand(tabId, 'Page.enable');
+          // Run probe + bringToFront in parallel with capture prep. Probe is
+          // best-effort context for the model; bringToFront defends against
+          // stale/blank surface captures when the tab is occluded.
+          const probe = await this._captureViewportProbe(tabId);
+          await this._bringToFrontForCapture(tabId);
           const screenshot = await cdpClient.sendCommand(tabId, 'Page.captureScreenshot', {
             format: 'png',
             quality: 100,
@@ -1144,6 +1254,7 @@ export class Agent {
             success: true,
             image: `data:image/png;base64,${screenshot.data}`,
             description: `Screenshot captured via CDP (${screenshot.data.length} bytes)`,
+            page: probe || undefined,
           };
         } catch {
           // Fallback to tabs API. captureVisibleTab takes a windowId and
@@ -1179,23 +1290,38 @@ export class Agent {
       if (mode === 'act') {
         try {
           await cdpClient.attach(tabId);
-          // Capture page URL and title for verification context
-          const pageInfo = await cdpClient.evaluate(tabId, `
-            ({ url: location.href, title: document.title })
-          `);
-          const info = pageInfo?.result?.value || {};
           await cdpClient.sendCommand(tabId, 'Page.enable');
+          // Probe page health so the model can catch "I verified a stale
+          // loading frame" cases, and bring the tab forward so the capture
+          // reflects what the user would actually see.
+          const probe = await this._captureViewportProbe(tabId);
+          await this._bringToFrontForCapture(tabId);
           const shot = await cdpClient.sendCommand(tabId, 'Page.captureScreenshot', {
             format: 'png', quality: 80, fromSurface: true,
           });
+          let imageDataUrl = `data:image/png;base64,${shot.data}`;
+          // If we remember the rect of the last ax interaction on this tab,
+          // outline it on the screenshot so the model can anchor its review
+          // to the element it actually touched.
+          let annotatedRect = null;
+          const last = this._lastInteractionRect.get(tabId);
+          if (last) {
+            const cssViewport = probe
+              ? { width: probe.innerWidth, height: probe.innerHeight }
+              : null;
+            imageDataUrl = await this._annotateScreenshot(imageDataUrl, last, cssViewport);
+            annotatedRect = { x: last.x, y: last.y, w: last.w, h: last.h };
+          }
           return {
             done: true,
             summary: args.summary,
             verification: {
-              pageUrl: info.url || '',
-              pageTitle: info.title || '',
-              screenshot: `data:image/png;base64,${shot.data}`,
-              note: 'Review this screenshot carefully. Does it confirm the task was completed successfully? If the page shows an existing item from the past (check dates), you may NOT have actually created anything new.',
+              pageUrl: probe?.url || '',
+              pageTitle: probe?.title || '',
+              screenshot: imageDataUrl,
+              page: probe || undefined,
+              annotatedRect,
+              note: 'Review this screenshot carefully. Does it confirm the task was completed successfully? If the page shows an existing item from the past (check dates), you may NOT have actually created anything new.' + (annotatedRect ? ' The red-outlined region is the element you last interacted with.' : ''),
             },
           };
         } catch (_) {
@@ -1232,6 +1358,7 @@ export class Agent {
     if (name === 'full_page_screenshot') {
       try {
         await cdpClient.attach(tabId);
+        await this._bringToFrontForCapture(tabId);
         const imageData = await cdpClient.captureFullPageScreenshot(tabId);
         return {
           success: true,
@@ -1285,6 +1412,7 @@ export class Agent {
         // 2. Capture screenshot
         try {
           await cdpClient.sendCommand(tabId, 'Page.enable');
+          await this._bringToFrontForCapture(tabId);
           const shot = await cdpClient.sendCommand(tabId, 'Page.captureScreenshot', {
             format: 'png', quality: 100, fromSurface: true,
           });
@@ -2426,6 +2554,11 @@ export class Agent {
     const actionMap = {
       'read_page': 'get_page_info_cdp',
       'get_interactive_elements': 'get_interactive_elements_cdp',
+      // Accessibility-tree path (preferred). Ported from Claude for Chrome —
+      // flat indented text output with persistent WeakRef-backed ref_ids.
+      'get_accessibility_tree': 'get_accessibility_tree',
+      'click_ax': 'click_ax',
+      'type_ax': 'type_ax',
       'click': 'click',
       'type_text': 'type',
       'press_keys': 'press_keys',
@@ -2447,24 +2580,42 @@ export class Agent {
         action,
         params: args,
       });
+      this._recordInteractionRect(tabId, name, response);
       return response;
     } catch (e) {
-      // Content script might not be injected — try injecting it
+      // Content script might not be injected — try injecting it.
+      // accessibility-tree.js must load first so content.js's
+      // get_accessibility_tree / click_ax / type_ax handlers can reach
+      // window.__generateAccessibilityTree and window.__wb_ax_lookup.
       try {
         await chrome.scripting.executeScript({
           target: { tabId },
-          files: ['src/content/content.js'],
+          files: ['src/content/accessibility-tree.js', 'src/content/content.js'],
         });
         const response = await chrome.tabs.sendMessage(tabId, {
           target: 'content',
           action,
           params: args,
         });
+        this._recordInteractionRect(tabId, name, response);
         return response;
       } catch (e2) {
         return { error: `Failed to communicate with page: ${e2.message}` };
       }
     }
+  }
+
+  /**
+   * Remember the rect returned by a successful click_ax / type_ax so the
+   * `done` verification screenshot can outline the last-touched element.
+   * No-op for other tool responses or when the rect is missing/degenerate.
+   */
+  _recordInteractionRect(tabId, toolName, response) {
+    if (!response || !response.success) return;
+    if (toolName !== 'click_ax' && toolName !== 'type_ax') return;
+    const r = response.rect;
+    if (!r || !r.w || !r.h) return;
+    this._lastInteractionRect.set(tabId, { x: r.x, y: r.y, w: r.w, h: r.h, ts: Date.now() });
   }
 
   /**

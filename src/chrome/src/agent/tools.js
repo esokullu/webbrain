@@ -7,8 +7,55 @@ export const AGENT_TOOLS = [
   {
     type: 'function',
     function: {
+      name: 'get_accessibility_tree',
+      description: 'PREFERRED page-reading tool. Returns the page as a flat, indented text representation of its accessibility tree. Each kept node is one line of the form `role "accessible name" [ref_id] href="..." type="..." placeholder="..."`. Indentation shows hierarchy. ref_ids are STABLE across calls — re-use them in click_ax / type_ax. Use this first; read_page is a prose fallback for long-form articles only.',
+      parameters: {
+        type: 'object',
+        properties: {
+          filter: { type: 'string', enum: ['all', 'visible', 'interactive'], description: 'Which nodes to include. "visible" (in-viewport, visible) is a good default for navigation tasks. "interactive" shows only clickable/typeable things. "all" traverses the entire DOM. Defaults to "all" when omitted.' },
+          maxDepth: { type: 'number', description: 'Max tree depth to descend (default 15). Lower values produce smaller output.' },
+          maxChars: { type: 'number', description: 'Abort and return an error if the rendered tree exceeds this many characters. Protects against huge pages.' },
+          ref_id: { type: 'string', description: 'Optional. Anchor the read at a previously-seen ref_id instead of document.body — returns just that element and its subtree. Useful for zooming into a nav, table, or dialog you already found.' },
+        },
+        required: [],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'click_ax',
+      description: 'Click an element by its ref_id from get_accessibility_tree. Scrolls into view, focuses, then clicks. ref_ids are stable across calls — a ref_id you saw last turn still works this turn, as long as the element stayed in the DOM. If you get a "not found" error, the element was removed or the page navigated — re-read the tree.',
+      parameters: {
+        type: 'object',
+        properties: {
+          ref_id: { type: 'string', description: 'A ref_id from get_accessibility_tree, e.g. "ref_42".' },
+        },
+        required: ['ref_id'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'type_ax',
+      description: 'Type text into an element by its ref_id from get_accessibility_tree. Handles <input>, <textarea>, and contenteditable. Uses React-compatible native value setters so frameworks pick up the change.',
+      parameters: {
+        type: 'object',
+        properties: {
+          ref_id: { type: 'string', description: 'A ref_id from get_accessibility_tree, e.g. "ref_42".' },
+          text: { type: 'string', description: 'Text to type.' },
+          clear: { type: 'boolean', description: 'Clear existing content before typing (default: false).' },
+        },
+        required: ['ref_id', 'text'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
       name: 'read_page',
-      description: 'Read the current page content including title, URL, text content, links, and forms. Use this to understand what is on the current page.',
+      description: 'Read the current page as PROSE — title, URL, visible text, links, forms. LEGACY read path; prefer get_accessibility_tree for UI tasks. Use read_page only when the user is asking about long-form text content (articles, READMEs, documentation).',
       parameters: {
         type: 'object',
         properties: {},
@@ -449,7 +496,8 @@ export const AGENT_TOOLS = [
  * Read-only tools allowed in Ask mode.
  */
 export const ASK_ONLY_TOOLS = [
-  'read_page', 'screenshot', 'get_interactive_elements', 'scroll',
+  'get_accessibility_tree', 'read_page', 'screenshot',
+  'get_interactive_elements', 'scroll',
   'extract_data', 'get_selection', 'done',
   // Read-only network tools — safe in Ask mode because they don't modify
   // the active page or take destructive actions. They DO send the user's
@@ -485,13 +533,33 @@ OPERATING ENVIRONMENT — read this carefully:
 You can read and analyze the current web page, but you CANNOT click, type, navigate, or modify anything in Ask mode. You are read-only here.
 
 Available tools:
-- read_page: Read the current page content (title, URL, text, links, forms)
+- get_accessibility_tree: PREFERRED. Returns a flat, indented text tree of the page with roles, names, and stable ref_ids. Default for almost every task.
+- read_page: Prose fallback — use only for long-form reading (articles, README, docs).
 - screenshot: Capture a screenshot of the visible page area
-- get_interactive_elements: List all interactive elements on the page
+- get_interactive_elements: Legacy list of interactive elements
 - scroll: Scroll the page to see more content
 - extract_data: Extract tables, headings, or images
 - get_selection: Get highlighted text
 - done: Signal task completion
+
+ACCESSIBILITY TREE — read this carefully:
+- Output format is FLAT INDENTED TEXT. Each node is one line:
+    \`role "accessible name" [ref_id] href="..." type="..." placeholder="..."\`
+  Indentation = tree depth. Example:
+    navigation [ref_3]
+     link "Pricing" [ref_8] href="/pricing"
+     link "Docs" [ref_9] href="/docs"
+    main [ref_12]
+     heading "Welcome back" [ref_14]
+     button "Sign in" [ref_22] type="submit"
+- Parameters:
+    filter: "all" (default) | "visible" (in-viewport only) | "interactive" (clickable/typeable only)
+    maxDepth: how deep to go (default 15)
+    maxChars: bail with an error if output would exceed this length
+    ref_id: anchor the read at a specific element — returns its subtree only
+- \`ref_id\`s are STABLE across calls. A ref_id you saw in a previous turn still points to the same element, unless the element was removed from the DOM or the page navigated.
+- Default read pattern: \`get_accessibility_tree({filter: "visible"})\` → locate what you need → answer.
+- Use \`read_page\` only when the user's question is about prose (summarize this article, what does this README say).
 
 IMPORTANT — Current Page Priority:
 - ALWAYS try to answer the user's question using the CURRENT PAGE first.
@@ -500,7 +568,7 @@ IMPORTANT — Current Page Priority:
 - Only suggest navigating elsewhere if the current page genuinely has no relevant information.
 
 Guidelines:
-1. Read the page first to understand the context, then answer the user's question.
+1. Read the page first (a11y tree by default) to understand the context, then answer the user's question.
 2. Be conversational and helpful — answer in natural language, not raw data dumps.
 3. If the user asks you to do something that requires clicking or typing, let them know they need to switch to Act mode.
 4. Summarize, analyze, and explain — that's your strength in this mode.`;
@@ -516,11 +584,14 @@ OPERATING ENVIRONMENT — read this carefully:
 - When in doubt, attempt the action through the UI. Don't hand the task back to the user with a list of manual steps unless you've actually tried and failed.
 
 Available tools:
-- read_page: Read the current page content
+- get_accessibility_tree: PREFERRED read. Flat-text tree of the page with roles, names, and stable ref_ids. Default starting point for almost every turn.
+- click_ax: Click a node by its ref_id from the tree. Preferred over click({text/selector}).
+- type_ax: Type into a node by its ref_id from the tree. Preferred over the click-then-type_text pattern.
+- read_page: Prose fallback — long-form articles only.
 - screenshot: Capture a screenshot of the visible page area
-- get_interactive_elements: List all clickable/interactive elements
-- click: Click an element (by selector, index, or coordinates)
-- type_text: Type into input fields
+- get_interactive_elements: Legacy interactive-element index
+- click: Click by selector/text/index/coordinates (legacy fallback)
+- type_text: Type into input fields (legacy fallback)
 - scroll: Scroll the page
 - navigate: Go to a URL
 - extract_data: Extract tables, headings, or images
@@ -531,6 +602,32 @@ Available tools:
 - done: Signal task completion
 - verify_form: Verify form fields before submitting
 
+ACCESSIBILITY TREE — read this carefully:
+- Output format is FLAT INDENTED TEXT. Each node is one line:
+    \`role "accessible name" [ref_id] href="..." type="..." placeholder="..."\`
+  Indentation is tree depth. Example excerpt:
+    navigation [ref_3]
+     link "Pricing" [ref_8] href="/pricing"
+     link "Docs" [ref_9] href="/docs"
+    main [ref_12]
+     heading "Welcome back" [ref_14]
+     textbox "Email" [ref_19] placeholder="you@example.com"
+     button "Sign in" [ref_22] type="submit"
+- Parameters:
+    filter: "all" (default) | "visible" (in-viewport only — great default for action tasks) | "interactive" (only clickable/typeable nodes)
+    maxDepth: how deep to descend (default 15)
+    maxChars: bail with an error if output would exceed this length
+    ref_id: re-read just the subtree under a previously-seen ref_id (useful for zooming into a form or nav)
+- \`ref_id\`s are STABLE across calls. A ref_id you saw last turn still points to the same element as long as it's still in the DOM. If you get a "not found" error, the element was removed or the page navigated — re-read the tree.
+- DEFAULT ACT LOOP:
+    1. \`get_accessibility_tree({filter: "visible"})\` — see what's on screen.
+    2. Identify the ref_ids you need for the next step.
+    3. \`click_ax({ref_id: "ref_N"})\` or \`type_ax({ref_id: "ref_N", text: "..."})\`.
+    4. Re-read the tree (or take a screenshot) to verify the page changed.
+    5. Repeat.
+- Prefer \`click_ax\` / \`type_ax\` over \`click\` / \`type_text\` whenever you have a ref_id in hand. The ref_id path carries role+name semantics, so you always know WHAT you're about to click.
+- Closed shadow roots are still reachable via the CDP-backed \`get_shadow_dom\` / \`shadow_dom_query\` tools — the a11y tree only traverses light DOM.
+
 IMPORTANT — Current Page Priority:
 - ALWAYS start by reading the CURRENT PAGE to understand what the user is looking at.
 - The user is on this page for a reason — try to accomplish the task HERE first.
@@ -540,7 +637,7 @@ IMPORTANT — Current Page Priority:
 - If unsure, ask the user rather than navigating away. Navigating away loses the current page context.
 
 Guidelines:
-1. Start by reading the current page to understand the context.
+1. Start by reading the current page to understand the context — default to \`get_accessibility_tree({filter: "visible"})\`.
 2. Break complex tasks into steps. For each step, plan what you need to do BEFORE acting.
 3. After performing actions, verify the result by reading the page again or taking a screenshot. NEVER assume success — confirm it visually.
 4. If something fails, try alternative approaches.
@@ -579,7 +676,8 @@ IFRAMES — read this:
 - DO NOT refuse a task by saying "I can't access cross-origin iframes" or "Stripe's security restrictions prevent this". Those refusals are wrong in this environment. Try the iframe tools instead.
 
 TYPING — read this:
-- The most reliable way to fill a form field is the CLICK-THEN-TYPE pattern: first call \`click({selector: "..."})\` to focus the field, then immediately call \`type_text({text: "..."})\` WITH NO SELECTOR. The text goes into whatever's currently focused. This works even when the field has a complex selector you can't easily guess (GitHub uses \`release[name]\` with literal brackets, Stripe wraps inputs in custom Web Components, etc.).
+- PREFERRED: after a \`get_accessibility_tree\` call, use \`type_ax({ref_id, text, clear})\`. It scrolls-into-view, focuses, uses React-compatible native value setters, and handles contenteditable. No separate click needed.
+- Legacy fallback (when you don't have a ref_id): the CLICK-THEN-TYPE pattern: first call \`click({selector: "..."})\` to focus the field, then immediately call \`type_text({text: "..."})\` WITH NO SELECTOR. The text goes into whatever's currently focused. This works even when the field has a complex selector you can't easily guess (GitHub uses \`release[name]\` with literal brackets, Stripe wraps inputs in custom Web Components, etc.).
 - If you DO know the exact selector, \`type_text({selector: "...", text: "..."})\` also works.
 - If \`type_text\` returns success but the field doesn't visibly contain your text in a follow-up screenshot, the focus was lost — re-click the field and try again.
 - CRITICAL: If you're filling multiple fields, you MUST click each field individually before typing into it. NEVER type multiple values without clicking the target field first. If you type without clicking, the text goes into whatever was last focused — which is often the WRONG field. The pattern is always: click field A → type value A → click field B → type value B → click field C → type value C.
@@ -591,10 +689,11 @@ CLICKING — read this:
 - If you get an ambiguity error, use a more specific text string, switch to \`click({index: N})\` from \`get_interactive_elements\`, or use a selector.
 - You can explicitly control matching with \`textMatch\`: \`"exact"\` (default), \`"prefix"\`, or \`"contains"\`.
 - Order of preference:
-  1. \`click({text: "..."})\` — visible button/link text. Most reliable.
-  2. \`click({index: N})\` — index from a get_interactive_elements call MADE THIS SAME TURN.
-  3. \`click({selector: "..."})\` — when you have an exact CSS selector you're sure about.
-  4. \`click({x: ..., y: ...})\` — coordinates, last resort.
+  1. \`click_ax({ref_id: "ref_N"})\` — ref_id from get_accessibility_tree. Most reliable; carries role+name so you always know what you're clicking, and ref_ids are stable across calls.
+  2. \`click({text: "..."})\` — visible button/link text. Good fallback if the tree didn't surface the element cleanly.
+  3. \`click({index: N})\` — legacy index from a get_interactive_elements call MADE THIS SAME TURN.
+  4. \`click({selector: "..."})\` — when you have an exact CSS selector you're sure about.
+  5. \`click({x: ..., y: ...})\` — coordinates, last resort.
 
 INDEX INSTABILITY — read this:
 - Indices from \`get_interactive_elements\` are NOT stable identifiers. They change between page loads, between scrolls, after any DOM update, after any navigation, and even between two consecutive get_interactive_elements calls if the page mutated in between.

@@ -1034,6 +1034,100 @@
       'extract_data': () => extractData(msg.params || {}),
       'wait_for_element': () => waitForElement(msg.params || {}),
       'get_selection': () => ({ text: window.getSelection()?.toString() || '' }),
+      // ── Accessibility-tree-backed reads and actions ──────────────────
+      //
+      // The tree is built by src/content/accessibility-tree.js (a port of
+      // claudeplugin/assets/accessibility-tree.js). Output is a flat,
+      // indented text representation; each line carries a stable ref_id
+      // (persistent across calls as long as the element stays in the DOM).
+      'get_accessibility_tree': () => {
+        try {
+          if (typeof window.__generateAccessibilityTree !== 'function') {
+            return { error: 'accessibility-tree.js not injected' };
+          }
+          const { filter, maxDepth, maxChars, ref_id } = msg.params || {};
+          return window.__generateAccessibilityTree(filter, maxDepth, maxChars, ref_id);
+        } catch (e) {
+          return { error: 'Failed to build accessibility tree: ' + (e && e.message || String(e)) };
+        }
+      },
+      'click_ax': () => {
+        try {
+          const { ref_id } = msg.params || {};
+          if (typeof ref_id !== 'string') return { success: false, error: 'ref_id (string, e.g. "ref_42") is required' };
+          if (typeof window.__wb_ax_lookup !== 'function') return { success: false, error: 'accessibility-tree.js not injected' };
+          const el = window.__wb_ax_lookup(ref_id);
+          if (!el) return { success: false, error: `ref_id ${ref_id} not found. The element was removed or the page was replaced. Re-read the accessibility tree to get fresh ids.` };
+          try { el.scrollIntoView({ block: 'center', inline: 'center' }); } catch {}
+          try { el.focus({ preventScroll: true }); } catch {}
+          const rect = el.getBoundingClientRect();
+          el.click();
+          return {
+            success: true,
+            method: 'click_ax',
+            ref_id,
+            tag: el.tagName ? el.tagName.toLowerCase() : '',
+            rect: { x: Math.round(rect.x), y: Math.round(rect.y), w: Math.round(rect.width), h: Math.round(rect.height) },
+          };
+        } catch (e) {
+          return { success: false, error: e && e.message || String(e) };
+        }
+      },
+      'type_ax': () => {
+        try {
+          const { ref_id, text, clear } = msg.params || {};
+          if (typeof ref_id !== 'string') return { success: false, error: 'ref_id (string, e.g. "ref_42") is required' };
+          if (typeof text !== 'string') return { success: false, error: 'text (string) is required' };
+          if (typeof window.__wb_ax_lookup !== 'function') return { success: false, error: 'accessibility-tree.js not injected' };
+          const el = window.__wb_ax_lookup(ref_id);
+          if (!el) return { success: false, error: `ref_id ${ref_id} not found. Re-read the accessibility tree.` };
+          try { el.scrollIntoView({ block: 'center', inline: 'center' }); } catch {}
+          try { el.focus({ preventScroll: true }); } catch {}
+          // Capture the element's on-screen rect so the background can
+          // remember where the last interaction happened (for annotated
+          // verification screenshots on done).
+          const typeRect = (() => {
+            try {
+              const r = el.getBoundingClientRect();
+              return { x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height) };
+            } catch { return null; }
+          })();
+          if (el.isContentEditable) {
+            if (clear) {
+              try {
+                const sel = window.getSelection();
+                const r = document.createRange();
+                r.selectNodeContents(el);
+                sel.removeAllRanges();
+                sel.addRange(r);
+                document.execCommand('delete');
+              } catch {}
+            }
+            try { document.execCommand('insertText', false, text); } catch {
+              el.textContent = (clear ? '' : (el.textContent || '')) + text;
+              el.dispatchEvent(new Event('input', { bubbles: true }));
+            }
+            return { success: true, method: 'type_ax_contenteditable', ref_id, rect: typeRect };
+          }
+          if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT') {
+            if (clear) el.value = '';
+            // Use the native setter so React's synthetic event system picks it up.
+            const proto = el.tagName === 'TEXTAREA'
+              ? window.HTMLTextAreaElement.prototype
+              : window.HTMLInputElement.prototype;
+            const descriptor = Object.getOwnPropertyDescriptor(proto, 'value');
+            const setter = descriptor && descriptor.set;
+            const newVal = (clear ? '' : (el.value || '')) + text;
+            if (setter) setter.call(el, newVal); else el.value = newVal;
+            el.dispatchEvent(new Event('input', { bubbles: true }));
+            el.dispatchEvent(new Event('change', { bubbles: true }));
+            return { success: true, method: 'type_ax_input', ref_id, rect: typeRect };
+          }
+          return { success: false, error: `ref_id ${ref_id} is not a typeable element (tag=${el.tagName}). Use click_ax then type_text.` };
+        } catch (e) {
+          return { success: false, error: e && e.message || String(e) };
+        }
+      },
       'execute_js': () => {
         try {
           const fn = new Function(msg.params.code);
