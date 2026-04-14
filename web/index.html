@@ -664,6 +664,30 @@
     }
     .footer-links { display: flex; gap: 20px; }
 
+    .safety-note {
+      max-width: var(--max-w);
+      margin: 0 auto 24px;
+      background: rgba(251,191,36,0.1);
+      border: 1px solid rgba(251,191,36,0.35);
+      border-radius: var(--radius-sm);
+      padding: 18px 20px;
+      text-align: left;
+    }
+    .safety-note h4 {
+      color: #fcd34d;
+      font-size: 14px;
+      margin-bottom: 8px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .safety-note ul {
+      margin-left: 20px;
+      color: var(--text-dim);
+      font-size: 13px;
+      line-height: 1.65;
+    }
+    .safety-note li + li { margin-top: 6px; }
+
     /* ================================================================
        COMPARISON TABLE
        ================================================================ */
@@ -1194,10 +1218,19 @@
 
 <!-- FOOTER -->
 <footer>
+  <div class="safety-note" id="safety">
+    <h4>Important Safety Notice</h4>
+    <ul>
+      <li>WebBrain Act mode can take real actions on your behalf. You are responsible for reviewing prompts, destinations, and outcomes before continuing.</li>
+      <li>WebBrain may capture screenshots for planning. Avoid using agent mode on sensitive pages (for example health, finance, dating, or private account portals) unless you accept that risk.</li>
+      <li>Web content can contain malicious prompt injections designed to manipulate AI behavior. Always review suggested actions and stop runs that look unexpected.</li>
+    </ul>
+  </div>
   <div class="footer-inner">
     <span>© 2026 WebBrain. Built by <a href="https://emresokullu.com" target="_blank">Emre Sokullu</a>.</span>
     <div class="footer-links">
       <a href="https://github.com/esokullu/webbrain" target="_blank">GitHub</a>
+      <a href="#safety">Safety Notice</a>
       <a href="/privacy">Privacy Policy</a>
       <a href="https://github.com/esokullu/webbrain/issues" target="_blank">Report Bug</a>
       <a href="https://github.com/esokullu/webbrain/blob/main/LICENSE" target="_blank">MIT License</a>
