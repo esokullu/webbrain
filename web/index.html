@@ -596,6 +596,9 @@
       padding: 36px 40px;
       text-align: center;
       min-width: 260px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
       transition: all 0.25s;
     }
     .download-card:hover {
@@ -606,6 +609,13 @@
     .download-card .browser-icon { font-size: 42px; margin-bottom: 16px; }
     .download-card h3 { font-size: 18px; margin-bottom: 6px; }
     .download-card p { color: var(--text-dim); font-size: 13px; margin-bottom: 20px; }
+    .download-card-actions {
+      width: 100%;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      margin-top: auto;
+    }
     .download-card .btn { width: 100%; justify-content: center; }
 
     /* ================================================================
@@ -1029,22 +1039,29 @@
       <div class="browser-icon">🌐</div>
       <h3>Chrome</h3>
       <p>Manifest V3 &middot; Chrome 116+</p>
-      <a href="https://chromewebstore.google.com/detail/webbrain/ljhijonmfahplgbbacgcfnaihbjljhhb" target="_blank" rel="noopener noreferrer" class="btn btn-primary">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-        Download from Chrome Web Store
-      </a>
+      <div class="download-card-actions">
+        <a href="https://chromewebstore.google.com/detail/webbrain/ljhijonmfahplgbbacgcfnaihbjljhhb" target="_blank" rel="noopener noreferrer" class="btn btn-primary">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          Download from Chrome Web Store
+        </a>
+        <a href="https://github.com/esokullu/webbrain/tree/main/src/chrome" target="_blank" rel="noopener noreferrer" class="btn btn-secondary">
+          View Chrome source
+        </a>
+      </div>
     </div>
     <div class="download-card">
       <div class="browser-icon">🦊</div>
       <h3>Firefox</h3>
       <p>Manifest V2 &middot; Firefox 109+</p>
-      <a href="https://addons.mozilla.org/en-US/firefox/addon/webbrain/" target="_blank" rel="noopener noreferrer" class="btn btn-primary" style="background: #ff9800;">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-        Download from Firefox Add-ons
-      </a>
-      <a href="https://github.com/esokullu/webbrain/tree/main/firefox" target="_blank" rel="noopener noreferrer" class="btn btn-secondary" style="margin-top:10px;">
-        View Firefox source
-      </a>
+      <div class="download-card-actions">
+        <a href="https://addons.mozilla.org/en-US/firefox/addon/webbrain/" target="_blank" rel="noopener noreferrer" class="btn btn-primary" style="background: #ff9800;">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          Download from Firefox Add-ons
+        </a>
+        <a href="https://github.com/esokullu/webbrain/tree/main/src/firefox" target="_blank" rel="noopener noreferrer" class="btn btn-secondary">
+          View Firefox source
+        </a>
+      </div>
     </div>
   </div>
 </section>
