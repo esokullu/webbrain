@@ -25,6 +25,37 @@ let currentAssistantEl = null;
 let verboseMode = false;
 let agentMode = 'ask'; // 'ask' or 'act'
 let abortRequested = false;
+// Notification sound on task completion. Default on; togglable via Settings.
+let notifySoundEnabled = true;
+let notifyAudio = null;
+chrome.storage.local.get('notifySound').then((stored) => {
+  if (stored && stored.notifySound === false) notifySoundEnabled = false;
+}).catch(() => {});
+chrome.storage.onChanged.addListener((changes) => {
+  if (changes.notifySound) {
+    notifySoundEnabled = changes.notifySound.newValue !== false;
+  }
+});
+
+/**
+ * Play a short chime when the agent finishes a task. Lazy-creates the Audio
+ * element the first time and reuses it after that — sidepanel.html is an
+ * extension page so loading /assets/notification.mp3 works without any
+ * web_accessible_resources entry. Best-effort: if autoplay is blocked (very
+ * occasional first-load case in Chrome) we just swallow the error.
+ */
+function playCompletionSound() {
+  if (!notifySoundEnabled) return;
+  try {
+    if (!notifyAudio) {
+      notifyAudio = new Audio(chrome.runtime.getURL('assets/notification.mp3'));
+      notifyAudio.volume = 0.6;
+    }
+    notifyAudio.currentTime = 0;
+    const p = notifyAudio.play();
+    if (p && typeof p.catch === 'function') p.catch(() => {});
+  } catch { /* ignore */ }
+}
 
 // Per-tab chat history (stores innerHTML of messages container).
 // Also mirrored to chrome.storage.session keyed `tabChat:<tabId>` so the
@@ -384,12 +415,18 @@ async function sendMessage() {
     }
   } finally {
     finalizeSteps();
+    // Chime the user when the agent finishes. We play on both success and
+    // error completion — anything that wasn't an explicit user abort. The
+    // sound is what takes them from "glance back at the tab" to "know it's
+    // done" without having to sit and watch the sidebar.
+    const wasAborted = abortRequested;
     isProcessing = false;
     abortRequested = false;
     sendBtn.disabled = false;
     hideActivity();
     currentAssistantEl = null;
     scrollToBottom();
+    if (!wasAborted) playCompletionSound();
   }
 }
 
@@ -766,6 +803,40 @@ function scrollToBottom() {
   container.scrollTop = container.scrollHeight;
 }
 
+// Debounce math rendering so streaming updates don't re-walk the DOM
+// on every token.
+let _mathRenderTimer = null;
+function scheduleMathRender() {
+  if (_mathRenderTimer) return;
+  _mathRenderTimer = setTimeout(() => {
+    _mathRenderTimer = null;
+    try {
+      if (typeof window.renderMathInElement !== 'function') return;
+      const target = document.getElementById('messages');
+      if (!target) return;
+      window.renderMathInElement(target, {
+        // Delimiters in order of precedence. $$ must come before $ so the
+        // longer pattern wins.
+        delimiters: [
+          { left: '$$', right: '$$', display: true },
+          { left: '\\[', right: '\\]', display: true },
+          { left: '\\(', right: '\\)', display: false },
+          { left: '$', right: '$', display: false },
+        ],
+        // Don't crash the whole message on a bad expression — show the raw
+        // source in red instead.
+        throwOnError: false,
+        errorColor: '#f44336',
+        // Skip rendering inside code blocks and already-rendered math.
+        ignoredTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code'],
+        ignoredClasses: ['katex', 'code-block-wrapper'],
+      });
+    } catch (e) {
+      console.warn('[webbrain] math render failed:', e);
+    }
+  }, 50);
+}
+
 function formatMarkdown(text) {
   if (!text) return '';
 
@@ -815,6 +886,12 @@ function formatMarkdown(text) {
       `<div class="code-block-wrapper">${header}<pre><code>${escaped}</code></pre></div>`
     );
   });
+
+  // Schedule KaTeX rendering of any math expressions in the messages area.
+  // auto-render walks text nodes and replaces $...$, $$...$$, \(...\), \[...\]
+  // with rendered spans. It's idempotent (rendered spans are skipped on
+  // subsequent passes) so we can safely call it after every innerHTML write.
+  scheduleMathRender();
 
   // Store raw code for copy buttons to use
   if (codeBlocks.length > 0) {
@@ -1008,6 +1085,13 @@ providerSelect.addEventListener('change', async () => {
 settingsBtn.addEventListener('click', () => {
   chrome.runtime.openOptionsPage();
 });
+
+const tracesBtn = document.getElementById('btn-traces');
+if (tracesBtn) {
+  tracesBtn.addEventListener('click', () => {
+    chrome.tabs.create({ url: chrome.runtime.getURL('src/ui/traces.html') });
+  });
+}
 
 // --- Start ---
 init();

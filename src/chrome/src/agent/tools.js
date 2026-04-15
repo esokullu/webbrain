@@ -54,6 +54,23 @@ export const AGENT_TOOLS = [
   {
     type: 'function',
     function: {
+      name: 'set_field',
+      description: 'Atomically focus + (optionally clear) + type text into a form field by ref_id. This is the ONE-SHOT equivalent of click_ax followed by type_ax — use this whenever you need to fill a text input / textarea / contenteditable. Prevents the common loop where the model clicks the field, then forgets to type and clicks again. Set submit:true to press Enter afterward (e.g. to submit a search).',
+      parameters: {
+        type: 'object',
+        properties: {
+          ref_id: { type: 'string', description: 'A ref_id from get_accessibility_tree, e.g. "ref_42".' },
+          text: { type: 'string', description: 'Text to type into the field.' },
+          clear: { type: 'boolean', description: 'Clear existing content before typing (default: true).' },
+          submit: { type: 'boolean', description: 'Press Enter after typing (default: false).' },
+        },
+        required: ['ref_id', 'text'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
       name: 'read_page',
       description: 'Read the current page as PROSE — title, URL, visible text, links, forms. LEGACY read path; prefer get_accessibility_tree for UI tasks. Use read_page only when the user is asking about long-form text content (articles, READMEs, documentation).',
       parameters: {
@@ -67,10 +84,15 @@ export const AGENT_TOOLS = [
     type: 'function',
     function: {
       name: 'screenshot',
-      description: 'Capture a screenshot of the visible area of the current tab. Returns a base64-encoded PNG image. Useful when you need to visually inspect the page, verify the result of an action, or when DOM text extraction is insufficient.',
+      description: 'Capture a screenshot of the visible area of the current tab. Returns a base64-encoded PNG image. Default: native device resolution — higher visual fidelity, better for reading small text. IMPORTANT: at native resolution on HiDPI displays, image pixels are NOT CSS pixels, so you CANNOT read (X,Y) from the image and pass them to click({x,y}). If you plan to pixel-click, pass `coord_aligned: true` to force a CSS-pixel-aligned capture where image pixel (X,Y) maps exactly to click(x:X, y:Y). Better: prefer click_ax({ref_id}) after get_accessibility_tree — avoids coordinate math entirely.',
       parameters: {
         type: 'object',
-        properties: {},
+        properties: {
+          coord_aligned: {
+            type: 'boolean',
+            description: 'Align the capture to CSS pixels (scale=1) so image (X,Y) == click (X,Y). Use this immediately before click({x,y}). Default false (native device resolution).',
+          },
+        },
         required: [],
       },
     },
@@ -91,7 +113,7 @@ export const AGENT_TOOLS = [
     type: 'function',
     function: {
       name: 'click',
-      description: 'Click an element. FOUR ways to use it: (1) CSS selector, (2) visible text, (3) element index from get_interactive_elements, (4) x/y coordinates. For text clicks, default matching is EXACT and case-insensitive. You can opt into broader matching with `textMatch: "prefix"` or `textMatch: "contains"`. Note: jQuery/Playwright pseudo-classes like `:contains()` and `:has-text()` are NOT valid CSS and will fail; use the `text` parameter instead.',
+      description: 'Click an element. FOUR ways to use it: (1) CSS selector, (2) visible text, (3) element index from get_interactive_elements, (4) x/y coordinates. For text clicks, default matching is EXACT and case-insensitive. You can opt into broader matching with `textMatch: "prefix"` or `textMatch: "contains"`. Note: jQuery/Playwright pseudo-classes like `:contains()` and `:has-text()` are NOT valid CSS and will fail; use the `text` parameter instead. COORDINATES are CSS pixels; if you are reading (x,y) off a screenshot, that screenshot MUST have been captured with screenshot({coord_aligned: true}) or the click will land at the wrong position on HiDPI displays. Prefer click_ax({ref_id}) — it avoids this entirely.',
       parameters: {
         type: 'object',
         properties: {
@@ -587,6 +609,7 @@ Available tools:
 - get_accessibility_tree: PREFERRED read. Flat-text tree of the page with roles, names, and stable ref_ids. Default starting point for almost every turn.
 - click_ax: Click a node by its ref_id from the tree. Preferred over click({text/selector}).
 - type_ax: Type into a node by its ref_id from the tree. Preferred over the click-then-type_text pattern.
+- set_field: One-shot focus + clear + type + verify on a text field by ref_id. PREFERRED for filling forms — use instead of click_ax + type_ax.
 - read_page: Prose fallback — long-form articles only.
 - screenshot: Capture a screenshot of the visible page area
 - get_interactive_elements: Legacy interactive-element index
@@ -676,7 +699,19 @@ IFRAMES — read this:
 - DO NOT refuse a task by saying "I can't access cross-origin iframes" or "Stripe's security restrictions prevent this". Those refusals are wrong in this environment. Try the iframe tools instead.
 
 TYPING — read this:
-- PREFERRED: after a \`get_accessibility_tree\` call, use \`type_ax({ref_id, text, clear})\`. It scrolls-into-view, focuses, uses React-compatible native value setters, and handles contenteditable. No separate click needed.
+- PREFERRED for text fields: \`set_field({ref_id, text, clear, submit})\` — ONE call that focuses, clears, types, and verifies. Use this instead of click_ax + type_ax whenever you're filling a text input / textarea / contenteditable. It eliminates the "I clicked the field then forgot to type" loop.
+- Alternative: \`type_ax({ref_id, text, clear})\` after a \`get_accessibility_tree\` call. It scrolls-into-view, focuses, uses React-compatible native value setters, and handles contenteditable. No separate click needed.
+- HARD RULE — do not loop on click_ax. After \`click_ax\` on a TEXT-ENTRY element (textbox, searchbox, combobox with text entry, textarea, or contenteditable), your VERY NEXT tool call MUST be \`type_ax({ref_id: same-id, text: "..."})\` or \`set_field({ref_id: same-id, text: "..."})\`. Do NOT click_ax again. Do NOT re-read the accessibility tree first. Do NOT take a screenshot first. The click focused the field; the only useful next step is to type. (Better: skip the click_ax entirely and just call \`set_field\` directly.)
+- Branch by element kind (the tree line tells you the role/tag):
+  * text input / textarea / contenteditable → \`set_field\` (one call) or \`type_ax\` (the HARD RULE above applies to click_ax in this case).
+  * \`<select>\` (native dropdown) → PREFERRED path: \`click_ax\` to focus the select, then \`press_keys({keys: ["<first-letter-of-option>"]})\` — the browser will jump to / select the matching option. For "every 6 months" type-ahead works: press "e" and it lands on the "every 6 months" row. For longer option labels or ambiguous first-letters, use ArrowDown N times + Enter, or type several letters in quick succession. This is MUCH more reliable than trying to click the option line, because native select popups are OS-drawn and NOT in the accessibility tree after opening. Smart models tend to loop here — just use press_keys.
+  * Custom/ARIA combobox / button-opens-listbox (role="combobox" or a button whose click opens a popup listbox — Stripe currency/billing pickers, Radix/Headless-UI selects, MUI Select, Downshift, Mantine, React-Select, etc.) → PREFERRED PATH: keyboard, NOT clicks on options. Clicking an \`option\` ref in these widgets very often dismisses the popup before the selection lands (the mousedown-outside handler fires first). The reliable sequence is:
+    1. \`click_ax(combobox ref)\` — opens the listbox.
+    2. If there's a visible search/filter textbox inside the popup (Stripe does this), \`set_field({ref_id: searchbox, text: "<query>", submit: true})\` — typing narrows to one match, \`submit: true\` dispatches Enter which selects it. Done.
+    3. Otherwise use \`press_keys\` to navigate: start by typing the first letter of the target (\`press_keys({keys: ["e"]})\` for "Every 3 months"), add ArrowDown presses if needed to move between same-letter options, then \`press_keys({keys: ["Enter"]})\` to commit.
+    4. Verify by re-reading the combobox ref — its label should now reflect the chosen option. If still stale, re-open and use keyboard; do NOT keep clicking option refs.
+    RULE OF THUMB: in any ARIA custom dropdown, once the listbox is open, the ONLY reliable selection methods are (a) type-filter + Enter, (b) arrows + Enter. \`click_ax\` on an option ref is a last resort and often fails silently.
+  * checkbox / radio / button / link → \`click_ax\` alone toggles or activates them. No type follow-up.
 - Legacy fallback (when you don't have a ref_id): the CLICK-THEN-TYPE pattern: first call \`click({selector: "..."})\` to focus the field, then immediately call \`type_text({text: "..."})\` WITH NO SELECTOR. The text goes into whatever's currently focused. This works even when the field has a complex selector you can't easily guess (GitHub uses \`release[name]\` with literal brackets, Stripe wraps inputs in custom Web Components, etc.).
 - If you DO know the exact selector, \`type_text({selector: "...", text: "..."})\` also works.
 - If \`type_text\` returns success but the field doesn't visibly contain your text in a follow-up screenshot, the focus was lost — re-click the field and try again.

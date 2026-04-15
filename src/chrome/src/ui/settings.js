@@ -9,23 +9,109 @@ const maxStepsRange = document.getElementById('range-max-steps');
 const stepsValueLabel = document.getElementById('steps-value');
 const autoScreenshotSelect = document.getElementById('select-auto-screenshot');
 const siteAdaptersToggle = document.getElementById('toggle-site-adapters');
+const notifySoundToggle = document.getElementById('toggle-notify-sound');
+const tracingToggle = document.getElementById('toggle-tracing');
+const accountSection = document.getElementById('account-section');
 
 let providersData = {};
 let activeProviderId = '';
+let authToken = '';
+let authEmail = '';
+let authDefaultModel = '';
 
 // --- Init ---
 
 async function init() {
+  // Load auth state
+  const authStored = await chrome.storage.local.get(['authToken', 'authEmail', 'authDefaultModel']);
+  authToken = authStored.authToken || '';
+  authEmail = authStored.authEmail || '';
+  authDefaultModel = authStored.authDefaultModel || '';
+  renderAuthSection();
+
   // Load display settings
-  const stored = await chrome.storage.local.get(['verboseMode', 'screenshotFallback', 'maxAgentSteps', 'autoScreenshot', 'useSiteAdapters']);
+  const stored = await chrome.storage.local.get(['verboseMode', 'screenshotFallback', 'maxAgentSteps', 'autoScreenshot', 'useSiteAdapters', 'notifySound', 'tracingEnabled']);
   verboseToggle.checked = stored.verboseMode || false;
   screenshotToggle.checked = stored.screenshotFallback ?? true; // on by default
   maxStepsRange.value = stored.maxAgentSteps || 60;
   stepsValueLabel.textContent = maxStepsRange.value;
   autoScreenshotSelect.value = stored.autoScreenshot || 'state_change';
   siteAdaptersToggle.checked = stored.useSiteAdapters ?? true;
+  notifySoundToggle.checked = stored.notifySound ?? true; // on by default
+  tracingToggle.checked = stored.tracingEnabled === true; // off by default
 
   // Load providers
+  const res = await sendToBackground('get_providers');
+  providersData = res.providers;
+  activeProviderId = res.active;
+  renderProviders();
+}
+
+// --- Auth ---
+
+function renderAuthSection() {
+  if (authToken && authEmail) {
+    accountSection.innerHTML = `
+      <div class="account-card">
+        <div class="account-info">
+          <div class="account-email">${authEmail}</div>
+          <div class="account-provider">WebBrain Cloud</div>
+        </div>
+        <button class="btn-sign-out" id="btn-sign-out">Sign Out</button>
+      </div>
+    `;
+    document.getElementById('btn-sign-out').addEventListener('click', logout);
+  } else {
+    accountSection.innerHTML = `
+      <div class="account-card">
+        <div class="account-info">
+          <div class="account-email not-signed-in">Not signed in</div>
+        </div>
+        <button class="btn-sign-in" id="btn-sign-in">Sign In / Register</button>
+      </div>
+    `;
+    document.getElementById('btn-sign-in').addEventListener('click', openAuthTab);
+  }
+}
+
+function openAuthTab() {
+  window.open('https://auth.webbrain.one', '_blank');
+}
+
+async function logout() {
+  await chrome.storage.local.remove(['authToken', 'authEmail', 'authDefaultModel']);
+  authToken = '';
+  authEmail = '';
+  authDefaultModel = '';
+  renderAuthSection();
+}
+
+window.addEventListener('message', (event) => {
+  if (event.data?.type === 'WB_AUTH_TOKEN') {
+    const { token, email, defaultModel } = event.data;
+    authToken = token;
+    authEmail = email;
+    authDefaultModel = defaultModel || 'openai/gpt-4o';
+    chrome.storage.local.set({ authToken, authEmail, authDefaultModel });
+    renderAuthSection();
+    autoConfigureWebbrainProvider();
+  }
+});
+
+async function autoConfigureWebbrainProvider() {
+  const webbrainConfig = {
+    type: 'openai',
+    label: 'WebBrain Cloud',
+    providerName: 'webbrain',
+    baseUrl: 'https://auth.webbrain.one/v1',
+    model: authDefaultModel || 'openai/gpt-4o',
+    apiKey: authToken,
+    enabled: true,
+  };
+
+  await sendToBackground('update_provider', { providerId: 'webbrain', config: webbrainConfig });
+  await sendToBackground('set_active_provider', { providerId: 'webbrain' });
+
   const res = await sendToBackground('get_providers');
   providersData = res.providers;
   activeProviderId = res.active;
@@ -56,6 +142,14 @@ autoScreenshotSelect.addEventListener('change', () => {
 
 siteAdaptersToggle.addEventListener('change', () => {
   chrome.storage.local.set({ useSiteAdapters: siteAdaptersToggle.checked });
+});
+
+notifySoundToggle.addEventListener('change', () => {
+  chrome.storage.local.set({ notifySound: notifySoundToggle.checked });
+});
+
+tracingToggle.addEventListener('change', () => {
+  chrome.storage.local.set({ tracingEnabled: tracingToggle.checked });
 });
 
 // --- Provider Rendering ---
@@ -105,8 +199,14 @@ function renderProviders() {
     anthropic: {
       fields: [
         { key: 'apiKey', label: 'API Key', type: 'password', placeholder: 'sk-ant-...' },
-        { key: 'model', label: 'Model', type: 'text', placeholder: 'claude-sonnet-4-20250514' },
+        { key: 'model', label: 'Model', type: 'text', placeholder: 'claude-sonnet-4-6' },
         { key: 'baseUrl', label: 'API Base URL', type: 'text', placeholder: 'https://api.anthropic.com' },
+      ],
+    },
+    webbrain: {
+      fields: [
+        { key: 'baseUrl', label: 'API Base URL', type: 'text', placeholder: 'https://auth.webbrain.one/v1' },
+        { key: 'model', label: 'Model', type: 'text', placeholder: 'openai/gpt-4o' },
       ],
     },
   };

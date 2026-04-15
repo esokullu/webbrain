@@ -5,6 +5,12 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>WebBrain</title>
   <link rel="stylesheet" href="../../styles/sidepanel.css">
+  <link rel="stylesheet" href="../../vendor/katex/katex.min.css">
+  <!-- KaTeX is loaded as classic scripts (not modules). They assign to
+       window.katex and window.renderMathInElement so formatMarkdown can
+       call them after inserting message HTML. -->
+  <script defer src="../../vendor/katex/katex.min.js"></script>
+  <script defer src="../../vendor/katex/auto-render.min.js"></script>
 </head>
 <body>
   <div id="app">
@@ -20,6 +26,12 @@
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <polyline points="4 17 10 11 4 5"/>
             <line x1="12" y1="19" x2="20" y2="19"/>
+          </svg>
+        </button>
+        <button id="btn-traces" title="Open Traces (recorded runs)">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M3 3v18h18"/>
+            <polyline points="7 14 11 10 14 13 21 6"/>
           </svg>
         </button>
         <button id="btn-settings" title="Settings">

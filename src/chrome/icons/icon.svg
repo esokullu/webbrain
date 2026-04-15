@@ -1,0 +1,23 @@
+<svg width="691" height="691" viewBox="0 0 691 691" fill="none" xmlns="http://www.w3.org/2000/svg">
+<!-- Brain emoji style icon - fills the canvas properly -->
+<g transform="translate(345.5, 345.5) scale(5.8) translate(-50, -55)">
+  <!-- Brain stem -->
+  <path d="M47 98h6v12h-6z" fill="#E87DA0"/>
+  <!-- Left hemisphere -->
+  <path d="M50 18C38 18 28 24 23 33c-3-2-6-3-10-3C5 30 0 38 0 48c0 5 2 10 5 14-2 3-3 7-3 11 0 9 5 17 13 21 1 8 8 14 16 16v-8h19V18z" fill="#F9A8C9"/>
+  <!-- Right hemisphere -->
+  <path d="M50 18c12 0 22 6 27 15 3-2 6-3 10-3 8 0 13 8 13 18 0 5-2 10-5 14 2 3 3 7 3 11 0 9-5 17-13 21-1 8-8 14-16 16v-8H50V18z" fill="#F472B6"/>
+  <!-- Center fissure -->
+  <line x1="50" y1="18" x2="50" y2="102" stroke="#D4467E" stroke-width="2"/>
+  <!-- Left brain folds -->
+  <path d="M48 30C38 32 30 38 26 46" stroke="#D4467E" stroke-width="2" stroke-linecap="round" fill="none"/>
+  <path d="M48 48C34 48 22 54 18 62" stroke="#D4467E" stroke-width="2" stroke-linecap="round" fill="none"/>
+  <path d="M48 66C38 68 28 74 24 82" stroke="#D4467E" stroke-width="2" stroke-linecap="round" fill="none"/>
+  <path d="M48 84C42 86 36 90 33 95" stroke="#D4467E" stroke-width="2" stroke-linecap="round" fill="none"/>
+  <!-- Right brain folds -->
+  <path d="M52 30C62 32 70 38 74 46" stroke="#D4467E" stroke-width="2" stroke-linecap="round" fill="none"/>
+  <path d="M52 48C66 48 78 54 82 62" stroke="#D4467E" stroke-width="2" stroke-linecap="round" fill="none"/>
+  <path d="M52 66C62 68 72 74 76 82" stroke="#D4467E" stroke-width="2" stroke-linecap="round" fill="none"/>
+  <path d="M52 84C58 86 64 90 67 95" stroke="#D4467E" stroke-width="2" stroke-linecap="round" fill="none"/>
+</g>
+</svg>

@@ -8,6 +8,7 @@ import {
   downloadResourceFromPage,
   downloadFiles,
 } from '../network/network-tools.js';
+import * as trace from '../trace/recorder.js';
 
 /**
  * The WebBrain Agent — orchestrates multi-step LLM + tool-use loops.
@@ -16,7 +17,9 @@ export class Agent {
   constructor(providerManager) {
     this.providerManager = providerManager;
     this.conversations = new Map(); // tabId -> messages[]
+    this.conversationModes = new Map(); // tabId -> 'ask' | 'act'
     this.abortFlags = new Map(); // tabId -> boolean
+    this.currentRunId = new Map(); // tabId -> active trace runId
     this.maxSteps = 120; // safety limit for autonomous loops (configurable via settings)
     this.maxContextMessages = 50; // trim beyond this
     this._debugLog = []; // ring buffer for deep verbose (LLM requests/responses)
@@ -258,7 +261,17 @@ export class Agent {
       }
 
       onUpdate('tool_call', { name: fnName, args: fnArgs });
+      const _toolStart = Date.now();
       const toolResult = await this.executeTool(tabId, fnName, fnArgs);
+      try {
+        const runId = this.currentRunId.get(tabId);
+        if (runId) {
+          await trace.recordToolCall(runId, null, {
+            name: fnName, args: fnArgs, result: toolResult,
+            latencyMs: Date.now() - _toolStart,
+          });
+        }
+      } catch {}
       onUpdate('tool_result', { name: fnName, result: toolResult });
 
       if (NAV_PRONE_TOOLS.has(fnName) && beforeUrl && !toolResult?.error) {
@@ -360,6 +373,12 @@ export class Agent {
           });
           onUpdate('tool_call', { name: 'auto_screenshot', args: {} });
           onUpdate('tool_result', { name: 'auto_screenshot', result: { success: true, bytes: shot.dataUrl.length, elements: visible.length } });
+          try {
+            const runIdForShot = this.currentRunId.get(tabId);
+            if (runIdForShot) {
+              await trace.recordScreenshot(runIdForShot, null, shot.dataUrl, 'auto-screenshot after tool batch');
+            }
+          } catch {}
         }
       }
     }
@@ -1140,9 +1159,29 @@ export class Agent {
     const tools = getToolsForMode(mode);
     let steps = 0;
     let finalResponse = '';
+    let _traceStatus = 'done';
 
     this.abortFlags.delete(tabId); // clear any stale abort
 
+    // Start trace run (gated inside recorder by tracingEnabled setting).
+    let runId = null;
+    try {
+      let tabUrl = '', tabTitle = '';
+      try {
+        const tab = await browser.tabs.get(tabId);
+        tabUrl = tab?.url || ''; tabTitle = tab?.title || '';
+      } catch {}
+      runId = await trace.startRun({
+        model: provider.model,
+        providerId: provider.name,
+        providerClass: provider.constructor.name,
+        userMessage: typeof userMessage === 'string' ? userMessage : JSON.stringify(userMessage).slice(0, 2000),
+        tabUrl, tabTitle, mode,
+      });
+      if (runId) this.currentRunId.set(tabId, runId);
+    } catch {}
+
+    try {
     while (steps < this.maxSteps) {
       if (this._checkAbort(tabId)) {
         finalResponse = finalResponse || '[Stopped by user]';
@@ -1164,7 +1203,10 @@ export class Agent {
         const chatOpts = { tools: useTools ? tools : undefined, temperature: 0.3, maxTokens: 4096 };
         const prunedMessages = this._pruneOldImages(messages);
         this._logDebug({ type: 'llm_request', step: steps, provider: provider.constructor.name, messages: prunedMessages, options: chatOpts });
+        const _llmStart = Date.now();
+        if (runId) { try { await trace.recordLLMRequest(runId, steps, { providerClass: provider.constructor.name, model: provider.model, messageCount: prunedMessages.length, toolsCount: (chatOpts.tools || []).length }); } catch {} }
         result = await provider.chat(prunedMessages, chatOpts);
+        if (runId) { try { await trace.recordLLMResponse(runId, steps, { content: result.content, toolCalls: result.toolCalls, usage: result.usage, latencyMs: Date.now() - _llmStart, model: provider.model }); } catch {} }
         this._logDebug({ type: 'llm_response', step: steps, content: result.content, toolCalls: result.toolCalls });
       } catch (e) {
         this._logDebug({ type: 'llm_error', step: steps, error: e.message });
@@ -1253,10 +1295,19 @@ export class Agent {
     }
 
     if (steps >= this.maxSteps) {
+      _traceStatus = 'max_steps';
       onUpdate('max_steps_reached', { steps: this.maxSteps });
     }
 
     return finalResponse;
+    } finally {
+      try {
+        if (runId) {
+          await trace.endRun(runId, { status: _traceStatus, finalContent: finalResponse });
+          this.currentRunId.delete(tabId);
+        }
+      } catch {}
+    }
   }
 
   /**

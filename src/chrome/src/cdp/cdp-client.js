@@ -224,19 +224,19 @@ export class CDPClient {
 
     const scrollWidth = visualViewport?.contentWidth || 1920;
     const scrollHeight = visualViewport?.contentHeight || 1080;
-    const scale = visualViewport?.scale || 1;
+    // Remember pre-capture scroll so we can restore it (we're in an MV3
+    // service worker here — there is no `window`, so read from the page eval).
+    const originalScrollX = visualViewport?.scrollX || 0;
+    const originalScrollY = visualViewport?.scrollY || 0;
 
     const viewports = [];
-    const scrollX = window.scrollX || 0;
-    const scrollY = window.scrollY || 0;
-
     for (let y = 0; y < scrollHeight; y += 1080) {
       for (let x = 0; x < scrollWidth; x += 1920) {
         viewports.push({ x, y, width: Math.min(1920, scrollWidth - x), height: Math.min(1080, scrollHeight - y) });
       }
     }
 
-    const images = [];
+    const tiles = [];
     for (const vp of viewports) {
       await this.evaluate(tabId, `window.scrollTo(${vp.x}, ${vp.y})`);
       await new Promise(r => setTimeout(r, 100));
@@ -254,17 +254,20 @@ export class CDPClient {
         quality: 100,
         fromSurface: true,
       });
-      images.push(screenshot.data);
+      tiles.push({ x: vp.x, y: vp.y, width: vp.width, height: vp.height, data: screenshot.data });
     }
 
-    await this.evaluate(tabId, `window.scrollTo(${scrollX}, ${scrollY})`);
+    await this.evaluate(tabId, `window.scrollTo(${originalScrollX}, ${originalScrollY})`);
 
     const { combineImages } = await import('./image-utils.js').catch(() => ({ combineImages: null }));
     if (combineImages) {
-      return await combineImages(images, scrollWidth, scrollHeight, 2);
+      return await combineImages(tiles, scrollWidth, scrollHeight, 2);
     }
 
-    return images[0];
+    // Last-resort fallback if image-utils failed to load: return just the
+    // first tile. Previously this returned `images[0]`, which looked like a
+    // full-page screenshot but silently dropped everything below the fold.
+    return tiles[0]?.data || '';
   }
 
   /**

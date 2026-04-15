@@ -307,6 +307,33 @@
     return el; // no interactive ancestor found — use original
   }
 
+  /**
+   * querySelector with resilience against selectors that contain unescaped
+   * React-Aria-style IDs like `#react-aria-:r1a:` — the literal colons
+   * blow up CSS parsing. If the selector is a bare id-hash and throws,
+   * retry with the `[id="..."]` attribute-selector form. Also handles
+   * escaping colons as a last resort.
+   */
+  function safeQuerySelector(selector) {
+    if (typeof selector !== 'string' || !selector) return null;
+    try { return document.querySelector(selector); } catch {}
+    // Bare ID form: "#raw-id-with-:-in-it"
+    if (selector.startsWith('#') && !/[\s>+~,\[\]\.:]/.test(selector.slice(1).replace(/\\:/g, ''))) {
+      const rawId = selector.slice(1).replace(/\\:/g, ':');
+      try {
+        const byId = document.getElementById(rawId);
+        if (byId) return byId;
+      } catch {}
+      try { return document.querySelector(`[id="${rawId.replace(/"/g, '\\"')}"]`); } catch {}
+    }
+    // Last resort: escape unescaped colons and retry once
+    try {
+      const escaped = selector.replace(/(^|[^\\]):/g, '$1\\:');
+      return document.querySelector(escaped);
+    } catch {}
+    return null;
+  }
+
   let _lastClickIdent = null;
 
   /**
@@ -449,7 +476,7 @@
         el = _resolveInteractiveAncestor(resolved);
       }
     } else if (params.selector) {
-      el = document.querySelector(params.selector);
+      el = safeQuerySelector(params.selector);
     } else if (params.index != null) {
       // Must use the SAME traversal as getInteractiveElements so the
       // index the agent saw is the index we resolve.
@@ -558,7 +585,7 @@
   function typeText(params) {
     let el;
     if (params.selector) {
-      el = document.querySelector(params.selector);
+      el = safeQuerySelector(params.selector);
     } else if (params.index != null) {
       // Same index space as getInteractiveElements / clickElement.
       el = queryInteractive()[params.index];
@@ -1009,15 +1036,6 @@
     });
   }
 
-  window.__webbrain_getNodeById = (nodeId) => {
-    return null;
-  };
-
-  // Expose node retrieval for CDP
-  window.__webbrain_getNodeById = (nodeId) => {
-    return null;
-  };
-
   // --- Message handler ---
   chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     if (msg.target !== 'content') return;
@@ -1062,13 +1080,33 @@
           try { el.focus({ preventScroll: true }); } catch {}
           const rect = el.getBoundingClientRect();
           el.click();
-          return {
+          // If the model just clicked a text-entry element, its next call must
+          // be type_ax on the same ref_id. Putting the directive in the tool
+          // payload (rather than only in the system prompt) keeps it in the
+          // model's recent attention window — critical for small local models.
+          const tag = el.tagName ? el.tagName.toLowerCase() : '';
+          let isTextEntry = false;
+          if (tag === 'textarea') isTextEntry = true;
+          else if (tag === 'input') {
+            const inputType = (el.type || 'text').toLowerCase();
+            const nonText = new Set(['checkbox', 'radio', 'file', 'submit', 'button', 'reset', 'image', 'color', 'range', 'hidden']);
+            isTextEntry = !nonText.has(inputType);
+          } else if (el.isContentEditable) isTextEntry = true;
+          const resp = {
             success: true,
             method: 'click_ax',
             ref_id,
-            tag: el.tagName ? el.tagName.toLowerCase() : '',
+            tag,
             rect: { x: Math.round(rect.x), y: Math.round(rect.y), w: Math.round(rect.width), h: Math.round(rect.height) },
           };
+          if (isTextEntry) {
+            resp.focused = true;
+            resp.next_required = 'type_ax';
+            resp.hint = `This element is now focused. Your very next tool call MUST be type_ax({ref_id: "${ref_id}", text: "..."}). Do not call any other tool in between.`;
+          } else if (tag === 'select') {
+            resp.hint = `This is a <select>. Prefer press_keys on the focused element to choose an option (e.g. type the first letters of the desired option, or ArrowDown + Enter). type_ax on a select also works via value/text match.`;
+          }
+          return resp;
         } catch (e) {
           return { success: false, error: e && e.message || String(e) };
         }
@@ -1110,6 +1148,24 @@
             return { success: true, method: 'type_ax_contenteditable', ref_id, rect: typeRect };
           }
           if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT') {
+            // Guard against non-typeable INPUT subtypes. These all share the
+            // INPUT tagName so without this check a confused model calling
+            // type_ax on, say, a checkbox would silently set the value
+            // attribute — returning success while nothing actually toggled.
+            // Point the model at click_ax instead.
+            if (el.tagName === 'INPUT') {
+              const inputType = (el.type || 'text').toLowerCase();
+              const nonTypeable = new Set([
+                'checkbox', 'radio', 'file', 'submit', 'button',
+                'reset', 'image', 'color', 'range', 'hidden',
+              ]);
+              if (nonTypeable.has(inputType)) {
+                return {
+                  success: false,
+                  error: `ref_id ${ref_id} is an <input type="${inputType}"> which is not text-typeable. Use click_ax to toggle/activate it instead.`,
+                };
+              }
+            }
             if (clear) el.value = '';
             // Use the native setter so React's synthetic event system picks it up.
             const proto = el.tagName === 'TEXTAREA'
@@ -1124,6 +1180,87 @@
             return { success: true, method: 'type_ax_input', ref_id, rect: typeRect };
           }
           return { success: false, error: `ref_id ${ref_id} is not a typeable element (tag=${el.tagName}). Use click_ax then type_text.` };
+        } catch (e) {
+          return { success: false, error: e && e.message || String(e) };
+        }
+      },
+      'set_field': () => {
+        try {
+          const { ref_id, text, clear = true, submit = false } = msg.params || {};
+          if (typeof ref_id !== 'string') return { success: false, error: 'ref_id (string, e.g. "ref_42") is required' };
+          if (typeof text !== 'string') return { success: false, error: 'text (string) is required' };
+          if (typeof window.__wb_ax_lookup !== 'function') return { success: false, error: 'accessibility-tree.js not injected' };
+          const el = window.__wb_ax_lookup(ref_id);
+          if (!el) return { success: false, error: `ref_id ${ref_id} not found. Re-read the accessibility tree.` };
+          try { el.scrollIntoView({ block: 'center', inline: 'center' }); } catch {}
+          try { el.focus({ preventScroll: true }); } catch {}
+          const rect = (() => {
+            try {
+              const r = el.getBoundingClientRect();
+              return { x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height) };
+            } catch { return null; }
+          })();
+          // Guard: refuse non-typeable elements up-front so the caller gets a
+          // clear error instead of a silent no-op.
+          if (el.tagName === 'INPUT') {
+            const inputType = (el.type || 'text').toLowerCase();
+            const nonTypeable = new Set(['checkbox', 'radio', 'file', 'submit', 'button', 'reset', 'image', 'color', 'range', 'hidden']);
+            if (nonTypeable.has(inputType)) {
+              return { success: false, error: `ref_id ${ref_id} is an <input type="${inputType}"> which is not text-typeable. Use click_ax to toggle/activate it instead.` };
+            }
+          } else if (!el.isContentEditable && el.tagName !== 'TEXTAREA' && el.tagName !== 'INPUT') {
+            return { success: false, error: `ref_id ${ref_id} is not a text field (tag=${el.tagName}). set_field works on input/textarea/contenteditable only.` };
+          }
+          let prevValue = '';
+          if (el.isContentEditable) {
+            prevValue = el.textContent || '';
+            if (clear) {
+              try {
+                const sel = window.getSelection();
+                const r = document.createRange();
+                r.selectNodeContents(el);
+                sel.removeAllRanges();
+                sel.addRange(r);
+                document.execCommand('delete');
+              } catch {}
+            }
+            try { document.execCommand('insertText', false, text); } catch {
+              el.textContent = (clear ? '' : prevValue) + text;
+              el.dispatchEvent(new Event('input', { bubbles: true }));
+            }
+          } else {
+            prevValue = el.value || '';
+            const proto = el.tagName === 'TEXTAREA'
+              ? window.HTMLTextAreaElement.prototype
+              : window.HTMLInputElement.prototype;
+            const descriptor = Object.getOwnPropertyDescriptor(proto, 'value');
+            const setter = descriptor && descriptor.set;
+            const newVal = (clear ? '' : prevValue) + text;
+            if (setter) setter.call(el, newVal); else el.value = newVal;
+            el.dispatchEvent(new Event('input', { bubbles: true }));
+            el.dispatchEvent(new Event('change', { bubbles: true }));
+          }
+          // Verify: read back the value and confirm it contains what we typed.
+          const actual = el.isContentEditable ? (el.textContent || '') : (el.value || '');
+          const verified = actual.includes(text);
+          if (submit) {
+            try {
+              el.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, bubbles: true }));
+              el.dispatchEvent(new KeyboardEvent('keypress', { key: 'Enter', code: 'Enter', keyCode: 13, bubbles: true }));
+              el.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', code: 'Enter', keyCode: 13, bubbles: true }));
+              // Form submission: if element is inside a form, submit it.
+              const form = el.form || (el.closest && el.closest('form'));
+              if (form && typeof form.requestSubmit === 'function') form.requestSubmit();
+            } catch {}
+          }
+          return {
+            success: true,
+            method: 'set_field',
+            ref_id,
+            rect,
+            verified,
+            actual: verified ? undefined : actual.slice(0, 200),
+          };
         } catch (e) {
           return { success: false, error: e && e.message || String(e) };
         }

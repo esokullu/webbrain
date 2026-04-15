@@ -9,6 +9,7 @@ import {
   downloadResourceFromPage,
   downloadFiles,
 } from '../network/network-tools.js';
+import * as trace from '../trace/recorder.js';
 
 /**
  * The WebBrain Agent — orchestrates multi-step LLM + tool-use loops.
@@ -21,6 +22,7 @@ export class Agent {
     this.hydratedTabs = new Set(); // tabIds we've already pulled from storage
     this.persistTimers = new Map(); // tabId -> debounce handle
     this.abortFlags = new Map(); // tabId -> boolean
+    this.currentRunId = new Map(); // tabId -> active trace runId (for recorder hooks)
     this.maxSteps = 120; // safety limit for autonomous loops (configurable via settings)
     this.maxContextMessages = 50; // trim beyond this
     this._debugLog = []; // ring buffer for deep verbose (LLM requests/responses)
@@ -284,7 +286,7 @@ export class Agent {
       return { role: 'user', content: contextLine + userMessage };
     }
 
-    const screenshotNote = `[Initial viewport screenshot follows. The image is ${shot.width}×${shot.height} pixels and represents the visible viewport at a 1:1 CSS-pixel coordinate system — a click at image pixel (X, Y) corresponds exactly to a click tool call with x=X, y=Y. Prefer selector-based clicks (call get_interactive_elements first) when possible; only use coordinates as a last resort.]\n\n`;
+    const screenshotNote = `[Initial viewport screenshot follows (native device resolution for visual fidelity — pixel coordinates on the image are NOT CSS pixels). Prefer click_ax({ref_id}) after get_accessibility_tree. If you must use click({x,y}), first call screenshot({coord_aligned: true}) to get a CSS-pixel-aligned capture whose image pixels match click coordinates.]\n\n`;
 
     return {
       role: 'user',
@@ -398,8 +400,16 @@ export class Agent {
       }
 
       onUpdate('tool_call', { name: fnName, args: fnArgs });
+      const _toolStart = Date.now();
       const toolResult = await this.executeTool(tabId, fnName, fnArgs);
+      const _toolLatency = Date.now() - _toolStart;
       onUpdate('tool_result', { name: fnName, result: toolResult });
+      const _runIdForTool = this.currentRunId.get(tabId);
+      if (_runIdForTool) {
+        trace.recordToolCall(_runIdForTool, null, {
+          name: fnName, args: fnArgs, result: toolResult, latencyMs: _toolLatency,
+        });
+      }
 
       // Detect unintended navigation. Give the page a beat to fire SPA
       // history events / commit a real nav before re-reading the URL.
@@ -516,7 +526,7 @@ export class Agent {
           // failure mode for local vision models.
           const visible = await this._getVisibleInteractiveElements(tabId);
           const elementsText = this._formatElementsList(visible);
-          const textBlock = `[Auto-screenshot of current viewport after the action above. Image is ${shot.width}×${shot.height} pixels = the CSS viewport at 1:1. A click at image pixel (X, Y) maps directly to click(x:X, y:Y). Use this to confirm the result and plan the next step. Prefer click({text:"..."}) over coordinate clicks — coordinates are a last resort.]${elementsText}`;
+          const textBlock = `[Auto-screenshot of current viewport after the action above (native device resolution for visual fidelity — image pixels are NOT CSS pixels). Use this to confirm the result and plan the next step. Prefer click_ax({ref_id}) after get_accessibility_tree, or click({text:"..."}). If you must use click({x,y}), call screenshot({coord_aligned: true}) first to get a CSS-pixel-aligned image.]${elementsText}`;
           messages.push({
             role: 'user',
             content: [
@@ -526,6 +536,10 @@ export class Agent {
           });
           onUpdate('tool_call', { name: 'auto_screenshot', args: {} });
           onUpdate('tool_result', { name: 'auto_screenshot', result: { success: true, bytes: shot.dataUrl.length, elements: visible.length } });
+          const _runIdForShot = this.currentRunId.get(tabId);
+          if (_runIdForShot) {
+            trace.recordScreenshot(_runIdForShot, null, shot.dataUrl, 'auto-screenshot after tool batch');
+          }
         }
       }
     }
@@ -774,39 +788,54 @@ export class Agent {
   }
 
   /**
-   * Capture a viewport JPEG via CDP, pinned to a 1:1 CSS-pixel coordinate
-   * system. Returns { dataUrl, width, height } in CSS pixels, or null on
-   * failure.
+   * Capture a viewport JPEG via CDP. Defaults to native surface resolution
+   * (CSS pixels × devicePixelRatio) because the primary click path is now
+   * `click_ax({ref_id})` — higher-fidelity screenshots help the model read
+   * small text and tight UI, and coordinate-accuracy doesn't matter when
+   * clicks resolve through accessibility-tree ref_ids.
    *
-   * Why the clip+scale dance: by default `Page.captureScreenshot` with
-   * `fromSurface: true` captures at the native surface resolution, which on
-   * any HiDPI display is `viewport CSS pixels × devicePixelRatio`. The
-   * model then reads pixel coordinates from the image and emits them as
-   * click coords — but `Input.dispatchMouseEvent` interprets coordinates as
-   * CSS pixels, not surface pixels. On a DPR=2 display the click lands at
-   * half the intended X/Y. Result: the agent appears to click but nothing
-   * happens, then loops trying again. Forcing `clip.scale=1` with the
-   * actual CSS viewport dimensions gives an image where pixel-(X,Y) maps
-   * exactly to CSS-(X,Y), eliminating the offset.
+   * For the legacy pixel-click path (`click({x, y})`), set `coordAligned:
+   * true` to pin the capture to CSS pixels (scale=1). With `fromSurface:
+   * true`, the default capture is at surface resolution — but
+   * `Input.dispatchMouseEvent` interprets coordinates as CSS pixels, so on
+   * a DPR=2 display a click at "pixel (400,300) from a native capture"
+   * would land at (200,150). Forcing `clip.scale=1` produces an image
+   * where pixel-(X,Y) maps exactly to CSS-(X,Y). The `screenshot` tool
+   * exposes this via the `coord_aligned` parameter.
+   *
+   * Returns { dataUrl, width, height } (in image pixels) or null.
    */
-  async _captureAutoScreenshot(tabId) {
+  async _captureAutoScreenshot(tabId, { coordAligned = false } = {}) {
     try {
       await cdpClient.attach(tabId);
       await cdpClient.sendCommand(tabId, 'Page.enable');
       await this._bringToFrontForCapture(tabId);
-      const vp = await cdpClient.evaluate(tabId, '({w: window.innerWidth, h: window.innerHeight})');
-      const w = Math.max(1, Math.round(vp?.result?.value?.w || 1024));
-      const h = Math.max(1, Math.round(vp?.result?.value?.h || 768));
+      if (coordAligned) {
+        const vp = await cdpClient.evaluate(tabId, '({w: window.innerWidth, h: window.innerHeight})');
+        const w = Math.max(1, Math.round(vp?.result?.value?.w || 1024));
+        const h = Math.max(1, Math.round(vp?.result?.value?.h || 768));
+        const shot = await cdpClient.sendCommand(tabId, 'Page.captureScreenshot', {
+          format: 'jpeg',
+          quality: 60,
+          clip: { x: 0, y: 0, width: w, height: h, scale: 1 },
+        });
+        if (!shot?.data) return null;
+        return {
+          dataUrl: `data:image/jpeg;base64,${shot.data}`,
+          width: w,
+          height: h,
+          coordAligned: true,
+        };
+      }
       const shot = await cdpClient.sendCommand(tabId, 'Page.captureScreenshot', {
         format: 'jpeg',
         quality: 60,
-        clip: { x: 0, y: 0, width: w, height: h, scale: 1 },
+        fromSurface: true,
       });
       if (!shot?.data) return null;
       return {
         dataUrl: `data:image/jpeg;base64,${shot.data}`,
-        width: w,
-        height: h,
+        coordAligned: false,
       };
     } catch (e) {
       return null;
@@ -1245,16 +1274,24 @@ export class Agent {
           // stale/blank surface captures when the tab is occluded.
           const probe = await this._captureViewportProbe(tabId);
           await this._bringToFrontForCapture(tabId);
-          const screenshot = await cdpClient.sendCommand(tabId, 'Page.captureScreenshot', {
-            format: 'png',
-            quality: 100,
-            fromSurface: true,
-          });
+          // coord_aligned: force CSS-pixel alignment (scale=1). Required
+          // if the model plans to pixel-click the capture via
+          // click({x,y}). Default false — native surface resolution is
+          // higher fidelity for reading the page.
+          const coordAligned = !!(args && args.coord_aligned);
+          const capArgs = { format: 'png', fromSurface: true };
+          if (coordAligned) {
+            const w = Math.max(1, Math.round(probe?.innerWidth || 1024));
+            const h = Math.max(1, Math.round(probe?.innerHeight || 768));
+            capArgs.clip = { x: 0, y: 0, width: w, height: h, scale: 1 };
+          }
+          const screenshot = await cdpClient.sendCommand(tabId, 'Page.captureScreenshot', capArgs);
           return {
             success: true,
             image: `data:image/png;base64,${screenshot.data}`,
-            description: `Screenshot captured via CDP (${screenshot.data.length} bytes)`,
+            description: `Screenshot captured via CDP (${screenshot.data.length} bytes, ${coordAligned ? 'CSS-pixel aligned for pixel clicks' : 'native resolution'})`,
             page: probe || undefined,
+            coordAligned,
           };
         } catch {
           // Fallback to tabs API. captureVisibleTab takes a windowId and
@@ -2559,6 +2596,7 @@ export class Agent {
       'get_accessibility_tree': 'get_accessibility_tree',
       'click_ax': 'click_ax',
       'type_ax': 'type_ax',
+      'set_field': 'set_field',
       'click': 'click',
       'type_text': 'type',
       'press_keys': 'press_keys',
@@ -2612,7 +2650,7 @@ export class Agent {
    */
   _recordInteractionRect(tabId, toolName, response) {
     if (!response || !response.success) return;
-    if (toolName !== 'click_ax' && toolName !== 'type_ax') return;
+    if (toolName !== 'click_ax' && toolName !== 'type_ax' && toolName !== 'set_field') return;
     const r = response.rect;
     if (!r || !r.w || !r.h) return;
     this._lastInteractionRect.set(tabId, { x: r.x, y: r.y, w: r.w, h: r.h, ts: Date.now() });
@@ -2782,7 +2820,24 @@ export class Agent {
     let finalResponse = '';
 
     this.abortFlags.delete(tabId); // clear any stale abort
+    let _traceStatus = 'done'; // updated on early exits
 
+    // Start a trace run (no-op if tracing is disabled in settings).
+    let tabUrl = '', tabTitle = '';
+    try {
+      const tab = await chrome.tabs.get(tabId);
+      tabUrl = tab?.url || '';
+      tabTitle = tab?.title || '';
+    } catch {}
+    const runId = await trace.startRun({
+      model: provider.model, providerId: provider.name,
+      providerClass: provider.constructor.name,
+      userMessage: typeof userMessage === 'string' ? userMessage : JSON.stringify(userMessage).slice(0, 2000),
+      tabUrl, tabTitle, mode,
+    });
+    if (runId) this.currentRunId.set(tabId, runId);
+
+    try {
     while (steps < this.maxSteps) {
       // Check for abort before each step
       if (this._checkAbort(tabId)) {
@@ -2808,8 +2863,12 @@ export class Agent {
         const chatOpts = { tools: useTools ? tools : undefined, temperature: 0.3, maxTokens: 4096 };
         const prunedMessages = this._pruneOldImages(messages);
         this._logDebug({ type: 'llm_request', step: steps, provider: provider.constructor.name, messages: prunedMessages, options: chatOpts });
+        if (runId) trace.recordLLMRequest(runId, steps, { providerClass: provider.constructor.name, model: provider.model, messageCount: prunedMessages.length, toolsCount: (chatOpts.tools || []).length });
+        const _llmStart = Date.now();
         result = await provider.chat(prunedMessages, chatOpts);
+        const _llmLatency = Date.now() - _llmStart;
         this._logDebug({ type: 'llm_response', step: steps, content: result.content, toolCalls: result.toolCalls });
+        if (runId) trace.recordLLMResponse(runId, steps, { content: result.content, toolCalls: result.toolCalls, usage: result.usage, latencyMs: _llmLatency, model: provider.model });
       } catch (e) {
         this._logDebug({ type: 'llm_error', step: steps, error: e.message });
         // If context overflow, trim aggressively and retry once
@@ -2899,10 +2958,17 @@ export class Agent {
 
     if (steps >= this.maxSteps) {
       onUpdate('max_steps_reached', { steps: this.maxSteps });
+      _traceStatus = 'max_steps';
     }
 
     this._persist(tabId);
     return finalResponse;
+    } finally {
+      if (runId) {
+        trace.endRun(runId, { status: _traceStatus, finalContent: finalResponse });
+        this.currentRunId.delete(tabId);
+      }
+    }
   }
 
   /**

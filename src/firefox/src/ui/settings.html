@@ -216,11 +216,66 @@
       border-radius: 3px;
       font-size: 11px;
     }
+
+    .account-card {
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 14px 16px;
+      margin-bottom: 14px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+    .account-info { flex: 1; min-width: 0; }
+    .account-email {
+      font-size: 13px;
+      font-weight: 600;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .account-email.not-signed-in { color: var(--text2); font-weight: 400; }
+    .account-provider {
+      font-size: 11px;
+      color: var(--accent);
+      margin-top: 2px;
+    }
+    .btn-sign-in {
+      background: var(--accent);
+      color: #fff;
+      border: none;
+      border-radius: 6px;
+      padding: 8px 16px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+    .btn-sign-in:hover { background: var(--accent2); }
+    .btn-sign-out {
+      background: var(--bg3);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 8px 16px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+    .btn-sign-out:hover { background: rgba(255,255,255,0.05); }
   </style>
 </head>
 <body>
   <h1>WebBrain Settings</h1>
-  <p class="subtitle">Configure your LLM providers and display preferences · v3.5.2</p>
+  <p class="subtitle">Configure your LLM providers and display preferences · v3.5.11</p>
+
+  <h2>Account</h2>
+  <div id="account-section"></div>
 
   <h2>Display</h2>
   <div id="display-settings">
@@ -265,6 +320,16 @@
         <option value="state_change">On state change (default)</option>
         <option value="every_step">Every step</option>
       </select>
+    </div>
+    <div class="setting-row">
+      <div class="setting-info">
+        <div class="setting-label">Record traces (for model comparison)</div>
+        <div class="setting-desc">Persist every run (LLM requests, responses, tool calls, screenshots) into local IndexedDB so you can inspect and compare models side-by-side. Opens in a separate Traces tab. Off by default because it adds disk writes per step. <a href="traces.html" target="_blank" style="color:var(--accent);">Open Traces page →</a></div>
+      </div>
+      <label class="toggle">
+        <input type="checkbox" id="toggle-tracing">
+        <span class="toggle-slider"></span>
+      </label>
     </div>
     <div class="setting-row">
       <div class="setting-info">

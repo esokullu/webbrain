@@ -95,6 +95,15 @@ export class ProviderManager {
         apiKey: '',
         enabled: false,
       },
+      webbrain: {
+        type: 'openai',
+        label: 'WebBrain Cloud',
+        providerName: 'webbrain',
+        baseUrl: 'https://auth.webbrain.one/v1',
+        model: 'openai/gpt-4o',
+        apiKey: '',
+        enabled: false,
+      },
     };
   }
 

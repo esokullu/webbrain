@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>WebBrain Traces</title>
+  <style>
+    :root {
+      --bg: #1a1a2e;
+      --bg2: #16213e;
+      --bg3: #1e2746;
+      --bg4: #2a3558;
+      --text: #e8e8e8;
+      --text2: #a0a0b8;
+      --text3: #6d6d87;
+      --accent: #6c63ff;
+      --accent2: #5a52d5;
+      --border: rgba(255,255,255,0.08);
+      --success: #4caf50;
+      --warning: #ff9800;
+      --error: #f44336;
+      --radius: 10px;
+    }
+    * { margin:0; padding:0; box-sizing:border-box; }
+    html, body { height: 100%; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      font-size: 13px;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    header {
+      padding: 12px 18px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      flex-shrink: 0;
+    }
+    h1 {
+      font-size: 18px;
+      background: linear-gradient(135deg, var(--accent), #a78bfa);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    .spacer { flex: 1; }
+    .pill {
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      padding: 4px 10px;
+      border-radius: 12px;
+      font-size: 11px;
+      color: var(--text2);
+    }
+    button, select, input[type=text] {
+      background: var(--bg3);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 6px 12px;
+      font-size: 12px;
+      font-family: inherit;
+      cursor: pointer;
+    }
+    button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+    button.primary:hover { background: var(--accent2); }
+    button.danger { color: var(--error); }
+    button:hover { background: var(--bg4); }
+    input[type=text] { cursor: text; }
+
+    main {
+      flex: 1;
+      display: grid;
+      grid-template-columns: 320px 1fr;
+      min-height: 0;
+    }
+
+    /* Sidebar: run list */
+    #sidebar {
+      border-right: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+    }
+    #filters {
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      flex-shrink: 0;
+    }
+    #run-list {
+      overflow-y: auto;
+      flex: 1;
+      padding: 4px;
+    }
+    .run-item {
+      padding: 10px 12px;
+      border-radius: 8px;
+      margin-bottom: 2px;
+      cursor: pointer;
+      border: 1px solid transparent;
+      transition: background 0.1s;
+    }
+    .run-item:hover { background: var(--bg2); }
+    .run-item.selected { background: var(--bg3); border-color: var(--accent); }
+    .run-item.compare { background: rgba(108,99,255,0.15); border-color: var(--accent); }
+    .run-item .run-title {
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--text);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      margin-bottom: 3px;
+    }
+    .run-item .run-meta {
+      font-size: 10px;
+      color: var(--text2);
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .run-item .run-model {
+      font-family: ui-monospace, SFMono-Regular, monospace;
+      color: var(--accent);
+      font-size: 10px;
+    }
+    .status-dot {
+      display: inline-block;
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      margin-right: 4px;
+      vertical-align: middle;
+    }
+    .status-dot.done { background: var(--success); }
+    .status-dot.running { background: var(--warning); animation: pulse 1.2s infinite; }
+    .status-dot.error, .status-dot.max_steps { background: var(--error); }
+    @keyframes pulse { 50% { opacity: 0.4; } }
+
+    /* Right pane */
+    #main-pane {
+      overflow-y: auto;
+      min-width: 0;
+      padding: 16px;
+    }
+    #empty-state {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      height: 100%;
+      color: var(--text3);
+      text-align: center;
+    }
+    #empty-state div { max-width: 360px; }
+
+    .run-header {
+      display: flex;
+      align-items: baseline;
+      gap: 12px;
+      margin-bottom: 10px;
+      flex-wrap: wrap;
+    }
+    .run-header h2 { font-size: 16px; font-weight: 600; }
+    .run-header .meta {
+      font-size: 11px;
+      color: var(--text2);
+    }
+    .run-task {
+      background: var(--bg2);
+      border-left: 3px solid var(--accent);
+      padding: 10px 12px;
+      border-radius: 0 6px 6px 0;
+      margin-bottom: 14px;
+      font-size: 12px;
+      white-space: pre-wrap;
+      max-height: 160px;
+      overflow-y: auto;
+    }
+    .stats-row {
+      display: flex;
+      gap: 18px;
+      margin-bottom: 14px;
+      flex-wrap: wrap;
+    }
+    .stat {
+      font-size: 11px;
+      color: var(--text2);
+    }
+    .stat b {
+      color: var(--text);
+      font-family: ui-monospace, monospace;
+    }
+
+    /* Timeline */
+    .timeline { display: flex; flex-direction: column; gap: 6px; }
+    .event {
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px 12px;
+      font-size: 12px;
+    }
+    .event.llm_request { opacity: 0.55; }
+    .event.llm_response { border-left: 3px solid var(--accent); }
+    .event.tool { border-left: 3px solid #3fa7d6; }
+    .event.screenshot { border-left: 3px solid #a78bfa; padding: 8px; }
+    .event.error { border-left: 3px solid var(--error); color: var(--error); }
+    .event.note { border-left: 3px solid var(--warning); }
+    .event-head {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 11px;
+      color: var(--text2);
+      margin-bottom: 6px;
+    }
+    .event-head .kind { color: var(--text); font-weight: 600; font-size: 12px; }
+    .event-head .step { color: var(--accent); font-family: ui-monospace, monospace; }
+    .event-head .latency { color: var(--text3); font-family: ui-monospace, monospace; }
+    .tool-name { font-family: ui-monospace, monospace; color: var(--accent); }
+    .event details { margin-top: 4px; }
+    .event summary { cursor: pointer; color: var(--text2); font-size: 11px; user-select: none; }
+    .event summary:hover { color: var(--text); }
+    .event pre {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 8px 10px;
+      font-family: ui-monospace, SFMono-Regular, monospace;
+      font-size: 11px;
+      line-height: 1.45;
+      white-space: pre-wrap;
+      word-break: break-word;
+      overflow-x: auto;
+      margin-top: 6px;
+      max-height: 320px;
+      overflow-y: auto;
+    }
+    .event .content-text {
+      white-space: pre-wrap;
+      margin-top: 4px;
+      font-size: 12px;
+      color: var(--text);
+    }
+    .event img {
+      max-width: 100%;
+      border-radius: 6px;
+      display: block;
+      cursor: zoom-in;
+    }
+    .tool-args { color: var(--text2); font-family: ui-monospace, monospace; font-size: 11px; }
+
+    /* Compare mode */
+    #main-pane.compare-mode {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+      padding: 12px;
+    }
+    #main-pane.compare-mode > .pane {
+      overflow-y: auto;
+      max-height: 100%;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 14px;
+      background: var(--bg);
+    }
+
+    /* Modal */
+    #img-modal {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.85);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+      cursor: zoom-out;
+    }
+    #img-modal.show { display: flex; }
+    #img-modal img { max-width: 95vw; max-height: 95vh; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>WebBrain Traces</h1>
+    <span id="count-pill" class="pill">0 runs</span>
+    <div class="spacer"></div>
+    <button id="btn-refresh" title="Reload run list">↻ Refresh</button>
+    <button id="btn-compare" title="Enter compare mode (pick 2 runs)">⇔ Compare</button>
+    <button id="btn-export" title="Export selected run as JSON">⇩ Export JSON</button>
+    <button id="btn-delete" class="danger" title="Delete selected run">✕ Delete</button>
+    <button id="btn-clear-all" class="danger" title="Delete every stored run">Clear all</button>
+  </header>
+  <main>
+    <aside id="sidebar">
+      <div id="filters">
+        <input type="text" id="filter-text" placeholder="Filter by task / model / URL">
+        <select id="filter-model">
+          <option value="">All models</option>
+        </select>
+      </div>
+      <div id="run-list"></div>
+    </aside>
+    <section id="main-pane">
+      <div id="empty-state">
+        <div>
+          <p style="font-size:14px;margin-bottom:10px;">No run selected.</p>
+          <p style="color:var(--text3);">Pick a run from the left to see its step-by-step timeline. Click <b>Compare</b> to pick two runs and view them side-by-side.</p>
+        </div>
+      </div>
+    </section>
+  </main>
+  <div id="img-modal"><img id="img-modal-img"></div>
+  <script src="traces.js" type="module"></script>
+</body>
+</html>

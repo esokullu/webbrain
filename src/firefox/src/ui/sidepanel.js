@@ -8,6 +8,7 @@ const inputEl = document.getElementById('user-input');
 const sendBtn = document.getElementById('btn-send');
 const clearBtn = document.getElementById('btn-clear');
 const settingsBtn = document.getElementById('btn-settings');
+const tracesBtn = document.getElementById('btn-traces');
 const verboseBtn = document.getElementById('btn-verbose');
 const providerSelect = document.getElementById('provider-select');
 const statusDot = document.getElementById('status-dot');
@@ -641,6 +642,35 @@ function scrollToBottom() {
   container.scrollTop = container.scrollHeight;
 }
 
+// Debounce math rendering so streaming updates don't re-walk the DOM
+// on every token.
+let _mathRenderTimer = null;
+function scheduleMathRender() {
+  if (_mathRenderTimer) return;
+  _mathRenderTimer = setTimeout(() => {
+    _mathRenderTimer = null;
+    try {
+      if (typeof window.renderMathInElement !== 'function') return;
+      const target = document.getElementById('messages');
+      if (!target) return;
+      window.renderMathInElement(target, {
+        delimiters: [
+          { left: '$$', right: '$$', display: true },
+          { left: '\\[', right: '\\]', display: true },
+          { left: '\\(', right: '\\)', display: false },
+          { left: '$', right: '$', display: false },
+        ],
+        throwOnError: false,
+        errorColor: '#f44336',
+        ignoredTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code'],
+        ignoredClasses: ['katex', 'code-block-wrapper'],
+      });
+    } catch (e) {
+      console.warn('[webbrain] math render failed:', e);
+    }
+  }, 50);
+}
+
 function formatMarkdown(text) {
   if (!text) return '';
 
@@ -690,6 +720,9 @@ function formatMarkdown(text) {
       `<div class="code-block-wrapper">${header}<pre><code>${escaped}</code></pre></div>`
     );
   });
+
+  // Schedule KaTeX rendering of any math expressions in the messages area.
+  scheduleMathRender();
 
   // Store raw code for copy buttons to use
   if (codeBlocks.length > 0) {
@@ -866,6 +899,10 @@ providerSelect.addEventListener('change', async () => {
 
 settingsBtn.addEventListener('click', () => {
   browser.runtime.openOptionsPage();
+});
+
+tracesBtn?.addEventListener('click', () => {
+  browser.tabs.create({ url: browser.runtime.getURL('src/ui/traces.html') });
 });
 
 // --- Start ---

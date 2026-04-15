@@ -14,7 +14,7 @@ export class AnthropicProvider extends BaseLLMProvider {
   }
 
   get model() {
-    return this.config.model || 'claude-sonnet-4-20250514';
+    return this.config.model || 'claude-sonnet-4-6';
   }
 
   get supportsTools() {
