@@ -659,6 +659,21 @@
 
     if (!el) return { success: false, error: 'Element not found' };
 
+    // Guard: only INPUT, TEXTAREA, SELECT, and contenteditable are typeable.
+    // Calling HTMLInputElement's native value setter on anything else throws
+    // "Illegal invocation" because the setter requires `this` to be an input.
+    const isTypeable = el.isContentEditable
+      || el instanceof HTMLInputElement
+      || el instanceof HTMLTextAreaElement
+      || el instanceof HTMLSelectElement;
+    if (!isTypeable) {
+      const tag = (el.tagName || '').toLowerCase();
+      return {
+        success: false,
+        error: `Cannot type into <${tag}> — it is not an editable field. If you wanted to activate it, use click instead. If the real target is a nearby input, click the input first, then call type_text({text: "..."}) with no selector.`,
+      };
+    }
+
     el.focus();
 
     // contenteditable path (Notion, Google Docs comments, Lexical,

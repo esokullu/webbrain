@@ -62,12 +62,11 @@ export const AGENT_TOOLS = [
     type: 'function',
     function: {
       name: 'type_text',
-      description: 'Type text into an input field. THREE WAYS to use it: (1) CSS selector, (2) element index from get_interactive_elements, or (3) ONLY text (no selector, no index) to type into the currently focused element — use this RIGHT AFTER clicking a field. The third form is most reliable for forms with weird selectors (GitHub release[name], Stripe nested inputs).',
+      description: 'Type text into an input field. TWO WAYS to use it: (1) CSS selector, or (2) ONLY text (no selector) to type into the currently focused element — use this RIGHT AFTER clicking a field. The second form is most reliable for forms with weird selectors (GitHub release[name], Stripe nested inputs). DO NOT pass `index` — type_text does not support indices. To type into an indexed field, call click({index: N}) first, then type_text({text: "..."}).',
       parameters: {
         type: 'object',
         properties: {
           selector: { type: 'string', description: 'OPTIONAL CSS selector. Omit to type into the currently focused element.' },
-          index: { type: 'number', description: 'OPTIONAL element index from get_interactive_elements.' },
           text: { type: 'string', description: 'Text to type.' },
           clear: { type: 'boolean', description: 'Clear existing content before typing (default: false).' },
         },

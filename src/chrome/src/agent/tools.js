@@ -131,14 +131,13 @@ export const AGENT_TOOLS = [
     type: 'function',
     function: {
       name: 'type_text',
-      description: 'Type text into an input field. THREE WAYS to use it: (1) provide a CSS selector to find the field by selector, (2) provide an element index from get_interactive_elements, or (3) provide ONLY the text (no selector, no index) to type into the currently focused element — use this RIGHT AFTER clicking a field. The third form is the most reliable for forms with weird selectors (e.g. GitHub release[name], Stripe nested inputs): click the field with `click({selector: ...})`, then immediately call `type_text({text: "..."})` with no selector.',
+      description: 'Type text into an input field. TWO WAYS to use it: (1) provide a CSS selector to find the field by selector, or (2) provide ONLY the text (no selector) to type into the currently focused element — use this RIGHT AFTER clicking a field. The second form is the most reliable for forms with weird selectors (e.g. GitHub release[name], Stripe nested inputs): click the field with `click({text: ...})` or `click({index: ...})` or `click_ax({ref_id: ...})`, then immediately call `type_text({text: "..."})` with no selector. DO NOT pass an `index` parameter — type_text does not support indices. To type into an indexed field, call `click({index: N})` first, then `type_text({text: "..."})`.',
       parameters: {
         type: 'object',
         properties: {
           selector: { type: 'string', description: 'OPTIONAL CSS selector for the input element. Omit to type into the currently focused element.' },
-          index: { type: 'number', description: 'OPTIONAL element index from get_interactive_elements.' },
           text: { type: 'string', description: 'Text to type.' },
-          clear: { type: 'boolean', description: 'Clear existing content before typing (default: false). Works for all three forms.' },
+          clear: { type: 'boolean', description: 'Clear existing content before typing (default: false). Works for both forms.' },
         },
         required: ['text'],
       },
@@ -707,7 +706,7 @@ TYPING — read this:
   * \`<select>\` (native dropdown) → PREFERRED path: \`click_ax\` to focus the select, then \`press_keys({keys: ["<first-letter-of-option>"]})\` — the browser will jump to / select the matching option. For "every 6 months" type-ahead works: press "e" and it lands on the "every 6 months" row. For longer option labels or ambiguous first-letters, use ArrowDown N times + Enter, or type several letters in quick succession. This is MUCH more reliable than trying to click the option line, because native select popups are OS-drawn and NOT in the accessibility tree after opening. Smart models tend to loop here — just use press_keys.
   * Custom/ARIA combobox / button-opens-listbox (role="combobox" or a button whose click opens a popup listbox — Stripe currency/billing pickers, Radix/Headless-UI selects, MUI Select, Downshift, Mantine, React-Select, etc.) → PREFERRED PATH: keyboard, NOT clicks on options. Clicking an \`option\` ref in these widgets very often dismisses the popup before the selection lands (the mousedown-outside handler fires first). The reliable sequence is:
     1. \`click_ax(combobox ref)\` — opens the listbox.
-    2. If there's a visible search/filter textbox inside the popup (Stripe does this), \`set_field({ref_id: searchbox, text: "<query>", submit: true})\` — typing narrows to one match, \`submit: true\` dispatches Enter which selects it. Done.
+    2. Re-read the accessibility tree (\`get_accessibility_tree\`) — opening the listbox typically reveals a new search/filter textbox with a fresh \`ref_N\` id. If there's a visible search/filter textbox inside the popup (Stripe does this), call \`set_field({ref_id: "ref_N", text: "<query>", submit: true})\` using that actual ref number from the refreshed tree — typing narrows to one match, \`submit: true\` dispatches Enter which selects it. Done. (Never invent a placeholder like \`searchbox\` or \`search_input\` — ref_ids MUST be the literal \`ref_N\` strings the tree emits.)
     3. Otherwise use \`press_keys\` to navigate: start by typing the first letter of the target (\`press_keys({keys: ["e"]})\` for "Every 3 months"), add ArrowDown presses if needed to move between same-letter options, then \`press_keys({keys: ["Enter"]})\` to commit.
     4. Verify by re-reading the combobox ref — its label should now reflect the chosen option. If still stale, re-open and use keyboard; do NOT keep clicking option refs.
     RULE OF THUMB: in any ARIA custom dropdown, once the listbox is open, the ONLY reliable selection methods are (a) type-filter + Enter, (b) arrows + Enter. \`click_ax\` on an option ref is a last resort and often fails silently.

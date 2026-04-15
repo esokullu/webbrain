@@ -1060,6 +1060,8 @@ export class Agent {
     this.apiAllowedTabs.delete(tabId);
     this.apiAllowedInjected.delete(tabId);
     this._lastInteractionRect.delete(tabId);
+    if (this._doneBlockCount) this._doneBlockCount.delete(tabId);
+    if (this._recentSubmitClicks) this._recentSubmitClicks.delete(tabId);
     this._clearLoopState(tabId);
     const t = this.persistTimers.get(tabId);
     if (t) { clearTimeout(t); this.persistTimers.delete(tabId); }
@@ -1086,10 +1088,32 @@ export class Agent {
 
     if (!tooManyMessages && !tooManyChars) return; // context is fine
 
-    // Strategy: keep system prompt + summarize old messages + keep recent messages
+    // Strategy: keep system prompt + ORIGINAL USER TASK (pinned) + summarize
+    // old messages + keep recent messages.
+    //
+    // CRITICAL: the first real user message is the task statement ("create a
+    // new product called namaz..."). Folding it into a synthetic summary
+    // causes small models to say "the previous context was removed" and
+    // forget what they were doing. Always keep it verbatim at position 1.
     const systemMsg = messages[0]; // always the system prompt
+    // Find the first real user turn (skip any seeded site-guidance context
+    // we may have prepended which uses role:'user' with a [Site guidance…]
+    // heading).
+    let originalTaskIdx = -1;
+    for (let i = 1; i < messages.length; i++) {
+      const m = messages[i];
+      if (m.role !== 'user') continue;
+      const c = typeof m.content === 'string' ? m.content : '';
+      if (c.startsWith('[Site guidance') || c.startsWith('[Site context changed') || c.startsWith('[Context window was trimmed')) continue;
+      originalTaskIdx = i;
+      break;
+    }
+    const originalTask = originalTaskIdx >= 0 ? messages[originalTaskIdx] : null;
+
     const keepRecent = 16; // keep last N messages verbatim
-    const oldMessages = messages.slice(1, -keepRecent);
+    // Exclude the pinned original task from both summary and recent slices.
+    const afterPin = originalTaskIdx >= 0 ? originalTaskIdx + 1 : 1;
+    const oldMessages = messages.slice(afterPin, -keepRecent);
     const recentMessages = messages.slice(-keepRecent);
 
     if (oldMessages.length < 4) return; // not enough to summarize
@@ -1125,12 +1149,16 @@ export class Agent {
       }
     }
 
-    // Rebuild: system + summary + recent
-    const summaryMsg = { role: 'user', content: `[Context window was trimmed. ${summaryText}]` };
-    const summaryAck = { role: 'assistant', content: 'Understood, I have the conversation context. Continuing.' };
+    // Rebuild: system + pinned original task + summary + recent.
+    // The pinned task keeps the model anchored to what was asked, while
+    // the summary + recent slice preserves progress toward it.
+    const summaryMsg = { role: 'user', content: `[Context window was trimmed to stay within budget. Your ORIGINAL TASK is the user message above — keep working on it. ${summaryText}]` };
+    const summaryAck = { role: 'assistant', content: 'Understood. I\'ll continue working on the original task.' };
 
     messages.length = 0;
-    messages.push(systemMsg, summaryMsg, summaryAck, ...recentMessages);
+    messages.push(systemMsg);
+    if (originalTask) messages.push(originalTask);
+    messages.push(summaryMsg, summaryAck, ...recentMessages);
 
     console.log(`[WebBrain] Context trimmed for tab ${tabId}: ${oldMessages.length} old messages → summary. ${messages.length} messages remain.`);
   }
@@ -1218,6 +1246,16 @@ export class Agent {
    */
   _emergencyTrim(messages) {
     const systemMsg = messages[0];
+    // Pin the original user task (same logic as _manageContext).
+    let originalTask = null;
+    for (let i = 1; i < messages.length; i++) {
+      const m = messages[i];
+      if (m.role !== 'user') continue;
+      const c = typeof m.content === 'string' ? m.content : '';
+      if (c.startsWith('[Site guidance') || c.startsWith('[Site context changed') || c.startsWith('[Context')) continue;
+      originalTask = m;
+      break;
+    }
     const keepLast = 6; // keep only 6 most recent messages
     const recent = messages.slice(-keepLast);
 
@@ -1233,15 +1271,17 @@ export class Agent {
 
     const notice = {
       role: 'user',
-      content: '[Context was too large for the model. Older messages were removed. Please continue based on what you can see.]',
+      content: '[Context was too large for the model. Older intermediate steps were removed, but your ORIGINAL TASK is pinned above — keep working on it based on the most recent state you can see.]',
     };
     const ack = {
       role: 'assistant',
-      content: 'Understood, some earlier context was trimmed. I\'ll continue with what I have.',
+      content: 'Understood. I\'ll continue the original task with the recent state.',
     };
 
     messages.length = 0;
-    messages.push(systemMsg, notice, ack, ...recent);
+    messages.push(systemMsg);
+    if (originalTask) messages.push(originalTask);
+    messages.push(notice, ack, ...recent);
 
     console.log(`[WebBrain] Emergency context trim: kept ${messages.length} messages.`);
   }
@@ -1252,10 +1292,42 @@ export class Agent {
   async executeTool(tabId, name, args) {
     // Tools handled by the background/service worker
     if (name === 'navigate') {
-      await chrome.tabs.update(tabId, { url: args.url });
-      // Wait a moment for navigation
+      let rawUrl = String(args.url || '').trim();
+      if (!rawUrl) {
+        return { success: false, error: 'navigate: url is required' };
+      }
+      // Resolve relative URLs (e.g. "/acct_.../products") against the
+      // current tab. chrome.tabs.update silently routes bare paths to
+      // file:// which produces ERR_FILE_NOT_FOUND — the model then sees
+      // success and loops. Resolve against the tab's origin instead, or
+      // reject if we can't (e.g. tab on chrome:// with a relative input).
+      if (!/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(rawUrl)) {
+        // Not absolute. Try to resolve against current tab URL.
+        try {
+          const tab = await chrome.tabs.get(tabId);
+          const base = tab && tab.url;
+          if (base && /^https?:/i.test(base)) {
+            rawUrl = new URL(rawUrl, base).toString();
+          } else {
+            return {
+              success: false,
+              error: `navigate: "${args.url}" is not an absolute URL. Provide the full URL including scheme and host (e.g. "https://dashboard.stripe.com/${String(args.url).replace(/^\/+/, '')}"). Do NOT pass bare paths — they resolve to local files.`,
+            };
+          }
+        } catch (e) {
+          return { success: false, error: `navigate: cannot resolve relative URL "${args.url}" — no current tab URL available. Pass an absolute URL starting with https://.` };
+        }
+      }
+      await chrome.tabs.update(tabId, { url: rawUrl });
+      // Wait for navigation to commit so we can report the real final URL
+      // (which may differ from rawUrl after redirects or auth walls).
       await new Promise(r => setTimeout(r, 2000));
-      return { success: true, url: args.url };
+      let finalUrl = rawUrl;
+      try {
+        const tab = await chrome.tabs.get(tabId);
+        if (tab && tab.url) finalUrl = tab.url;
+      } catch {}
+      return { success: true, url: finalUrl, requestedUrl: rawUrl };
     }
 
     if (name === 'new_tab') {
@@ -1349,6 +1421,84 @@ export class Agent {
             imageDataUrl = await this._annotateScreenshot(imageDataUrl, last, cssViewport);
             annotatedRect = { x: last.x, y: last.y, w: last.w, h: last.h };
           }
+
+          // Probe for "work in progress" signals: an open dialog/modal or a
+          // visible form. If any of these are present while the model claims
+          // it created/added/saved/submitted something, that's a red flag —
+          // the submit almost certainly didn't happen.
+          let pageState = null;
+          try {
+            const stateProbe = await cdpClient.evaluate(tabId, `
+              (() => {
+                function visible(el) {
+                  try {
+                    const r = el.getBoundingClientRect();
+                    if (r.width < 1 || r.height < 1) return false;
+                    const s = window.getComputedStyle(el);
+                    if (s.visibility === 'hidden' || s.display === 'none' || parseFloat(s.opacity) === 0) return false;
+                    return true;
+                  } catch (e) { return false; }
+                }
+                const dialogs = Array.from(document.querySelectorAll('[role=dialog],[role=alertdialog],[aria-modal="true"],dialog[open]')).filter(visible);
+                const forms = Array.from(document.querySelectorAll('form')).filter(visible);
+                // Cheap "success toast" signal: a visible element whose text
+                // contains created/added/saved/success.
+                const toasts = Array.from(document.querySelectorAll('[role=status],[role=alert],[aria-live]'))
+                  .filter(visible)
+                  .map(e => (e.innerText || '').trim().slice(0, 120))
+                  .filter(Boolean);
+                return {
+                  openDialogCount: dialogs.length,
+                  dialogTitles: dialogs.map(d => {
+                    const h = d.querySelector('h1,h2,h3,[role=heading]');
+                    return (h ? (h.innerText || '') : (d.getAttribute('aria-label') || '')).trim().slice(0, 80);
+                  }).filter(Boolean),
+                  visibleFormCount: forms.length,
+                  liveRegionMessages: toasts,
+                };
+              })()
+            `);
+            pageState = stateProbe?.result?.value || null;
+          } catch (e) {}
+
+          // Synthesize a warning when summary claims completion but page
+          // state contradicts it.
+          let completionWarning = null;
+          const summaryLower = String(args.summary || '').toLowerCase();
+          const claimsCompletion = /\b(created|added|saved|submitted|posted|published|sent|done|completed|finished)\b/.test(summaryLower);
+          if (claimsCompletion && pageState) {
+            if (pageState.openDialogCount > 0 || pageState.visibleFormCount > 0) {
+              const titlesStr = pageState.dialogTitles.length ? ` (dialog titles: ${pageState.dialogTitles.map(t => '"' + t + '"').join(', ')})` : '';
+              completionWarning = `WARNING: Your summary claims the task was completed, but a ${pageState.openDialogCount > 0 ? 'modal/dialog' : 'form'} is still visible on the page${titlesStr}. This usually means the submit/save button was never clicked. Before calling done again, actually submit the form (click the primary action button like "Save", "Create", "Submit", or press Enter in the form) and verify a success indicator: a URL change away from the create/edit path, a toast/confirmation message, or the form disappearing. Do NOT claim success without this evidence.`;
+            } else if (pageState.liveRegionMessages.length === 0 && probe?.url && /[?&](create|edit|new)\b/i.test(probe.url)) {
+              completionWarning = `WARNING: Your summary claims the task was completed, but the URL still contains a create/edit query parameter (${probe.url}) and no success message is visible. Verify the submit actually happened before finishing.`;
+            }
+          }
+
+          // If completionWarning fires, DO NOT terminate. Return a regular
+          // failed tool result so the agent loop continues and the model
+          // must actually submit (and verify) before it can call done again.
+          // Also track how many times we've blocked on this tab so the model
+          // can escape if the heuristic is wrong (e.g. the "form" is a
+          // search/filter bar, not a submit form).
+          if (completionWarning) {
+            if (!this._doneBlockCount) this._doneBlockCount = new Map();
+            const blocks = (this._doneBlockCount.get(tabId) || 0) + 1;
+            this._doneBlockCount.set(tabId, blocks);
+            if (blocks <= 2) {
+              return {
+                success: false,
+                blockedDone: true,
+                error: completionWarning + ` (block attempt ${blocks}/2 — if you genuinely believe the task is complete and the visible form/dialog is unrelated, re-call done with summary explicitly acknowledging this, e.g. "already-existing product, no submit needed".)`,
+                pageUrl: probe?.url || '',
+                pageState,
+              };
+            }
+            // After 2 blocks, let done through with a loud note in verification.
+          }
+          // Reset block count on successful done.
+          if (this._doneBlockCount) this._doneBlockCount.delete(tabId);
+
           return {
             done: true,
             summary: args.summary,
@@ -1358,7 +1508,9 @@ export class Agent {
               screenshot: imageDataUrl,
               page: probe || undefined,
               annotatedRect,
-              note: 'Review this screenshot carefully. Does it confirm the task was completed successfully? If the page shows an existing item from the past (check dates), you may NOT have actually created anything new.' + (annotatedRect ? ' The red-outlined region is the element you last interacted with.' : ''),
+              pageState,
+              completionWarning,
+              note: 'Review this screenshot carefully. Does it confirm the task was completed successfully? If the page shows an existing item from the past (check dates), you may NOT have actually created anything new.' + (annotatedRect ? ' The red-outlined region is the element you last interacted with.' : '') + (completionWarning ? ' ' + completionWarning : ''),
             },
           };
         } catch (_) {
@@ -1706,6 +1858,42 @@ export class Agent {
       try {
         await cdpClient.attach(tabId);
 
+        // ── Duplicate submit-click guard ────────────────────────────────
+        // The model often mistakes the modal-open link and the in-modal
+        // submit button on Stripe-style UIs (both labeled "Create product",
+        // "Add product", etc.) — clicking twice creates duplicate records.
+        // Track clicks whose text matches a submit-like pattern and block
+        // a second one on the same tab+URL within a short window, UNLESS
+        // the URL has changed (real navigation) or the model explicitly
+        // acknowledges the duplicate via args._allowResubmit = true.
+        if (args.text && !args._allowResubmit) {
+          const rawText = String(args.text).trim();
+          const submitLikeRE = /^(create|save|submit|add|post|publish|send|confirm|sign up|sign in|log in|register|place order|pay|checkout|update|apply|finish|done)\b/i;
+          if (submitLikeRE.test(rawText)) {
+            let curUrl = '';
+            try { const t = await chrome.tabs.get(tabId); curUrl = t?.url || ''; } catch (e) {}
+            if (!this._recentSubmitClicks) this._recentSubmitClicks = new Map();
+            const buf = this._recentSubmitClicks.get(tabId) || [];
+            const key = `${rawText.toLowerCase()}|${curUrl}`;
+            const now = Date.now();
+            // Keep entries from the last 45 seconds
+            const fresh = buf.filter(e => now - e.ts < 45000);
+            const match = fresh.find(e => e.key === key);
+            if (match) {
+              return {
+                success: false,
+                blockedDuplicateSubmit: true,
+                error: `Blocked: you already clicked "${rawText}" on this page ${Math.round((now - match.ts) / 1000)}s ago and the URL has not changed since. Stripe-style UIs often reuse the same label for the modal-OPEN button and the SUBMIT button inside the modal — a second click typically creates a duplicate record. Before clicking "${rawText}" again, verify: (a) that all required fields are actually filled (take a screenshot or read the form), (b) that this click is intended as a FIRST submit and not a retry. If the previous click did nothing because a field was empty, fill the field first. If you genuinely need to retry, pass _allowResubmit: true in the args.`,
+                previousClickUrl: match.url,
+                currentUrl: curUrl,
+                secondsSincePrevious: Math.round((now - match.ts) / 1000),
+              };
+            }
+            fresh.push({ key, ts: now, url: curUrl, text: rawText });
+            this._recentSubmitClicks.set(tabId, fresh);
+          }
+        }
+
         // ── Global SELECT guard ─────────────────────────────────────────
         // Inject a capture-phase mousedown+click listener that prevents
         // native <select> dropdown popups from opening via ANY mouse path
@@ -1861,12 +2049,49 @@ export class Agent {
                 if (interactive.length === 1) {
                   matches = interactive;
                 } else {
+                  const pickList = (interactive.length > 1 ? interactive : matches).slice(0, 6);
+                  const candidates = pickList.map((m, idx) => {
+                    const e = m.el;
+                    let rect = { x: 0, y: 0, w: 0, h: 0 };
+                    let cx = 0, cy = 0;
+                    try {
+                      const r = e.getBoundingClientRect();
+                      rect = { x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height) };
+                      cx = Math.round(r.x + r.width / 2);
+                      cy = Math.round(r.y + r.height / 2);
+                    } catch (e2) {}
+                    let ancestor = '';
+                    try {
+                      const container = e.closest('[role=dialog],[role=alertdialog],[aria-modal="true"],form,section,nav,header,footer,aside,[role=region]');
+                      if (container) {
+                        const label = container.getAttribute('aria-label') || '';
+                        const labelledby = container.getAttribute('aria-labelledby');
+                        let labelledText = '';
+                        if (labelledby) {
+                          try { labelledText = (document.getElementById(labelledby) || {}).innerText || ''; } catch (e3) {}
+                        }
+                        const headingEl = container.querySelector('h1,h2,h3,h4,[role=heading]');
+                        const heading = headingEl ? (headingEl.innerText || '').trim().slice(0, 40) : '';
+                        const role = container.getAttribute('role') || container.tagName.toLowerCase();
+                        ancestor = [role, label || labelledText || heading].filter(Boolean).join(': ').trim().slice(0, 80);
+                      }
+                    } catch (e4) {}
+                    return {
+                      index: idx,
+                      tag: e.tagName.toLowerCase(),
+                      role: e.getAttribute('role') || '',
+                      text: m.txt.slice(0, 80),
+                      cx, cy,
+                      rect,
+                      ancestor,
+                    };
+                  });
                   return {
                     found: false,
                     ambiguous: true,
                     mode: usedMode,
                     count: matches.length,
-                    candidates: matches.slice(0, 5).map(m => m.txt.slice(0, 80)),
+                    candidates,
                   };
                 }
               }
@@ -1989,7 +2214,34 @@ export class Agent {
                   const _INTERACTIVE_ROLES = new Set(['button','link','tab','menuitem','option']);
                   const _PASSIVE_TAGS = new Set(['LABEL','SPAN','DIV','P','STRONG','EM','I','B','SMALL','SVG','IMG']);
                   function _isInteractive(n) { return _INTERACTIVE_TAGS.has(n.tagName) || _INTERACTIVE_ROLES.has((n.getAttribute&&n.getAttribute('role'))||'') || (n.hasAttribute&&(n.hasAttribute('onclick')||n.hasAttribute('data-action'))); }
-                  if (matches.length > 1) { const inter = matches.filter(m => _isInteractive(m.el)); if (inter.length === 1) matches = inter; else return { found: false, ambiguous: true, mode: usedMode, count: matches.length, candidates: matches.slice(0,5).map(m=>m.txt.slice(0,80)) }; }
+                  if (matches.length > 1) {
+                    const inter = matches.filter(m => _isInteractive(m.el));
+                    if (inter.length === 1) { matches = inter; }
+                    else {
+                      const pickList = (inter.length > 1 ? inter : matches).slice(0, 6);
+                      const candidates = pickList.map((m, idx) => {
+                        const e = m.el;
+                        let rect = { x:0, y:0, w:0, h:0 }, cx=0, cy=0;
+                        try { const r = e.getBoundingClientRect(); rect = { x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height) }; cx = Math.round(r.x + r.width/2); cy = Math.round(r.y + r.height/2); } catch(e2) {}
+                        let ancestor = '';
+                        try {
+                          const container = e.closest('[role=dialog],[role=alertdialog],[aria-modal="true"],form,section,nav,header,footer,aside,[role=region]');
+                          if (container) {
+                            const label = container.getAttribute('aria-label') || '';
+                            const labelledby = container.getAttribute('aria-labelledby');
+                            let labelledText = '';
+                            if (labelledby) { try { labelledText = (document.getElementById(labelledby) || {}).innerText || ''; } catch(e3) {} }
+                            const headingEl = container.querySelector('h1,h2,h3,h4,[role=heading]');
+                            const heading = headingEl ? (headingEl.innerText || '').trim().slice(0, 40) : '';
+                            const role = container.getAttribute('role') || container.tagName.toLowerCase();
+                            ancestor = [role, label || labelledText || heading].filter(Boolean).join(': ').trim().slice(0, 80);
+                          }
+                        } catch(e4) {}
+                        return { index: idx, tag: e.tagName.toLowerCase(), role: e.getAttribute('role') || '', text: m.txt.slice(0, 80), cx, cy, rect, ancestor };
+                      });
+                      return { found: false, ambiguous: true, mode: usedMode, count: matches.length, candidates };
+                    }
+                  }
                   let el = matches[0].el;
 
                   // LABEL → associated input
@@ -2037,10 +2289,117 @@ export class Agent {
             if (info?.ambiguous) {
               return {
                 success: false,
-                error: `Ambiguous text match for "${args.text}" (mode=${info.mode}, matches=${info.count}). Use a more specific text, click({index:N}) from get_interactive_elements, or selector/x,y.`,
+                error: `Ambiguous text match for "${args.text}" (mode=${info.mode}, matches=${info.count}). Candidates in the candidates field include cx/cy (precomputed click center, CSS pixels) and ancestor context. Call click({x: candidate.cx, y: candidate.cy}) — no arithmetic needed. Use the ancestor field to disambiguate (e.g. an alertdialog's Cancel vs a form's Cancel sit in different containers). Do NOT retry click({text: "${args.text}"}) — it will fail the same way.`,
                 candidates: info.candidates || [],
               };
             }
+            // Before giving up, check for an open listbox/menu/select on the
+            // page. If one is visible, enumerate its options — that's almost
+            // always what the model needed to see. This turns a useless
+            // "not found" into a "here are the actual choices" hint.
+            let openOptions = null;
+            try {
+              const opt = await cdpClient.evaluate(tabId, `
+                (() => {
+                  function visible(el) {
+                    try {
+                      const r = el.getBoundingClientRect();
+                      if (r.width < 1 || r.height < 1) return false;
+                      const s = window.getComputedStyle(el);
+                      if (s.visibility === 'hidden' || s.display === 'none' || parseFloat(s.opacity) === 0) return false;
+                      return true;
+                    } catch (e) { return false; }
+                  }
+                  // Detect whether a container/page has an associated
+                  // searchbox/filter input (searchable combobox). When true,
+                  // the listbox is almost certainly virtualized — clicking
+                  // an option that isn't in the visible window will never
+                  // match. The right move is to TYPE the value to filter.
+                  function findFilterInput(container) {
+                    // Option A: the combobox itself is an editable input
+                    const cb = document.querySelector('[role=combobox][aria-expanded="true"]');
+                    if (cb && (cb.tagName === 'INPUT' || cb.getAttribute('aria-autocomplete'))) {
+                      return { kind: 'combobox', text: (cb.value || cb.innerText || '').trim().slice(0, 40), autocomplete: cb.getAttribute('aria-autocomplete') || '' };
+                    }
+                    // Option B: a visible searchbox / [type=search] input is
+                    // associated with the listbox (aria-controls/activedescendant
+                    // or just physically near it).
+                    const sbox = Array.from(document.querySelectorAll('input[type=search],input[role=searchbox],[role=searchbox],input[aria-autocomplete]')).filter(visible)[0];
+                    if (sbox) return { kind: 'searchbox', text: (sbox.value || '').trim().slice(0, 40), autocomplete: sbox.getAttribute('aria-autocomplete') || '' };
+                    // Option C: editable focused input inside the listbox container
+                    if (container) {
+                      const inp = container.querySelector('input:not([type=hidden]),textarea');
+                      if (inp && visible(inp)) return { kind: 'input-in-listbox', text: (inp.value || '').trim().slice(0, 40), autocomplete: inp.getAttribute('aria-autocomplete') || '' };
+                    }
+                    return null;
+                  }
+                  // 1) Visible ARIA listbox/menu containers
+                  const containers = Array.from(document.querySelectorAll('[role=listbox],[role=menu],[role=combobox][aria-expanded="true"]')).filter(visible);
+                  for (const c of containers) {
+                    const opts = Array.from(c.querySelectorAll('[role=option],[role=menuitem],[role=menuitemradio],[role=menuitemcheckbox]'))
+                      .filter(visible)
+                      .map(o => (o.innerText || o.getAttribute('aria-label') || '').trim())
+                      .filter(Boolean)
+                      .slice(0, 20);
+                    if (opts.length) {
+                      const totalOptions = c.querySelectorAll('[role=option],[role=menuitem],[role=menuitemradio],[role=menuitemcheckbox]').length;
+                      return {
+                        source: c.getAttribute('role') || 'listbox',
+                        options: opts,
+                        visibleCount: opts.length,
+                        totalCount: totalOptions,
+                        virtualized: totalOptions > opts.length,
+                        filter: findFilterInput(c),
+                      };
+                    }
+                  }
+                  // 2) Focused <select>
+                  const ae = document.activeElement;
+                  if (ae && ae.tagName === 'SELECT') {
+                    const opts = Array.from(ae.options).map(o => (o.text || '').trim()).filter(Boolean).slice(0, 20);
+                    if (opts.length) return { source: 'select', options: opts, visibleCount: opts.length, totalCount: ae.options.length, virtualized: false, filter: null };
+                  }
+                  // 3) Any visible <select> on page (last resort, only 1)
+                  const sels = Array.from(document.querySelectorAll('select')).filter(visible);
+                  if (sels.length === 1) {
+                    const opts = Array.from(sels[0].options).map(o => (o.text || '').trim()).filter(Boolean).slice(0, 20);
+                    if (opts.length) return { source: 'select (only one visible on page)', options: opts, visibleCount: opts.length, totalCount: sels[0].options.length, virtualized: false, filter: null };
+                  }
+                  return null;
+                })()
+              `);
+              openOptions = opt?.result?.value || null;
+            } catch (e) {}
+
+            if (openOptions && openOptions.options && openOptions.options.length) {
+              // Filterable combobox case: the model needs to TYPE, not click.
+              if (openOptions.filter) {
+                const needle = args.text;
+                const filterKind = openOptions.filter.kind;
+                const filterHint = filterKind === 'combobox'
+                  ? `The combobox itself is editable`
+                  : filterKind === 'searchbox'
+                    ? `There is an associated searchbox on the page`
+                    : `There is an input field inside the listbox`;
+                return {
+                  success: false,
+                  error: `"${needle}" is not in the currently-visible options of the open ${openOptions.source}. ${filterHint} — this is a SEARCHABLE combobox (likely virtualized, only ${openOptions.visibleCount} of ${openOptions.totalCount} options rendered). Instead of clicking, TYPE the value to filter: call type_text({text: "${needle}", clear: true}) with NO selector (the combobox input should already be focused), then click the matching option or press Enter. Do NOT retry click({text: "${needle}"}) — the option isn't in the visible window.`,
+                  availableOptions: openOptions.options,
+                  source: openOptions.source,
+                  filterable: true,
+                  filter: openOptions.filter,
+                  visibleCount: openOptions.visibleCount,
+                  totalCount: openOptions.totalCount,
+                };
+              }
+              return {
+                success: false,
+                error: `No clickable element found for text "${args.text}". However, an open ${openOptions.source} is visible on the page with these options: ${openOptions.options.map(o => '"' + o + '"').join(', ')}. Pick one of those exact labels (or "Custom" if the value you want isn't listed) and call click({text: "..."}) again.`,
+                availableOptions: openOptions.options,
+                source: openOptions.source,
+              };
+            }
+
             return {
               success: false,
               error: `No clickable element found for text "${args.text}" (also tried scrolling down). Try get_interactive_elements to see what's on the page, or use a selector.`,
@@ -2376,6 +2735,12 @@ export class Agent {
     if (name === 'type_text') {
       try {
         await cdpClient.attach(tabId);
+        if (args.index != null) {
+          return {
+            success: false,
+            error: `type_text does not accept an \`index\` parameter. To type into an element by its index, first call click({index: ${args.index}}) to focus it, then call type_text({text: "${String(args.text || '').slice(0, 60)}"}) with NO selector and NO index. Alternatively, use click_ax + type_ax with a ref_id from get_accessibility_tree.`,
+          };
+        }
         if (args.selector) {
           const result = await cdpClient.typeText(tabId, args.selector, args.text || '', !!args.clear);
           // Track field for duplicate-typing detection
@@ -2544,7 +2909,8 @@ export class Agent {
             ...(warning ? { warning } : {}),
           };
         }
-        // index-based: fall through to content-script path.
+        // Should be unreachable — all branches above return.
+        return { success: false, error: 'type_text: internal — no branch matched. Provide {text} (with focused field) or {selector, text}.' };
       } catch (e) {
         return { success: false, error: `Type failed: ${e.message}` };
       }

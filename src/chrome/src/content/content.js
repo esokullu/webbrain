@@ -452,10 +452,52 @@
         if (interactiveMatches.length === 1) {
           matches = interactiveMatches;
         } else {
+          // Build rich candidates: position (rect), tag, role, surrounding
+          // context (closest landmark/dialog/button text), and a suggested
+          // disambiguator. When the same text appears twice (e.g. "Cancel"
+          // on both outer modal and inner sub-dialog), the model needs rects
+          // to pick by location, not just the same string twice.
+          const pickList = (interactiveMatches.length > 1 ? interactiveMatches : matches).slice(0, 6);
+          const candidates = pickList.map((m, idx) => {
+            const e = m.e;
+            let rect = { x: 0, y: 0, w: 0, h: 0 };
+            let cx = 0, cy = 0;
+            try {
+              const r = e.getBoundingClientRect();
+              rect = { x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height) };
+              cx = Math.round(r.x + r.width / 2);
+              cy = Math.round(r.y + r.height / 2);
+            } catch {}
+            let ancestor = '';
+            try {
+              const container = e.closest('[role=dialog],[role=alertdialog],[aria-modal="true"],form,section,nav,header,footer,aside,[role=region]');
+              if (container) {
+                const label = container.getAttribute('aria-label') || '';
+                const labelledby = container.getAttribute('aria-labelledby');
+                let labelledText = '';
+                if (labelledby) {
+                  try { labelledText = (document.getElementById(labelledby) || {}).innerText || ''; } catch {}
+                }
+                const headingEl = container.querySelector('h1,h2,h3,h4,[role=heading]');
+                const heading = headingEl ? (headingEl.innerText || '').trim().slice(0, 40) : '';
+                const role = container.getAttribute('role') || container.tagName.toLowerCase();
+                ancestor = [role, label || labelledText || heading].filter(Boolean).join(': ').trim().slice(0, 80);
+              }
+            } catch {}
+            return {
+              index: idx,
+              tag: e.tagName.toLowerCase(),
+              role: e.getAttribute('role') || '',
+              text: m.txt.slice(0, 80),
+              cx, cy,
+              rect,
+              ancestor,
+            };
+          });
           return {
             success: false,
-            error: `Ambiguous text match for "${params.text}" (mode=${usedMode}, matches=${matches.length}).`,
-            candidates: matches.slice(0, 5).map(m => m.txt.slice(0, 80)),
+            error: `Ambiguous text match for "${params.text}" (mode=${usedMode}, matches=${matches.length}). ${candidates.length} candidates returned with cx/cy (precomputed click center, in CSS pixels) and ancestor context. Pick one and call click({x: candidate.cx, y: candidate.cy}) — no arithmetic needed. Use the ancestor field to disambiguate (e.g. an alertdialog's Cancel vs a form's Cancel sit in different containers). Do NOT retry click({text: "${params.text}"}) — it will fail the same way.`,
+            candidates,
           };
         }
       }
@@ -608,6 +650,21 @@
     }
 
     if (!el) return { success: false, error: 'Element not found' };
+
+    // Guard: only INPUT, TEXTAREA, SELECT, and contenteditable are typeable.
+    // Calling HTMLInputElement's native value setter on anything else throws
+    // "Illegal invocation" because the setter requires `this` to be an input.
+    const isTypeable = el.isContentEditable
+      || el instanceof HTMLInputElement
+      || el instanceof HTMLTextAreaElement
+      || el instanceof HTMLSelectElement;
+    if (!isTypeable) {
+      const tag = (el.tagName || '').toLowerCase();
+      return {
+        success: false,
+        error: `Cannot type into <${tag}> — it is not an editable field. If you wanted to activate it, use click instead. If the real target is a nearby input, click the input first, then call type_text({text: "..."}) with no selector.`,
+      };
+    }
 
     el.focus();
 
@@ -1075,7 +1132,19 @@
           if (typeof ref_id !== 'string') return { success: false, error: 'ref_id (string, e.g. "ref_42") is required' };
           if (typeof window.__wb_ax_lookup !== 'function') return { success: false, error: 'accessibility-tree.js not injected' };
           const el = window.__wb_ax_lookup(ref_id);
-          if (!el) return { success: false, error: `ref_id ${ref_id} not found. The element was removed or the page was replaced. Re-read the accessibility tree to get fresh ids.` };
+          if (!el) {
+            let suggestions = [];
+            try { if (typeof window.__wb_ax_suggest === 'function') suggestions = window.__wb_ax_suggest(ref_id, 6); } catch {}
+            const refStr = String(ref_id);
+            const looksLikeDomId = !/^ref_\d+$/.test(refStr);
+            const formatNote = looksLikeDomId
+              ? ` "${refStr}" is not a valid ref_id. Valid ref_ids have the form ref_N (e.g. ref_42) and appear in square brackets in get_accessibility_tree output — do not use DOM ids, CSS selectors, or placeholder words from the prompt.`
+              : '';
+            const hint = suggestions.length
+              ? ' Nearest existing refs: ' + suggestions.map(s => `${s.ref} (${s.role}${s.name ? ' "' + s.name + '"' : ''})`).join(', ') + '.'
+              : '';
+            return { success: false, error: `ref_id ${ref_id} not found.${formatNote} The element may have been removed or the page replaced.${hint} Re-read the accessibility tree to get fresh ids — do NOT guess ref numbers or invent placeholders.`, suggestions };
+          }
           try { el.scrollIntoView({ block: 'center', inline: 'center' }); } catch {}
           try { el.focus({ preventScroll: true }); } catch {}
           const rect = el.getBoundingClientRect();
@@ -1099,12 +1168,56 @@
             tag,
             rect: { x: Math.round(rect.x), y: Math.round(rect.y), w: Math.round(rect.width), h: Math.round(rect.height) },
           };
+          // Echo accessible name + href so the model can see exactly what
+          // element it hit. This is critical when a stale ref_id points at
+          // the wrong thing — e.g. a sidebar nav link that navigates away
+          // from an open modal, silently destroying in-progress form state.
+          try {
+            const accName = (el.getAttribute && (el.getAttribute('aria-label') || el.getAttribute('title')))
+              || (el.innerText && el.innerText.trim().slice(0, 80))
+              || '';
+            if (accName) resp.name = accName;
+          } catch {}
+          if (tag === 'a') {
+            try {
+              const href = el.getAttribute('href') || '';
+              if (href) {
+                resp.href = href;
+                // Flag cross-page navigation so a stale-ref click can't pass
+                // silently. Same-page anchors (#foo) and javascript: don't
+                // navigate and shouldn't trigger the warning.
+                const currentPath = (location.pathname + location.search) || '/';
+                const navigates = href && !href.startsWith('#') && !href.toLowerCase().startsWith('javascript:') && href !== currentPath;
+                if (navigates) {
+                  resp.navigates = true;
+                  resp.hint = `This <a> click is navigating to ${href}. If that's not what you intended, the ref_id was stale — re-read the accessibility tree to get fresh ids. Any unsaved form input on the previous page has been lost.`;
+                }
+              }
+            } catch {}
+          }
           if (isTextEntry) {
             resp.focused = true;
             resp.next_required = 'type_ax';
             resp.hint = `This element is now focused. Your very next tool call MUST be type_ax({ref_id: "${ref_id}", text: "..."}). Do not call any other tool in between.`;
           } else if (tag === 'select') {
             resp.hint = `This is a <select>. Prefer press_keys on the focused element to choose an option (e.g. type the first letters of the desired option, or ArrowDown + Enter). type_ax on a select also works via value/text match.`;
+          } else {
+            // Detect combobox / popup-opener. If this click was supposed to
+            // open a listbox/menu/dialog, the popup is almost always rendered
+            // via a React portal at the end of <body> — OUTSIDE this
+            // element's DOM subtree. The model must re-read the FULL tree
+            // (no ref_id subtree filter) to see the new options, then
+            // type-filter or press arrows — NOT keep clicking this button,
+            // which toggles the popup closed.
+            try {
+              const role = (el.getAttribute('role') || '').toLowerCase();
+              const hasPopup = el.getAttribute('aria-haspopup');
+              const isCombobox = role === 'combobox' || !!hasPopup;
+              if (isCombobox) {
+                resp.opened_popup_likely = true;
+                resp.hint = `This element is a combobox / popup-opener (role="${role}"${hasPopup ? `, aria-haspopup="${hasPopup}"` : ''}). The popup is almost always rendered in a React portal at the end of <body>, OUTSIDE this button's subtree. Next step: call get_accessibility_tree({filter: "visible"}) — do NOT pass a ref_id (subtree filter will miss the portal). Look for a newly-appeared listbox / searchbox / menu. Then either (a) set_field({ref_id: <new search textbox ref>, text: "<query>", submit: true}), or (b) press_keys(["<first letter>"]) then press_keys(["Enter"]). Do NOT click this same ref_id again — it will just toggle the popup closed.`;
+              }
+            } catch {}
           }
           return resp;
         } catch (e) {
@@ -1118,7 +1231,19 @@
           if (typeof text !== 'string') return { success: false, error: 'text (string) is required' };
           if (typeof window.__wb_ax_lookup !== 'function') return { success: false, error: 'accessibility-tree.js not injected' };
           const el = window.__wb_ax_lookup(ref_id);
-          if (!el) return { success: false, error: `ref_id ${ref_id} not found. Re-read the accessibility tree.` };
+          if (!el) {
+            let suggestions = [];
+            try { if (typeof window.__wb_ax_suggest === 'function') suggestions = window.__wb_ax_suggest(ref_id, 6); } catch {}
+            const refStr = String(ref_id);
+            const looksLikeDomId = !/^ref_\d+$/.test(refStr);
+            const formatNote = looksLikeDomId
+              ? ` "${refStr}" is not a valid ref_id. Valid ref_ids have the form ref_N (e.g. ref_42) and appear in square brackets in get_accessibility_tree output — do not use DOM ids, CSS selectors, or placeholder words from the prompt.`
+              : '';
+            const hint = suggestions.length
+              ? ' Nearest existing refs: ' + suggestions.map(s => `${s.ref} (${s.role}${s.name ? ' "' + s.name + '"' : ''})`).join(', ') + '.'
+              : '';
+            return { success: false, error: `ref_id ${ref_id} not found.${formatNote} The element may have been removed or the page replaced.${hint} Re-read the accessibility tree to get fresh ids — do NOT guess ref numbers or invent placeholders.`, suggestions };
+          }
           try { el.scrollIntoView({ block: 'center', inline: 'center' }); } catch {}
           try { el.focus({ preventScroll: true }); } catch {}
           // Capture the element's on-screen rect so the background can
@@ -1184,14 +1309,26 @@
           return { success: false, error: e && e.message || String(e) };
         }
       },
-      'set_field': () => {
+      'set_field': async () => {
         try {
           const { ref_id, text, clear = true, submit = false } = msg.params || {};
           if (typeof ref_id !== 'string') return { success: false, error: 'ref_id (string, e.g. "ref_42") is required' };
           if (typeof text !== 'string') return { success: false, error: 'text (string) is required' };
           if (typeof window.__wb_ax_lookup !== 'function') return { success: false, error: 'accessibility-tree.js not injected' };
           const el = window.__wb_ax_lookup(ref_id);
-          if (!el) return { success: false, error: `ref_id ${ref_id} not found. Re-read the accessibility tree.` };
+          if (!el) {
+            let suggestions = [];
+            try { if (typeof window.__wb_ax_suggest === 'function') suggestions = window.__wb_ax_suggest(ref_id, 6); } catch {}
+            const refStr = String(ref_id);
+            const looksLikeDomId = !/^ref_\d+$/.test(refStr);
+            const formatNote = looksLikeDomId
+              ? ` "${refStr}" is not a valid ref_id. Valid ref_ids have the form ref_N (e.g. ref_42) and appear in square brackets in get_accessibility_tree output — do not use DOM ids, CSS selectors, or placeholder words from the prompt.`
+              : '';
+            const hint = suggestions.length
+              ? ' Nearest existing refs: ' + suggestions.map(s => `${s.ref} (${s.role}${s.name ? ' "' + s.name + '"' : ''})`).join(', ') + '.'
+              : '';
+            return { success: false, error: `ref_id ${ref_id} not found.${formatNote} The element may have been removed or the page replaced.${hint} Re-read the accessibility tree to get fresh ids — do NOT guess ref numbers or invent placeholders.`, suggestions };
+          }
           try { el.scrollIntoView({ block: 'center', inline: 'center' }); } catch {}
           try { el.focus({ preventScroll: true }); } catch {}
           const rect = (() => {
@@ -1245,12 +1382,51 @@
           const verified = actual.includes(text);
           if (submit) {
             try {
-              el.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, bubbles: true }));
-              el.dispatchEvent(new KeyboardEvent('keypress', { key: 'Enter', code: 'Enter', keyCode: 13, bubbles: true }));
-              el.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', code: 'Enter', keyCode: 13, bubbles: true }));
-              // Form submission: if element is inside a form, submit it.
-              const form = el.form || (el.closest && el.closest('form'));
-              if (form && typeof form.requestSubmit === 'function') form.requestSubmit();
+              // Detect combobox/searchbox pattern: if the element is a searchbox,
+              // has role=combobox, has aria-controls pointing to a listbox, or a
+              // visible listbox is present on the page, we need ArrowDown first to
+              // highlight a filtered option before Enter commits it. Bare Enter on
+              // Stripe/React virtualized pickers just closes the popup without
+              // selecting anything.
+              const roleAttr = (el.getAttribute && el.getAttribute('role') || '').toLowerCase();
+              const controls = el.getAttribute && el.getAttribute('aria-controls');
+              let isCombobox = roleAttr === 'searchbox' || roleAttr === 'combobox'
+                || (el.getAttribute && el.getAttribute('aria-autocomplete'))
+                || (el.getAttribute && el.getAttribute('aria-expanded') === 'true');
+              if (!isCombobox && controls) {
+                try { if (document.getElementById(controls)) isCombobox = true; } catch {}
+              }
+              if (!isCombobox) {
+                // Last-resort check: any visible listbox on the page?
+                try {
+                  const lbs = document.querySelectorAll('[role="listbox"],[role="menu"]');
+                  for (const lb of lbs) {
+                    const r = lb.getBoundingClientRect();
+                    if (r.width > 0 && r.height > 0) { isCombobox = true; break; }
+                  }
+                } catch {}
+              }
+              const dispatchKey = (type, key, keyCode) => {
+                el.dispatchEvent(new KeyboardEvent(type, { key, code: key, keyCode, bubbles: true, cancelable: true }));
+              };
+              if (isCombobox) {
+                // Give the listbox a tick to filter, then highlight the first
+                // option with ArrowDown, then commit with Enter.
+                await new Promise(r => setTimeout(r, 80));
+                dispatchKey('keydown', 'ArrowDown', 40);
+                dispatchKey('keyup', 'ArrowDown', 40);
+                await new Promise(r => setTimeout(r, 30));
+              }
+              dispatchKey('keydown', 'Enter', 13);
+              dispatchKey('keypress', 'Enter', 13);
+              dispatchKey('keyup', 'Enter', 13);
+              // Form submission: only fall back to requestSubmit for non-combobox
+              // inputs. Submitting a form while a combobox popup is open is
+              // usually wrong and can prematurely post the enclosing form.
+              if (!isCombobox) {
+                const form = el.form || (el.closest && el.closest('form'));
+                if (form && typeof form.requestSubmit === 'function') form.requestSubmit();
+              }
             } catch {}
           }
           return {
