@@ -7,6 +7,70 @@ export const AGENT_TOOLS = [
   {
     type: 'function',
     function: {
+      name: 'get_accessibility_tree',
+      description: 'PREFERRED page-reading tool. Returns the page as a flat, indented text representation of its accessibility tree. Each kept node is one line of the form `role "accessible name" [ref_id] href="..." type="..." placeholder="..."`. Indentation shows hierarchy. ref_ids are STABLE across calls — re-use them in click_ax / type_ax / set_field.',
+      parameters: {
+        type: 'object',
+        properties: {
+          filter: { type: 'string', enum: ['all', 'visible', 'interactive'], description: 'Which nodes to include. "visible" (in-viewport, visible) is a good default. "interactive" shows only clickable/typeable things. "all" traverses the entire DOM.' },
+          maxDepth: { type: 'number', description: 'Max tree depth to descend (default 15).' },
+          maxChars: { type: 'number', description: 'Abort and return an error if the rendered tree exceeds this many characters.' },
+          ref_id: { type: 'string', description: 'Optional. Anchor at a previously-seen ref_id instead of document.body.' },
+        },
+        required: [],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'click_ax',
+      description: 'Click an element by its ref_id from get_accessibility_tree. Scrolls into view, focuses, then clicks. ref_ids are stable across calls.',
+      parameters: {
+        type: 'object',
+        properties: {
+          ref_id: { type: 'string', description: 'A ref_id from get_accessibility_tree, e.g. "ref_42".' },
+        },
+        required: ['ref_id'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'type_ax',
+      description: 'Type text into an element by its ref_id from get_accessibility_tree. Handles <input>, <textarea>, and contenteditable. Uses React-compatible native value setters.',
+      parameters: {
+        type: 'object',
+        properties: {
+          ref_id: { type: 'string', description: 'A ref_id from get_accessibility_tree, e.g. "ref_42".' },
+          text: { type: 'string', description: 'Text to type.' },
+          clear: { type: 'boolean', description: 'Clear existing content before typing (default: false).' },
+        },
+        required: ['ref_id', 'text'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'set_field',
+      description: 'Atomically focus + (optionally clear) + type text into a form field by ref_id. ONE-SHOT equivalent of click_ax then type_ax. Set submit:true to press Enter afterward (combobox-aware: dispatches ArrowDown then Enter when a listbox is open).',
+      parameters: {
+        type: 'object',
+        properties: {
+          ref_id: { type: 'string', description: 'A ref_id from get_accessibility_tree, e.g. "ref_42".' },
+          text: { type: 'string', description: 'Text to type into the field.' },
+          clear: { type: 'boolean', description: 'Clear existing content before typing (default: true).' },
+          submit: { type: 'boolean', description: 'Press Enter after typing (default: false).' },
+        },
+        required: ['ref_id', 'text'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
       name: 'read_page',
       description: 'Read the current page content including title, URL, text content, links, and forms. Use this to understand what is on the current page.',
       parameters: {

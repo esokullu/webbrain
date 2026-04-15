@@ -1,0 +1,659 @@
+/**
+ * WebBrain — in-page accessibility tree builder.
+ *
+ * This is a port of the approach used by Claude for Chrome
+ * (claudeplugin/assets/accessibility-tree.js). The original ships minified;
+ * this is a clean re-implementation of the same algorithm.
+ *
+ * Key properties (match Claude's behaviour):
+ *
+ * 1. OUTPUT IS A FLAT INDENTED TEXT STRING, not a JSON tree. Each kept node
+ *    becomes one line:
+ *
+ *        button "Sign in" [ref_42] type="submit"
+ *          option "United States" [ref_43] (selected)
+ *        link "Pricing" [ref_44] href="/pricing"
+ *
+ *    Indentation is 1 space per tree-depth level (depth increases for kept
+ *    ancestors; skipped ancestors don't bump depth, so the tree visually
+ *    flattens generic containers).
+ *
+ * 2. ref_id IS STABLE ACROSS CALLS. ref_ids live in window.__wbElementMap as
+ *    WeakRefs, so an element keeps its `ref_N` identifier for as long as it
+ *    remains in the DOM. Between calls we sweep entries whose deref() is
+ *    gone, so the map doesn't grow unbounded.
+ *
+ * 3. Parameters:
+ *      filter:  'all' | 'visible' | 'interactive' (default 'all')
+ *      maxDepth: number of tree levels to descend (default 15)
+ *      maxChars: hard cap on total output length
+ *      refId:   if set, build the subtree rooted at that previously-seen
+ *               element instead of document.body. Enables follow-up reads
+ *               like "read the subtree under the nav I already identified".
+ *
+ * 4. Node keep-criteria (in 'visible' or 'interactive' filter):
+ *      a) element passes the filter's visibility / interactivity check, AND
+ *      b) EITHER is interactive, OR is a landmark/heading, OR has a computed
+ *         accessible name, OR has a non-generic, non-image role.
+ *
+ *    Skipped nodes still contribute their children to the output (children
+ *    are emitted at the parent's depth, so generic wrappers collapse).
+ *
+ * 5. Additional exports used by click_ax / type_ax:
+ *      window.__wb_ax_lookup(refId) → Element | null
+ *      window.__wb_ax_release(refId) → void (optional cleanup)
+ */
+(() => {
+  if (window.__wb_ax_installed) return;
+  window.__wb_ax_installed = true;
+
+  // ── Persistent ref_id registry ──────────────────────────────────────────
+  if (!window.__wbElementMap) window.__wbElementMap = Object.create(null);
+  if (typeof window.__wbRefCounter !== 'number') window.__wbRefCounter = 0;
+
+  const MAX_NAME_LEN = 100;
+
+  // ── Role inference (matches Claude's mapping) ───────────────────────────
+  const TAG_ROLES = {
+    a: 'link',
+    button: 'button',
+    select: 'combobox',
+    textarea: 'textbox',
+    h1: 'heading', h2: 'heading', h3: 'heading',
+    h4: 'heading', h5: 'heading', h6: 'heading',
+    img: 'image',
+    nav: 'navigation',
+    main: 'main',
+    header: 'banner',
+    footer: 'contentinfo',
+    section: 'region',
+    article: 'article',
+    aside: 'complementary',
+    form: 'form',
+    table: 'table',
+    ul: 'list',
+    ol: 'list',
+    li: 'listitem',
+    label: 'label',
+  };
+
+  function getRole(el) {
+    const explicit = el.getAttribute('role');
+    if (explicit) return explicit;
+    const tag = el.tagName.toLowerCase();
+    if (tag === 'input') {
+      const t = el.getAttribute('type');
+      if (t === 'submit' || t === 'button' || t === 'file') return 'button';
+      if (t === 'checkbox') return 'checkbox';
+      if (t === 'radio') return 'radio';
+      return 'textbox';
+    }
+    return TAG_ROLES[tag] || 'generic';
+  }
+
+  // ── Accessible name (matches Claude's priority order) ───────────────────
+  function getAccessibleName(el) {
+    const tag = el.tagName.toLowerCase();
+
+    // <select> — prefer the currently selected option's label.
+    if (tag === 'select') {
+      const opt = el.querySelector('option[selected]') || (el.options && el.options[el.selectedIndex]);
+      if (opt && opt.textContent && opt.textContent.trim()) {
+        return opt.textContent.trim();
+      }
+    }
+
+    const ariaLabel = el.getAttribute('aria-label');
+    if (ariaLabel && ariaLabel.trim()) return ariaLabel.trim();
+
+    // aria-labelledby: look up the referenced element(s) and concatenate
+    // their text. Common on Stripe / design-system-heavy apps where the
+    // visible label lives in a sibling element.
+    const labelledby = el.getAttribute('aria-labelledby');
+    if (labelledby && labelledby.trim()) {
+      try {
+        const ids = labelledby.trim().split(/\s+/);
+        const parts = [];
+        for (const id of ids) {
+          const ref = document.getElementById(id);
+          if (ref) {
+            const t = (ref.innerText || ref.textContent || '').trim();
+            if (t) parts.push(t);
+          }
+        }
+        const joined = parts.join(' ').trim();
+        if (joined) return joined.length > MAX_NAME_LEN ? joined.substring(0, MAX_NAME_LEN) + '...' : joined;
+      } catch (e) {}
+    }
+
+    const placeholder = el.getAttribute('placeholder');
+    if (placeholder && placeholder.trim()) return placeholder.trim();
+
+    const title = el.getAttribute('title');
+    if (title && title.trim()) return title.trim();
+
+    const alt = el.getAttribute('alt');
+    if (alt && alt.trim()) return alt.trim();
+
+    if (el.id) {
+      try {
+        const byFor = document.querySelector(`label[for="${CSS.escape(el.id)}"]`);
+        if (byFor && byFor.textContent && byFor.textContent.trim()) {
+          return byFor.textContent.trim();
+        }
+      } catch {}
+    }
+
+    if (tag === 'input') {
+      const t = (el.getAttribute('type') || '').toLowerCase();
+      const valAttr = el.getAttribute('value');
+      // Only submit/button/reset use the value as the accessible name — those
+      // are clickable buttons where the value IS the label. For text-like
+      // inputs we must NOT return el.value, because then a `<input type="text"
+      // value="1">` renders in the tree as `textbox "1"`, which looks to the
+      // model like a button labeled "1" rather than a text field currently
+      // holding "1". formatLine emits the current value separately as a
+      // `value="..."` attribute.
+      if ((t === 'submit' || t === 'button' || t === 'reset')
+          && valAttr && valAttr.trim()) return valAttr.trim();
+    }
+
+    // Button/link/summary: prefer direct text children, but fall back to the
+    // full innerText when the visible label is buried in nested spans/svgs
+    // (common in Stripe/Radix/headless-UI — e.g. a "month(s)" picker trigger
+    // wraps its text in <span><span>month(s)</span></span>).
+    if (tag === 'button' || tag === 'a' || tag === 'summary') {
+      let text = '';
+      for (const child of el.childNodes) {
+        if (child.nodeType === Node.TEXT_NODE) text += child.textContent;
+      }
+      if (text.trim()) return text.trim();
+      const deep = (el.innerText || el.textContent || '').trim();
+      if (deep) return deep.length > MAX_NAME_LEN ? deep.substring(0, MAX_NAME_LEN) + '...' : deep;
+    }
+
+    if (/^h[1-6]$/.test(tag)) {
+      const s = el.textContent;
+      if (s && s.trim()) return s.trim().substring(0, MAX_NAME_LEN);
+    }
+
+    // Images without alt get no name (alt was already handled above).
+    if (tag === 'img') return '';
+
+    // For list/menu items and similar pickable nodes, the visible label is
+    // almost always inside nested markup (Stripe wraps currency option
+    // labels in child spans — "direct text children only" returns empty,
+    // which left the model staring at `option [ref_187]` with no clue what
+    // currency it was). Use innerText for these roles so the model sees the
+    // actual labels.
+    const roleAttr = (el.getAttribute('role') || '').toLowerCase();
+    const LABEL_FROM_DESCENDANTS_ROLES = new Set([
+      'option', 'menuitem', 'menuitemcheckbox', 'menuitemradio',
+      'tab', 'treeitem', 'row', 'gridcell', 'cell', 'listitem',
+    ]);
+    if (LABEL_FROM_DESCENDANTS_ROLES.has(roleAttr) || tag === 'li') {
+      const s = (el.innerText || el.textContent || '').trim();
+      if (s) return s.length > MAX_NAME_LEN ? s.substring(0, MAX_NAME_LEN) + '...' : s;
+    }
+
+    // Form fields without an explicit label (aria-label, aria-labelledby,
+    // placeholder, title, <label for>) often sit next to a small text node or
+    // sibling like "Every" / "Price" / "Quantity". Look at the immediate
+    // previous sibling (and its parent's preceding text/label) for a short
+    // label — without this, Stripe's "Every [1] month(s)" custom-interval
+    // input renders as a bare textbox and the model can't tell what it's for.
+    if (tag === 'input' || tag === 'textarea' || tag === 'select'
+        || roleAttr === 'textbox' || roleAttr === 'searchbox'
+        || roleAttr === 'spinbutton' || roleAttr === 'combobox') {
+      try {
+        const tryText = (node) => {
+          if (!node) return '';
+          if (node.nodeType === Node.TEXT_NODE) return (node.textContent || '').trim();
+          if (node.nodeType === Node.ELEMENT_NODE) {
+            const t = (node.innerText || node.textContent || '').trim();
+            if (t && t.length <= 60) return t;
+          }
+          return '';
+        };
+        let sib = el.previousSibling;
+        for (let i = 0; i < 4 && sib; i++, sib = sib.previousSibling) {
+          const t = tryText(sib);
+          if (t) return t.length > MAX_NAME_LEN ? t.substring(0, MAX_NAME_LEN) + '...' : t;
+        }
+        // Parent-level previous sibling: handles layouts like
+        // <div>Every</div><div><input/></div>.
+        const parent = el.parentElement;
+        if (parent) {
+          let psib = parent.previousSibling;
+          for (let i = 0; i < 3 && psib; i++, psib = psib.previousSibling) {
+            const t = tryText(psib);
+            if (t) return t.length > MAX_NAME_LEN ? t.substring(0, MAX_NAME_LEN) + '...' : t;
+          }
+        }
+      } catch {}
+    }
+
+    // Fallback: direct text children only, at least 3 chars.
+    let text = '';
+    for (const child of el.childNodes) {
+      if (child.nodeType === Node.TEXT_NODE) text += child.textContent;
+    }
+    if (text.trim() && text.trim().length >= 3) {
+      const v = text.trim();
+      return v.length > MAX_NAME_LEN ? v.substring(0, MAX_NAME_LEN) + '...' : v;
+    }
+    return '';
+  }
+
+  // ── Visibility ──────────────────────────────────────────────────────────
+  function isVisible(el) {
+    const cs = window.getComputedStyle(el);
+    if (cs.display === 'none') return false;
+    if (cs.visibility === 'hidden') return false;
+    if (cs.opacity === '0') return false;
+    if (el.offsetWidth <= 0 || el.offsetHeight <= 0) return false;
+    return true;
+  }
+
+  function isInViewport(el) {
+    const r = el.getBoundingClientRect();
+    return r.top < window.innerHeight && r.bottom > 0 && r.left < window.innerWidth && r.right > 0;
+  }
+
+  // ── Interactivity / landmark checks ─────────────────────────────────────
+  const INTERACTIVE_TAGS = new Set(['a', 'button', 'input', 'select', 'textarea', 'details', 'summary']);
+  const LANDMARK_TAGS = new Set(['h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'nav', 'main', 'header', 'footer', 'section', 'article', 'aside']);
+
+  function isInteractive(el) {
+    const tag = el.tagName.toLowerCase();
+    if (INTERACTIVE_TAGS.has(tag)) return true;
+    if (el.getAttribute('onclick') !== null) return true;
+    if (el.getAttribute('tabindex') !== null) return true;
+    const role = el.getAttribute('role');
+    if (role === 'button' || role === 'link') return true;
+    if (el.getAttribute('contenteditable') === 'true') return true;
+    return false;
+  }
+
+  function isLandmark(el) {
+    if (LANDMARK_TAGS.has(el.tagName.toLowerCase())) return true;
+    return el.getAttribute('role') !== null;
+  }
+
+  // ── Skip tags ──────────────────────────────────────────────────────────
+  const SKIP_TAGS = new Set(['script', 'style', 'meta', 'link', 'title', 'noscript']);
+
+  // Roles worth keeping in 'visible' filter even when non-interactive.
+  // A dialog/listbox/menu is important structural context; a generic span
+  // with an accessible name usually isn't.
+  const USEFUL_NON_INTERACTIVE_ROLES = new Set([
+    'dialog', 'alertdialog', 'alert', 'status',
+    'listbox', 'menu', 'menubar', 'tablist', 'radiogroup',
+    'option', 'menuitem', 'menuitemcheckbox', 'menuitemradio', 'tab',
+    'combobox', 'textbox', 'searchbox',
+    'heading', 'form', 'main', 'navigation', 'banner', 'contentinfo', 'region', 'complementary',
+    'progressbar', 'slider', 'spinbutton',
+  ]);
+
+  /**
+   * Should this element be INCLUDED in the output? (Its children are still
+   * walked regardless — they bubble up to the parent's depth if this node
+   * is skipped.)
+   */
+  function shouldInclude(el, opts) {
+    const tag = el.tagName.toLowerCase();
+    if (SKIP_TAGS.has(tag)) return false;
+
+    if (opts.filter !== 'all' && el.getAttribute('aria-hidden') === 'true') return false;
+    if (opts.filter !== 'all' && !isVisible(el)) return false;
+
+    // The 'visible' default restricts to in-viewport elements, UNLESS we're
+    // anchored at a specific refId (then we want the whole subtree).
+    if (opts.filter !== 'all' && !opts.refId) {
+      if (!isInViewport(el)) return false;
+    }
+
+    if (opts.filter === 'interactive') return isInteractive(el);
+
+    const role = getRole(el);
+
+    if (opts.filter === 'visible') {
+      // Tight mode for agent consumption: only keep nodes the model can
+      // actually ACT on or needs as structural context. Plain spans/divs
+      // with an accessible name were the main bloat source on complex
+      // apps (Stripe, Notion, etc.) and are almost never the right click
+      // target — the interactive ancestor is.
+      if (isInteractive(el)) return true;
+      if (/^h[1-6]$/.test(el.tagName.toLowerCase())) return true;
+      if (USEFUL_NON_INTERACTIVE_ROLES.has(role)) return true;
+      return false;
+    }
+
+    // opts.filter === 'all' — keep the older, more generous behavior.
+    if (isInteractive(el)) return true;
+    if (isLandmark(el)) return true;
+    if (getAccessibleName(el).length > 0) return true;
+    return role !== null && role !== 'generic' && role !== 'image';
+  }
+
+  // ── Ref_id management ───────────────────────────────────────────────────
+  //
+  // Elements keep the same ref_id across calls: if we already have a WeakRef
+  // pointing at `el`, reuse its key; otherwise mint a new ref_N.
+  function getOrMintRef(el) {
+    for (const key in window.__wbElementMap) {
+      if (window.__wbElementMap[key].deref() === el) return key;
+    }
+    const key = 'ref_' + (++window.__wbRefCounter);
+    window.__wbElementMap[key] = new WeakRef(el);
+    return key;
+  }
+
+  function sweepDeadRefs() {
+    for (const key in window.__wbElementMap) {
+      if (!window.__wbElementMap[key].deref()) {
+        delete window.__wbElementMap[key];
+      }
+    }
+  }
+
+  // ── Line formatting ────────────────────────────────────────────────────
+  function formatLine(el, depth) {
+    const role = getRole(el);
+    let name = getAccessibleName(el);
+    const ref = getOrMintRef(el);
+
+    let line = ' '.repeat(depth) + role;
+    if (name) {
+      name = name.replace(/\s+/g, ' ').substring(0, MAX_NAME_LEN).replace(/"/g, '\\"');
+      line += ' "' + name + '"';
+    }
+    line += ' [' + ref + ']';
+
+    const href = el.getAttribute('href');
+    if (href) line += ' href="' + href + '"';
+    const type = el.getAttribute('type');
+    if (type) line += ' type="' + type + '"';
+    const ph = el.getAttribute('placeholder');
+    if (ph) line += ' placeholder="' + ph + '"';
+
+    // Surface the current value for text-like inputs/textareas so the model
+    // can see what's already filled in. Skipped for submit/button/reset/file
+    // (value is the label there), checkboxes/radios, and when the value
+    // already matches the rendered name.
+    const tag = el.tagName.toLowerCase();
+    if (tag === 'input' || tag === 'textarea') {
+      const inputType = (el.getAttribute('type') || 'text').toLowerCase();
+      const skipValueTypes = new Set(['submit', 'button', 'reset', 'file', 'checkbox', 'radio', 'image', 'hidden', 'color', 'range', 'password']);
+      if (!skipValueTypes.has(inputType)) {
+        const v = (el.value == null ? '' : String(el.value));
+        if (v && v !== name) {
+          const trimmed = v.length > 60 ? v.substring(0, 60) + '...' : v;
+          line += ' value="' + trimmed.replace(/"/g, '\\"') + '"';
+        }
+      }
+    }
+
+    return line;
+  }
+
+  function formatOption(opt, depth) {
+    const ref = getOrMintRef(opt);
+    const rawName = opt.textContent ? opt.textContent.trim() : '';
+    const name = rawName.replace(/\s+/g, ' ').substring(0, MAX_NAME_LEN).replace(/"/g, '\\"');
+    let line = ' '.repeat(depth) + 'option';
+    if (name) line += ' "' + name + '"';
+    line += ' [' + ref + ']';
+    if (opt.selected) line += ' (selected)';
+    if (opt.value && opt.value !== rawName) {
+      line += ' value="' + opt.value.replace(/"/g, '\\"') + '"';
+    }
+    return line;
+  }
+
+  // ── Walker ─────────────────────────────────────────────────────────────
+  function walk(el, depth, opts, lines) {
+    if (depth > opts.maxDepth) return;
+    if (!el || !el.tagName) return;
+
+    // Skip nodes already emitted in the hoisted-overlay prelude. depth>0
+    // guard ensures we still enter the overlay itself when it's the
+    // explicit walk root.
+    if (depth > 0 && opts._skipOverlaySet && opts._skipOverlaySet.has(el)) return;
+
+    // An element anchored via refId is always included at depth 0, even if
+    // it wouldn't normally pass the include filter.
+    const included = shouldInclude(el, opts) || (opts.refId != null && depth === 0);
+
+    if (included) {
+      lines.push(formatLine(el, depth));
+
+      if (el.tagName.toLowerCase() === 'select' && el.options) {
+        for (const opt of el.options) {
+          lines.push(formatOption(opt, depth + 1));
+        }
+      }
+    }
+
+    if (el.children && depth < opts.maxDepth) {
+      const nextDepth = included ? depth + 1 : depth;
+      for (const child of el.children) {
+        walk(child, nextDepth, opts, lines);
+      }
+    }
+  }
+
+  // ── Public: build the tree ──────────────────────────────────────────────
+  function generateAccessibilityTree(filter, maxDepth, maxChars, refId) {
+    try {
+      const effFilter = filter || 'all';
+      // Tighter defaults for the 'visible' / 'interactive' modes so small
+      // models don't drown in 18K-token Stripe trees. Callers can still
+      // override by passing explicit values.
+      const defaultDepth = effFilter === 'all' ? 15 : 10;
+      const defaultChars = effFilter === 'visible' ? 3000
+                          : effFilter === 'interactive' ? 3500
+                          : null; // 'all' has no default cap (explicit only)
+      const opts = {
+        filter: effFilter,
+        maxDepth: maxDepth != null ? maxDepth : defaultDepth,
+        refId: refId || null,
+      };
+      const effMaxChars = maxChars != null ? maxChars : defaultChars;
+      const viewport = { width: window.innerWidth, height: window.innerHeight };
+      const lines = [];
+
+      if (refId) {
+        const weak = window.__wbElementMap[refId];
+        if (!weak) {
+          return {
+            error: `Element with ref_id '${refId}' not found. It may have been removed from the page. Call get_accessibility_tree without ref_id to get the current page state.`,
+            pageContent: '',
+            viewport,
+          };
+        }
+        const el = weak.deref();
+        if (!el) {
+          delete window.__wbElementMap[refId];
+          return {
+            error: `Element with ref_id '${refId}' no longer exists. It may have been removed from the page. Call get_accessibility_tree without ref_id to get the current page state.`,
+            pageContent: '',
+            viewport,
+          };
+        }
+        walk(el, 0, opts, lines);
+      } else if (document.body) {
+        // Hoist "overlay" surfaces (open listboxes, menus, dialogs,
+        // alertdialogs, expanded comboboxes, aria-modal containers) to the
+        // TOP of the tree output. Portals often render these as children of
+        // <body> positioned AFTER lots of base page content, which means a
+        // DOM-order walk under soft-truncation commonly misses them entirely.
+        // Without this, the model can't see the currency picker, timezone
+        // picker, confirmation dialog, etc. that just opened in response to
+        // its last click. Emitting them first guarantees they survive any
+        // later truncation.
+        const overlaySelectors = [
+          '[role=listbox]',
+          '[role=menu]',
+          '[role=dialog]',
+          '[role=alertdialog]',
+          '[aria-modal="true"]',
+          '[role=combobox][aria-expanded="true"]',
+          'dialog[open]',
+        ];
+        const overlayEls = [];
+        const seen = new WeakSet();
+        try {
+          for (const sel of overlaySelectors) {
+            const nodes = document.querySelectorAll(sel);
+            for (const n of nodes) {
+              if (seen.has(n)) continue;
+              if (!n.isConnected) continue;
+              // Skip if ancestor already collected — avoids emitting a
+              // nested listbox twice when its ancestor dialog is also hit.
+              let ancIsOverlay = false;
+              for (let p = n.parentElement; p; p = p.parentElement) {
+                if (seen.has(p)) { ancIsOverlay = true; break; }
+              }
+              if (ancIsOverlay) continue;
+              // Quick visibility gate — don't emit hidden overlay shells.
+              try {
+                const r = n.getBoundingClientRect();
+                if (r.width < 1 || r.height < 1) continue;
+                const s = window.getComputedStyle(n);
+                if (s.visibility === 'hidden' || s.display === 'none' || parseFloat(s.opacity) === 0) continue;
+              } catch (e) { continue; }
+              seen.add(n);
+              overlayEls.push(n);
+            }
+          }
+        } catch (e) {}
+        if (overlayEls.length) {
+          lines.push('[open overlays — rendered first so they survive truncation]');
+          for (const n of overlayEls) {
+            walk(n, 0, opts, lines);
+          }
+          lines.push('[/open overlays]');
+          opts._skipOverlaySet = seen;
+        }
+        walk(document.body, 0, opts, lines);
+      }
+
+      sweepDeadRefs();
+
+      const output = lines.join('\n');
+      // For 'visible' / 'interactive', truncate gracefully on overflow —
+      // small models prefer a partial tree to a hard error. For explicit
+      // maxChars (caller opted in), keep the stricter error behaviour.
+      if (effMaxChars != null && output.length > effMaxChars) {
+        if (filter && filter !== 'all' && maxChars == null) {
+          // Soft truncate at line boundary, append a clear hint.
+          let truncated = output.slice(0, effMaxChars);
+          const lastNl = truncated.lastIndexOf('\n');
+          if (lastNl > 0) truncated = truncated.slice(0, lastNl);
+          const omitted = lines.length - truncated.split('\n').length;
+          truncated += `\n[tree truncated: ${omitted} more nodes omitted to stay under ${effMaxChars} chars. For the whole page pass filter:"all" or increase maxChars. For a specific area pass refId of a container from the tree above.]`;
+          return { pageContent: truncated, viewport, truncated: true };
+        }
+        let hint = `Output exceeds ${effMaxChars} character limit (${output.length} characters). `;
+        if (refId) {
+          hint += 'The specified element has too much content. Try a smaller maxDepth or a more specific child element.';
+        } else if (maxDepth !== undefined) {
+          hint += 'Try a smaller maxDepth or use refId to focus on a specific element.';
+        } else {
+          hint += 'Try a maxDepth (e.g., maxDepth: 5) or use refId to focus on a specific element.';
+        }
+        return { error: hint, pageContent: '', viewport };
+      }
+
+      return { pageContent: output, viewport };
+    } catch (e) {
+      return {
+        error: 'Error generating accessibility tree: ' + (e && e.message || 'Unknown error'),
+        pageContent: '',
+        viewport: { width: window.innerWidth, height: window.innerHeight },
+      };
+    }
+  }
+
+  // ── Public: lookup by ref_id (used by click_ax / type_ax) ──────────────
+  function lookup(refId) {
+    const weak = window.__wbElementMap[refId];
+    if (!weak) return null;
+    const el = weak.deref();
+    if (!el) {
+      delete window.__wbElementMap[refId];
+      return null;
+    }
+    return el;
+  }
+
+  // ── Public: suggest nearby refs when the model asks for a bogus one ─────
+  //
+  // When a tool call fails with "ref_id not found", we want to give the model
+  // back an actionable hint: what refs DO exist near the one it asked for?
+  //
+  // Strategy:
+  //  • Parse the numeric suffix of the requested ref (e.g. "ref_11" → 11).
+  //  • Sort all currently-live refs by |refNum - target| ascending.
+  //  • Return up to `limit` refs with their role + accessible name.
+  //  • If the model asked for a plausibly-typed ref (text field), promote
+  //    interactive text-entry refs to the top of the suggestions.
+  function suggestNearRefs(requestedRefId, limit) {
+    const cap = typeof limit === 'number' ? limit : 6;
+    const m = /^ref_(\d+)$/.exec(String(requestedRefId || ''));
+    const targetNum = m ? parseInt(m[1], 10) : null;
+    const live = [];
+    for (const key in window.__wbElementMap) {
+      const weak = window.__wbElementMap[key];
+      const el = weak && weak.deref();
+      if (!el) continue;
+      try {
+        if (!el.isConnected) continue;
+        if (!isVisible(el)) continue;
+      } catch { continue; }
+      const km = /^ref_(\d+)$/.exec(key);
+      const n = km ? parseInt(km[1], 10) : 0;
+      const role = getRole(el);
+      const name = getAccessibleName(el) || '';
+      const interactive = isInteractive(el);
+      live.push({ ref: key, n, role, name, interactive });
+    }
+    // Ranking strategy depends on what the model asked for:
+    //
+    //  • If the request is a well-formed ref_N: sort by numeric distance to
+    //    N (interactive ties first). This points the model at nearby refs
+    //    that actually exist — useful when it hallucinated ref_11 right
+    //    beside ref_10/ref_12.
+    //
+    //  • If the request is bogus (DOM id, placeholder word, garbage): sort
+    //    by ref-number DESCENDING, preferring refs that have an accessible
+    //    name. The highest-numbered live refs are the most recently minted
+    //    by the tree walker — almost always the newly-appeared listbox /
+    //    dialog / options the model actually wants to reach.
+    if (targetNum != null) {
+      live.sort((a, b) => {
+        if (a.interactive !== b.interactive) return a.interactive ? -1 : 1;
+        return Math.abs(a.n - targetNum) - Math.abs(b.n - targetNum);
+      });
+    } else {
+      live.sort((a, b) => {
+        const aNamed = a.name ? 1 : 0;
+        const bNamed = b.name ? 1 : 0;
+        if (aNamed !== bNamed) return bNamed - aNamed;          // named first
+        if (a.interactive !== b.interactive) return a.interactive ? -1 : 1;
+        return b.n - a.n;                                        // newest first
+      });
+    }
+    return live.slice(0, cap).map(x => ({
+      ref: x.ref,
+      role: x.role,
+      name: x.name.length > 40 ? x.name.slice(0, 40) + '…' : x.name,
+      interactive: x.interactive,
+    }));
+  }
+
+  window.__generateAccessibilityTree = generateAccessibilityTree;
+  window.__wb_ax_lookup = lookup;
+  window.__wb_ax_suggest = suggestNearRefs;
+})();

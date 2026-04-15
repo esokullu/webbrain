@@ -997,6 +997,269 @@
       },
       'get_shadow_dom': () => getShadowDOM(),
       'get_frames': () => getFrames(),
+      // ── Accessibility-tree handlers (ported from Chrome v3.6.8) ───────
+      // These rely on accessibility-tree.js being loaded first; manifest
+      // content_scripts puts it before content.js so window.__wb_ax_lookup
+      // and window.__generateAccessibilityTree are defined by the time the
+      // first message arrives.
+      'get_accessibility_tree': () => {
+        try {
+          if (typeof window.__generateAccessibilityTree !== 'function') {
+            return { error: 'accessibility-tree.js not injected' };
+          }
+          const { filter, maxDepth, maxChars, ref_id } = msg.params || {};
+          return window.__generateAccessibilityTree(filter, maxDepth, maxChars, ref_id);
+        } catch (e) {
+          return { error: 'Failed to build accessibility tree: ' + (e && e.message || String(e)) };
+        }
+      },
+      'click_ax': () => {
+        try {
+          const { ref_id } = msg.params || {};
+          if (typeof ref_id !== 'string') return { success: false, error: 'ref_id (string, e.g. "ref_42") is required' };
+          if (typeof window.__wb_ax_lookup !== 'function') return { success: false, error: 'accessibility-tree.js not injected' };
+          const el = window.__wb_ax_lookup(ref_id);
+          if (!el) {
+            let suggestions = [];
+            try { if (typeof window.__wb_ax_suggest === 'function') suggestions = window.__wb_ax_suggest(ref_id, 6); } catch {}
+            const refStr = String(ref_id);
+            const looksLikeDomId = !/^ref_\d+$/.test(refStr);
+            const formatNote = looksLikeDomId
+              ? ` "${refStr}" is not a valid ref_id. Valid ref_ids have the form ref_N (e.g. ref_42) and appear in square brackets in get_accessibility_tree output — do not use DOM ids, CSS selectors, or placeholder words from the prompt.`
+              : '';
+            const hint = suggestions.length
+              ? ' Nearest existing refs: ' + suggestions.map(s => `${s.ref} (${s.role}${s.name ? ' "' + s.name + '"' : ''})`).join(', ') + '.'
+              : '';
+            return { success: false, error: `ref_id ${ref_id} not found.${formatNote} The element may have been removed or the page replaced.${hint} Re-read the accessibility tree to get fresh ids — do NOT guess ref numbers or invent placeholders.`, suggestions };
+          }
+          try { el.scrollIntoView({ block: 'center', inline: 'center' }); } catch {}
+          try { el.focus({ preventScroll: true }); } catch {}
+          const rect = el.getBoundingClientRect();
+          el.click();
+          const tag = el.tagName ? el.tagName.toLowerCase() : '';
+          let isTextEntry = false;
+          if (tag === 'textarea') isTextEntry = true;
+          else if (tag === 'input') {
+            const inputType = (el.type || 'text').toLowerCase();
+            const nonText = new Set(['checkbox', 'radio', 'file', 'submit', 'button', 'reset', 'image', 'color', 'range', 'hidden']);
+            isTextEntry = !nonText.has(inputType);
+          } else if (el.isContentEditable) isTextEntry = true;
+          const resp = {
+            success: true,
+            method: 'click_ax',
+            ref_id,
+            tag,
+            rect: { x: Math.round(rect.x), y: Math.round(rect.y), w: Math.round(rect.width), h: Math.round(rect.height) },
+          };
+          try {
+            const accName = (el.getAttribute && (el.getAttribute('aria-label') || el.getAttribute('title')))
+              || (el.innerText && el.innerText.trim().slice(0, 80))
+              || '';
+            if (accName) resp.name = accName;
+          } catch {}
+          if (tag === 'a') {
+            try {
+              const href = el.getAttribute('href') || '';
+              if (href) {
+                resp.href = href;
+                const currentPath = (location.pathname + location.search) || '/';
+                const navigates = href && !href.startsWith('#') && !href.toLowerCase().startsWith('javascript:') && href !== currentPath;
+                if (navigates) {
+                  resp.navigates = true;
+                  resp.hint = `This <a> click is navigating to ${href}. If that's not what you intended, the ref_id was stale — re-read the accessibility tree to get fresh ids. Any unsaved form input on the previous page has been lost.`;
+                }
+              }
+            } catch {}
+          }
+          if (isTextEntry) {
+            resp.focused = true;
+            resp.next_required = 'type_ax';
+            resp.hint = `This element is now focused. Your very next tool call MUST be type_ax({ref_id: "${ref_id}", text: "..."}). Do not call any other tool in between.`;
+          } else if (tag === 'select') {
+            resp.hint = `This is a <select>. Prefer press_keys on the focused element to choose an option (e.g. type the first letters of the desired option, or ArrowDown + Enter). type_ax on a select also works via value/text match.`;
+          } else {
+            try {
+              const role = (el.getAttribute('role') || '').toLowerCase();
+              const hasPopup = el.getAttribute('aria-haspopup');
+              const isCombobox = role === 'combobox' || !!hasPopup;
+              if (isCombobox) {
+                resp.opened_popup_likely = true;
+                resp.hint = `This element is a combobox / popup-opener (role="${role}"${hasPopup ? `, aria-haspopup="${hasPopup}"` : ''}). The popup is almost always rendered in a portal at the end of <body>, OUTSIDE this button's subtree. Next step: call get_accessibility_tree({filter: "visible"}) — do NOT pass a ref_id (subtree filter will miss the portal). Look for a newly-appeared listbox / searchbox / menu. Then either (a) set_field({ref_id: <new search textbox ref>, text: "<query>", submit: true}), or (b) press_keys(["<first letter>"]) then press_keys(["Enter"]). Do NOT click this same ref_id again — it will just toggle the popup closed.`;
+              }
+            } catch {}
+          }
+          return resp;
+        } catch (e) {
+          return { success: false, error: e && e.message || String(e) };
+        }
+      },
+      'type_ax': () => {
+        try {
+          const { ref_id, text, clear } = msg.params || {};
+          if (typeof ref_id !== 'string') return { success: false, error: 'ref_id (string, e.g. "ref_42") is required' };
+          if (typeof text !== 'string') return { success: false, error: 'text (string) is required' };
+          if (typeof window.__wb_ax_lookup !== 'function') return { success: false, error: 'accessibility-tree.js not injected' };
+          const el = window.__wb_ax_lookup(ref_id);
+          if (!el) {
+            let suggestions = [];
+            try { if (typeof window.__wb_ax_suggest === 'function') suggestions = window.__wb_ax_suggest(ref_id, 6); } catch {}
+            return { success: false, error: `ref_id ${ref_id} not found. Re-read the accessibility tree to get fresh ids.`, suggestions };
+          }
+          try { el.scrollIntoView({ block: 'center', inline: 'center' }); } catch {}
+          try { el.focus({ preventScroll: true }); } catch {}
+          const typeRect = (() => {
+            try {
+              const r = el.getBoundingClientRect();
+              return { x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height) };
+            } catch { return null; }
+          })();
+          if (el.isContentEditable) {
+            if (clear) {
+              try {
+                const sel = window.getSelection();
+                const r = document.createRange();
+                r.selectNodeContents(el);
+                sel.removeAllRanges();
+                sel.addRange(r);
+                document.execCommand('delete');
+              } catch {}
+            }
+            try { document.execCommand('insertText', false, text); } catch {
+              el.textContent = (clear ? '' : (el.textContent || '')) + text;
+              el.dispatchEvent(new Event('input', { bubbles: true }));
+            }
+            return { success: true, method: 'type_ax_contenteditable', ref_id, rect: typeRect };
+          }
+          if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT') {
+            if (el.tagName === 'INPUT') {
+              const inputType = (el.type || 'text').toLowerCase();
+              const nonTypeable = new Set(['checkbox', 'radio', 'file', 'submit', 'button', 'reset', 'image', 'color', 'range', 'hidden']);
+              if (nonTypeable.has(inputType)) {
+                return { success: false, error: `ref_id ${ref_id} is an <input type="${inputType}"> which is not text-typeable. Use click_ax to toggle/activate it instead.` };
+              }
+            }
+            if (clear) el.value = '';
+            const proto = el.tagName === 'TEXTAREA'
+              ? window.HTMLTextAreaElement.prototype
+              : window.HTMLInputElement.prototype;
+            const descriptor = Object.getOwnPropertyDescriptor(proto, 'value');
+            const setter = descriptor && descriptor.set;
+            const newVal = (clear ? '' : (el.value || '')) + text;
+            if (setter) setter.call(el, newVal); else el.value = newVal;
+            el.dispatchEvent(new Event('input', { bubbles: true }));
+            el.dispatchEvent(new Event('change', { bubbles: true }));
+            return { success: true, method: 'type_ax_input', ref_id, rect: typeRect };
+          }
+          return { success: false, error: `ref_id ${ref_id} is not a typeable element (tag=${el.tagName}). Use click_ax then type_text.` };
+        } catch (e) {
+          return { success: false, error: e && e.message || String(e) };
+        }
+      },
+      'set_field': async () => {
+        try {
+          const { ref_id, text, clear = true, submit = false } = msg.params || {};
+          if (typeof ref_id !== 'string') return { success: false, error: 'ref_id (string, e.g. "ref_42") is required' };
+          if (typeof text !== 'string') return { success: false, error: 'text (string) is required' };
+          if (typeof window.__wb_ax_lookup !== 'function') return { success: false, error: 'accessibility-tree.js not injected' };
+          const el = window.__wb_ax_lookup(ref_id);
+          if (!el) return { success: false, error: `ref_id ${ref_id} not found. Re-read the accessibility tree.` };
+          try { el.scrollIntoView({ block: 'center', inline: 'center' }); } catch {}
+          try { el.focus({ preventScroll: true }); } catch {}
+          const rect = (() => {
+            try {
+              const r = el.getBoundingClientRect();
+              return { x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height) };
+            } catch { return null; }
+          })();
+          if (el.tagName === 'INPUT') {
+            const inputType = (el.type || 'text').toLowerCase();
+            const nonTypeable = new Set(['checkbox', 'radio', 'file', 'submit', 'button', 'reset', 'image', 'color', 'range', 'hidden']);
+            if (nonTypeable.has(inputType)) {
+              return { success: false, error: `ref_id ${ref_id} is an <input type="${inputType}"> which is not text-typeable. Use click_ax to toggle/activate it instead.` };
+            }
+          } else if (!el.isContentEditable && el.tagName !== 'TEXTAREA' && el.tagName !== 'INPUT') {
+            return { success: false, error: `ref_id ${ref_id} is not a text field (tag=${el.tagName}). set_field works on input/textarea/contenteditable only.` };
+          }
+          let prevValue = '';
+          if (el.isContentEditable) {
+            prevValue = el.textContent || '';
+            if (clear) {
+              try {
+                const sel = window.getSelection();
+                const r = document.createRange();
+                r.selectNodeContents(el);
+                sel.removeAllRanges();
+                sel.addRange(r);
+                document.execCommand('delete');
+              } catch {}
+            }
+            try { document.execCommand('insertText', false, text); } catch {
+              el.textContent = (clear ? '' : prevValue) + text;
+              el.dispatchEvent(new Event('input', { bubbles: true }));
+            }
+          } else {
+            prevValue = el.value || '';
+            const proto = el.tagName === 'TEXTAREA'
+              ? window.HTMLTextAreaElement.prototype
+              : window.HTMLInputElement.prototype;
+            const descriptor = Object.getOwnPropertyDescriptor(proto, 'value');
+            const setter = descriptor && descriptor.set;
+            const newVal = (clear ? '' : prevValue) + text;
+            if (setter) setter.call(el, newVal); else el.value = newVal;
+            el.dispatchEvent(new Event('input', { bubbles: true }));
+            el.dispatchEvent(new Event('change', { bubbles: true }));
+          }
+          const actual = el.isContentEditable ? (el.textContent || '') : (el.value || '');
+          const verified = actual.includes(text);
+          if (submit) {
+            try {
+              const roleAttr = (el.getAttribute && el.getAttribute('role') || '').toLowerCase();
+              const controls = el.getAttribute && el.getAttribute('aria-controls');
+              let isCombobox = roleAttr === 'searchbox' || roleAttr === 'combobox'
+                || (el.getAttribute && el.getAttribute('aria-autocomplete'))
+                || (el.getAttribute && el.getAttribute('aria-expanded') === 'true');
+              if (!isCombobox && controls) {
+                try { if (document.getElementById(controls)) isCombobox = true; } catch {}
+              }
+              if (!isCombobox) {
+                try {
+                  const lbs = document.querySelectorAll('[role="listbox"],[role="menu"]');
+                  for (const lb of lbs) {
+                    const r = lb.getBoundingClientRect();
+                    if (r.width > 0 && r.height > 0) { isCombobox = true; break; }
+                  }
+                } catch {}
+              }
+              const dispatchKey = (type, key, keyCode) => {
+                el.dispatchEvent(new KeyboardEvent(type, { key, code: key, keyCode, bubbles: true, cancelable: true }));
+              };
+              if (isCombobox) {
+                await new Promise(r => setTimeout(r, 80));
+                dispatchKey('keydown', 'ArrowDown', 40);
+                dispatchKey('keyup', 'ArrowDown', 40);
+                await new Promise(r => setTimeout(r, 30));
+              }
+              dispatchKey('keydown', 'Enter', 13);
+              dispatchKey('keypress', 'Enter', 13);
+              dispatchKey('keyup', 'Enter', 13);
+              if (!isCombobox) {
+                const form = el.form || (el.closest && el.closest('form'));
+                if (form && typeof form.requestSubmit === 'function') form.requestSubmit();
+              }
+            } catch {}
+          }
+          return {
+            success: true,
+            method: 'set_field',
+            ref_id,
+            rect,
+            verified,
+            actual: verified ? undefined : actual.slice(0, 200),
+          };
+        } catch (e) {
+          return { success: false, error: e && e.message || String(e) };
+        }
+      },
     };
 
     const handler = handlers[msg.action];

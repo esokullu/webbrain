@@ -981,6 +981,10 @@ export class Agent {
       'wait_for_element': 'wait_for_element',
       'get_selection': 'get_selection',
       'execute_js': 'execute_js',
+      'get_accessibility_tree': 'get_accessibility_tree',
+      'click_ax': 'click_ax',
+      'type_ax': 'type_ax',
+      'set_field': 'set_field',
     };
 
     const action = actionMap[name];
