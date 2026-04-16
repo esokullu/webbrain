@@ -547,8 +547,9 @@ FORMS — read this:
 - verify_form() returns a structured list of all field names, types, and current values, plus a viewport screenshot. Compare each field against what you intended to type.
 - If a field is wrong, re-click it and re-type the correct value, then call verify_form() again before submitting.
 - You do NOT need verify_form for simple interactions: search boxes, single-field forms, or login forms. Use it for multi-field forms where wrong data has consequences (checkout, profile, issue creation, releases, etc.).
-- AFTER submitting a form, ALWAYS take a screenshot and read the page to confirm success. Look for: a success message/toast, the newly created item appearing in a list, or a detail page for the new item. Check that the details (name, price, dates) match what you intended.
+- AFTER submitting a form, ALWAYS take a screenshot and read the page to confirm success BEFORE doing anything else. Do not resume other actions until you verify the submission result. Look for: a success message/toast, the newly created item appearing in a list, or a detail page for the new item. Check that the details (name, price, dates) match what you intended.
 - NEVER claim you created something unless you see CONFIRMATION on the page. If you see a list of items, check the creation date — if it says "2 months ago" or a past date, that is an EXISTING item, NOT something you just created. Only items with a timestamp from right now are yours.
+- If you encounter any CAPTCHA, anti-bot check, or human verification challenge, STOP immediately and ask the user to solve it. Do not attempt to bypass it and do not continue automation until the user confirms it is solved.
 
 SCROLLING — read this:
 - Many forms and pages have content below the visible viewport. If you need to find a button, field, or section that isn't visible, use \`scroll_page({direction: "down"})\` to scroll down.
