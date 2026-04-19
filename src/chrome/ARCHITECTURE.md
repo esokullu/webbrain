@@ -1,13 +1,13 @@
 # WebBrain Chrome Extension — Architecture
 
-> Version 2.1.0 · Manifest V3 · Service Worker background
+> Version 3.6.8 · Manifest V3 · Service Worker background
 
 ## High-Level Overview
 
-WebBrain is a browser extension that gives an LLM full control over the browser tab the user is looking at. The user types a natural-language instruction in a side panel, and an autonomous agent loop calls the LLM, executes tool calls (click, type, navigate, screenshot, etc.), feeds results back to the LLM, and repeats until the task is done.
+WebBrain is a browser extension that gives an LLM full control over the browser tab the user is looking at. The user types a natural-language instruction in a side panel, and an autonomous agent loop calls the LLM, executes tool calls (click, type, navigate, screenshot, etc.), feeds the results back to the LLM, and repeats until the task is done or a loop detector halts it.
 
 ```
-┌────────────┐     messages      ┌─────────────┐    HTTP/JSON     ┌──────────────┐
+┌─────────────┐     messages      ┌─────────────┐    HTTP/JSON     ┌──────────────┐
 │  Side Panel │ ◄──────────────► │  Background  │ ◄──────────────► │  LLM Provider│
 │  (UI)       │   chrome.runtime │  (Agent)     │   fetch()        │  (OpenAI /   │
 │  sidepanel  │   .sendMessage   │  agent.js    │                  │   Anthropic /│
@@ -15,48 +15,56 @@ WebBrain is a browser extension that gives an LLM full control over the browser 
 └──────┬──────┘                  │  .js         │                  └──────────────┘
        │                         └──────┬───────┘
        │                                │
-       │     ┌──────────────────────────┤
-       │     │ chrome.debugger (CDP)    │ chrome.tabs.executeScript
-       │     ▼                         ▼
-       │  ┌──────────┐          ┌──────────────┐
-       │  │ CDP      │          │ Content      │
-       │  │ Client   │          │ Script       │
-       │  │ cdp-     │          │ content.js   │
-       │  │ client.js│          │ (injected)   │
-       │  └──────────┘          └──────────────┘
-       │        │                      │
-       └────────┴──────────────────────┘
-                    DOM / Page
+       │   ┌────────────────────────────┼──────────────────────┐
+       │   │ chrome.debugger (CDP)      │ chrome.scripting     │
+       │   ▼                            ▼                      │
+       │ ┌──────────┐  ┌──────────────────────────────────┐   │
+       │ │ CDP      │  │ Content Scripts (injected)       │   │
+       │ │ Client   │  │  • accessibility-tree.js          │   │
+       │ │ cdp-     │  │  • content.js                     │   │
+       │ │ client.js│  └──────────────────────────────────┘   │
+       │ └──────────┘                                          │
+       │       │                                               │
+       └───────┴──────────── DOM / Page ───────────────────────┘
 ```
 
 ## Directory Structure
 
 ```
 src/chrome/
-├── manifest.json            # Manifest V3 config
+├── manifest.json              # Manifest V3 config
 ├── src/
-│   ├── background.js        # Service worker — message router
+│   ├── background.js           # Service worker — message router
 │   ├── agent/
-│   │   ├── agent.js          # Core agent loop (1820+ lines)
-│   │   ├── tools.js          # Tool schemas + system prompts
-│   │   └── adapters.js       # Per-site guidance (GitHub, Stripe, etc.)
+│   │   ├── agent.js            # Core agent loop (~2000 lines)
+│   │   ├── tools.js            # Tool schemas + system prompts
+│   │   └── adapters.js         # Per-site guidance
 │   ├── cdp/
-│   │   └── cdp-client.js     # Chrome DevTools Protocol wrapper
+│   │   └── cdp-client.js       # Chrome DevTools Protocol wrapper
 │   ├── content/
-│   │   └── content.js        # Injected DOM reader / clicker
+│   │   ├── accessibility-tree.js  # AX tree builder + ref_id registry
+│   │   └── content.js          # Injected DOM reader / typer / clicker
 │   ├── network/
-│   │   └── network-tools.js  # fetch_url, research_url, downloads
+│   │   └── network-tools.js    # fetch_url, research_url, downloads
+│   ├── offscreen/
+│   │   ├── offscreen.html      # Offscreen document host
+│   │   └── offscreen.js        # HTTP fetch proxy (localhost/PNA fallback)
 │   ├── providers/
-│   │   ├── base.js           # Provider interface
-│   │   ├── manager.js        # Provider lifecycle
-│   │   ├── openai.js         # OpenAI-compatible (GPT, LM Studio, OpenRouter)
-│   │   ├── anthropic.js      # Anthropic Claude
-│   │   └── llamacpp.js       # Local llama.cpp server
+│   │   ├── base.js             # Provider interface
+│   │   ├── manager.js          # Provider lifecycle
+│   │   ├── openai.js           # OpenAI-compatible
+│   │   ├── anthropic.js        # Anthropic Claude
+│   │   ├── llamacpp.js         # Local llama.cpp server
+│   │   └── fetch-with-fallback.js  # Uses offscreen proxy on direct-fetch failure
+│   ├── trace/
+│   │   └── recorder.js         # Optional IndexedDB run recorder
 │   └── ui/
 │       ├── sidepanel.html
-│       ├── sidepanel.js      # Chat UI, verbose mode, deep verbose
+│       ├── sidepanel.js        # Chat UI, verbose mode, deep verbose
 │       ├── settings.html
-│       └── settings.js       # Provider config UI
+│       ├── settings.js         # Provider + display settings
+│       ├── traces.html
+│       └── traces.js           # Trace viewer / model comparison UI
 └── icons/
 ```
 
@@ -65,412 +73,257 @@ src/chrome/
 ```json
 {
   "permissions": [
-    "sidePanel",     // Side panel API
-    "activeTab",     // Access active tab
-    "scripting",     // Inject content scripts
-    "storage",       // Persist settings + conversations
-    "webNavigation", // Track navigation events
-    "debugger",      // Chrome DevTools Protocol (CDP) — key differentiator
-    "downloads"      // File download management
+    "sidePanel", "activeTab", "scripting", "storage",
+    "webNavigation", "debugger", "downloads",
+    "unlimitedStorage", "offscreen", "privateNetworkAccess"
   ],
-  "host_permissions": ["<all_urls>"]
+  "host_permissions": ["<all_urls>", "http://localhost/*", "http://127.0.0.1/*"]
 }
 ```
 
-The `debugger` permission is the most important — it allows CDP access for trusted mouse/keyboard events, pixel-perfect screenshots, and shadow DOM piercing.
+| Permission | Why |
+|---|---|
+| `debugger` | CDP access — trusted mouse/keyboard, pixel-perfect screenshots, shadow-DOM piercing. The single most important differentiator vs Firefox. |
+| `unlimitedStorage` | Optional trace recorder persists agent runs (LLM I/O + screenshots) into IndexedDB. A multi-step run can be 1–10 MB; the default ~10 MB origin cap fills after a few runs. |
+| `offscreen` | Localhost LLM servers (llama.cpp, LM Studio, Ollama) are unreachable from the MV3 service worker due to CORS / Private Network Access restrictions. An offscreen document is created on demand as a fetch proxy. |
+| `privateNetworkAccess` | Same motivation — allow calling `http://localhost:8080` from the extension. |
+
+---
+
+## The Accessibility-Tree System (v3.6.x)
+
+The primary page-interaction path is now an AX tree + `ref_id` model, replacing the older index-based `get_interactive_elements` for almost all flows.
+
+### `accessibility-tree.js`
+
+Injected before `content.js` via `content_scripts`. Exposes three globals on `window`:
+
+- `__generateAccessibilityTree(filter, maxDepth, maxChars, ref_id)` — walks the DOM and emits a flat, indented text tree:
+
+  ```
+  dialog [ref_166]
+   heading "Add a product" [ref_167]
+   button "Close" [ref_169]
+   textbox "Name" [ref_170] type="text" placeholder="Product name" value="namaz"
+   combobox "…" [ref_180] type="button"
+  ```
+
+- `__wb_ax_lookup(ref_id)` — resolves a `ref_N` string back to the live `Element`. Backed by a `window.__wbElementMap` of `WeakRef`s, so ids stay stable across calls as long as the element stays in the DOM.
+- `__wb_ax_suggest(ref_id, n)` — when a lookup misses, returns nearby still-valid refs so the error message can guide the model back on track.
+
+### Filters
+
+| filter | Behavior |
+|---|---|
+| `all` | Whole DOM. Useful when anchoring at a specific `ref_id`. |
+| `visible` | **Default for the agent.** In-viewport, visible nodes only, soft-truncated at 3000 chars. |
+| `interactive` | Only clickable/typeable things. |
+
+### What makes the tree useful for small models
+
+- **Overlay hoisting.** Open dialogs / listboxes / menus / `[aria-expanded=true]` comboboxes are emitted first under an `[open overlays]` banner so portal-rendered popups (React / Radix / Stripe) survive the 3000-char soft cap.
+- **Accessible-name resolution** (`getAccessibleName`): priority is `<select>` selected option → `aria-label` → `aria-labelledby` (concatenates all referenced ids) → `placeholder` → `title` → `alt` → `<label for>` → input `value` (submit/button/reset only, never for text inputs — those emit `value="..."` separately) → direct text → `innerText` fallback for buttons/links/summary → `innerText` fallback for option/menuitem/tab/listitem/row/gridcell/cell → preceding-sibling text for unlabeled form fields ("Every 1 month(s)" pattern) → direct-text fallback.
+- **`ref_id` stability.** WeakRef-backed registry with a monotonic counter means a ref you saw three turns ago still works if the element survived.
+
+### AX tools (content-script handlers)
+
+| Tool | Returns | Notes |
+|---|---|---|
+| `get_accessibility_tree` | Text tree + viewport | Primary page read path. |
+| `click_ax({ref_id})` | `{success, method, tag, rect, name, href?, navigates?, hint?}` | Scrolls into view → focuses → `el.click()`. Emits hints: text-entry elements get a `next_required: 'type_ax'` nudge; combobox openers get "the popup is in a portal — re-read the full tree". |
+| `type_ax({ref_id, text, clear})` | `{success, method, rect}` | React-compatible: uses the native HTMLInputElement/HTMLTextAreaElement value setter. Rejects non-typeable INPUT subtypes (checkbox/radio/submit/file/...) with a clear error pointing at `click_ax`. |
+| `set_field({ref_id, text, clear, submit})` | `{success, verified, ...}` | One-shot focus + clear + type + (optional) submit. **Combobox-aware:** if the element or an ancestor looks like a searchbox/combobox/open listbox, `submit:true` dispatches `ArrowDown` → `Enter` with small delays (Stripe-style virtualized pickers need the first option highlighted before Enter commits it). Bare text inputs still get `Enter` + `form.requestSubmit()`. |
 
 ---
 
 ## Agent Loop
 
-The agent lives in `agent.js` and runs inside the background service worker. It implements a multi-step tool-use loop:
+Lives in `agent.js`, runs in the service worker. Same shape as always:
 
 ```
 User message
     │
     ▼
-┌─ _enrichFirstUserMessage() ──────────────────────────────┐
-│  • Attach page URL + title                                │
-│  • Inject site adapter notes (if URL matches)             │
-│  • Inject /allow-api override (if set)                    │
-│  • Capture viewport screenshot (if provider has vision)   │
-│  • Build multimodal content array [text, image_url]       │
-└───────────────────────────────────────────────────────────┘
+_enrichFirstUserMessage()
+    • Attach page URL + title
+    • Inject site adapter notes (if URL matches)
+    • Capture viewport screenshot (if provider supports vision)
+    • Build multimodal content [text, image_url]
     │
     ▼
-┌─ Main Loop (max 120 steps) ──────────────────────────────┐
-│  1. Call provider.chat(messages, {tools, temp, maxTokens})│
-│  2. If response has tool_calls:                           │
-│     a. Execute each tool via _executeToolBatch()          │
-│     b. Push tool results into messages[]                  │
-│     c. Auto-screenshot if state changed + vision          │
-│     d. Detect loops (nudge → stop)                        │
-│     e. Detect unintended navigation → warn model          │
-│     f. Continue loop                                      │
-│  3. If response has only text: return as final answer     │
-│  4. If done() tool called: return summary immediately     │
-└───────────────────────────────────────────────────────────┘
+Main loop (max steps from Settings, default 60)
+    1. provider.chat(messages, {tools, temp, maxTokens})
+    2. If response has tool_calls:
+       a. _executeToolBatch() — run each tool
+       b. Push tool results into messages
+       c. Auto-screenshot if state changed AND provider has vision
+          (mode configurable: off / navigation / state_change / every_step)
+       d. Loop detection — nudge or stop
+       e. Navigation detection — warn on unintended SPA routing
+       f. Record trace event if tracing enabled
+    3. If response has text only → final answer
+    4. If done() called → summary (but see blockedDone below)
 ```
 
-### Two execution modes
+### Execution modes
 
 | | `processMessage()` | `processMessageStream()` |
 |---|---|---|
-| LLM call | `provider.chat()` — single response | `provider.chatStream()` — SSE chunks |
-| UI updates | `onUpdate('text', ...)` at end | `onUpdate('text_delta', ...)` incrementally |
+| LLM call | `provider.chat()` | `provider.chatStream()` (SSE) |
+| UI updates | `onUpdate('text', ...)` at end | `onUpdate('text_delta', ...)` live |
 | Tool calls | Parsed from `result.toolCalls` | Accumulated from stream deltas |
-| Use case | Simpler, works with all providers | Better UX for long responses |
+
+### done() blocking (v3.6.4+)
+
+`done()` doesn't mean "done" if the page disagrees. Before accepting the summary, the agent probes for visible dialogs / forms / live-region messages. If the summary claims "created" / "saved" but a modal is still open, it returns `{success: false, blockedDone: true}` up to 2 times per tab, forcing the model to take another step. This stopped a class of "hallucinated success" failures on Stripe.
+
+### Duplicate-submit guard (v3.6.5+)
+
+Before any `click` whose resolved text matches `^(create|save|submit|add|post|publish|send|confirm|place order|pay|checkout|update|finish|done)\b` the agent checks a per-tab+URL 45-second window. Duplicate clicks in that window are blocked unless `_allowResubmit` is set. Prevents the "clicked Create three times → three products created" failure mode.
+
+### Ambiguous-click CDP enrichment (v3.6.4+)
+
+When `click({text})` or `click({selector})` finds multiple matches, the error payload now carries full candidates (`ref_id`, rect, accessible name, ancestor summary) instead of just count. Lets the model pick the right one instead of looping.
 
 ---
 
-## Example LLM Request & Response
+## Tools (full list)
 
-### First turn — Act mode, vision-capable provider
+### AX / page reading
+`get_accessibility_tree`, `read_page` (legacy prose), `screenshot`, `get_interactive_elements` (legacy indexed list), `get_selection`, `extract_data`, `get_shadow_dom`, `get_frames`
 
-**What the agent sends to `provider.chat()`:**
+### Interaction
+`click_ax`, `type_ax`, `set_field`, `click` (by text/selector/index/coords — legacy), `type_text`, `press_keys`, `scroll`, `navigate`, `new_tab`, `wait_for_element`, `execute_js`, `iframe_read`, `iframe_click`, `iframe_type`, `upload_file`
 
-```json
-{
-  "model": "gpt-4o",
-  "messages": [
-    {
-      "role": "system",
-      "content": "You are WebBrain, an AI browser agent running in Act mode. You can read web pages, interact with elements, navigate, and perform multi-step tasks autonomously.\n\nOPERATING ENVIRONMENT — read this carefully:\n- You are NOT a generic chatbot. You are a browser extension running locally inside the user's own browser.\n- You operate inside the user's authenticated browser session...\n\n[Full Act system prompt — ~120 lines of behavioral guidance]\n\nCLICKING — read this:\n- Default text matching is EXACT (case-insensitive). If exact fails, the system automatically tries prefix then substring...\n\nINDEX INSTABILITY — read this:\n- Indices from get_interactive_elements are NOT stable identifiers..."
-    },
-    {
-      "role": "user",
-      "content": [
-        {
-          "type": "text",
-          "text": "[Page context — URL: https://dashboard.stripe.com/test/products — Title: Products | Stripe Dashboard]\n\n[Site guidance for stripe — FINANCE / HIGH-STAKES]\n- Always confirm amounts before submitting...\n\n[Initial viewport screenshot follows. The image is 1440×900 pixels and represents the visible viewport at a 1:1 CSS-pixel coordinate system...]\n\ncreate a new subscription called Visne for $1000/year"
-        },
-        {
-          "type": "image_url",
-          "image_url": {
-            "url": "data:image/jpeg;base64,/9j/4AAQ..."
-          }
-        }
-      ]
-    }
-  ],
-  "tools": [
-    {
-      "type": "function",
-      "function": {
-        "name": "read_page",
-        "description": "Read the current page content including title, URL, text content, links, and forms.",
-        "parameters": { "type": "object", "properties": {}, "required": [] }
-      }
-    },
-    {
-      "type": "function",
-      "function": {
-        "name": "click",
-        "description": "Click an element. FOUR ways to use it: (1) CSS selector, (2) visible text, (3) element index from get_interactive_elements, (4) x/y coordinates...",
-        "parameters": {
-          "type": "object",
-          "properties": {
-            "text": { "type": "string" },
-            "textMatch": { "type": "string", "enum": ["exact", "prefix", "contains"] },
-            "selector": { "type": "string" },
-            "index": { "type": "number" },
-            "x": { "type": "number" },
-            "y": { "type": "number" }
-          }
-        }
-      }
-    },
-    {
-      "type": "function",
-      "function": {
-        "name": "type_text",
-        "description": "Type text into an input field...",
-        "parameters": {
-          "type": "object",
-          "properties": {
-            "selector": { "type": "string" },
-            "index": { "type": "number" },
-            "text": { "type": "string" },
-            "clear": { "type": "boolean" }
-          },
-          "required": ["text"]
-        }
-      }
-    }
-    // ... 27 more tools (screenshot, scroll, navigate, verify_form, press_keys, etc.)
-  ],
-  "tool_choice": "auto",
-  "temperature": 0.3,
-  "max_tokens": 4096,
-  "stream": false
-}
-```
+### Network / files
+`fetch_url`, `research_url`, `list_downloads`, `read_downloaded_file`, `download_resource_from_page`, `download_files`
 
-### LLM response — tool call
+### Safety / control
+`verify_form`, `done`
 
-```json
-{
-  "choices": [{
-    "message": {
-      "role": "assistant",
-      "content": null,
-      "tool_calls": [{
-        "id": "call_abc123",
-        "type": "function",
-        "function": {
-          "name": "click",
-          "arguments": "{\"text\":\"Create product\"}"
-        }
-      }]
-    }
-  }]
-}
-```
-
-### What happens next
-
-1. Agent parses `tool_calls`, extracts `click({text: "Create product"})`
-2. Calls `executeTool(tabId, 'click', {text: 'Create product'})`
-3. CDP evaluates JS in page to find element matching "Create product" (exact → prefix → contains)
-4. Dispatches `Input.dispatchMouseEvent` (mouseMoved, mousePressed, mouseReleased) at element center
-5. Returns `{success: true, method: 'cdp-by-text', tag: 'BUTTON', text: 'Create product'}`
-6. Agent pushes tool result into messages as a `tool` role message
-7. Detects state change → captures auto-screenshot → appends as user message with image
-8. Calls provider.chat() again with updated messages
-9. Loop continues until LLM responds with text only (no tool_calls) or calls `done()`
-
-### Tool result → next LLM call
-
-The messages array grows with each tool call/result cycle:
-
-```json
-[
-  { "role": "system", "content": "..." },
-  { "role": "user", "content": [{"type": "text", "text": "..."}, {"type": "image_url", ...}] },
-  {
-    "role": "assistant",
-    "content": null,
-    "tool_calls": [{"id": "call_abc123", "function": {"name": "click", "arguments": "{\"text\":\"Create product\"}"}}]
-  },
-  {
-    "role": "tool",
-    "tool_call_id": "call_abc123",
-    "content": "{\"success\":true,\"method\":\"cdp-by-text\",\"tag\":\"BUTTON\",\"text\":\"Create product\"}"
-  },
-  {
-    "role": "user",
-    "content": [
-      {"type": "text", "text": "[Auto-screenshot of current viewport after the action above. Image is 1440×900 pixels...]"},
-      {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,..."}}
-    ]
-  }
-]
-```
-
----
-
-## Tools
-
-### Full tool list (30 tools)
-
-| Tool | Description | Ask | Act |
-|------|-------------|-----|-----|
-| `read_page` | Page content (title, URL, text, links, forms) | ✓ | ✓ |
-| `screenshot` | Viewport capture as base64 | ✓ | ✓ |
-| `get_interactive_elements` | Indexed list of clickable/typable elements | ✓ | ✓ |
-| `click` | Click by text/selector/index/coordinates | | ✓ |
-| `type_text` | Type into focused or targeted field | | ✓ |
-| `press_keys` | Press Escape, Tab, or Enter | | ✓ |
-| `scroll` | Scroll page up/down/to element | ✓ | ✓ |
-| `navigate` | Go to URL | | ✓ |
-| `new_tab` | Open URL in new tab | | ✓ |
-| `wait_for_element` | Wait for selector to appear | | ✓ |
-| `extract_data` | Extract tables/headings/images | ✓ | ✓ |
-| `get_selection` | Get highlighted text | ✓ | ✓ |
-| `execute_js` | Run arbitrary JavaScript in page | | ✓ |
-| `get_shadow_dom` | Read shadow DOM content | | ✓ |
-| `get_frames` | List iframes on page | | ✓ |
-| `iframe_read` | Read inside cross-origin iframe | | ✓ |
-| `iframe_click` | Click inside cross-origin iframe | | ✓ |
-| `iframe_type` | Type inside cross-origin iframe | | ✓ |
-| `fetch_url` | HTTP request with user's cookies | ✓ | ✓ |
-| `research_url` | Open URL in background tab, read content | ✓ | ✓ |
-| `list_downloads` | List recent downloads | ✓ | ✓ |
-| `read_downloaded_file` | Read a downloaded file's content | | ✓ |
-| `download_resource_from_page` | Download a resource from current page | | ✓ |
-| `download_files` | Download files by URL | | ✓ |
-| `verify_form` | Read form field values + screenshot before submit | | ✓ |
-| `done` | Signal task completion with summary | ✓ | ✓ |
-
-### Click tool — text matching behavior
-
-The `click({text: "..."})` tool uses a cascading match strategy:
-
-```
-1. EXACT match     → "Save" matches "Save" only
-2. PREFIX match    → "Save" matches "Save changes"
-3. CONTAINS match  → "Save" matches "Auto-Save settings"
-```
-
-- Default (no `textMatch` param): tries exact → prefix → contains automatically
-- If `textMatch` is explicitly set: only that mode is used
-- **Ambiguity detection**: if >1 element matches at any level, returns an error with candidate list instead of clicking arbitrarily
-
-### Press keys (v1)
-
-Limited to three safe keys: `Escape`, `Tab`, `Enter`. Uses CDP `Input.dispatchKeyEvent` for trusted events. Primary use case: dismissing modals, advancing focus, submitting forms.
-
-### Verify form (v2.1)
-
-Pre-submission safety check. Reads all `<input>`, `<select>`, and `<textarea>` values from a form and captures a viewport screenshot. The LLM compares returned values against what it intended to type, catching silent `type_text` failures (focus lost, field cleared by JS, wrong target).
-
-```
-verify_form({selector: "#checkout-form"})
-→ {
-    success: true,
-    action: "https://example.com/checkout",
-    method: "post",
-    fieldCount: 4,
-    fields: [
-      { name: "email", type: "email", value: "user@example.com", placeholder: "Email" },
-      { name: "card",  type: "text",  value: "4242...4242",      placeholder: "Card number" },
-      { name: "plan",  type: "select", value: "Pro [$49/mo]",    placeholder: "" },
-      { name: "terms", type: "checkbox", value: "on",            placeholder: "" }
-    ],
-    image: "data:image/png;base64,..."
-  }
-```
-
-- If `selector` is omitted, uses the form containing the focused element, or the first form on the page
-- Hidden and submit-type inputs are excluded
-- Chrome uses CDP `Runtime.evaluate` + `Page.captureScreenshot`
-- System prompt guides the LLM to call this before submitting important multi-field forms (not search boxes or logins)
+Mode gating (Ask vs Act) continues as before — Ask mode is read-only.
 
 ---
 
 ## Chrome DevTools Protocol (CDP)
 
-The `cdp-client.js` module wraps `chrome.debugger` to provide:
+`cdp-client.js` wraps `chrome.debugger`:
 
 | Capability | CDP Domain | Use |
 |---|---|---|
-| Screenshot | `Page.captureScreenshot` | Viewport capture |
+| Screenshot | `Page.captureScreenshot` | Viewport + full-page |
 | Click | `Input.dispatchMouseEvent` | Trusted mouse events |
-| Keyboard | `Input.dispatchKeyEvent` | press_keys, clear field |
-| Evaluate JS | `Runtime.evaluate` | Run code in page context |
-| DOM query | `DOM.querySelector` | Shadow DOM piercing |
+| Keyboard | `Input.dispatchKeyEvent` | Trusted keystrokes |
+| Evaluate | `Runtime.evaluate` | Run code in page context |
+| DOM query | `DOM.*` | Shadow DOM piercing |
 
-CDP events are **trusted** — they behave exactly like real user input. This is critical for sites that reject synthetic `el.click()` or `new MouseEvent()`.
+CDP events are **trusted** (`event.isTrusted === true`). Many sites reject synthetic `el.click()`; CDP is what lets WebBrain work on those.
 
 ### CDP click vs content-script click
 
 | | CDP path | Content-script fallback |
 |---|---|---|
-| How | `Input.dispatchMouseEvent` at (x,y) | `el.click()` in injected JS |
-| Trusted | Yes — indistinguishable from real user | No — `event.isTrusted === false` |
-| Cross-origin | Works (coordinates don't care about origin) | Blocked by same-origin |
-| Used when | Default for Chrome | Fallback when CDP unavailable |
+| How | `Input.dispatchMouseEvent(x,y)` | `el.click()` |
+| Trusted | Yes | No |
+| Cross-origin | Works | Blocked |
+| Used when | Default in Chrome, or `click({x,y})` / `click({text})` after coord resolution | `click_ax` (focuses the exact element, dispatches in-page) |
 
 ---
 
 ## Provider System
 
-### Provider interface (`base.js`)
+### Interface (`base.js`)
 
 ```javascript
 class BaseProvider {
-  async chat(messages, options)       // → { content, toolCalls, usage }
-  async *chatStream(messages, options) // yields { type, content }
-  get supportsTools()                  // boolean
-  get supportsVision()                 // boolean
-  async testConnection()              // throws on failure
+  async chat(messages, options)         // → { content, toolCalls, usage }
+  async *chatStream(messages, options)  // yields { type, content }
+  get supportsTools()
+  get supportsVision()
+  async testConnection()
 }
 ```
 
-### Provider implementations
+### Implementations
 
-| Provider | Endpoint | Vision detection | Notes |
-|---|---|---|---|
-| `OpenAIProvider` | `/v1/chat/completions` | Model name regex (`gpt-4o`, `gpt-5`, vision models) | Also handles LM Studio, OpenRouter |
-| `AnthropicProvider` | `/v1/messages` | `claude-(3\|sonnet-4\|opus-4)` patterns | Converts OpenAI format → Anthropic blocks |
-| `LlamaCppProvider` | `localhost:8080/v1/chat/completions` | Explicit opt-in via config | Local inference, OpenAI-compatible |
-| Ollama (via `OpenAIProvider`) | `localhost:11434/v1/chat/completions` | Explicit opt-in via config | Uses OpenAI-compatible API, apiKey='ollama' |
+| Provider | Endpoint | Vision detection |
+|---|---|---|
+| `OpenAIProvider` | `/v1/chat/completions` | Model-name regex |
+| `AnthropicProvider` | `/v1/messages` | `claude-(3\|sonnet-4\|opus-4)` patterns |
+| `LlamaCppProvider` | `localhost:8080/v1/chat/completions` | Explicit opt-in |
+| Ollama (via OpenAI provider) | `localhost:11434/v1/*` | Explicit opt-in |
 
-### Anthropic message conversion
+### Anthropic conversion
 
-The agent uses OpenAI-format messages internally. The Anthropic provider converts:
+OpenAI format → Anthropic blocks: system → separate `system` field; `assistant + tool_calls` → `assistant + tool_use` blocks; `tool` role → `user + tool_result` blocks; `image_url` data URLs → `image source`.
 
-```
-OpenAI format                          Anthropic format
-─────────────                          ─────────────────
-system message                    →    separate `system` field
-assistant + tool_calls            →    assistant + tool_use blocks
-tool role + tool_call_id          →    user role + tool_result blocks
-image_url (data:base64)           →    image source (base64 block)
-```
+### fetch-with-fallback
+
+`providers/fetch-with-fallback.js` tries a direct `fetch` first. On failure (typically a `TypeError: Failed to fetch` against localhost), it lazily creates an offscreen document and proxies through it. This is the only reason the `offscreen` permission exists.
 
 ---
 
 ## Loop Detection
 
-Three independent detectors run in parallel, strongest action wins:
+Three independent detectors, strongest action wins:
 
-### 1. General repeat detector
-- Records last 6 tool calls (name + args hash + success/error)
-- **Nudge** (warning injected into context): 3 identical calls, or ABAB oscillation
-- **Stop** (conversation halted): 8 nudges without 2 consecutive healthy calls between
-
-### 2. Coordinate click detector
-- Buckets clicks to 5px radius
-- **Nudge** at 5 identical coordinate clicks
-- **Stop** at 8 — with message explaining the coordinates hit empty space
-- Separate window of 12 entries (independent of general detector)
-
-### 3. Navigation detector
-- Snapshots URL before `click`, `navigate`, `execute_js`, `iframe_click`
-- Compares URL after (200ms delay for SPA routing)
-- If URL changed unexpectedly (not via `navigate`), injects `[NAVIGATION OCCURRED]` warning
+1. **General repeat** — last 6 tool calls by (name + args hash + outcome). Nudge at 3 identical or ABAB. Stop at 8 nudges without 2 consecutive healthy calls between.
+2. **Coordinate click** — 5-pixel bucketing. Nudge at 5 same-bucket clicks. Stop at 8.
+3. **Navigation** — snapshot URL before `click`/`navigate`/`execute_js`/`iframe_click`, compare 200 ms later. Unexpected change → `[NAVIGATION OCCURRED]` warning.
 
 ---
 
 ## Context Management
 
-### Automatic trimming (`_manageContext`)
-- Triggers when messages > 50 or total chars > 80,000
-- Strategy: keep system prompt + summarize oldest messages via LLM + keep last 16 verbatim
-- Compressed summary capped at 2,000 chars
-
-### Emergency trimming (`_emergencyTrim`)
-- Triggered by context overflow errors from the provider
-- Aggressively removes oldest messages, retries once
-
-### Image pruning (`_pruneOldImages`)
-- Before each LLM call, strips base64 images from all but the last 4 messages
-- Prevents vision-capable conversations from blowing up context
-
-### Tool result limiting (`_limitToolResult`)
-- Caps individual tool results at 8,000 chars
-- Truncates with `[truncated]` marker
+- **Auto-trim** (`_manageContext`): triggered at >50 messages or >80,000 chars; keeps system prompt + LLM-summarized old messages (cap 2000 chars) + last 16 verbatim.
+- **Emergency trim** (`_emergencyTrim`): on provider context-overflow error.
+- **Image pruning** (`_pruneOldImages`): before every call, strip base64 images from all but the last 4 messages.
+- **Tool result cap**: individual results truncated at 8,000 chars with `[truncated]` marker.
 
 ---
 
 ## Conversation Persistence
 
-Conversations survive service worker restarts (important for MV3):
+MV3 service workers die; conversations mustn't:
 
 ```
 chrome.storage.session['agentConv:<tabId>'] = JSON.stringify(messages)
 ```
 
-- **Persist**: debounced 300ms after any message change
-- **Hydrate**: lazy-loaded on first message to a tab
-- **Per-tab isolation**: each tab has its own conversation + mode
+Persisted debounced 300 ms after any change; lazily hydrated on first message to a tab; per-tab isolated.
+
+---
+
+## Trace Recorder (optional)
+
+Off by default. Enabled via Settings → Display → "Record traces". When on, every agent run writes to an IndexedDB database (`webbrain-traces`):
+
+- `runs` store: one row per user message — model, provider, token totals, timestamps.
+- `events` store: one row per LLM request/response, tool call, screenshot. Rows are indexed by `(runId, seq)`.
+
+The Traces page (`ui/traces.html`) lists runs and renders their event timelines. Exporting produces a JSON blob identical to the ones used in this session's debugging. Data never leaves the machine — this is why `unlimitedStorage` is requested (a multi-step run with screenshots is 1–10 MB).
+
+---
+
+## Display Settings
+
+`Settings → Display` toggles (stored in `chrome.storage.local`):
+
+| Setting | Effect |
+|---|---|
+| Verbose mode | Shows full tool args + JSON results in chat instead of compact labels. |
+| Screenshot fallback | Capture a screenshot when DOM read fails or returns insufficient content. |
+| Site adapters | Inject per-site guidance into the first user message (default on). |
+| Auto-screenshot | `off` / `navigation` / `state_change` (default) / `every_step`. |
+| Record traces | Enable the trace recorder (see above). |
+| Completion sound | Play a chime in the side panel when the agent finishes. |
+| Max Agent Steps | Step cap, default 60. |
 
 ---
 
 ## Site Adapters
 
-17 adapters inject site-specific guidance into the first user message:
+17 adapters inject site-specific guidance into the first user message. Re-injected mid-conversation if the user navigates to a different matched site.
 
 | Category | Sites |
 |---|---|
@@ -480,87 +333,67 @@ chrome.storage.session['agentConv:<tabId>'] = JSON.stringify(messages)
 | Publishing | Medium, Substack |
 | Commerce | Amazon |
 | Cloud | AWS, GCP |
-| Finance | Stripe, Coinbase, Chase, Robinhood (generic) |
+| Finance | Stripe, Coinbase, Chase, Robinhood |
 
-Finance adapters get an extra `[FINANCE / HIGH-STAKES]` heading and conservative guidance.
-
-Adapters are re-injected mid-conversation if the user navigates to a different matched site.
+Finance adapters carry a `[FINANCE / HIGH-STAKES]` banner and extra confirmation guidance.
 
 ---
 
 ## Side Panel UI
 
 ### Modes
-- **Ask mode**: read-only tools, analysis/Q&A
-- **Act mode**: full tool set, autonomous actions
+- **Ask** — read-only tools, analysis / Q&A.
+- **Act** — full tool set, autonomous actions.
 
 ### Verbose mode
-- **Normal**: shows compact step labels ("clicking 'Submit'", "typing 'hello'")
-- **Verbose ON**: shows full JSON tool call args + truncated results
-- **Deep verbose** (hidden): Shift+click the verbose button → dumps full LLM request/response log to DevTools console
-
-### Deep verbose log
-
-The agent maintains a ring buffer (`_debugLog`, max 200 entries) of every LLM call:
-
-```javascript
-// Logged for every provider.chat() / provider.chatStream() call:
-{ type: 'llm_request',       step: 1, provider: 'OpenAIProvider', messages: [...], options: {...}, timestamp: '...' }
-{ type: 'llm_response',      step: 1, content: '...', toolCalls: [...], timestamp: '...' }
-{ type: 'llm_error',         step: 2, error: 'Rate limit exceeded', timestamp: '...' }
-{ type: 'llm_stream_request', step: 3, provider: 'AnthropicProvider', messages: [...], ... }
-```
-
-Shift+clicking the verbose button sends `get_debug_log` to the background, which returns the full buffer. The sidepanel dumps it to `console.log` with color-coded, collapsible groups.
+- **Normal** — compact step labels.
+- **Verbose ON** — full JSON args + truncated results.
+- **Deep verbose** (Shift+click verbose button) — dump the full LLM request/response ring buffer (200 entries) to DevTools console with color-coded groups.
 
 ---
 
 ## Message Flow — Complete Walkthrough
 
 ```
-1. User types "click the Submit button" in side panel
-2. sidepanel.js sends {action:'chat', text:'...', mode:'act', tabId:42}
-   via chrome.runtime.sendMessage
+1. User types "create a product 'namaz' priced 500 CNY, recurring every 2 months"
 
-3. background.js receives, calls agent.processMessage(42, text, onUpdate, 'act')
+2. sidepanel.js → chrome.runtime.sendMessage({action:'chat', text, mode:'act', tabId:42})
 
-4. Agent builds messages array:
-   [system prompt, enriched user message with screenshot]
+3. background.js → agent.processMessage(42, text, onUpdate, 'act')
 
-5. Agent calls provider.chat(messages, {tools, temp:0.3, maxTokens:4096})
-   → Logged to _debugLog as 'llm_request'
+4. _enrichFirstUserMessage: attach URL/title + site adapter + viewport screenshot
 
-6. Provider POSTs to LLM API, gets response
-   → Logged to _debugLog as 'llm_response'
+5. provider.chat(messages, {tools, temp:0.3, maxTokens:4096})
+   → trace recorder logs llm_request
 
-7. LLM returns tool_calls: [{name:'click', args:{text:'Submit'}}]
+6. LLM returns tool_calls: [{name:'get_accessibility_tree', args:{filter:'visible'}}]
 
-8. Agent calls _executeToolBatch():
-   a. onUpdate('tool_call', ...) → sidepanel shows "clicking 'Submit'"
-   b. executeTool() → CDP evaluates JS to find "Submit" element
-   c. CDP dispatches mouse events at element center
-   d. onUpdate('tool_result', ...) → sidepanel shows result
-   e. State change detected → auto-screenshot captured
-   f. Screenshot appended to messages as user content
+7. _executeToolBatch → content script → window.__generateAccessibilityTree(...)
+   → returns indented tree text
 
-9. Agent calls provider.chat() again with updated messages
-   → LLM sees tool result + new screenshot
+8. Agent appends tool result, auto-screenshots (state unchanged → skipped), loops
 
-10. LLM responds with text only (no tool_calls):
-    "Done — I clicked the Submit button."
+9. Over ~15 steps the agent: clicks "Create product", fills name via set_field,
+   fills price, opens currency combobox, types "CNY" with submit:true
+   (ArrowDown+Enter commits the filtered option), opens billing-period dropdown,
+   selects "Custom", sets count to 2 and unit to "month(s)", clicks "Add product".
 
-11. Agent returns final text
-    → sidepanel renders as assistant message
+10. done() returns the summary — blockedDone check passes since the dialog closed
+    and an alertdialog "Product created" is now visible.
+
+11. sidepanel renders the assistant message + optional completion chime.
 ```
 
 ---
 
 ## Security Model
 
-- Extension runs with user's full browser permissions — no additional auth needed
-- `host_permissions: <all_urls>` allows content script injection anywhere
-- CDP debugger access allows trusted events on any tab
-- Cross-origin iframes accessible via content script injection (extension privilege)
-- `/allow-api` flag required for API mutations (POST/PUT/DELETE via fetch_url)
-- Finance sites get extra safety warnings via adapters
-- Tool results are capped at 8KB to prevent context injection attacks
+- Extension runs with the user's full browser permissions — no additional auth.
+- `<all_urls>` host permission → content-script injection anywhere.
+- `debugger` → trusted events on any tab.
+- Cross-origin iframes reachable via content-script injection (extension privilege).
+- `/allow-api` flag required for API mutations (POST/PUT/DELETE via `fetch_url`).
+- Finance adapters layer extra confirmation guidance.
+- Tool results capped at 8 KB to limit prompt-injection surface.
+- Offscreen proxy only forwards requests the user's own code initiated (provider SDK traffic).
+- Trace data is local-only — never transmitted.

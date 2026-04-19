@@ -1,18 +1,21 @@
 # WebBrain Firefox Extension — Architecture
 
-> Version 2.1.0 · Manifest V2 · Background Page
+> Version 3.6.8 · Manifest V2 · Background Page
 
 ## How Firefox Differs from Chrome
 
-Firefox uses Manifest V2 (background page, not service worker) and has **no access to the Chrome DevTools Protocol (CDP)**. This means:
+Firefox uses Manifest V2 (background page, not service worker) and has **no access to the Chrome DevTools Protocol (CDP)**. Starting with v3.6.x, the Firefox build has been brought to functional parity with Chrome for the accessibility-tree (AX) subsystem — the same tree builder, the same four AX tools (`get_accessibility_tree`, `click_ax`, `type_ax`, `set_field`), and the same ref_id registry. What Firefox still lacks:
 
-- **No trusted events** — clicks and key presses are synthetic (`el.click()`, `new KeyboardEvent()`), and some sites reject `event.isTrusted === false`
-- **No pixel-perfect screenshots** — uses `browser.tabs.captureVisibleTab()` instead of CDP `Page.captureScreenshot`
-- **No conversation persistence** — conversations are lost when the sidebar closes (no session storage equivalent)
-- **No shadow DOM piercing** — content script can read shadow DOM via `element.shadowRoot`, but can't pierce closed shadow roots
-- **Fewer tools** — 27 vs Chrome's 30 (missing full-page screenshot, shadow DOM query, file upload)
+- **No trusted events** — clicks and key presses are synthetic (`el.click()`, `new KeyboardEvent()`), and some sites reject `event.isTrusted === false`. All AX-tool click/type paths use synthetic dispatch in Firefox; the CDP-backed trusted-event path in Chrome has no Firefox equivalent.
+- **No pixel-perfect / full-page screenshots** — uses `browser.tabs.captureVisibleTab()` instead of CDP `Page.captureScreenshot`.
+- **No conversation persistence** — conversations are lost when the sidebar closes (no session-storage equivalent for MV2 background pages).
+- **No shadow DOM piercing** — content script can read open shadow roots via `element.shadowRoot`, but cannot pierce closed roots.
+- **No offscreen document** — no HTTP fetch proxy for localhost LLM servers with Private Network Access / CORS issues. User must ensure their local LLM server sends permissive CORS headers.
+- **No trace recorder** — no IndexedDB run recorder, no `unlimitedStorage` permission, no trace viewer UI.
+- **No duplicate-submit guard / no ambiguous-click CDP enrichment / no `blockedDone` heuristic** — these agent-level safety and precision features from Chrome v3.6.x were intentionally skipped in the Firefox port as higher-risk and CDP-dependent. They can be layered on later.
+- **Fewer tools overall** — Firefox exposes 31 tools (27 legacy + 4 AX) vs Chrome's ~34 (missing full-page screenshot, shadow-dom-query via CDP, file upload via CDP).
 
-Everything else — the agent loop, LLM providers, site adapters, loop detection — is architecturally identical.
+Everything else — the agent loop, LLM providers, site adapters, loop detection, context management — is architecturally identical to Chrome.
 
 ---
 
@@ -20,58 +23,60 @@ Everything else — the agent loop, LLM providers, site adapters, loop detection
 
 ```
 ┌────────────┐     messages      ┌─────────────┐    HTTP/JSON     ┌──────────────┐
-│  Sidebar    │ ◄──────────────► │  Background  │ ◄──────────────► │  LLM Provider│
-│  (UI)       │  browser.runtime │  Page        │   fetch()        │  (OpenAI /   │
-│  sidepanel  │  .sendMessage    │  agent.js    │                  │   Anthropic /│
-│  .js        │                  │  background  │                  │   llama.cpp) │
-└──────┬──────┘                  │  .js         │                  └──────────────┘
-       │                         └──────┬───────┘
-       │                                │
-       │              browser.tabs.executeScript
-       │                                │
-       │                                ▼
-       │                         ┌──────────────┐
-       │                         │ Content      │
-       │                         │ Script       │
-       │                         │ content.js   │
-       │                         │ (injected)   │
-       │                         └──────────────┘
-       │                                │
-       └────────────────────────────────┘
+│  Sidebar   │ ◄──────────────► │  Background │ ◄──────────────► │  LLM Provider│
+│  (UI)      │  browser.runtime │  Page       │   fetch()        │  (OpenAI /   │
+│  sidepanel │  .sendMessage    │  agent.js   │                  │   Anthropic /│
+│  .js       │                  │  background │                  │   llama.cpp) │
+└──────┬─────┘                  │  .js        │                  └──────────────┘
+       │                        └──────┬──────┘
+       │                               │
+       │         browser.tabs.executeScript / sendMessage
+       │                               │
+       │                               ▼
+       │                ┌──────────────────────────────┐
+       │                │ Content Scripts (injected)   │
+       │                │  • accessibility-tree.js      │
+       │                │  • content.js                 │
+       │                └──────────────────────────────┘
+       │                               │
+       └───────────────────────────────┘
                     DOM / Page
 ```
 
-**Key difference from Chrome:** No CDP client box. All DOM interaction goes through content script injection only.
+**Key differences from Chrome:** No CDP client. No offscreen document. All DOM interaction happens through content script injection only, and all HTTP requests happen directly from the background page.
 
 ## Directory Structure
 
 ```
 src/firefox/
-├── manifest.json            # Manifest V2 config
+├── manifest.json                   # Manifest V2 config
 ├── src/
-│   ├── background.html      # Background page (MV2 requirement)
-│   ├── background.js        # Message router
+│   ├── background.html             # Background page (MV2 requirement)
+│   ├── background.js               # Message router
 │   ├── agent/
-│   │   ├── agent.js          # Core agent loop (~1300 lines)
-│   │   ├── tools.js          # Tool schemas + system prompts
-│   │   └── adapters.js       # Per-site guidance (identical to Chrome)
+│   │   ├── agent.js                # Core agent loop
+│   │   ├── tools.js                # Tool schemas + system prompts (incl. 4 AX tools)
+│   │   └── adapters.js             # Per-site guidance (identical to Chrome)
 │   ├── content/
-│   │   └── content.js        # Injected DOM reader / clicker
+│   │   ├── accessibility-tree.js   # AX tree builder + ref_id registry (NEW in 3.6.8)
+│   │   └── content.js              # DOM reader / typer / clicker + AX handlers
 │   ├── network/
-│   │   └── network-tools.js  # fetch_url, research_url
+│   │   └── network-tools.js        # fetch_url, research_url
 │   ├── providers/
-│   │   ├── base.js           # Provider interface (identical to Chrome)
-│   │   ├── manager.js        # Provider lifecycle
-│   │   ├── openai.js         # OpenAI-compatible
-│   │   ├── anthropic.js      # Anthropic Claude
-│   │   └── llamacpp.js       # Local llama.cpp server
+│   │   ├── base.js                 # Provider interface
+│   │   ├── manager.js              # Provider lifecycle
+│   │   ├── openai.js               # OpenAI-compatible
+│   │   ├── anthropic.js            # Anthropic Claude
+│   │   └── llamacpp.js             # Local llama.cpp server
 │   └── ui/
 │       ├── sidepanel.html
-│       ├── sidepanel.js      # Chat UI, verbose mode, deep verbose
+│       ├── sidepanel.js            # Chat UI, verbose mode, deep verbose
 │       ├── settings.html
 │       └── settings.js
 └── icons/
 ```
+
+Notable absences vs Chrome: no `cdp/`, no `offscreen/`, no `trace/`, no `ui/traces.html`, no `providers/fetch-with-fallback.js`.
 
 ## Permissions
 
@@ -80,18 +85,77 @@ src/firefox/
   "permissions": [
     "activeTab",
     "storage",
+    "unlimitedStorage",
     "tabs",
     "<all_urls>"
   ]
 }
 ```
 
-Notably **missing** vs Chrome: `debugger`, `downloads`, `sidePanel`, `scripting`, `webNavigation`.
+Notably **missing** vs Chrome: `debugger`, `downloads`, `sidePanel`, `scripting`, `webNavigation`, `offscreen`, `privateNetworkAccess`.
 
 - No `debugger` → no CDP, no trusted events
-- No `downloads` → limited file download support
+- No `offscreen` → no HTTP fetch proxy; direct fetch from background page only
+- No `privateNetworkAccess` → localhost LLM servers must send CORS headers themselves
 - Uses `sidebar_action` (MV2) instead of `side_panel` (MV3)
-- Uses `browser.tabs.executeScript()` instead of `chrome.scripting.executeScript()`
+- Uses `browser.tabs.executeScript()` / `browser.tabs.sendMessage()` instead of `chrome.scripting.executeScript()`
+
+`unlimitedStorage` is declared for parity (forward-looking: if a trace recorder is ported to Firefox, it will want IndexedDB without quota friction). It is currently unused by the Firefox build.
+
+---
+
+## The Accessibility-Tree System (v3.6.x)
+
+As of v3.6.8, Firefox ships `content/accessibility-tree.js` — the same DOM-walker that Chrome uses to produce a compact, indexed, semantic snapshot of the page for the LLM. The file was ported verbatim from Chrome; it uses only standard DOM APIs and works unchanged in Firefox.
+
+### What the tree is
+
+A flattened outline of the page's interactive and informative nodes, each assigned a stable `ref_id`:
+
+```
+[1] button "Sign in"
+[2] textbox "Email" value="emre@..."
+[3] textbox "Password"
+[4] searchbox "Search" aria-controls="listbox-1"
+[5] listbox
+  [6] option "Every month"
+  [7] option "Custom"
+```
+
+The tree is produced by a single DOM walk with these rules:
+
+- **Filtering**: `display:none`, `visibility:hidden`, `aria-hidden=true`, and zero-dimension nodes are skipped. Overlay containers (fixed/absolute with very high z-index) are hoisted so portaled dropdowns show up near the input that opened them, not at the end of the tree.
+- **Accessible name resolution** — priority order:
+  1. `aria-labelledby` resolved to referenced elements' text
+  2. `aria-label`
+  3. `<label for>` / wrapping `<label>`
+  4. `placeholder` (for inputs/textareas, as a weaker hint)
+  5. For submit/button/reset inputs: the `value` attribute
+  6. For buttons / links / `<summary>` with no inner text: the full `innerText`
+  7. **New in 3.6.8**: for unlabeled inputs/textareas/selects/textboxes/searchboxes/spinbuttons/comboboxes, scan preceding siblings and parent's preceding siblings for adjacent text nodes that look like labels
+- **Value attribute** (v3.6.8) — `<input>` and `<textarea>` render their live `.value` as a separate `value="..."` attribute on the tree line. Values are truncated to 60 chars. Skipped input types: `submit, button, reset, file, checkbox, radio, image, hidden, color, range, password`. This cleanly separates "what this field is called" from "what it currently contains" — a fix for the v3.6.7 Stripe bug where `textbox "1"` was ambiguous between a textbox named "1" and one containing "1".
+- **ref_id registry** — each emitted element is stored in `window.__wbElementMap` as a `WeakRef`, keyed by ref_id. The map is cleared at the start of every tree build so IDs don't leak between turns. All AX tools resolve ref_id through this map, getting fast O(1) lookup and automatic garbage collection of stale entries.
+- **Soft truncation** — the tree is capped at ~3000 chars. If it overflows, later elements are dropped with a truncation marker so the LLM knows the snapshot is incomplete.
+
+### AX tools
+
+| Tool | Purpose |
+|---|---|
+| `get_accessibility_tree` | Returns the rendered tree (string) plus metadata — used as the LLM's primary page-understanding surface for v3.6.x |
+| `click_ax` | Click an element by ref_id. Resolves through `__wbElementMap`, scrolls into view, dispatches `el.click()` |
+| `type_ax` | Type into an input/textarea/contenteditable by ref_id. Uses the native value setter (bypasses React controlled-input wrappers), dispatches `input` + `change` |
+| `set_field` | Combined type-and-submit for fields that participate in a combobox/autocomplete. Types the value, detects whether the field is a combobox (role=searchbox/combobox, aria-autocomplete, aria-controls pointing at a listbox, or any visible listbox on the page), and if so dispatches `ArrowDown → Enter` with small delays to commit the highlighted option. Otherwise falls back to `form.requestSubmit()`. This is the main fix for the Stripe "Every N months" bug — it lets the agent close combobox selections deterministically |
+
+Firefox's AX tools use synthetic events only — there is no trusted-event path. Sites that check `event.isTrusted` will reject these the same way they reject legacy `click` / `type_text`.
+
+### What was intentionally skipped in the Firefox port
+
+These Chrome v3.6.x features depend on CDP or agent-level state and were not ported — they can be re-evaluated later:
+
+- **Ambiguous-click CDP enrichment** — when `click_ax` lands on a node that overlaps many candidates, Chrome re-queries via CDP to pick the frontmost hit. Firefox relies on the initial ref_id resolution only.
+- **Duplicate-submit guard** — Chrome's agent.js tracks recent submit tool calls and blocks duplicates within a short window. Not in Firefox's agent loop.
+- **`blockedDone` heuristic** — Chrome blocks `done()` when the model hasn't yet verified that the most recent form submission actually landed. Firefox's `done()` is unconditional.
+- **Offscreen fetch fallback** — Chrome falls through to an offscreen-document proxy when direct fetch fails (common for localhost LLM servers and private-network destinations). Firefox has no offscreen API; local servers must handle CORS themselves.
 
 ---
 
@@ -114,9 +178,9 @@ Main Loop (max 120 steps)
     └─ If done() → return summary
 ```
 
-### Key difference: no conversation persistence
+### No conversation persistence
 
-Chrome persists conversations to `chrome.storage.session` and hydrates on service worker restart. Firefox does **not** — conversations live only in memory and are lost when the sidebar closes.
+Chrome persists conversations to `chrome.storage.session` and hydrates on service-worker restart. Firefox does **not** — conversations live only in memory on the background page and are lost when the sidebar closes or the background page unloads.
 
 ```javascript
 // Chrome has:
@@ -128,123 +192,46 @@ this.conversations = new Map();  // memory only, no persistence
 
 ---
 
-## Example LLM Request & Response
-
-The LLM request format is identical to Chrome — the same OpenAI-compatible message array with system prompt, tools, and multimodal content. See Chrome's ARCHITECTURE.md for the full example.
-
-### First turn (vision-capable provider)
-
-```json
-{
-  "model": "gpt-4o",
-  "messages": [
-    { "role": "system", "content": "You are WebBrain, an AI browser agent running in Act mode..." },
-    {
-      "role": "user",
-      "content": [
-        { "type": "text", "text": "[Page context — URL: https://example.com — Title: Example]\n\n[Initial viewport screenshot follows...]\n\nclick the login button" },
-        { "type": "image_url", "image_url": { "url": "data:image/jpeg;base64,..." } }
-      ]
-    }
-  ],
-  "tools": [ /* 27 tools in OpenAI function-calling format */ ],
-  "tool_choice": "auto",
-  "temperature": 0.3,
-  "max_tokens": 4096
-}
-```
-
-### LLM responds with tool call
-
-```json
-{
-  "choices": [{
-    "message": {
-      "role": "assistant",
-      "content": null,
-      "tool_calls": [{
-        "id": "call_xyz",
-        "type": "function",
-        "function": {
-          "name": "click",
-          "arguments": "{\"text\":\"Log in\"}"
-        }
-      }]
-    }
-  }]
-}
-```
-
-### What happens next (different from Chrome)
-
-1. Agent parses `click({text: "Log in"})`
-2. Calls `executeTool()` → sends message to content script via `browser.tabs.sendMessage()`
-3. Content script finds element matching "Log in" (exact → prefix → contains)
-4. Content script calls `el.click()` — **synthetic, not trusted**
-5. Returns `{success: true, tag: 'BUTTON', text: 'Log in'}`
-6. Agent pushes tool result into messages
-7. If vision supported: captures screenshot via `browser.tabs.captureVisibleTab()`
-8. Calls `provider.chat()` again
-9. Loop continues
-
-### The critical difference: el.click() vs CDP
-
-```
-Chrome:  CDP Input.dispatchMouseEvent  →  event.isTrusted = true   ✓
-Firefox: el.click() in content script  →  event.isTrusted = false  ⚠️
-```
-
-Most sites work fine with synthetic clicks. But some (banking, captchas, certain SPAs) check `event.isTrusted` and reject synthetic events. There's no workaround in Firefox — this is a platform limitation.
-
----
-
 ## Tools
 
-### Tool list (27 tools — 3 fewer than Chrome)
+### Complete tool list (31 tools)
 
-| Tool | Description | Ask | Act | Chrome-only? |
-|------|-------------|-----|-----|-------------|
-| `read_page` | Page content | ✓ | ✓ | |
-| `screenshot` | Viewport capture | ✓ | ✓ | |
-| `get_interactive_elements` | Indexed clickable elements | ✓ | ✓ | |
-| `click` | Click by text/selector/index/coords | | ✓ | |
-| `type_text` | Type into field | | ✓ | |
-| `press_keys` | Press Escape/Tab/Enter | | ✓ | |
-| `scroll` | Scroll page | ✓ | ✓ | |
-| `navigate` | Go to URL | | ✓ | |
-| `new_tab` | Open URL in new tab | | ✓ | |
-| `wait_for_element` | Wait for selector | | ✓ | |
-| `extract_data` | Extract tables/headings | ✓ | ✓ | |
-| `get_selection` | Get highlighted text | ✓ | ✓ | |
-| `execute_js` | Run JavaScript in page | | ✓ | |
-| `get_shadow_dom` | Read shadow DOM | | ✓ | |
-| `get_frames` | List iframes | | ✓ | |
-| `iframe_read` | Read inside iframe | | ✓ | |
-| `iframe_click` | Click inside iframe | | ✓ | |
-| `iframe_type` | Type inside iframe | | ✓ | |
-| `fetch_url` | HTTP request | ✓ | ✓ | |
-| `research_url` | Open + read URL | ✓ | ✓ | |
-| `list_downloads` | List downloads | ✓ | ✓ | |
-| `read_downloaded_file` | Read downloaded file | | ✓ | |
-| `download_resource_from_page` | Download from page | | ✓ | |
-| `download_files` | Download by URL | | ✓ | |
-| `verify_form` | Read form field values + screenshot before submit | | ✓ | |
-| `done` | Signal completion | ✓ | ✓ | |
-| `full_page_screenshot` | Full-page capture | | | ✓ (Chrome only) |
-| `shadow_dom_query` | CDP shadow pierce | | | ✓ (Chrome only) |
-| `upload_file` | Form file upload | | | ✓ (Chrome only) |
+AX tier (preferred in 3.6.x):
+
+| Tool | Description |
+|---|---|
+| `get_accessibility_tree` | Indexed semantic snapshot + ref_id map |
+| `click_ax` | Click by ref_id |
+| `type_ax` | Type into field by ref_id |
+| `set_field` | Type + combobox-aware commit (ArrowDown+Enter) or form submit |
+
+Legacy tier (kept for compatibility with older prompts and for non-AX flows):
+
+| Tool | Description |
+|---|---|
+| `read_page`, `screenshot`, `get_interactive_elements` | Page content / image / indexed elements |
+| `click`, `type_text`, `press_keys` | Text/selector/index-based interaction |
+| `scroll`, `navigate`, `new_tab`, `wait_for_element` | Page control |
+| `extract_data`, `get_selection`, `execute_js` | Data extraction / arbitrary JS |
+| `get_shadow_dom`, `get_frames`, `iframe_read`, `iframe_click`, `iframe_type` | Frame / shadow DOM |
+| `fetch_url`, `research_url` | HTTP / open-and-read |
+| `list_downloads`, `read_downloaded_file`, `download_resource_from_page`, `download_files` | Download helpers (limited without `downloads` permission — graceful fallbacks) |
+| `verify_form` | Reads form field values + viewport screenshot before submit |
+| `done` | Signal completion |
+
+Chrome-only (absent in Firefox): `full_page_screenshot`, `shadow_dom_query` (CDP shadow-pierce variant), `upload_file` (CDP-driven file input).
 
 ### Click — content script implementation
 
-Firefox's click implementation lives entirely in the content script (no CDP fallback):
+Firefox's click implementations (both legacy `click` and new `click_ax`) live entirely in the content script. No CDP fallback:
 
 ```javascript
-// Text-based click: auto-fallback matching
+// Text-based click: auto-fallback matching (legacy click tool)
 const modes = explicit ? [explicit] : ['exact', 'prefix', 'contains'];
 for (const m of modes) {
   matches = tryMode(m);
-  if (matches.length === 1) break;  // unique match
-  if (matches.length > 1) break;    // ambiguous — error
+  if (matches.length === 1) break;
+  if (matches.length > 1) break;
 }
 
 // If found: synthetic click
@@ -252,9 +239,43 @@ el.scrollIntoView({ behavior: 'smooth', block: 'center' });
 el.click();  // ← NOT trusted
 ```
 
-### Press keys — content script implementation
+`click_ax` skips the text matching entirely and resolves the element via `window.__wbElementMap[ref_id]?.deref()`, then runs the same scroll + synthetic-click dispatch.
 
-No CDP available, so Firefox dispatches synthetic `KeyboardEvent`:
+### Type — three paths
+
+Both `type_text` and `type_ax` end up in the same typing core:
+
+1. **ContentEditable**: sets `textContent`, dispatches `beforeinput` + `input` + `change`
+2. **Select elements**: matches option by value or visible text
+3. **Input/Textarea**: uses the native property setter via `Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(el, value)` to bypass React/Vue controlled-component wrappers, then dispatches `input` + `change`
+
+### set_field — combobox-aware submit
+
+```javascript
+'set_field': async () => {
+  // ... type the value, verify it landed ...
+  if (submit) {
+    const roleAttr = (el.getAttribute('role') || '').toLowerCase();
+    const controls = el.getAttribute('aria-controls');
+    let isCombobox = roleAttr === 'searchbox' || roleAttr === 'combobox'
+      || el.getAttribute('aria-autocomplete')
+      || el.getAttribute('aria-expanded') === 'true';
+    // controls-id lookup + visible-listbox fallback...
+    if (isCombobox) {
+      await new Promise(r => setTimeout(r, 80));
+      dispatchKey('keydown', 'ArrowDown', 40);
+      dispatchKey('keyup', 'ArrowDown', 40);
+      await new Promise(r => setTimeout(r, 30));
+    }
+    dispatchKey('keydown', 'Enter', 13);
+    // ... + form.requestSubmit() fallback for non-combobox
+  }
+}
+```
+
+### Press keys
+
+No CDP, so Firefox dispatches synthetic `KeyboardEvent` and Tab is implemented via manual focus advancement:
 
 ```javascript
 const ev = new KeyboardEvent('keydown', {
@@ -262,60 +283,39 @@ const ev = new KeyboardEvent('keydown', {
   bubbles: true, cancelable: true
 });
 target.dispatchEvent(ev);
-document.dispatchEvent(ev);  // also dispatch to document for broader coverage
+document.dispatchEvent(ev);
 ```
 
-For Tab, the content script implements manual focus advancement since synthetic Tab doesn't trigger the browser's native focus behavior:
+### Verify form
 
-```javascript
-// Build list of focusable elements, find current, advance to next
-const focusable = [...document.querySelectorAll(
-  'a[href], button, input, textarea, select, [tabindex]'
-)].filter(el => !el.disabled && el.tabIndex >= 0);
-const idx = focusable.indexOf(document.activeElement);
-focusable[(idx + 1) % focusable.length].focus();
-```
-
-### Verify form (v2.1)
-
-Pre-submission safety check. Reads all form field values via `browser.tabs.executeScript()` and captures a viewport screenshot via `browser.tabs.captureVisibleTab()`. Same behavior as Chrome but uses content script injection instead of CDP.
-
-- If `selector` is omitted, uses the form containing the focused element, or the first form on the page
-- Hidden and submit-type inputs are excluded
-- Screenshot requires the tab to be active (Firefox limitation)
-- System prompt guides the LLM to call this before submitting important multi-field forms
+Reads all form field values via `browser.tabs.executeScript()` and captures a viewport screenshot via `browser.tabs.captureVisibleTab()`. The system prompt guides the LLM to call this before submitting important multi-field forms.
 
 ---
 
 ## Content Script
 
-The content script (`content.js`) is the **only** way Firefox interacts with the page. It handles:
+The content script is the **only** way Firefox interacts with the page. `content.js` now imports `accessibility-tree.js` (as a separate file loaded first in the content_scripts list) and exposes the following handlers relevant to v3.6.x:
 
-### Interactive element discovery
-
-```javascript
-const INTERACTIVE_SELECTORS = `
-  a[href], button, input:not([type="hidden"]), textarea, select,
-  [role="button"], [role="link"], [role="tab"], [role="menuitem"],
-  [role="textbox"], [role="combobox"], [role="searchbox"],
-  [contenteditable=""], [contenteditable="true"],
-  [onclick], [data-action], summary, label
-`;
+```
+get_accessibility_tree  →  window.buildAccessibilityTree() → { tree, metadata }
+click_ax                →  resolveRef(id) → scrollIntoView + el.click()
+type_ax                 →  resolveRef(id) → native setter + input/change
+set_field               →  type + combobox detect → ArrowDown/Enter or submit
 ```
 
-Elements are filtered for visibility (computed style, dimensions, aria-hidden) and returned with index, tag, type, role, text, rect, and editability flag.
+Plus the legacy handlers: `read_page`, `screenshot`, `click`, `type_text`, `press_keys`, `scroll`, `extract_data`, `get_selection`, `get_shadow_dom`, `get_frames`, `iframe_*`.
 
-### Type text — three paths
+### Manifest wiring
 
-1. **ContentEditable**: sets `textContent`, dispatches `beforeinput` + `input` + `change`
-2. **Select elements**: matches option by value or visible text
-3. **Input/Textarea**: uses native property setter via `Object.getOwnPropertyDescriptor` to bypass React/Vue controlled component wrappers, dispatches `input` + `change`
+```json
+"content_scripts": [{
+  "matches": ["<all_urls>"],
+  "js": ["src/content/accessibility-tree.js", "src/content/content.js"],
+  "run_at": "document_idle"
+}]
+```
 
-### Page reading
-
-- `getPageInfo()`: URL, title, description, text, links, forms
-- `getPageInfoFull()`: extends with shadow DOM traversal and iframe detection
-- `getInteractiveElements()`: indexed list with rects for the agent
+`accessibility-tree.js` is loaded first so its `window.buildAccessibilityTree` and `window.__wbElementMap` are available by the time `content.js` wires up the message handlers.
 
 ---
 
@@ -325,90 +325,75 @@ Identical to Chrome. Same five providers (OpenAI, Anthropic, llama.cpp, Ollama, 
 
 Uses `browser.storage.local` instead of `chrome.storage.local` for config persistence.
 
----
-
-## Loop Detection
-
-Identical to Chrome. Same three detectors (general repeat, coordinate click, navigation) with the same thresholds and nudge/stop behavior.
+**No fetch-with-fallback.** Chrome has a `providers/fetch-with-fallback.js` layer that catches direct-fetch failures (typically CORS/PNA on localhost LLM servers) and retries through an offscreen document. Firefox has no equivalent — all provider fetches go directly from the background page, and the local LLM server must set `Access-Control-Allow-Origin: *` (or the extension's `moz-extension://…` origin) itself.
 
 ---
 
-## Context Management
+## Loop Detection, Context Management, Verbose Mode, Site Adapters
 
-Identical to Chrome:
-- Auto-trim at >50 messages or >80,000 chars
-- LLM-powered summarization of old messages
-- Emergency trim on context overflow
-- Image pruning (keep last 4 only)
-- Tool result cap at 8,000 chars
+All identical to Chrome:
+
+- **Loop detection** — three detectors (general repeat, coordinate click, navigation) with the same thresholds and nudge/stop behavior
+- **Context management** — auto-trim at >50 messages or >80,000 chars, LLM-powered summarization, emergency trim on context overflow, image pruning (last 4 only), tool-result cap at 8,000 chars
+- **Verbose mode** — three levels: Normal / Verbose ON / Deep verbose (Shift+click dumps the LLM-payload ring buffer to DevTools console). Deep verbose works identically; there's just no persisted trace UI to browse it from
+- **Site adapters** — same adapter set, same `getActiveAdapter(url)` matching, same mid-conversation re-injection on navigation
 
 ---
 
 ## Side Panel UI
-
-### Differences from Chrome
 
 | Feature | Chrome | Firefox |
 |---|---|---|
 | Panel type | Side panel (MV3 API) | Sidebar action (MV2) |
 | Chat persistence | Survives panel close | Lost on close |
 | Tab tracking | `chrome.tabs.onActivated` + session storage | `browser.tabs.onActivated` + in-memory Map |
-| Background comms | `chrome.runtime.sendMessage` | `browser.runtime.sendMessage` (async/await) |
-
-### Verbose mode
-
-Same three levels as Chrome:
-- **Normal**: compact step labels
-- **Verbose ON**: full JSON tool args + results
-- **Deep verbose**: Shift+click verbose button → console dump of full LLM payloads
-
-### Deep verbose
-
-Works identically to Chrome. The agent stores a ring buffer of LLM requests/responses (max 200 entries). Shift+clicking the verbose button fetches and dumps to DevTools console with color-coded groups.
+| Background comms | `chrome.runtime.sendMessage` | `browser.runtime.sendMessage` (Promise-based) |
+| Trace viewer | Yes (`ui/traces.html`) | No |
 
 ---
 
-## Site Adapters
-
-Identical to Chrome — same 17 adapters, same `getActiveAdapter(url)` matching, same mid-conversation re-injection on navigation.
-
----
-
-## Message Flow — Complete Walkthrough
+## Message Flow — Walkthrough (Stripe "Every 2 months" example)
 
 ```
-1. User types "click Submit" in sidebar
+1. User: "create a product priced at 500 CNY billed every 2 months"
+   in a Stripe product-creation tab.
 
-2. sidepanel.js sends {action:'chat', text:'click Submit', mode:'act', tabId:42}
-   via browser.runtime.sendMessage()
+2. sidepanel.js → background.js → agent.processMessage(tabId, text, 'act')
 
-3. background.js receives → agent.processMessage(42, text, onUpdate, 'act')
+3. Agent builds messages: [system prompt, user msg + URL/title + screenshot].
 
-4. Agent builds messages:
-   [system prompt, enriched user message (URL/title + screenshot)]
+4. Agent calls provider.chat(...)
 
-5. Agent calls provider.chat(messages, {tools, temp:0.3, maxTokens:4096})
-   → Logged to _debugLog
+5. LLM: get_accessibility_tree {}
+   → content.js runs buildAccessibilityTree
+   → tree returned:
+        [12] textbox "Name"
+        [17] textbox "Price" value="500"
+        [22] combobox "Currency" value="CNY"
+        [31] combobox "Billing period"
+        ...
 
-6. LLM returns tool_calls: [{name:'click', args:{text:'Submit'}}]
+6. LLM: set_field {ref_id: 31, value: "Custom", submit: true}
+   → content.js types "Custom", detects combobox (role=combobox +
+     aria-controls listbox), fires ArrowDown+Enter → option commits.
 
-7. Agent calls executeTool() → dispatches to content script:
-   browser.tabs.sendMessage(42, {action:'click', params:{text:'Submit'}})
+7. Agent auto-screenshots, pushes tree+screenshot back.
 
-8. Content script:
-   a. Finds <button>Submit</button> via text matching
-   b. el.scrollIntoView()
-   c. el.click()  ← synthetic, not trusted
-   d. Returns {success: true, tag: 'BUTTON', text: 'Submit'}
+8. LLM: get_accessibility_tree {}
+   → tree now shows the newly-rendered "Every N months" row with
+     [45] spinbutton "Every" value="1" and adjacent labels resolved
+     by the preceding-sibling scan.
 
-9. Agent pushes tool result into messages
-   Auto-screenshot via browser.tabs.captureVisibleTab()
+9. LLM: type_ax {ref_id: 45, value: "2"}
+   → native setter writes 2, input event fires.
 
-10. Agent calls provider.chat() again with updated context
+10. LLM: click_ax {ref_id: <Save button>} → synthetic click.
 
-11. LLM responds with text: "Done — I clicked Submit."
-    → sidepanel renders as assistant message
+11. LLM: done({summary: "Product created..."})
+    → sidepanel renders final message.
 ```
+
+Same end-to-end shape as Chrome, minus the CDP-trusted-event path and the offscreen fetch fallback.
 
 ---
 
@@ -417,11 +402,15 @@ Identical to Chrome — same 17 adapters, same `getActiveAdapter(url)` matching,
 | Limitation | Impact | Workaround |
 |---|---|---|
 | No CDP (no `debugger` permission) | Clicks are synthetic (`isTrusted: false`) | Most sites work; some banking/captcha sites may reject |
+| No offscreen document | Localhost LLM fetches fail on CORS | Configure server CORS headers |
+| No trace recorder | No run replay / model-comparison UI | Use deep-verbose console dump |
 | No conversation persistence | Chat lost when sidebar closes | None — MV2 limitation |
-| No trusted keyboard events | `press_keys` may not work on all sites | Content script dispatches to both activeElement and document |
-| No full-page screenshot | Can only capture visible viewport | Scroll + multiple screenshots |
-| No shadow DOM piercing (closed) | Can't read closed shadow roots | `execute_js` with manual traversal |
-| No file upload | Can't automate file input dialogs | User must upload manually |
+| No trusted keyboard events | `press_keys` may not land on all sites | Dispatched to both activeElement and document |
+| No full-page screenshot | Only visible viewport | Scroll + multiple captures |
+| No shadow-root piercing (closed) | Can't read closed shadow roots | `execute_js` with manual traversal |
+| No file upload | Can't automate file input dialogs | User uploads manually |
+| No duplicate-submit guard | Agent may submit twice if LLM loops | Rely on site-level idempotence / user watches |
+| No ambiguous-click CDP enrichment | Overlapping hit-target ambiguity resolved by ref_id only | Prompting / adapter guidance |
 | MV2 background page | Less efficient than MV3 service worker | `persistent: false` helps |
 
 ---
@@ -429,9 +418,17 @@ Identical to Chrome — same 17 adapters, same `getActiveAdapter(url)` matching,
 ## Security Model
 
 Same as Chrome, minus CDP:
+
 - Extension runs with user's full browser permissions
-- `<all_urls>` host permission allows content script injection anywhere
+- `<all_urls>` host permission allows content-script injection anywhere
 - Cross-origin iframes accessible via extension privilege
 - `/allow-api` flag required for API mutations
 - Finance adapters get extra safety warnings
 - Tool results capped at 8KB
+- No remote code execution: all providers called via `fetch()` with user-supplied keys; no eval of LLM responses
+
+---
+
+## Versioning & Port Status
+
+v3.6.8 is the first Firefox release at feature parity with Chrome's AX subsystem. Work was done on the `firefox-port-3.6.8` branch. Skipped-on-purpose items (listed above under "What was intentionally skipped in the Firefox port") are the natural next scope for a v3.7 Firefox pass.
