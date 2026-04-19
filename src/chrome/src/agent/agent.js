@@ -2586,10 +2586,68 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
               };
             }
 
-            return {
-              success: false,
-              error: `No clickable element found for text "${args.text}" (also tried scrolling down). Try get_interactive_elements to see what's on the page, or use a selector.`,
-            };
+            // Last-resort widened scan: contenteditable editors + ARIA
+            // roles + [tabindex] elements. The strict selector set at the top
+            // skips custom widgets (tag pickers, flair lists, rich-text
+            // bodies like Discourse/Gmail/Slack/Notion). Retrying with a
+            // wider net catches them without bloating the primary scanner.
+            let fbInfo = null;
+            try {
+              const fbRes = await cdpClient.evaluate(tabId, `
+                (() => {
+                  const needle = ${JSON.stringify(args.text.toLowerCase())};
+                  const explicit = ${JSON.stringify(args.textMatch || '')};
+                  const sels = '[contenteditable="true"],[contenteditable=""],[role="option"],[role="listbox"],[role="combobox"],[role="textbox"],[role="switch"],[role="checkbox"],[role="radio"],[tabindex]:not([tabindex="-1"])';
+                  function vis(el) {
+                    try {
+                      const r = el.getBoundingClientRect();
+                      if (r.width < 1 || r.height < 1) return false;
+                      const s = window.getComputedStyle(el);
+                      if (s.visibility === 'hidden' || s.display === 'none' || parseFloat(s.opacity) === 0) return false;
+                      return true;
+                    } catch(e) { return false; }
+                  }
+                  const all = Array.from(document.querySelectorAll(sels)).filter(vis);
+                  const norm = all.map(el => ({
+                    el,
+                    txt: (el.innerText || el.getAttribute('aria-label') || el.getAttribute('placeholder') || '').trim().toLowerCase(),
+                  })).filter(x => !!x.txt);
+                  const modes = explicit ? [explicit] : ['exact', 'prefix', 'contains'];
+                  for (const m of modes) {
+                    const matches = norm.filter(x =>
+                      m === 'exact' ? x.txt === needle :
+                      m === 'prefix' ? x.txt.startsWith(needle) :
+                      x.txt.includes(needle)
+                    );
+                    if (matches.length >= 1) {
+                      const el = matches[0].el;
+                      try { el.scrollIntoView({block:'center',inline:'center'}); } catch(e){}
+                      const r = el.getBoundingClientRect();
+                      return {
+                        found: true,
+                        mode: m,
+                        x: r.left + r.width/2,
+                        y: r.top + r.height/2,
+                        tag: el.tagName,
+                        role: el.getAttribute('role') || (el.getAttribute('contenteditable') != null ? 'contenteditable' : ''),
+                        text: matches[0].txt.slice(0, 80),
+                        widgetFallback: true,
+                      };
+                    }
+                  }
+                  return { found: false };
+                })()
+              `);
+              fbInfo = fbRes?.result?.value || null;
+            } catch(e) {}
+            if (fbInfo?.found) {
+              info = fbInfo;
+            } else {
+              return {
+                success: false,
+                error: `No clickable element found for text "${args.text}" (also tried scrolling down and widening to contenteditable/[role=*]/[tabindex]). Try get_interactive_elements to see what's on the page, or use a selector.`,
+              };
+            }
           }
           // <select> intercept: don't dispatch mouse events — the native
           // dropdown popup can't be controlled via CDP. Focus the element
