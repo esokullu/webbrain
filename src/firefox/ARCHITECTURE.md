@@ -1,6 +1,6 @@
 # WebBrain Firefox Extension — Architecture
 
-> Version 3.6.8 · Manifest V2 · Background Page
+> Version 4.0.1 · Manifest V2 · Background Page
 
 ## How Firefox Differs from Chrome
 
@@ -12,7 +12,7 @@ Firefox uses Manifest V2 (background page, not service worker) and has **no acce
 - **No shadow DOM piercing** — content script can read open shadow roots via `element.shadowRoot`, but cannot pierce closed roots.
 - **No offscreen document** — no HTTP fetch proxy for localhost LLM servers with Private Network Access / CORS issues. User must ensure their local LLM server sends permissive CORS headers.
 - **No trace recorder** — no IndexedDB run recorder, no `unlimitedStorage` permission, no trace viewer UI.
-- **No duplicate-submit guard / no ambiguous-click CDP enrichment / no `blockedDone` heuristic** — these agent-level safety and precision features from Chrome v3.6.x were intentionally skipped in the Firefox port as higher-risk and CDP-dependent. They can be layered on later.
+- **No duplicate-submit guard** — the per-tab submit-throttle (Chrome v3.6.5+) is still Chrome-only. Firefox's agent loop does not block rapid duplicate Create/Submit clicks. `blockedDone` and the ambiguous-click candidate payload were ported to Firefox in v4.0.1 (see "Overlay defenses" below).
 - **Fewer tools overall** — Firefox exposes 31 tools (27 legacy + 4 AX) vs Chrome's ~34 (missing full-page screenshot, shadow-dom-query via CDP, file upload via CDP).
 
 Everything else — the agent loop, LLM providers, site adapters, loop detection, context management — is architecturally identical to Chrome.
@@ -152,10 +152,21 @@ Firefox's AX tools use synthetic events only — there is no trusted-event path.
 
 These Chrome v3.6.x features depend on CDP or agent-level state and were not ported — they can be re-evaluated later:
 
-- **Ambiguous-click CDP enrichment** — when `click_ax` lands on a node that overlaps many candidates, Chrome re-queries via CDP to pick the frontmost hit. Firefox relies on the initial ref_id resolution only.
+- **CDP-enriched `click_ax` frontmost resolution** — when `click_ax` lands on a node that overlaps many candidates, Chrome re-queries via CDP to pick the frontmost hit. Firefox relies on the initial ref_id resolution plus the v4.0.1 occlusion hit-test (see below).
 - **Duplicate-submit guard** — Chrome's agent.js tracks recent submit tool calls and blocks duplicates within a short window. Not in Firefox's agent loop.
-- **`blockedDone` heuristic** — Chrome blocks `done()` when the model hasn't yet verified that the most recent form submission actually landed. Firefox's `done()` is unconditional.
 - **Offscreen fetch fallback** — Chrome falls through to an offscreen-document proxy when direct fetch fails (common for localhost LLM servers and private-network destinations). Firefox has no offscreen API; local servers must handle CORS themselves.
+
+### Overlay defenses (v4.0.1+)
+
+Brought to Chrome parity in v4.0.1 — same three layers, synthetic-event-safe so they work without CDP:
+
+1. **Modal-scoped text click.** `click({text: ...})` in `content.js` resolves `_findTopmostModal()` (native `<dialog open>`, `aria-modal`, `[role=dialog]`, common overlay patterns) and scopes its `querySelectorAll` to that subtree — plus the label→input map, the 3×scroll-down retry, and the contenteditable/[role]/[tabindex] fallback. Closes the GitHub "dimmed Publish button behind Create-tag dialog" class of failures.
+2. **Post-click occlusion hit-test.** For text/selector/index clicks (skipped for x,y and SELECT), after `scrollIntoView` but before `.click()`, the resolver calls `elementFromPoint(cx, cy)` at the target center. If topmost is neither the target nor a DOM ancestor/descendant, the click is refused with `{occluded: true, occludedBy}` and a force-click hint.
+3. **Rich ambiguity payload.** Ambiguous text matches now return Chrome's `{index, tag, role, text, cx, cy, rect, ancestor}` candidates. The `ancestor` string identifies the containing dialog/form so the model can disambiguate "Cancel in alertdialog" vs "Cancel in form" by location.
+
+**`blockedDone` heuristic (ported in v4.0.1).** Firefox's `done` now probes open dialogs, visible forms, and live-region messages via `browser.tabs.executeScript` (MV2 equivalent of Chrome's CDP probe). If the summary claims completion while a modal or form is still visible, returns `{blockedDone: true}` up to 2× per tab before letting `done` through with a loud verification note. Block count cleared on `clearConversation`.
+
+System prompt has a new "MODALS & DIALOGS" section describing the intended flow and the "dialog still open" failure pattern.
 
 ---
 

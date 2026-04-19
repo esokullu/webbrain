@@ -1,6 +1,6 @@
 # WebBrain Chrome Extension — Architecture
 
-> Version 3.6.8 · Manifest V3 · Service Worker background
+> Version 4.0.1 · Manifest V3 · Service Worker background
 
 ## High-Level Overview
 
@@ -176,6 +176,16 @@ Main loop (max steps from Settings, default 60)
 ### done() blocking (v3.6.4+)
 
 `done()` doesn't mean "done" if the page disagrees. Before accepting the summary, the agent probes for visible dialogs / forms / live-region messages. If the summary claims "created" / "saved" but a modal is still open, it returns `{success: false, blockedDone: true}` up to 2 times per tab, forcing the model to take another step. This stopped a class of "hallucinated success" failures on Stripe.
+
+### Overlay defenses (v4.0.1+)
+
+Three layered defenses keep the agent from interacting with the wrong surface when a dialog is open:
+
+1. **Modal-scoped text click.** `click({text: ...})` now resolves `_findTopmostModal()` and scopes its `querySelectorAll` (plus label map, scroll retry, and contenteditable fallback) to that subtree. Previously this was only enforced for index-based `get_interactive_elements`, so a text-click could still land on a dimmed background button (e.g. GitHub's "Publish release" while the "Create new tag" dialog was open). Error messages call out the scoping so the model knows why a page-wide lookup returns no match.
+2. **Post-click occlusion hit-test.** For text / selector / index clicks (not x,y — the model chose those coords deliberately), after `scrollIntoView` but before `.click()`, the resolver calls `elementFromPoint(cx, cy)` at the target's center. If the topmost paint is neither the target nor a DOM ancestor/descendant, the click is refused with `{occluded: true, occludedBy: {...}}` and a suggestion to force-click via coordinates if the model really wants to hit what's on top.
+3. **Modal-aware ambiguity payload.** When multiple elements match the text, the `ancestor` field in each candidate now identifies the containing dialog/form (`"dialog: Create new tag"` vs `"form: release"`) so the model can pick by location instead of re-calling the same query.
+
+System prompt has a new "MODALS & DIALOGS" section that describes the intended flow and the "dialog still open" failure pattern.
 
 ### Duplicate-submit guard (v3.6.5+)
 
