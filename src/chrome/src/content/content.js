@@ -352,7 +352,14 @@
       const explicit = params.textMatch || '';
       // Include inputs/select/textarea so we can match by placeholder, value, or aria-label
       const sels = 'a, button, [role="button"], [role="link"], [role="tab"], [role="menuitem"], input:not([type="hidden"]), textarea, select, input[type="button"], input[type="submit"], summary, label, [onclick], [data-action]';
-      const all = Array.from(document.querySelectorAll(sels));
+      // Modal scoping: if a topmost modal/dialog is open, restrict the search
+      // to elements inside it. Without this, click({text: "Create"}) can land
+      // on a background button (GitHub's "Create new tag" dialog over the
+      // dimmed "Publish release" — both contain the same verb). This mirrors
+      // what queryInteractive() already does for index-based clicks.
+      const _modalRoot = _findTopmostModal();
+      const _scope = _modalRoot || document;
+      const all = Array.from(_scope.querySelectorAll(sels));
       const normalized = all.map(e => ({
         e,
         txt: (e.innerText || e.value || e.placeholder || e.ariaLabel || '').trim().toLowerCase(),
@@ -360,7 +367,7 @@
 
       // Build label→input map so we can match label text and resolve to associated input
       const labelMap = new Map();
-      document.querySelectorAll('label').forEach(lbl => {
+      _scope.querySelectorAll('label').forEach(lbl => {
         const txt = (lbl.innerText || '').trim().toLowerCase();
         if (!txt) return;
         let target = null;
@@ -404,10 +411,12 @@
       }
 
       if (!el && matches.length === 0) {
-        // Auto-scroll retry: scroll down up to 3 times to find elements below the fold
+        // Auto-scroll retry: scroll down up to 3 times to find elements below the fold.
+        // Still respect modal scoping — scrollable dialogs exist.
         for (let scrollAttempt = 0; scrollAttempt < 3 && matches.length === 0; scrollAttempt++) {
           window.scrollBy(0, Math.round(window.innerHeight * 0.7));
-          const allRetry = Array.from(document.querySelectorAll(sels));
+          const _retryScope = _findTopmostModal() || document;
+          const allRetry = Array.from(_retryScope.querySelectorAll(sels));
           const normRetry = allRetry.map(e => ({
             e,
             txt: (e.innerText || e.value || e.placeholder || e.ariaLabel || '').trim().toLowerCase(),
@@ -422,7 +431,7 @@
           // Also retry label→input map after scroll
           if (matches.length === 0) {
             const labelMap2 = new Map();
-            document.querySelectorAll('label').forEach(lbl => {
+            _retryScope.querySelectorAll('label').forEach(lbl => {
               const txt = (lbl.innerText || '').trim().toLowerCase();
               if (!txt) return;
               let target = null;
@@ -443,7 +452,8 @@
           }
         }
         if (!el && matches.length === 0) {
-          return { success: false, error: `No clickable element found for text "${params.text}" (also tried scrolling down)` };
+          const _noteModal = _modalRoot ? ' (search was scoped to the open modal/dialog; if the target is outside it, dismiss or complete the dialog first)' : '';
+          return { success: false, error: `No clickable element found for text "${params.text}" (also tried scrolling down)${_noteModal}` };
         }
       }
       if (!el && matches.length > 1) {
@@ -494,9 +504,10 @@
               ancestor,
             };
           });
+          const _scopeNote = _modalRoot ? ' (search was scoped to the open modal/dialog)' : '';
           return {
             success: false,
-            error: `Ambiguous text match for "${params.text}" (mode=${usedMode}, matches=${matches.length}). ${candidates.length} candidates returned with cx/cy (precomputed click center, in CSS pixels) and ancestor context. Pick one and call click({x: candidate.cx, y: candidate.cy}) — no arithmetic needed. Use the ancestor field to disambiguate (e.g. an alertdialog's Cancel vs a form's Cancel sit in different containers). Do NOT retry click({text: "${params.text}"}) — it will fail the same way.`,
+            error: `Ambiguous text match for "${params.text}" (mode=${usedMode}, matches=${matches.length})${_scopeNote}. ${candidates.length} candidates returned with cx/cy (precomputed click center, in CSS pixels) and ancestor context. Pick one and call click({x: candidate.cx, y: candidate.cy}) — no arithmetic needed. Use the ancestor field to disambiguate (e.g. an alertdialog's Cancel vs a form's Cancel sit in different containers). Do NOT retry click({text: "${params.text}"}) — it will fail the same way.`,
             candidates,
           };
         }
@@ -592,6 +603,51 @@
     if (el.tagName !== 'SELECT') {
       el.scrollIntoView({ behavior: 'smooth', block: 'center' });
     }
+
+    // Occlusion hit-test: for text/selector/index clicks, verify that the
+    // target's center is actually the topmost paint at that point. If an
+    // overlay/modal/toast is covering the target, elementFromPoint returns
+    // the cover instead — .click() will fire on the target but the user's
+    // visual mental model is "I clicked the cover". Refuse so the model
+    // dismisses the cover first. Skip for x,y clicks (the model chose the
+    // point on purpose) and for SELECT (already handled). Only applies to
+    // elements with real bounding rects.
+    if (el.tagName !== 'SELECT' && params.x == null && params.y == null) {
+      try {
+        const r = el.getBoundingClientRect();
+        if (r.width >= 1 && r.height >= 1 && r.top >= 0 && r.left >= 0 && r.bottom <= window.innerHeight && r.right <= window.innerWidth) {
+          const cx = Math.round(r.left + r.width / 2);
+          const cy = Math.round(r.top + r.height / 2);
+          const topmost = document.elementFromPoint(cx, cy);
+          if (topmost && topmost !== el && !el.contains(topmost) && !topmost.contains(el)) {
+            // Another element is painted on top. Give the model actionable
+            // info (what's blocking, where, what to do) instead of silently
+            // clicking the wrong thing.
+            let blockerInfo = topmost.tagName.toLowerCase();
+            const role = topmost.getAttribute && topmost.getAttribute('role');
+            if (role) blockerInfo += `[role=${role}]`;
+            const txt = (topmost.innerText || topmost.getAttribute?.('aria-label') || '').trim().slice(0, 60);
+            if (txt) blockerInfo += ` "${txt}"`;
+            let blockerContainer = '';
+            try {
+              const container = topmost.closest('[role=dialog],[role=alertdialog],[aria-modal="true"],dialog');
+              if (container) {
+                const h = container.querySelector('h1,h2,h3,[role=heading]');
+                const heading = h ? (h.innerText || '').trim().slice(0, 40) : (container.getAttribute('aria-label') || '');
+                if (heading) blockerContainer = ` inside dialog "${heading}"`;
+              }
+            } catch {}
+            return {
+              success: false,
+              error: `Click blocked: an overlay is covering the target. Topmost element at (${cx}, ${cy}) is <${blockerInfo}>${blockerContainer}, not your target <${el.tagName.toLowerCase()}>. Dismiss the overlay (press Escape, click its close button, or complete the modal flow) before retrying. If you're sure you want to force the click, use click({x: ${cx}, y: ${cy}}) — that will hit whatever's on top.`,
+              occluded: true,
+              occludedBy: { tag: topmost.tagName.toLowerCase(), text: txt, cx, cy },
+            };
+          }
+        }
+      } catch {}
+    }
+
     el.click();
 
     // Post-click SELECT detection: the click may have activated a <select>

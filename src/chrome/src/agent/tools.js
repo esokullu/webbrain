@@ -750,6 +750,13 @@ FORMS — read this:
 - NEVER claim you created something unless you see CONFIRMATION on the page. If you see a list of items, check the creation date — if it says "2 months ago" or a past date, that is an EXISTING item, NOT something you just created. Only items with a timestamp from right now are yours.
 - If you encounter any CAPTCHA, anti-bot check, or human verification challenge, STOP immediately and ask the user to solve it. Do not attempt to bypass it and do not continue automation until the user confirms it is solved.
 
+MODALS & DIALOGS — read this:
+- When a modal/dialog is open, treat the rest of the page as unreachable. click({text: ...}) and get_interactive_elements are automatically scoped to the topmost dialog, so queries for buttons behind the overlay will return "no match" — that's intentional.
+- Finish the modal FIRST: fill its fields, then click its primary action (Create, Save, Submit, Confirm) or dismiss it (Cancel, Close, Escape key). Never scroll past a modal looking for the outer page's button — the button is dimmed and non-interactive.
+- Typical failure to avoid: a dialog opens ("Create new tag"), the model thinks it's done, closes the dialog, then clicks "Publish release" on the page behind. This skips the tag creation entirely. If a dialog was opened, the NEXT click must be inside it.
+- Before calling done, verify the dialog actually closed. If the same modal is still on screen, the submit didn't land and done will be blocked.
+- If a click returns "Click blocked: an overlay is covering the target", something is on top of your target. Dismiss it (Escape, close button, complete the modal) before retrying. Force-clicking with x,y hits the overlay, not your target.
+
 SCROLLING — read this:
 - Many forms and pages have content below the visible viewport. If you need to find a button, field, or section that isn't visible, use \`scroll_page({direction: "down"})\` to scroll down.
 - When filling forms, scroll down to see ALL fields before starting. Many forms have important fields (price, billing interval, description) below the fold.

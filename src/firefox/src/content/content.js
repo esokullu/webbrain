@@ -405,7 +405,15 @@
       const explicit = params.textMatch || '';
       // Include inputs/select/textarea so we can match by placeholder, value, or aria-label
       const sels = 'a, button, [role="button"], [role="link"], [role="tab"], [role="menuitem"], input:not([type="hidden"]), textarea, select, input[type="button"], input[type="submit"], summary, label, [onclick], [data-action]';
-      const all = Array.from(document.querySelectorAll(sels));
+      // Modal scoping: if a topmost modal/dialog is open, restrict the search
+      // to elements inside it. Prevents the classic failure where the model
+      // types "Publish release" and the resolver clicks the dimmed Publish
+      // button behind the "Create new tag" dialog instead of the dialog's
+      // Create button. The modal dismissal itself (backdrop click) is still
+      // reachable via coordinate clicks.
+      const _modalRoot = _findTopmostModal();
+      const _scope = _modalRoot || document;
+      const all = Array.from(_scope.querySelectorAll(sels));
       const normalized = all.map(e => ({
         e,
         txt: (e.innerText || e.value || e.placeholder || e.ariaLabel || '').trim().toLowerCase(),
@@ -413,7 +421,7 @@
 
       // Build label→input map so we can match label text and resolve to associated input
       const labelMap = new Map();
-      document.querySelectorAll('label').forEach(lbl => {
+      _scope.querySelectorAll('label').forEach(lbl => {
         const txt = (lbl.innerText || '').trim().toLowerCase();
         if (!txt) return;
         let target = null;
@@ -457,11 +465,15 @@
       }
 
       if (!el && matches.length === 0) {
-        // Auto-scroll retry: scroll down up to 3 times to find elements below the fold
+        // Auto-scroll retry: scroll down up to 3 times to find elements below the fold.
+        // Still respect modal scoping — we scroll the page but search inside
+        // the modal (scrollable modals re-reveal off-screen dialog content).
         for (let scrollAttempt = 0; scrollAttempt < 3 && matches.length === 0; scrollAttempt++) {
           window.scrollBy(0, Math.round(window.innerHeight * 0.7));
-          // Re-query after scroll
-          const allRetry = Array.from(document.querySelectorAll(sels));
+          // Re-query after scroll. Re-resolve the modal root in case the
+          // dialog opened/closed during scroll.
+          const _retryScope = _findTopmostModal() || document;
+          const allRetry = Array.from(_retryScope.querySelectorAll(sels));
           const normRetry = allRetry.map(e => ({
             e,
             txt: (e.innerText || e.value || e.placeholder || e.ariaLabel || '').trim().toLowerCase(),
@@ -476,7 +488,7 @@
           // Also retry label→input map after scroll
           if (matches.length === 0) {
             const labelMap2 = new Map();
-            document.querySelectorAll('label').forEach(lbl => {
+            _retryScope.querySelectorAll('label').forEach(lbl => {
               const txt = (lbl.innerText || '').trim().toLowerCase();
               if (!txt) return;
               let target = null;
@@ -497,9 +509,11 @@
           }
         }
         if (!el && matches.length === 0) {
-          // Widened fallback: contenteditable editors + ARIA roles + [tabindex]
+          // Widened fallback: contenteditable editors + ARIA roles + [tabindex].
+          // Honor modal scoping here too.
+          const _fbScope = _findTopmostModal() || document;
           const fbSels = '[contenteditable="true"],[contenteditable=""],[role="option"],[role="listbox"],[role="combobox"],[role="textbox"],[role="switch"],[role="checkbox"],[role="radio"],[tabindex]:not([tabindex="-1"])';
-          const fbAll = Array.from(document.querySelectorAll(fbSels)).filter(e => {
+          const fbAll = Array.from(_fbScope.querySelectorAll(fbSels)).filter(e => {
             try {
               const r = e.getBoundingClientRect();
               if (r.width < 1 || r.height < 1) return false;
@@ -525,7 +539,8 @@
             }
           }
           if (!el) {
-            return { success: false, error: `No clickable element found for text "${params.text}" (also tried scrolling down and widening to contenteditable/[role=*]/[tabindex])` };
+            const _noteModal = _modalRoot ? ' (search was scoped to the open modal/dialog; if the target is outside it, dismiss or complete the dialog first)' : '';
+            return { success: false, error: `No clickable element found for text "${params.text}" (also tried scrolling down and widening to contenteditable/[role=*]/[tabindex])${_noteModal}` };
           }
         }
       }
@@ -535,10 +550,52 @@
         if (interactiveMatches.length === 1) {
           matches = interactiveMatches;
         } else {
+          // Build rich candidates: position (rect), tag, role, surrounding
+          // context (closest landmark/dialog/button text), and precomputed
+          // click centers. When the same text appears twice, the model needs
+          // rects to pick by location, not just the same string twice.
+          const pickList = (interactiveMatches.length > 1 ? interactiveMatches : matches).slice(0, 6);
+          const candidates = pickList.map((m, idx) => {
+            const e = m.e;
+            let rect = { x: 0, y: 0, w: 0, h: 0 };
+            let cx = 0, cy = 0;
+            try {
+              const r = e.getBoundingClientRect();
+              rect = { x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height) };
+              cx = Math.round(r.x + r.width / 2);
+              cy = Math.round(r.y + r.height / 2);
+            } catch {}
+            let ancestor = '';
+            try {
+              const container = e.closest('[role=dialog],[role=alertdialog],[aria-modal="true"],form,section,nav,header,footer,aside,[role=region]');
+              if (container) {
+                const label = container.getAttribute('aria-label') || '';
+                const labelledby = container.getAttribute('aria-labelledby');
+                let labelledText = '';
+                if (labelledby) {
+                  try { labelledText = (document.getElementById(labelledby) || {}).innerText || ''; } catch {}
+                }
+                const headingEl = container.querySelector('h1,h2,h3,h4,[role=heading]');
+                const heading = headingEl ? (headingEl.innerText || '').trim().slice(0, 40) : '';
+                const role = container.getAttribute('role') || container.tagName.toLowerCase();
+                ancestor = [role, label || labelledText || heading].filter(Boolean).join(': ').trim().slice(0, 80);
+              }
+            } catch {}
+            return {
+              index: idx,
+              tag: e.tagName.toLowerCase(),
+              role: e.getAttribute('role') || '',
+              text: m.txt.slice(0, 80),
+              cx, cy,
+              rect,
+              ancestor,
+            };
+          });
+          const _scopeNote = _modalRoot ? ' (search was scoped to the open modal/dialog)' : '';
           return {
             success: false,
-            error: `Ambiguous text match for "${params.text}" (mode=${usedMode}, matches=${matches.length}).`,
-            candidates: matches.slice(0, 5).map(m => m.txt.slice(0, 80)),
+            error: `Ambiguous text match for "${params.text}" (mode=${usedMode}, matches=${matches.length})${_scopeNote}. ${candidates.length} candidates returned with cx/cy (precomputed click center, in CSS pixels) and ancestor context. Pick one and call click({x: candidate.cx, y: candidate.cy}) — no arithmetic needed. Use the ancestor field to disambiguate (e.g. an alertdialog's Cancel vs a form's Cancel sit in different containers). Do NOT retry click({text: "${params.text}"}) — it will fail the same way.`,
+            candidates,
           };
         }
       }
@@ -631,6 +688,46 @@
     if (el.tagName !== 'SELECT') {
       el.scrollIntoView({ behavior: 'smooth', block: 'center' });
     }
+
+    // Occlusion hit-test: for text/selector/index clicks, verify that the
+    // target's center is actually the topmost paint at that point. If an
+    // overlay/modal/toast is covering the target, elementFromPoint returns
+    // the cover instead. Refuse so the model dismisses the cover first.
+    // Skip for x,y clicks (the model chose the point on purpose) and for
+    // SELECT (already handled).
+    if (el.tagName !== 'SELECT' && params.x == null && params.y == null) {
+      try {
+        const r = el.getBoundingClientRect();
+        if (r.width >= 1 && r.height >= 1 && r.top >= 0 && r.left >= 0 && r.bottom <= window.innerHeight && r.right <= window.innerWidth) {
+          const cx = Math.round(r.left + r.width / 2);
+          const cy = Math.round(r.top + r.height / 2);
+          const topmost = document.elementFromPoint(cx, cy);
+          if (topmost && topmost !== el && !el.contains(topmost) && !topmost.contains(el)) {
+            let blockerInfo = topmost.tagName.toLowerCase();
+            const role = topmost.getAttribute && topmost.getAttribute('role');
+            if (role) blockerInfo += `[role=${role}]`;
+            const txt = (topmost.innerText || topmost.getAttribute?.('aria-label') || '').trim().slice(0, 60);
+            if (txt) blockerInfo += ` "${txt}"`;
+            let blockerContainer = '';
+            try {
+              const container = topmost.closest('[role=dialog],[role=alertdialog],[aria-modal="true"],dialog');
+              if (container) {
+                const h = container.querySelector('h1,h2,h3,[role=heading]');
+                const heading = h ? (h.innerText || '').trim().slice(0, 40) : (container.getAttribute('aria-label') || '');
+                if (heading) blockerContainer = ` inside dialog "${heading}"`;
+              }
+            } catch {}
+            return {
+              success: false,
+              error: `Click blocked: an overlay is covering the target. Topmost element at (${cx}, ${cy}) is <${blockerInfo}>${blockerContainer}, not your target <${el.tagName.toLowerCase()}>. Dismiss the overlay (press Escape, click its close button, or complete the modal flow) before retrying. If you're sure you want to force the click, use click({x: ${cx}, y: ${cy}}) — that will hit whatever's on top.`,
+              occluded: true,
+              occludedBy: { tag: topmost.tagName.toLowerCase(), text: txt, cx, cy },
+            };
+          }
+        }
+      } catch {}
+    }
+
     el.click();
 
     // Post-click SELECT detection: the click may have activated a <select>

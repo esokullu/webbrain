@@ -681,6 +681,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
    */
   clearConversation(tabId) {
     this.conversations.delete(tabId);
+    if (this._doneBlockCount) this._doneBlockCount.delete(tabId);
     this._clearLoopState(tabId);
   }
 
@@ -928,20 +929,96 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
         try {
           const tab = await browser.tabs.get(tabId);
           if (tab?.active) {
-            // Capture page URL and title for verification context
-            const results = await browser.tabs.executeScript(tabId, {
-              code: `({ url: location.href, title: document.title })`,
-            });
-            const info = (results && results[0]) || {};
+            // Probe page URL, title, and "work in progress" signals: open
+            // dialogs/modals and visible forms. If any of these are present
+            // while the model claims it created/added/saved/submitted, the
+            // submit almost certainly didn't happen — e.g. the model
+            // clicked a button that only OPENED the dialog, never the
+            // Create/Submit button inside it.
+            const probeCode = `
+              (() => {
+                function visible(el) {
+                  try {
+                    const r = el.getBoundingClientRect();
+                    if (r.width < 1 || r.height < 1) return false;
+                    const s = window.getComputedStyle(el);
+                    if (s.visibility === 'hidden' || s.display === 'none' || parseFloat(s.opacity) === 0) return false;
+                    return true;
+                  } catch (e) { return false; }
+                }
+                const dialogs = Array.from(document.querySelectorAll('[role=dialog],[role=alertdialog],[aria-modal="true"],dialog[open]')).filter(visible);
+                const forms = Array.from(document.querySelectorAll('form')).filter(visible);
+                const toasts = Array.from(document.querySelectorAll('[role=status],[role=alert],[aria-live]'))
+                  .filter(visible)
+                  .map(e => (e.innerText || '').trim().slice(0, 120))
+                  .filter(Boolean);
+                return {
+                  url: location.href,
+                  title: document.title,
+                  openDialogCount: dialogs.length,
+                  dialogTitles: dialogs.map(d => {
+                    const h = d.querySelector('h1,h2,h3,[role=heading]');
+                    return (h ? (h.innerText || '') : (d.getAttribute('aria-label') || '')).trim().slice(0, 80);
+                  }).filter(Boolean),
+                  visibleFormCount: forms.length,
+                  liveRegionMessages: toasts,
+                };
+              })()
+            `;
+            const results = await browser.tabs.executeScript(tabId, { code: probeCode });
+            const pageState = (results && results[0]) || {};
             const dataUrl = await browser.tabs.captureVisibleTab(tab.windowId, { format: 'png', quality: 80 });
+
+            // Synthesize a warning when summary claims completion but page
+            // state contradicts it.
+            let completionWarning = null;
+            const summaryLower = String(args.summary || '').toLowerCase();
+            const claimsCompletion = /\b(created|added|saved|submitted|posted|published|sent|done|completed|finished)\b/.test(summaryLower);
+            if (claimsCompletion) {
+              if (pageState.openDialogCount > 0 || pageState.visibleFormCount > 0) {
+                const titlesStr = pageState.dialogTitles && pageState.dialogTitles.length
+                  ? ` (dialog titles: ${pageState.dialogTitles.map(t => '"' + t + '"').join(', ')})`
+                  : '';
+                completionWarning = `WARNING: Your summary claims the task was completed, but a ${pageState.openDialogCount > 0 ? 'modal/dialog' : 'form'} is still visible on the page${titlesStr}. This usually means the submit/save button was never clicked. Before calling done again, actually submit the form (click the primary action button like "Save", "Create", "Submit", or press Enter in the form) and verify a success indicator: a URL change away from the create/edit path, a toast/confirmation message, or the form/dialog disappearing. Do NOT claim success without this evidence.`;
+              } else if ((!pageState.liveRegionMessages || pageState.liveRegionMessages.length === 0) && pageState.url && /[?&](create|edit|new)\b/i.test(pageState.url)) {
+                completionWarning = `WARNING: Your summary claims the task was completed, but the URL still contains a create/edit query parameter (${pageState.url}) and no success message is visible. Verify the submit actually happened before finishing.`;
+              }
+            }
+
+            // If completionWarning fires, DO NOT terminate. Return a failed
+            // tool result so the agent loop continues and the model must
+            // actually submit (and verify) before it can call done again.
+            // Track how many times we've blocked on this tab so the model
+            // can escape if the heuristic is wrong (e.g. the "form" is a
+            // search/filter bar, not a submit form).
+            if (completionWarning) {
+              if (!this._doneBlockCount) this._doneBlockCount = new Map();
+              const blocks = (this._doneBlockCount.get(tabId) || 0) + 1;
+              this._doneBlockCount.set(tabId, blocks);
+              if (blocks <= 2) {
+                return {
+                  success: false,
+                  blockedDone: true,
+                  error: completionWarning + ` (block attempt ${blocks}/2 — if you genuinely believe the task is complete and the visible form/dialog is unrelated, re-call done with summary explicitly acknowledging this, e.g. "already-existing product, no submit needed".)`,
+                  pageUrl: pageState.url || '',
+                  pageState,
+                };
+              }
+              // After 2 blocks, let done through with a loud note in verification.
+            }
+            // Reset block count on successful done.
+            if (this._doneBlockCount) this._doneBlockCount.delete(tabId);
+
             return {
               done: true,
               summary: args.summary,
               verification: {
-                pageUrl: info.url || '',
-                pageTitle: info.title || '',
+                pageUrl: pageState.url || '',
+                pageTitle: pageState.title || '',
                 screenshot: dataUrl,
-                note: 'Review this screenshot carefully. Does it confirm the task was completed successfully? If the page shows an existing item from the past (check dates), you may NOT have actually created anything new.',
+                pageState,
+                completionWarning,
+                note: 'Review this screenshot carefully. Does it confirm the task was completed successfully? If the page shows an existing item from the past (check dates), you may NOT have actually created anything new.' + (completionWarning ? ' ' + completionWarning : ''),
               },
             };
           }
