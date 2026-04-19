@@ -12,6 +12,13 @@ const siteAdaptersToggle = document.getElementById('toggle-site-adapters');
 const notifySoundToggle = document.getElementById('toggle-notify-sound');
 const tracingToggle = document.getElementById('toggle-tracing');
 const accountSection = document.getElementById('account-section');
+const visionBaseUrlInput = document.getElementById('vision-base-url');
+const visionApiKeyInput = document.getElementById('vision-api-key');
+const visionModelInput = document.getElementById('vision-model');
+const btnSaveVision = document.getElementById('btn-save-vision');
+const btnTestVision = document.getElementById('btn-test-vision');
+const btnClearVision = document.getElementById('btn-clear-vision');
+const visionTestResult = document.getElementById('test-vision');
 
 let providersData = {};
 let activeProviderId = '';
@@ -39,6 +46,13 @@ async function init() {
   siteAdaptersToggle.checked = stored.useSiteAdapters ?? true;
   notifySoundToggle.checked = stored.notifySound ?? true; // on by default
   tracingToggle.checked = stored.tracingEnabled === true; // off by default
+
+  // Load vision model config
+  const visionStored = await chrome.storage.local.get(['visionModel']);
+  const vision = visionStored.visionModel || {};
+  visionBaseUrlInput.value = vision.baseUrl || '';
+  visionApiKeyInput.value = vision.apiKey || '';
+  visionModelInput.value = vision.model || '';
 
   // Load providers
   const res = await sendToBackground('get_providers');
@@ -150,6 +164,69 @@ notifySoundToggle.addEventListener('change', () => {
 
 tracingToggle.addEventListener('change', () => {
   chrome.storage.local.set({ tracingEnabled: tracingToggle.checked });
+});
+
+// --- Vision Model ---
+
+function flashVisionResult(className, text) {
+  visionTestResult.className = `test-result show ${className}`;
+  visionTestResult.textContent = text;
+  setTimeout(() => visionTestResult.classList.remove('show'), 2000);
+}
+
+btnSaveVision.addEventListener('click', async () => {
+  const baseUrl = visionBaseUrlInput.value.trim();
+  const apiKey = visionApiKeyInput.value.trim();
+  const model = visionModelInput.value.trim();
+
+  if (!baseUrl && !apiKey && !model) {
+    await chrome.storage.local.remove('visionModel');
+    flashVisionResult('ok', 'Cleared.');
+    return;
+  }
+
+  await chrome.storage.local.set({
+    visionModel: { baseUrl, apiKey, model },
+  });
+  flashVisionResult('ok', 'Saved!');
+});
+
+btnTestVision.addEventListener('click', async () => {
+  const baseUrl = visionBaseUrlInput.value.trim();
+  const apiKey = visionApiKeyInput.value.trim();
+  const model = visionModelInput.value.trim();
+
+  if (!baseUrl || !model) {
+    visionTestResult.className = 'test-result show fail';
+    visionTestResult.textContent = 'Fill in Base URL and Model first.';
+    setTimeout(() => visionTestResult.classList.remove('show'), 2500);
+    return;
+  }
+
+  await chrome.storage.local.set({
+    visionModel: { baseUrl, apiKey, model },
+  });
+
+  visionTestResult.className = 'test-result show';
+  visionTestResult.textContent = 'Testing...';
+  visionTestResult.style.color = 'var(--text2)';
+
+  const res = await sendToBackground('test_vision_provider');
+  if (res.ok) {
+    visionTestResult.className = 'test-result show ok';
+    visionTestResult.textContent = `Connected! Model: ${res.model || model}`;
+  } else {
+    visionTestResult.className = 'test-result show fail';
+    visionTestResult.textContent = `Failed: ${res.error}`;
+  }
+});
+
+btnClearVision.addEventListener('click', async () => {
+  visionBaseUrlInput.value = '';
+  visionApiKeyInput.value = '';
+  visionModelInput.value = '';
+  await chrome.storage.local.remove('visionModel');
+  flashVisionResult('ok', 'Cleared.');
 });
 
 // --- Provider Rendering ---

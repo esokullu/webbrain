@@ -497,7 +497,36 @@
           }
         }
         if (!el && matches.length === 0) {
-          return { success: false, error: `No clickable element found for text "${params.text}" (also tried scrolling down)` };
+          // Widened fallback: contenteditable editors + ARIA roles + [tabindex]
+          const fbSels = '[contenteditable="true"],[contenteditable=""],[role="option"],[role="listbox"],[role="combobox"],[role="textbox"],[role="switch"],[role="checkbox"],[role="radio"],[tabindex]:not([tabindex="-1"])';
+          const fbAll = Array.from(document.querySelectorAll(fbSels)).filter(e => {
+            try {
+              const r = e.getBoundingClientRect();
+              if (r.width < 1 || r.height < 1) return false;
+              const s = window.getComputedStyle(e);
+              if (s.visibility === 'hidden' || s.display === 'none' || parseFloat(s.opacity) === 0) return false;
+              return true;
+            } catch(err) { return false; }
+          });
+          const fbNorm = fbAll.map(e => ({
+            e,
+            txt: (e.innerText || e.getAttribute('aria-label') || e.getAttribute('placeholder') || '').trim().toLowerCase(),
+          })).filter(x => !!x.txt);
+          for (const m of modes) {
+            const found = fbNorm.filter(x =>
+              m === 'exact' ? x.txt === needle :
+              m === 'prefix' ? x.txt.startsWith(needle) :
+              x.txt.includes(needle)
+            );
+            if (found.length >= 1) {
+              found[0].e.scrollIntoView({ block: 'center', inline: 'center' });
+              el = found[0].e;
+              break;
+            }
+          }
+          if (!el) {
+            return { success: false, error: `No clickable element found for text "${params.text}" (also tried scrolling down and widening to contenteditable/[role=*]/[tabindex])` };
+          }
         }
       }
       if (!el && matches.length > 1) {

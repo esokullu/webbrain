@@ -290,6 +290,10 @@ async function handleMessage(msg, sender) {
       return await providerManager.testProvider(msg.providerId);
     }
 
+    case 'test_vision_provider': {
+      return await providerManager.testVisionProvider();
+    }
+
     // --- Page Info (quick, no agent loop) ---
     case 'get_page_info': {
       const tabId = msg.tabId || sender.tab?.id;
