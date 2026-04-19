@@ -205,6 +205,24 @@ export class Agent {
   static NAV_TOOLS = new Set(['navigate', 'new_tab']);
   static STATE_CHANGE_TOOLS = new Set(['navigate', 'new_tab', 'click', 'type_text', 'press_keys', 'scroll']);
 
+  // System prompt for the dedicated "vision model" sub-call. Kept terse and
+  // format-oriented so the description is actually useful to the planning
+  // model — free-form captioning ("a modern-looking login page") is worse
+  // than useless. Update with care; this is the main quality lever for the
+  // split-provider mode.
+  static VISION_SYSTEM_PROMPT = `You are the vision subsystem of a web-automation agent. A screenshot of the current browser viewport is attached. Describe what is on screen so the planning agent can decide its next action.
+
+Format — keep it terse, structured, no flowery prose:
+
+1) Page purpose: one line (e.g. "GitHub repo issue list", "Gmail compose", "Stripe checkout form").
+2) Visible text: list the EXACT strings on buttons, links, headings, tabs, and menu items. Quote them verbatim. Do not paraphrase.
+3) Inputs: list each visible form field with its label, placeholder, current value, and whether it is focused/disabled.
+4) State signals: loading spinners, toasts, modals, error banners, success messages, CAPTCHAs, cookie/consent banners, overlays.
+5) Blockers: anything that would prevent the next likely action (overlay, disabled submit, missing data, auth prompt).
+6) Unknowns: if you cannot read something clearly, say so. Do not guess numbers, names, or identifiers.
+
+Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout description unless it matters (e.g. "left nav is collapsed"). If the page is blank or still loading, say that in one line and stop.`;
+
   /**
    * Decide whether to capture an auto-screenshot after a tool call, based on
    * the current setting and which tool ran.
@@ -274,18 +292,37 @@ export class Agent {
       }
     }
 
-    // Without vision, fall back to plain text context.
+    // Determine vision capability: either a dedicated vision model is
+    // configured (routes screenshots there, text to main), or the main
+    // provider itself supports images. Without either, plain text context.
     const provider = this.providerManager.getActive();
-    if (!provider.supportsVision) {
+    const visionProvider = await this.providerManager.getVisionProvider();
+    if (!provider.supportsVision && !visionProvider) {
       return { role: 'user', content: contextLine + userMessage };
     }
 
-    // With vision, attach a viewport screenshot.
     const shot = await this._captureAutoScreenshot(tabId);
     if (!shot) {
       return { role: 'user', content: contextLine + userMessage };
     }
 
+    // Vision-model path: sub-call the dedicated vision model, drop a text
+    // description into the first user message so the main provider never
+    // sees the raw pixels.
+    if (visionProvider) {
+      const desc = await this._describeScreenshot(tabId, shot.dataUrl, 'initial_user_message');
+      if (desc) {
+        const visionBlock = `[Initial viewport description (from vision model ${desc.model}):\n${desc.text}\n]\n\n`;
+        return { role: 'user', content: contextLine + visionBlock + userMessage };
+      }
+      // Sub-call failed. Fall back to raw image iff the main provider can
+      // read images; otherwise drop the screenshot entirely.
+      if (!provider.supportsVision) {
+        return { role: 'user', content: contextLine + userMessage };
+      }
+    }
+
+    // Raw-image path (main provider supports vision and no vision sub-call).
     const screenshotNote = `[Initial viewport screenshot follows (native device resolution for visual fidelity — pixel coordinates on the image are NOT CSS pixels). Prefer click_ax({ref_id}) after get_accessibility_tree. If you must use click({x,y}), first call screenshot({coord_aligned: true}) to get a CSS-pixel-aligned capture whose image pixels match click coordinates.]\n\n`;
 
     return {
@@ -512,8 +549,11 @@ export class Agent {
       onUpdate('warning', { message: 'Page navigated unexpectedly — agent notified.' });
     }
 
-    // Auto-screenshot once per batch, debounced 500ms.
-    if (didStateChange && provider.supportsVision) {
+    // Auto-screenshot once per batch, debounced 500ms. Capture if either
+    // the main provider supports images, or a dedicated vision model is
+    // configured to describe them.
+    const visionProvider = await this.providerManager.getVisionProvider();
+    if (didStateChange && (provider.supportsVision || visionProvider)) {
       const lastTs = this.lastAutoScreenshotTs.get(tabId) || 0;
       if (Date.now() - lastTs >= 500) {
         await new Promise(r => setTimeout(r, 250));
@@ -526,19 +566,46 @@ export class Agent {
           // failure mode for local vision models.
           const visible = await this._getVisibleInteractiveElements(tabId);
           const elementsText = this._formatElementsList(visible);
-          const textBlock = `[Auto-screenshot of current viewport after the action above (native device resolution for visual fidelity — image pixels are NOT CSS pixels). Use this to confirm the result and plan the next step. Prefer click_ax({ref_id}) after get_accessibility_tree, or click({text:"..."}). If you must use click({x,y}), call screenshot({coord_aligned: true}) first to get a CSS-pixel-aligned image.]${elementsText}`;
-          messages.push({
-            role: 'user',
-            content: [
-              { type: 'text', text: textBlock },
-              { type: 'image_url', image_url: { url: shot.dataUrl } },
-            ],
-          });
-          onUpdate('tool_call', { name: 'auto_screenshot', args: {} });
-          onUpdate('tool_result', { name: 'auto_screenshot', result: { success: true, bytes: shot.dataUrl.length, elements: visible.length } });
-          const _runIdForShot = this.currentRunId.get(tabId);
-          if (_runIdForShot) {
-            trace.recordScreenshot(_runIdForShot, null, shot.dataUrl, 'auto-screenshot after tool batch');
+          let pushed = false;
+
+          // Vision-model path: describe the screenshot, push only text.
+          if (visionProvider) {
+            const desc = await this._describeScreenshot(tabId, shot.dataUrl, 'auto_screenshot');
+            if (desc) {
+              const textBlock = `[Auto-screenshot description (from vision model ${desc.model}) after the action above:\n${desc.text}\n]${elementsText}`;
+              messages.push({ role: 'user', content: textBlock });
+              pushed = true;
+            } else if (!provider.supportsVision) {
+              // Sub-call failed and main provider can't read images — drop
+              // the screenshot, but still give the model the elements list
+              // so it has SOMETHING to ground on.
+              if (elementsText) {
+                messages.push({ role: 'user', content: `[Auto-screenshot after the action above — vision sub-call failed, image omitted.]${elementsText}` });
+                pushed = true;
+              }
+            }
+          }
+
+          // Raw-image path (no vision provider, or sub-call fallback).
+          if (!pushed && provider.supportsVision) {
+            const textBlock = `[Auto-screenshot of current viewport after the action above (native device resolution for visual fidelity — image pixels are NOT CSS pixels). Use this to confirm the result and plan the next step. Prefer click_ax({ref_id}) after get_accessibility_tree, or click({text:"..."}). If you must use click({x,y}), call screenshot({coord_aligned: true}) first to get a CSS-pixel-aligned image.]${elementsText}`;
+            messages.push({
+              role: 'user',
+              content: [
+                { type: 'text', text: textBlock },
+                { type: 'image_url', image_url: { url: shot.dataUrl } },
+              ],
+            });
+            pushed = true;
+          }
+
+          if (pushed) {
+            onUpdate('tool_call', { name: 'auto_screenshot', args: {} });
+            onUpdate('tool_result', { name: 'auto_screenshot', result: { success: true, bytes: shot.dataUrl.length, elements: visible.length } });
+            const _runIdForShot = this.currentRunId.get(tabId);
+            if (_runIdForShot) {
+              trace.recordScreenshot(_runIdForShot, null, shot.dataUrl, 'auto-screenshot after tool batch');
+            }
           }
         }
       }
@@ -838,6 +905,61 @@ export class Agent {
         coordAligned: false,
       };
     } catch (e) {
+      return null;
+    }
+  }
+
+  /**
+   * If the user configured a dedicated vision model in settings, route a
+   * screenshot to it and return a terse text description. The planning
+   * model then receives only the description (plus whatever the caller
+   * wraps around it) — the raw image never reaches the main provider.
+   *
+   * Returns { text, model } on success, or null on any failure. Callers
+   * fall back to sending the raw image_url block to the main provider.
+   *
+   * The sub-call is recorded in the trace under a `vision_sub_call` event
+   * so description quality can be inspected alongside the main turn.
+   */
+  async _describeScreenshot(tabId, dataUrl, context = 'unknown') {
+    if (!dataUrl) return null;
+    const vision = await this.providerManager.getVisionProvider();
+    if (!vision) return null;
+
+    const runId = this.currentRunId.get(tabId);
+    const started = Date.now();
+    try {
+      const messages = [
+        { role: 'system', content: Agent.VISION_SYSTEM_PROMPT },
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: 'Describe this screenshot of the current browser viewport for a web-automation agent. Follow the format in the system prompt.' },
+            { type: 'image_url', image_url: { url: dataUrl } },
+          ],
+        },
+      ];
+      const res = await vision.chat(messages, { maxTokens: 800, temperature: 0 });
+      const description = (res?.content || '').trim();
+      if (!description) throw new Error('empty description');
+      const latencyMs = Date.now() - started;
+      trace.recordVisionSubCall(runId, {
+        context,
+        model: vision.config.model,
+        baseUrl: vision.config.baseUrl,
+        description,
+        latencyMs,
+      });
+      return { text: description, model: vision.config.model };
+    } catch (e) {
+      trace.recordVisionSubCall(runId, {
+        context,
+        model: vision.config.model,
+        baseUrl: vision.config.baseUrl,
+        latencyMs: Date.now() - started,
+        error: e?.message || String(e),
+      });
+      console.warn('[agent] vision sub-call failed, falling back to raw image:', e);
       return null;
     }
   }

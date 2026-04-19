@@ -222,6 +222,21 @@ function renderEvent(ev, shotCache, compact) {
           <div class="content-text">${escapeHtml(ev.data?.phase || '')}: ${escapeHtml(ev.data?.message || '')}</div>
         </div>`;
     }
+    case 'vision_sub_call': {
+      const lat = ev.data?.latencyMs != null ? `<span class="latency">${ev.data.latencyMs} ms</span>` : '';
+      const model = ev.data?.model ? `<span class="latency">${escapeHtml(ev.data.model)}</span>` : '';
+      const ctx = ev.data?.context ? `<span class="tool-args">${escapeHtml(ev.data.context)}</span>` : '';
+      const body = ev.data?.error
+        ? `<div class="content-text" style="color:#f88;">vision sub-call failed: ${escapeHtml(ev.data.error)}</div>`
+        : (ev.data?.description
+            ? `<details open><summary>description</summary><pre>${escapeHtml(ev.data.description)}</pre></details>`
+            : '');
+      return `
+        <div class="event vision_sub_call">
+          <div class="event-head"><span class="kind">👁 vision sub-call</span>${ctx}${model}${lat}<span class="latency">${ts}</span></div>
+          ${body}
+        </div>`;
+    }
     case 'note':
     default: {
       return `

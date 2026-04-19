@@ -11,6 +11,12 @@ const autoScreenshotSelect = document.getElementById('select-auto-screenshot');
 const siteAdaptersToggle = document.getElementById('toggle-site-adapters');
 const tracingToggle = document.getElementById('toggle-tracing');
 const accountSection = document.getElementById('account-section');
+const visionBaseUrlInput = document.getElementById('vision-base-url');
+const visionApiKeyInput = document.getElementById('vision-api-key');
+const visionModelInput = document.getElementById('vision-model');
+const btnSaveVision = document.getElementById('btn-save-vision');
+const btnClearVision = document.getElementById('btn-clear-vision');
+const visionTestResult = document.getElementById('test-vision');
 
 let providersData = {};
 let activeProviderId = '';
@@ -37,6 +43,13 @@ async function init() {
   if (autoScreenshotSelect) autoScreenshotSelect.value = stored.autoScreenshot || 'state_change';
   if (siteAdaptersToggle) siteAdaptersToggle.checked = stored.useSiteAdapters ?? true;
   if (tracingToggle) tracingToggle.checked = stored.tracingEnabled === true;
+
+  // Load vision model config
+  const visionStored = await browser.storage.local.get(['visionModel']);
+  const vision = visionStored.visionModel || {};
+  visionBaseUrlInput.value = vision.baseUrl || '';
+  visionApiKeyInput.value = vision.apiKey || '';
+  visionModelInput.value = vision.model || '';
 
   // Load providers
   const res = await sendToBackground('get_providers');
@@ -144,6 +157,39 @@ siteAdaptersToggle?.addEventListener('change', () => {
 
 tracingToggle?.addEventListener('change', () => {
   browser.storage.local.set({ tracingEnabled: tracingToggle.checked });
+});
+
+// --- Vision Model ---
+
+function flashVisionResult(className, text) {
+  visionTestResult.className = `test-result show ${className}`;
+  visionTestResult.textContent = text;
+  setTimeout(() => visionTestResult.classList.remove('show'), 2000);
+}
+
+btnSaveVision.addEventListener('click', async () => {
+  const baseUrl = visionBaseUrlInput.value.trim();
+  const apiKey = visionApiKeyInput.value.trim();
+  const model = visionModelInput.value.trim();
+
+  if (!baseUrl && !apiKey && !model) {
+    await browser.storage.local.remove('visionModel');
+    flashVisionResult('ok', 'Cleared.');
+    return;
+  }
+
+  await browser.storage.local.set({
+    visionModel: { baseUrl, apiKey, model },
+  });
+  flashVisionResult('ok', 'Saved!');
+});
+
+btnClearVision.addEventListener('click', async () => {
+  visionBaseUrlInput.value = '';
+  visionApiKeyInput.value = '';
+  visionModelInput.value = '';
+  await browser.storage.local.remove('visionModel');
+  flashVisionResult('ok', 'Cleared.');
 });
 
 // --- Provider Rendering ---

@@ -132,6 +132,34 @@ export class ProviderManager {
   }
 
   /**
+   * Get a dedicated vision provider if the user has configured one under
+   * `visionModel` in storage. Returns an OpenAI-compatible provider instance
+   * or null if not configured. Caller is responsible for falling back to the
+   * active provider when this returns null.
+   */
+  async getVisionProvider() {
+    try {
+      const { visionModel } = await chrome.storage.local.get(['visionModel']);
+      if (!visionModel || !visionModel.baseUrl || !visionModel.model) return null;
+      return new OpenAICompatibleProvider({
+        type: 'openai',
+        label: 'Vision Model',
+        providerName: 'vision',
+        baseUrl: visionModel.baseUrl,
+        model: visionModel.model,
+        apiKey: visionModel.apiKey || '',
+        enabled: true,
+        // Advertise vision support regardless of model-name heuristics — the
+        // user explicitly configured this endpoint for vision.
+        supportsVision: true,
+      });
+    } catch (e) {
+      console.warn('[providers] getVisionProvider failed:', e);
+      return null;
+    }
+  }
+
+  /**
    * Switch the active provider.
    */
   async setActive(id) {

@@ -354,6 +354,30 @@
   <h2>Providers</h2>
   <div id="providers"></div>
 
+  <h2>Vision Model (optional)</h2>
+  <div class="provider-card" id="vision-card">
+    <div style="font-size:12px;color:var(--text2);margin-bottom:12px;line-height:1.5;">
+      If set, screenshots are sent to this model for reading the page, while the active provider above handles planning and tool calls. Leave blank to use the active provider for vision too. OpenAI-compatible endpoints only.
+    </div>
+    <div class="field">
+      <label>API Base URL</label>
+      <input type="text" id="vision-base-url" placeholder="https://api.openai.com/v1">
+    </div>
+    <div class="field">
+      <label>API Key</label>
+      <input type="password" id="vision-api-key" placeholder="sk-...">
+    </div>
+    <div class="field">
+      <label>Model</label>
+      <input type="text" id="vision-model" placeholder="gpt-4o">
+    </div>
+    <div class="btn-row">
+      <button class="btn-primary" id="btn-save-vision">Save</button>
+      <button class="btn-secondary" id="btn-clear-vision">Clear</button>
+    </div>
+    <div class="test-result" id="test-vision"></div>
+  </div>
+
   <div class="info-box">
     <strong>Getting started with llama.cpp:</strong><br>
     Run <code>llama-server -m your-model.gguf --port 8080</code> to start a local server.<br>
