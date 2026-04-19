@@ -224,6 +224,31 @@ Format — keep it terse, structured, no flowery prose:
 Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout description unless it matters (e.g. "left nav is collapsed"). If the page is blank or still loading, say that in one line and stop.`;
 
   /**
+   * Strip chain-of-thought preambles from a vision model's response.
+   *
+   * Reasoning models (Qwen3/3.5, DeepSeek-R1, etc.) often emit planning text
+   * before the real answer — either wrapped in <think>...</think> tags or as
+   * plain prose restating the task ("The user wants..."). Our vision prompt
+   * asks for a numbered list starting with "1)", so everything before the
+   * first list marker is preamble and can be discarded.
+   */
+  static _cleanVisionDescription(raw) {
+    if (!raw) return '';
+    let s = String(raw);
+    // Drop any <think>...</think> blocks (some servers surface them verbatim).
+    s = s.replace(/<think[\s\S]*?<\/think>/gi, '');
+    // Trim to the first numbered list marker ("1)" or "1." or "**1"), which
+    // matches the format our system prompt asks for.
+    const markerRe = /(^|\n)\s*(?:\*\*)?1[.)][\s\S]/;
+    const m = s.match(markerRe);
+    if (m && m.index != null) {
+      const cut = m.index + (m[1] ? m[1].length : 0);
+      s = s.slice(cut);
+    }
+    return s.trim();
+  }
+
+  /**
    * Decide whether to capture an auto-screenshot after a tool call, based on
    * the current setting and which tool ran.
    */
@@ -939,8 +964,14 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
           ],
         },
       ];
-      const res = await vision.chat(messages, { maxTokens: 800, temperature: 0 });
-      const description = (res?.content || '').trim();
+      const res = await vision.chat(messages, {
+        maxTokens: 800,
+        temperature: 0,
+        // Ask vLLM/sglang-style servers to suppress chain-of-thought for
+        // Qwen3/3.5 etc. Harmless on servers that ignore unknown fields.
+        extraBody: { chat_template_kwargs: { enable_thinking: false } },
+      });
+      const description = Agent._cleanVisionDescription(res?.content || '');
       if (!description) throw new Error('empty description');
       const latencyMs = Date.now() - started;
       trace.recordVisionSubCall(runId, {
