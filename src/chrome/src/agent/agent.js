@@ -1453,8 +1453,41 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     }
 
     if (name === 'new_tab') {
-      const tab = await chrome.tabs.create({ url: args.url });
-      return { success: true, tabId: tab.id, url: args.url };
+      const createProps = { url: args.url };
+      let sourceTab = null;
+      try {
+        sourceTab = await chrome.tabs.get(tabId);
+      } catch (_) {}
+      if (sourceTab?.windowId != null) {
+        createProps.windowId = sourceTab.windowId;
+      }
+      if (typeof sourceTab?.index === 'number') {
+        createProps.index = sourceTab.index + 1;
+      }
+      if (sourceTab?.id != null) {
+        createProps.openerTabId = sourceTab.id;
+      }
+
+      const tab = await chrome.tabs.create(createProps);
+      let groupId = -1;
+      // Group new tabs with the source tab so "research chains" stay visually
+      // together instead of scattering to the far right of the window.
+      if (sourceTab?.id != null && chrome.tabGroups) {
+        try {
+          if (typeof sourceTab.groupId === 'number' && sourceTab.groupId >= 0) {
+            groupId = sourceTab.groupId;
+            await chrome.tabs.group({ groupId, tabIds: [tab.id] });
+          } else {
+            groupId = await chrome.tabs.group({ tabIds: [sourceTab.id, tab.id] });
+            await chrome.tabGroups.update(groupId, {
+              title: 'WebBrain',
+              color: 'blue',
+              collapsed: false,
+            });
+          }
+        } catch (_) {}
+      }
+      return { success: true, tabId: tab.id, url: args.url, groupId: groupId >= 0 ? groupId : null };
     }
 
     if (name === 'screenshot') {
@@ -1651,7 +1684,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       return await fetchUrl(args.url, args);
     }
     if (name === 'research_url') {
-      return await researchUrl(args.url, args);
+      return await researchUrl(args.url, { ...args, sourceTabId: tabId });
     }
     if (name === 'list_downloads') {
       return await listDownloads(args);

@@ -138,7 +138,16 @@ export async function researchUrl(url, opts = {}) {
   const timeoutMs = Math.min(opts.timeout || 8000, 30000);
   let createdTab = null;
   try {
-    createdTab = await chrome.tabs.create({ url, active: false });
+    const createProps = { url, active: false };
+    if (opts.sourceTabId != null) {
+      try {
+        const sourceTab = await chrome.tabs.get(opts.sourceTabId);
+        if (sourceTab?.windowId != null) createProps.windowId = sourceTab.windowId;
+        if (typeof sourceTab?.index === 'number') createProps.index = sourceTab.index + 1;
+        if (sourceTab?.id != null) createProps.openerTabId = sourceTab.id;
+      } catch (_) {}
+    }
+    createdTab = await chrome.tabs.create(createProps);
     const tabId = createdTab.id;
 
     // Wait for the tab to finish loading.
