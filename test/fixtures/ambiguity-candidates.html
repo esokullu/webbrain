@@ -1,0 +1,33 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Fixture: ambiguity candidates</title>
+  <style>
+    body { font-family: system-ui; padding: 2em; }
+    form, section { border: 1px solid #ccc; padding: 1em; margin: 1em 0; }
+  </style>
+</head>
+<body>
+  <h1>Ambiguity fixture (no modal)</h1>
+  <p>Two "Cancel" buttons in different landmarks. Expected: ambiguous error with <code>ancestor</code> context on each candidate.</p>
+
+  <form aria-labelledby="pay-h">
+    <h2 id="pay-h">Payment</h2>
+    <input type="text" placeholder="card">
+    <button type="button" onclick="window.__clicked='pay-cancel'">Cancel</button>
+    <button type="submit">Pay</button>
+  </form>
+
+  <section aria-labelledby="ship-h">
+    <h2 id="ship-h">Shipping</h2>
+    <input type="text" placeholder="address">
+    <button type="button" onclick="window.__clicked='ship-cancel'">Cancel</button>
+    <button type="button">Save</button>
+  </section>
+
+  <script>
+    window.__clicked = null;
+  </script>
+</body>
+</html>

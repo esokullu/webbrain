@@ -1,0 +1,23 @@
+[
+  {
+    "name": "wikipedia-alan-turing",
+    "url": "https://en.wikipedia.org/wiki/Alan_Turing",
+    "mode": "ask",
+    "prompt": "What is Alan Turing's date of death? Answer with just the date.",
+    "check": { "type": "contains", "value": "1954", "field": "content" }
+  },
+  {
+    "name": "hackernews-top-title",
+    "url": "https://news.ycombinator.com/",
+    "mode": "ask",
+    "prompt": "What is the title of the #1 story on Hacker News right now?",
+    "check": { "type": "contains", "value": "", "field": "content", "minLength": 10 }
+  },
+  {
+    "name": "arxiv-attention-title",
+    "url": "https://arxiv.org/abs/1706.03762",
+    "mode": "ask",
+    "prompt": "What is the title of this paper?",
+    "check": { "type": "contains", "value": "Attention", "field": "content" }
+  }
+]

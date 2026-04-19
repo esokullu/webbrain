@@ -1,0 +1,36 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Fixture: modal scoping</title>
+  <style>
+    body { font-family: system-ui; padding: 2em; }
+    dialog, [role="dialog"] {
+      position: fixed; top: 15%; left: 20%; width: 60%; padding: 2em;
+      background: white; border: 2px solid #333; z-index: 1000;
+    }
+    .backdrop {
+      position: fixed; inset: 0; background: rgba(0,0,0,0.4); z-index: 999;
+    }
+  </style>
+</head>
+<body>
+  <h1>Release editor (background)</h1>
+  <button id="bg-publish" onclick="window.__clicked='bg-publish'">Publish release</button>
+  <button id="bg-create" onclick="window.__clicked='bg-create'">Create</button>
+
+  <div class="backdrop" aria-hidden="true"></div>
+
+  <div role="dialog" aria-modal="true" aria-labelledby="dlg-title">
+    <h2 id="dlg-title">Create new tag</h2>
+    <input type="text" placeholder="v4.0.0">
+    <button id="dlg-create" onclick="window.__clicked='dlg-create'">Create</button>
+    <button id="dlg-cancel" onclick="window.__clicked='dlg-cancel'">Cancel</button>
+  </div>
+
+  <script>
+    // Reset sentinel when a fresh click is dispatched via the test harness.
+    window.__clicked = null;
+  </script>
+</body>
+</html>

@@ -1,0 +1,29 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Fixture: occlusion</title>
+  <style>
+    body { font-family: system-ui; padding: 2em; margin: 0; }
+    #target {
+      position: fixed; top: 100px; left: 100px; width: 160px; height: 40px;
+      font-size: 14px;
+    }
+    #cover {
+      position: fixed; top: 80px; left: 80px; width: 200px; height: 80px;
+      background: rgba(255, 0, 0, 0.3); z-index: 9999; pointer-events: auto;
+    }
+  </style>
+</head>
+<body>
+  <h1>Occlusion fixture</h1>
+  <p>The Submit button is covered by a transparent red overlay.</p>
+
+  <button id="target" onclick="window.__clicked='target'">Submit</button>
+  <div id="cover" aria-hidden="true"></div>
+
+  <script>
+    window.__clicked = null;
+  </script>
+</body>
+</html>
