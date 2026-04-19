@@ -875,7 +875,21 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     }
 
     if (name === 'new_tab') {
-      const tab = await browser.tabs.create({ url: args.url });
+      const createProps = { url: args.url };
+      let sourceTab = null;
+      try {
+        sourceTab = await browser.tabs.get(tabId);
+      } catch (_) {}
+      if (sourceTab?.windowId != null) {
+        createProps.windowId = sourceTab.windowId;
+      }
+      if (typeof sourceTab?.index === 'number') {
+        createProps.index = sourceTab.index + 1;
+      }
+      if (sourceTab?.id != null) {
+        createProps.openerTabId = sourceTab.id;
+      }
+      const tab = await browser.tabs.create(createProps);
       return { success: true, tabId: tab.id, url: args.url };
     }
 
@@ -943,7 +957,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       return await fetchUrl(args.url, args);
     }
     if (name === 'research_url') {
-      return await researchUrl(args.url, args);
+      return await researchUrl(args.url, { ...args, sourceTabId: tabId });
     }
     if (name === 'list_downloads') {
       return await listDownloads(args);
