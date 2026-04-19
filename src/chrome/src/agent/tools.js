@@ -713,6 +713,7 @@ TYPING — read this:
   * checkbox / radio / button / link → \`click_ax\` alone toggles or activates them. No type follow-up.
 - Legacy fallback (when you don't have a ref_id): the CLICK-THEN-TYPE pattern: first call \`click({selector: "..."})\` to focus the field, then immediately call \`type_text({text: "..."})\` WITH NO SELECTOR. The text goes into whatever's currently focused. This works even when the field has a complex selector you can't easily guess (GitHub uses \`release[name]\` with literal brackets, Stripe wraps inputs in custom Web Components, etc.).
 - If you DO know the exact selector, \`type_text({selector: "...", text: "..."})\` also works.
+- RICH-TEXT BODY EDITORS (Discourse post body, Gmail compose, Slack message, Notion, Medium): these are \`<div contenteditable="true">\` elements that DON'T show up as interactive in the accessibility tree or \`get_interactive_elements\`. Clicking them by text or selector typically fails. The reliable one-shot is: \`type_text({selector: "div[contenteditable=\\"true\\"]", text: "..."})\`. Use it directly — don't burn steps trying to click the editor first.
 - If \`type_text\` returns success but the field doesn't visibly contain your text in a follow-up screenshot, the focus was lost — re-click the field and try again.
 - CRITICAL: If you're filling multiple fields, you MUST click each field individually before typing into it. NEVER type multiple values without clicking the target field first. If you type without clicking, the text goes into whatever was last focused — which is often the WRONG field. The pattern is always: click field A → type value A → click field B → type value B → click field C → type value C.
 - NEVER concatenate multiple values (name + price + period) into a single type_text call. Each piece of data goes into its own field.
@@ -745,8 +746,9 @@ FORMS — read this:
 - verify_form() returns a structured list of all field names, types, and current values, plus a viewport screenshot. Compare each field against what you intended to type.
 - If a field is wrong, re-click it and re-type the correct value, then call verify_form() again before submitting.
 - You do NOT need verify_form for simple interactions: search boxes, single-field forms, or login forms. Use it for multi-field forms where wrong data has consequences (checkout, profile, issue creation, releases, etc.).
-- AFTER submitting a form, ALWAYS take a screenshot and read the page to confirm success. Look for: a success message/toast, the newly created item appearing in a list, or a detail page for the new item. Check that the details (name, price, dates) match what you intended.
+- AFTER submitting a form, ALWAYS take a screenshot and read the page to confirm success BEFORE doing anything else. Do not resume other actions until you verify the submission result. Look for: a success message/toast, the newly created item appearing in a list, or a detail page for the new item. Check that the details (name, price, dates) match what you intended.
 - NEVER claim you created something unless you see CONFIRMATION on the page. If you see a list of items, check the creation date — if it says "2 months ago" or a past date, that is an EXISTING item, NOT something you just created. Only items with a timestamp from right now are yours.
+- If you encounter any CAPTCHA, anti-bot check, or human verification challenge, STOP immediately and ask the user to solve it. Do not attempt to bypass it and do not continue automation until the user confirms it is solved.
 
 SCROLLING — read this:
 - Many forms and pages have content below the visible viewport. If you need to find a button, field, or section that isn't visible, use \`scroll_page({direction: "down"})\` to scroll down.

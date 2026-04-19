@@ -148,6 +148,7 @@ const ADAPTERS = [
     category: 'general',
     match: (url) => /^https?:\/\/(www\.|old\.|new\.)?reddit\.com\//.test(url),
     notes: `
+- Prefer old.reddit.com — its DOM is simpler and easier to automate. If you land on www.reddit.com or new.reddit.com, navigate to the old.reddit.com equivalent first (swap the subdomain, keep the path).
 - old.reddit.com and new.reddit.com have completely different DOMs. Check the URL before assuming selectors.
 - Comments are nested deeply; "load more comments" links require clicking to expand.
 - Voting requires being logged in; the up/down arrows are siblings of each post/comment.

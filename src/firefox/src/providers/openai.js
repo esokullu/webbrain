@@ -78,6 +78,10 @@ export class OpenAICompatibleProvider extends BaseLLMProvider {
       body.tool_choice = options.toolChoice || 'auto';
     }
 
+    if (options.extraBody && typeof options.extraBody === 'object') {
+      Object.assign(body, options.extraBody);
+    }
+
     const url = `${this.baseUrl}/chat/completions`;
     let res;
     try {

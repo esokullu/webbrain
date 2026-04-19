@@ -221,6 +221,24 @@ export function recordError(runId, step, phase, message) {
   return _appendEvent(runId, 'error', { step, phase, message });
 }
 
+/**
+ * Record a vision sub-call: the agent asked a dedicated vision model to
+ * describe a screenshot so the main planning model receives text instead
+ * of pixels. Captured for debugging and quality inspection — description
+ * quality is the main failure mode of the split-provider design.
+ */
+export function recordVisionSubCall(runId, { step, context, model, baseUrl, description, latencyMs, error }) {
+  return _appendEvent(runId, 'vision_sub_call', {
+    step: step || null,
+    context: context || null, // 'initial_user_message' | 'auto_screenshot' | ...
+    model: model || null,
+    baseUrl: baseUrl || null,
+    description: description || null,
+    latencyMs: latencyMs || null,
+    error: error || null,
+  });
+}
+
 export function recordNote(runId, step, note, extra = null) {
   return _appendEvent(runId, 'note', { step, note, extra });
 }
