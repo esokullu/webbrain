@@ -198,4 +198,13 @@ export class ProviderManager {
     if (!provider) return { ok: false, error: 'Provider not found' };
     return provider.testConnection();
   }
+
+  /**
+   * Test the optional dedicated vision provider's connection.
+   */
+  async testVisionProvider() {
+    const provider = await this.getVisionProvider();
+    if (!provider) return { ok: false, error: 'Vision model not configured' };
+    return provider.testConnection();
+  }
 }

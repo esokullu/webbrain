@@ -15,6 +15,7 @@ const visionBaseUrlInput = document.getElementById('vision-base-url');
 const visionApiKeyInput = document.getElementById('vision-api-key');
 const visionModelInput = document.getElementById('vision-model');
 const btnSaveVision = document.getElementById('btn-save-vision');
+const btnTestVision = document.getElementById('btn-test-vision');
 const btnClearVision = document.getElementById('btn-clear-vision');
 const visionTestResult = document.getElementById('test-vision');
 
@@ -182,6 +183,36 @@ btnSaveVision.addEventListener('click', async () => {
     visionModel: { baseUrl, apiKey, model },
   });
   flashVisionResult('ok', 'Saved!');
+});
+
+btnTestVision.addEventListener('click', async () => {
+  const baseUrl = visionBaseUrlInput.value.trim();
+  const apiKey = visionApiKeyInput.value.trim();
+  const model = visionModelInput.value.trim();
+
+  if (!baseUrl || !model) {
+    visionTestResult.className = 'test-result show fail';
+    visionTestResult.textContent = 'Fill in Base URL and Model first.';
+    setTimeout(() => visionTestResult.classList.remove('show'), 2500);
+    return;
+  }
+
+  await browser.storage.local.set({
+    visionModel: { baseUrl, apiKey, model },
+  });
+
+  visionTestResult.className = 'test-result show';
+  visionTestResult.textContent = 'Testing...';
+  visionTestResult.style.color = 'var(--text2)';
+
+  const res = await sendToBackground('test_vision_provider');
+  if (res.ok) {
+    visionTestResult.className = 'test-result show ok';
+    visionTestResult.textContent = `Connected! Model: ${res.model || model}`;
+  } else {
+    visionTestResult.className = 'test-result show fail';
+    visionTestResult.textContent = `Failed: ${res.error}`;
+  }
 });
 
 btnClearVision.addEventListener('click', async () => {

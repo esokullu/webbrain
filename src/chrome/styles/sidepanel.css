@@ -211,6 +211,10 @@ body {
   border-bottom-right-radius: 4px;
 }
 
+.message.user .message-text {
+  white-space: pre-wrap;
+}
+
 .message.assistant .message-content {
   background: var(--bg-secondary);
   border: 1px solid var(--border);

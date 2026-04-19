@@ -164,6 +164,10 @@ async function handleMessage(msg, sender) {
       return await providerManager.testProvider(msg.providerId);
     }
 
+    case 'test_vision_provider': {
+      return await providerManager.testVisionProvider();
+    }
+
     case 'get_page_info': {
       const tabId = msg.tabId || sender.tab?.id;
       try {
