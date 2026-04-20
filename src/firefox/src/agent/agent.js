@@ -1,5 +1,5 @@
 import { AGENT_TOOLS, AGENT_TOOL_NAMES, getToolsForMode, SYSTEM_PROMPT_ASK, SYSTEM_PROMPT_ACT } from './tools.js';
-import { getActiveAdapter } from './adapters.js';
+import { getActiveAdapter, UNIVERSAL_PREAMBLE } from './adapters.js';
 import {
   fetchUrl,
   researchUrl,
@@ -27,6 +27,10 @@ export class Agent {
     this.maxContextChars = 80000; // rough char budget (~20k tokens)
     this.autoScreenshot = 'state_change';
     this.useSiteAdapters = true;
+    // Profile auto-fill (plaintext bio + throwaway password used on
+    // signup forms). Loaded in background.js and refreshed live on change.
+    this.profileEnabled = false;
+    this.profileText = '';
     this.recentCalls = new Map();
     this.loopNudges = new Map();
     this.healthyCallsSinceLoop = new Map();
@@ -675,20 +679,44 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
   /**
    * Get or create a conversation for a tab.
    */
+  /**
+   * Compose the full system prompt: base (ASK or ACT) + optional universal
+   * cookie/paywall guidance + optional user profile block. Base goes
+   * first so prompt-cache prefixes stay stable when user toggles settings.
+   */
+  _buildSystemPrompt(mode) {
+    let prompt = mode === 'act' ? SYSTEM_PROMPT_ACT : SYSTEM_PROMPT_ASK;
+    if (this.useSiteAdapters) {
+      prompt += `\n\n${UNIVERSAL_PREAMBLE.trim()}`;
+    }
+    if (this.profileEnabled && this.profileText && this.profileText.trim()) {
+      prompt +=
+        `\n\n[User profile — use these details when a form or signup needs them, INSTEAD of asking the user. The user has opted in to sharing this with you. Do NOT volunteer these details on pages that don't need them, and NEVER reveal the password in chat output or screenshots. Treat it as sensitive.]\n` +
+        this.profileText.trim();
+    }
+    return prompt;
+  }
+
+  _refreshSystemPrompts() {
+    for (const [tabId, messages] of this.conversations) {
+      if (!messages || messages[0]?.role !== 'system') continue;
+      const mode = this._conversationMode || 'ask';
+      messages[0].content = this._buildSystemPrompt(mode);
+    }
+  }
+
   getConversation(tabId, mode = 'ask') {
     if (!this.conversations.has(tabId)) {
-      const systemPrompt = mode === 'act' ? SYSTEM_PROMPT_ACT : SYSTEM_PROMPT_ASK;
       this.conversations.set(tabId, [
-        { role: 'system', content: systemPrompt },
+        { role: 'system', content: this._buildSystemPrompt(mode) },
       ]);
       this._conversationMode = mode;
     }
     // If mode changed, update the system prompt
     if (this._conversationMode !== mode) {
       const messages = this.conversations.get(tabId);
-      const systemPrompt = mode === 'act' ? SYSTEM_PROMPT_ACT : SYSTEM_PROMPT_ASK;
       if (messages[0]?.role === 'system') {
-        messages[0].content = systemPrompt;
+        messages[0].content = this._buildSystemPrompt(mode);
       }
       this._conversationMode = mode;
     }

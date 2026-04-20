@@ -27,6 +27,18 @@ async function loadSiteAdapters() {
 }
 loadSiteAdapters();
 
+// Profile auto-fill: user-provided text (name, email, etc.) that gets
+// appended to the system prompt when enabled. Plaintext in storage —
+// security warning lives in the settings UI.
+async function loadProfile() {
+  const stored = await chrome.storage.local.get(['profileEnabled', 'profileText']);
+  if (stored.profileEnabled != null) agent.profileEnabled = !!stored.profileEnabled;
+  if (typeof stored.profileText === 'string') agent.profileText = stored.profileText;
+  // No need to refresh live conversations on initial load — they don't
+  // exist yet. Refresh only fires on user-initiated setting changes below.
+}
+loadProfile();
+
 // Initialize on install
 chrome.runtime.onInstalled.addListener(async () => {
   await providerManager.load();
@@ -48,9 +60,23 @@ chrome.storage.onChanged.addListener((changes) => {
   if (changes.autoScreenshot) {
     agent.autoScreenshot = changes.autoScreenshot.newValue;
   }
+  // Any change that affects the composed system prompt needs to refresh
+  // already-open conversations so the next turn sees the update — without
+  // wiping the chat history.
+  let refreshPrompts = false;
   if (changes.useSiteAdapters) {
     agent.useSiteAdapters = changes.useSiteAdapters.newValue;
+    refreshPrompts = true;
   }
+  if (changes.profileEnabled) {
+    agent.profileEnabled = !!changes.profileEnabled.newValue;
+    refreshPrompts = true;
+  }
+  if (changes.profileText) {
+    agent.profileText = changes.profileText.newValue || '';
+    refreshPrompts = true;
+  }
+  if (refreshPrompts) agent._refreshSystemPrompts();
 });
 
 // Track which tabs have the panel enabled (per-tab, not global).

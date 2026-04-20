@@ -18,6 +18,28 @@
  * describe the SHAPE of the page rather than literal selectors.
  */
 
+/**
+ * Universal guidance injected into the first user message on every
+ * conversation when site adapters are enabled. Covers two patterns that
+ * appear on a huge fraction of the public web and are NOT intuitive for
+ * LLMs: consent banners (which block interaction and get summarized as
+ * page content) and paywalls (which invite the agent to bypass them).
+ *
+ * Kept deliberately short — this costs tokens on every new conversation.
+ * If you add more universal guidance, audit the total size first.
+ */
+export const UNIVERSAL_PREAMBLE = `[Universal guidance — cookie banners & paywalls]
+COOKIE / CONSENT BANNERS (OneTrust, Didomi, Cookiebot, Quantcast, Google Funding Choices, TrustArc, etc.) often open on top of page content and must be dismissed before anything else works.
+- Priority: click({text: "Reject all"}) > "Reject non-essential" / "Only necessary". Use click({text}) — selectors churn; labels are stable.
+- If only "Accept all" / "I agree" is exposed at the top level, click it to unblock the task. Do NOT dig into "Manage preferences" / "Customize" / "Show details" — it's a token sink and usually a dark-pattern dead-end.
+- After dismissing, re-screenshot or call read_page before reasoning about the page. Do NOT describe the banner text as if it were page content.
+
+PAYWALLS / SIGN-IN WALLS. Signals: "Subscribe to continue", "X free articles remaining", a gray/blurred overlay on the body, a fade-out on the text, a sign-in wall mid-article, very short article body followed by a signup form.
+- STOP and surface the paywall to the user. Report what's actually visible (headline, dek, first paragraphs).
+- DO NOT attempt to bypass: no archive.today / archive.org / 12ft.io, no cookie/localStorage clearing, no disabling JS, no reader-mode tricks, no copy-from-print-view. These are circumvention and not supported.
+- Offer alternatives: (a) search freely available sources for the same story, (b) ask whether the user has a subscription account to sign in with.
+- Never claim to have read the full article when only the preview was available.`;
+
 const ADAPTERS = [
   // ─── Code & Dev Tools ─────────────────────────────────────────────────
   {
@@ -25,7 +47,7 @@ const ADAPTERS = [
     category: 'general',
     match: (url) => /^https?:\/\/(www\.)?github\.com\//.test(url),
     notes: `
-- Creating a release: navigate to /<owner>/<repo>/releases/new (not /releases). The tag selector is a combobox labeled "Choose a tag" — click({text: "Choose a tag"}) to open it, type the tag name, then click({text: "Create new tag"}) to confirm.
+- Creating a release: navigate to /<owner>/<repo>/releases/new (not /releases). The tag selector is a combobox labeled "Choose a tag" — click({text: "Choose a tag"}) to open it, then type the tag name into the focused popup, then click({text: "Create new tag"}) to confirm.
 - DO NOT use index-based clicks on the release page. GitHub's global header pollutes the index space and the release form is deep in the DOM. Always use click({text:"..."}) for buttons. Specifically: never click element #38 from memory — that's a learned anti-pattern from training data, and on the live site #38 is the "Pull requests" header link that navigates away from the release form.
 - Release body is a CodeMirror editor, not a textarea. Click the editor surface (click({text:"Describe this release"}) on the placeholder works) then type with no selector.
 - The green "Publish release" button is at the bottom of the form. Click it with click({text: "Publish release"}). The gray "Save draft" is right next to it — don't confuse them.
@@ -234,6 +256,69 @@ const ADAPTERS = [
 - Deployments live under each project. The "Production" tab vs "Preview" tab matters — promoting a preview to prod is a separate action.
 - Environment variables are scoped to environments (Production, Preview, Development); changing one doesn't auto-redeploy.
 - The team selector is in the top-left, separate from the project selector.`,
+  },
+
+  // ─── News Paywalls ────────────────────────────────────────────────────
+  // For each of these, full article bodies are subscription-gated. The
+  // universal paywall note already says "don't bypass" — these adapters
+  // are here to (1) set expectations early so the agent doesn't chase
+  // "Continue reading" buttons that lead to signup walls, and (2) name
+  // the specific framework so users see a sensible "this is paywalled"
+  // message instead of a confused summary of a signup CTA.
+  {
+    name: 'nytimes',
+    category: 'general',
+    match: (url) => /^https?:\/\/(www\.)?nytimes\.com\//.test(url),
+    notes: `
+- NYT is a subscription publication. Most articles are paywalled after the first 2-3 paragraphs. A sign-in wall may appear as a full-page takeover.
+- Cookie banner: "Continue" / "Manage Privacy Preferences" — click Continue to dismiss.
+- DO NOT attempt paywall bypass. Report what's visible and offer alternatives (AP/Reuters wire coverage of the same story is usually free).
+- Games (Wordle, Connections, Mini Crossword) have their own subsections; progress requires a free NYT account.`,
+  },
+  {
+    name: 'wsj',
+    category: 'general',
+    match: (url) => /^https?:\/\/(www\.)?wsj\.com\//.test(url),
+    notes: `
+- WSJ is a subscription publication. Most articles show a short preview then a subscriber wall.
+- The article URL sometimes contains "?mod=…" tracking params — strip them if sharing a link.
+- DO NOT attempt paywall bypass. Report what's visible and offer: (a) search freely available coverage of the same story, (b) ask the user to sign in if they have a subscription.`,
+  },
+  {
+    name: 'ft',
+    category: 'general',
+    match: (url) => /^https?:\/\/(www\.)?ft\.com\//.test(url),
+    notes: `
+- Financial Times is a metered subscription publication — a handful of free articles per month, then a hard paywall.
+- Some articles are marked "Free to read" (look for a small label near the headline); those are fully available.
+- DO NOT attempt paywall bypass. If the article is gated, surface the paywall to the user and offer alternatives.`,
+  },
+  {
+    name: 'bloomberg',
+    category: 'general',
+    match: (url) => /^https?:\/\/(www\.)?bloomberg\.com\//.test(url),
+    notes: `
+- Bloomberg articles are paywalled; free users see a short preview and a gray fade-out before the signup wall.
+- Bloomberg's bot check occasionally interposes a CAPTCHA before the article — if you hit it, STOP and tell the user rather than trying to solve it.
+- DO NOT attempt paywall bypass. Offer alternatives (Reuters, AP usually cover the same market stories freely).`,
+  },
+  {
+    name: 'economist',
+    category: 'general',
+    match: (url) => /^https?:\/\/(www\.)?economist\.com\//.test(url),
+    notes: `
+- The Economist is a subscription publication. Most articles show the first paragraph then a subscriber wall.
+- "1843 Magazine" and some opinion pieces are free — others aren't.
+- DO NOT attempt paywall bypass. Surface the paywall and offer to summarize from freely available coverage.`,
+  },
+  {
+    name: 'washingtonpost',
+    category: 'general',
+    match: (url) => /^https?:\/\/(www\.)?washingtonpost\.com\//.test(url),
+    notes: `
+- Washington Post is a metered subscription publication. After the free article limit, a hard paywall replaces the article body.
+- Cookie banner is a full-screen consent dialog with clear Accept/Reject options — dismiss first.
+- DO NOT attempt paywall bypass. Report what's visible and offer alternatives.`,
   },
 
   // ─── Finance / High-Stakes ────────────────────────────────────────────

@@ -27,6 +27,13 @@ async function loadSiteAdapters() {
 }
 loadSiteAdapters();
 
+async function loadProfile() {
+  const stored = await browser.storage.local.get(['profileEnabled', 'profileText']);
+  if (stored.profileEnabled != null) agent.profileEnabled = !!stored.profileEnabled;
+  if (typeof stored.profileText === 'string') agent.profileText = stored.profileText;
+}
+loadProfile();
+
 // Initialize on install
 browser.runtime.onInstalled.addListener(async () => {
   await providerManager.load();
@@ -43,9 +50,20 @@ browser.storage.onChanged.addListener((changes) => {
   if (changes.autoScreenshot) {
     agent.autoScreenshot = changes.autoScreenshot.newValue;
   }
+  let refreshPrompts = false;
   if (changes.useSiteAdapters) {
     agent.useSiteAdapters = changes.useSiteAdapters.newValue;
+    refreshPrompts = true;
   }
+  if (changes.profileEnabled) {
+    agent.profileEnabled = !!changes.profileEnabled.newValue;
+    refreshPrompts = true;
+  }
+  if (changes.profileText) {
+    agent.profileText = changes.profileText.newValue || '';
+    refreshPrompts = true;
+  }
+  if (refreshPrompts) agent._refreshSystemPrompts();
 });
 
 // Open sidebar when browser action is clicked

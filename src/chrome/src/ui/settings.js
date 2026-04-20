@@ -19,6 +19,11 @@ const btnSaveVision = document.getElementById('btn-save-vision');
 const btnTestVision = document.getElementById('btn-test-vision');
 const btnClearVision = document.getElementById('btn-clear-vision');
 const visionTestResult = document.getElementById('test-vision');
+const profileEnabledToggle = document.getElementById('toggle-profile-enabled');
+const profileTextArea = document.getElementById('profile-text');
+const btnSaveProfile = document.getElementById('btn-save-profile');
+const btnClearProfile = document.getElementById('btn-clear-profile');
+const profileTestResult = document.getElementById('test-profile');
 
 let providersData = {};
 let activeProviderId = '';
@@ -53,6 +58,11 @@ async function init() {
   visionBaseUrlInput.value = vision.baseUrl || '';
   visionApiKeyInput.value = vision.apiKey || '';
   visionModelInput.value = vision.model || '';
+
+  // Load profile (auto-fill bio + throwaway password)
+  const profileStored = await chrome.storage.local.get(['profileEnabled', 'profileText']);
+  if (profileEnabledToggle) profileEnabledToggle.checked = !!profileStored.profileEnabled;
+  if (profileTextArea) profileTextArea.value = profileStored.profileText || '';
 
   // Load providers
   const res = await sendToBackground('get_providers');
@@ -228,6 +238,43 @@ btnClearVision.addEventListener('click', async () => {
   await chrome.storage.local.remove('visionModel');
   flashVisionResult('ok', 'Cleared.');
 });
+
+// --- Profile auto-fill ---
+// Persisted to chrome.storage.local in plaintext; the agent picks the
+// changes up via the storage.onChanged listener in background.js and
+// refreshes open conversations' system prompts on the next turn.
+
+function flashProfileResult(className, text) {
+  if (!profileTestResult) return;
+  profileTestResult.className = `test-result show ${className}`;
+  profileTestResult.textContent = text;
+  setTimeout(() => profileTestResult.classList.remove('show'), 2000);
+}
+
+// Enabling/disabling the toggle saves immediately — no "Save" click needed
+// for the on/off state so users don't get confused when the toggle
+// appears to not do anything.
+if (profileEnabledToggle) {
+  profileEnabledToggle.addEventListener('change', () => {
+    chrome.storage.local.set({ profileEnabled: profileEnabledToggle.checked });
+  });
+}
+
+if (btnSaveProfile) {
+  btnSaveProfile.addEventListener('click', async () => {
+    const text = (profileTextArea?.value || '').trim();
+    await chrome.storage.local.set({ profileText: text });
+    flashProfileResult('ok', 'Saved.');
+  });
+}
+
+if (btnClearProfile) {
+  btnClearProfile.addEventListener('click', async () => {
+    if (profileTextArea) profileTextArea.value = '';
+    await chrome.storage.local.set({ profileText: '' });
+    flashProfileResult('ok', 'Cleared.');
+  });
+}
 
 // --- Provider Rendering ---
 

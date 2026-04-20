@@ -320,7 +320,8 @@
   <nav class="tabs" role="tablist">
     <button class="tab-btn active" type="button" role="tab" data-tab="display">Display</button>
     <button class="tab-btn" type="button" role="tab" data-tab="providers">Providers</button>
-    <button class="tab-btn" type="button" role="tab" data-tab="vision">Vision Model</button>
+    <button class="tab-btn" type="button" role="tab" data-tab="vision">Vision</button>
+    <button class="tab-btn" type="button" role="tab" data-tab="profile">Profile</button>
   </nav>
 
   <section class="tab-panel active" data-panel="display" role="tabpanel">
@@ -431,6 +432,48 @@
         <button class="btn-secondary" id="btn-clear-vision">Clear</button>
       </div>
       <div class="test-result" id="test-vision"></div>
+    </div>
+  </section>
+
+  <section class="tab-panel" data-panel="profile" role="tabpanel">
+    <div class="provider-card" id="profile-card">
+      <div style="font-size:12px;color:var(--text2);margin-bottom:12px;line-height:1.55;">
+        Store a short bio the agent can use to fill signup forms without asking every time — your name, work email, company, and a <em>throwaway</em> password for low-stakes signups. When enabled, the text below is appended to the agent's system prompt on every conversation.
+      </div>
+
+      <div class="setting-row" style="margin-bottom:12px;">
+        <div class="setting-info">
+          <div class="setting-label">Enable profile auto-fill</div>
+          <div class="setting-desc">Inject the profile text into the agent's system prompt. Disabled = the agent never sees this text.</div>
+        </div>
+        <label class="toggle">
+          <input type="checkbox" id="toggle-profile-enabled">
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+
+      <div class="field">
+        <label>Profile text</label>
+        <textarea id="profile-text"
+                  rows="8"
+                  placeholder="I'm Jane Doe. My email is jane@example.com. I work for Acme Inc. My default password for low-stakes signups is SomePhrase-42!. I'm based in Berlin."
+                  style="width:100%;background:var(--bg3);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:10px 12px;font-size:13px;font-family:inherit;line-height:1.5;outline:none;resize:vertical;"></textarea>
+      </div>
+      <div class="btn-row">
+        <button class="btn-primary" id="btn-save-profile">Save</button>
+        <button class="btn-secondary" id="btn-clear-profile">Clear</button>
+      </div>
+      <div class="test-result" id="test-profile"></div>
+
+      <div class="info-box" style="margin-top:16px;">
+        <strong>Security — read this:</strong><br>
+        <ul style="margin:6px 0 0 18px;padding:0;line-height:1.55;">
+          <li>The text you enter here is stored <strong>in plaintext</strong> in your browser's local storage. It is <strong>not</strong> transmitted to the WebBrain project — but it <strong>is</strong> sent to whichever LLM provider you have configured on every turn, as part of the system prompt.</li>
+          <li><strong>Do not put passwords for important accounts</strong> here (Google, Apple, iCloud, banking, work SSO, primary email). Those accounts should use 2FA and you shouldn't need to hand them to an agent anyway.</li>
+          <li>A <strong>throwaway password</strong> you reuse for low-stakes site signups (newsletters, free trials, forum accounts) is the intended use case.</li>
+          <li>If this browser profile is ever compromised, an attacker with disk access can read this text. Keep it minimal.</li>
+        </ul>
+      </div>
     </div>
   </section>
 

@@ -110,6 +110,22 @@
           "@type": "Answer",
           "text": "Yes on Chrome. The agent runs in the background service worker bound to its original tab, so it keeps clicking, typing, and reading that specific tab even when you switch focus elsewhere. The sidebar locks input while a task is running so you can't accidentally start a second task. On Firefox, the agent also keeps running, but auto-screenshots are skipped while the agent's tab is in the background — Firefox's screenshot API can only capture the active tab, so WebBrain refuses rather than feed the model an image of an unrelated page. Avoid actively interacting with the same tab the agent is working on."
         }
+      },
+      {
+        "@type": "Question",
+        "name": "How does Profile auto-fill work, and is it safe?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "Profile auto-fill is an optional feature in Settings → Profile. You enter a short bio (name, work email, company, a throwaway password for low-stakes signups) and toggle it on. When enabled, WebBrain appends the text to the agent's system prompt so it can fill signup forms without asking every time. The text is stored in plaintext in your browser's local storage — it is not transmitted to the WebBrain project, but it IS sent to whichever LLM provider you have configured on every turn. Use it only for low-stakes info. Do not put passwords for important accounts (Google, Apple, iCloud, banking, work SSO) here — those should use 2FA and shouldn't be handed to an agent anyway."
+        }
+      },
+      {
+        "@type": "Question",
+        "name": "What does WebBrain do with cookie banners and paywalls?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "WebBrain recognizes cookie consent banners from common frameworks (OneTrust, Cookiebot, Didomi, Quantcast, Google Funding Choices, TrustArc) and dismisses them before reasoning about the page — preferring 'Reject all' when available, falling back to 'Accept all' rather than disappearing into the 'Manage preferences' maze. For paywalls, WebBrain reports the paywall honestly and tells you what it could actually see. It does NOT attempt to bypass paywalls — no archive.today, 12ft.io, cookie clearing, JS disabling, or reader-mode tricks. If you want the content, log in with a subscription or look for free coverage of the same story."
+        }
       }
     ]
   }
@@ -974,6 +990,26 @@
       <h3>Smart Context</h3>
       <p>Automatic context management prevents token overflow. Intelligently trims conversation history and limits tool output for smooth, uninterrupted sessions.</p>
     </div>
+    <div class="feature-card">
+      <div class="feature-icon">👁️</div>
+      <h3>Dedicated Vision Model</h3>
+      <p>Pair a fast text-only model for planning with a separate vision-capable model for reading screenshots. Cheaper and faster than using a single big multimodal model for everything.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">🗂️</div>
+      <h3>Tab Groups</h3>
+      <p>Any tab the agent opens joins a dedicated "WebBrain" group, so your research chains stay visually together instead of scattering across your window. Clicks on target="_blank" links fold back into the current tab to prevent tab sprawl.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">👤</div>
+      <h3>Profile Auto-fill</h3>
+      <p>Optional plaintext bio — name, work email, company, a throwaway password — lets the agent breeze through low-stakes signup forms without asking every time. Off by default, all stored locally.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">🍪</div>
+      <h3>Cookie & Paywall Aware</h3>
+      <p>Dismisses consent banners (OneTrust, Cookiebot, Didomi, Quantcast) before reasoning about the page. Detects paywalls and tells you honestly instead of fabricating article content or trying to bypass them.</p>
+    </div>
   </div>
 </section>
 
@@ -1198,6 +1234,19 @@
       <p>Yes, on Chrome — the agent runs in the background service worker and is bound to the tab it started on, so it keeps clicking, typing, and reading that specific tab even when you move focus elsewhere. Tools that target a tab (CDP click, type, navigate, screenshot) all work on backgrounded tabs in Chrome. The sidebar locks the input while a task is running so you can't accidentally start a second task on the new tab — you'll need to wait or stop the current one. Note that browsers throttle timers and animations on background tabs, so heavily animated sites may respond slightly slower.</p>
       <p>On Firefox, the agent will keep running on its original tab too, but auto-screenshots are limited: Firefox's screenshot API can only capture the currently active tab, not a specific tab in the background. WebBrain detects this and skips the screenshot for that turn rather than feeding the model an image of an unrelated page. The agent will continue planning from text-based context until you switch back to its tab.</p>
       <p><strong>Avoid actively clicking or typing on the same tab the agent is working on</strong> — that creates race conditions where you and the agent fight over the same page. Switching tabs is fine; co-driving the same tab is not.</p>
+    </details>
+
+    <details class="faq-item">
+      <summary>How does Profile auto-fill work, and is it safe?</summary>
+      <p>Profile auto-fill is an optional feature in <strong>Settings → Profile</strong>. You enter a short bio — name, work email, company, and a <em>throwaway</em> password for low-stakes signups — and toggle it on. When enabled, WebBrain appends that text to the agent's system prompt so it can fill signup forms without asking every time.</p>
+      <p>The text is stored <strong>in plaintext</strong> in your browser's local storage. It is <strong>not</strong> transmitted to the WebBrain project, but it <strong>is</strong> sent to whichever LLM provider you have configured on every turn, as part of the system prompt. Off by default.</p>
+      <p><strong>Do not put passwords for important accounts</strong> (Google, Apple, iCloud, banking, work SSO, primary email) here. Those accounts should use 2FA and shouldn't be handed to an agent anyway. A throwaway password you reuse for newsletter signups and free trials is the intended use case.</p>
+    </details>
+
+    <details class="faq-item">
+      <summary>What does WebBrain do with cookie banners and paywalls?</summary>
+      <p><strong>Cookie banners:</strong> WebBrain recognizes consent banners from common frameworks (OneTrust, Cookiebot, Didomi, Quantcast, Google Funding Choices, TrustArc) and dismisses them before reasoning about the page. Priority is "Reject all" / "Reject non-essential" / "Only necessary" when clearly visible; it falls back to "Accept all" rather than disappearing into the "Manage preferences" maze.</p>
+      <p><strong>Paywalls:</strong> WebBrain reports the paywall honestly and tells you what it could actually see (headline, dek, first paragraphs). It does <strong>not</strong> attempt to bypass paywalls — no archive.today, 12ft.io, cookie clearing, JS disabling, or reader-mode tricks. If you want the full article, log in with a subscription or ask WebBrain to look for free coverage of the same story.</p>
     </details>
 
     <details class="faq-item">

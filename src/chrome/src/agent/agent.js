@@ -1,6 +1,6 @@
 import { AGENT_TOOLS, AGENT_TOOL_NAMES, getToolsForMode, SYSTEM_PROMPT_ASK, SYSTEM_PROMPT_ACT, SYSTEM_PROMPT_ACT_COMPACT } from './tools.js';
 import { cdpClient } from '../cdp/cdp-client.js';
-import { getActiveAdapter } from './adapters.js';
+import { getActiveAdapter, UNIVERSAL_PREAMBLE } from './adapters.js';
 import {
   fetchUrl,
   researchUrl,
@@ -31,9 +31,20 @@ export class Agent {
     // Auto-screenshot mode. 'off' | 'navigation' | 'state_change' | 'every_step'.
     // Loaded from chrome.storage.local in background.js.
     this.autoScreenshot = 'state_change';
-    // Whether to inject site adapter notes into the first user message of
-    // each conversation. Loaded from chrome.storage.local. Default true.
+    // Whether to inject site adapter notes + universal cookie/paywall
+    // guidance into the system prompt. Loaded from chrome.storage.local.
+    // Default true. The adapter notes themselves still live in
+    // _enrichFirstUserMessage because they're URL-specific; the universal
+    // preamble rides along with the base system prompt.
     this.useSiteAdapters = true;
+
+    // Profile auto-fill: when enabled, the user's profile text (name,
+    // email, throwaway password, etc.) is appended to the system prompt
+    // so the agent can fill signup forms without asking every time.
+    // Plaintext in chrome.storage.local — warned about in the settings
+    // UI. Loaded in background.js alongside other settings.
+    this.profileEnabled = false;
+    this.profileText = '';
     // Stale click detection: per-tab last clicked element identity.
     this._lastCdpClickIdent = new Map(); // tabId -> string
     // Loop detection: per-tab ring buffer of recent tool calls + nudge count.
@@ -1290,11 +1301,56 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     return SYSTEM_PROMPT_ACT;
   }
 
+  /**
+   * Compose the full system prompt: base (ASK or ACT) + optional universal
+   * cookie/paywall guidance + optional user profile block.
+   *
+   * Everything past the base prompt is appended, NOT prepended — this keeps
+   * the cache-stable prefix (base prompt) at the front so providers that
+   * prompt-cache (Anthropic, OpenAI) hit the cache even when the user
+   * toggles adapters or edits their profile. Re-invoked on mode switches
+   * and on settings changes via _refreshSystemPrompts().
+   */
+  _buildSystemPrompt(mode) {
+    let prompt = mode === 'act' ? this._getActPrompt() : SYSTEM_PROMPT_ASK;
+
+    // Universal cookie/paywall guidance. Always relevant for http(s)
+    // browsing; cheap enough to carry on chrome:///file:// pages too
+    // since it's just a few dozen cached tokens.
+    if (this.useSiteAdapters) {
+      prompt += `\n\n${UNIVERSAL_PREAMBLE.trim()}`;
+    }
+
+    // Profile auto-fill. Only injected when the user has both enabled the
+    // feature AND provided non-empty text — we don't want to push an empty
+    // "[User profile]" header to the model.
+    if (this.profileEnabled && this.profileText && this.profileText.trim()) {
+      prompt +=
+        `\n\n[User profile — use these details when a form or signup needs them, INSTEAD of asking the user. The user has opted in to sharing this with you. Do NOT volunteer these details on pages that don't need them, and NEVER reveal the password in chat output or screenshots. Treat it as sensitive.]\n` +
+        this.profileText.trim();
+    }
+
+    return prompt;
+  }
+
+  /**
+   * Rewrite the system prompt on every live conversation — called when the
+   * user toggles `useSiteAdapters` or edits their profile in settings, so
+   * the change takes effect on the next turn without forcing a conversation
+   * reset.
+   */
+  _refreshSystemPrompts() {
+    for (const [tabId, messages] of this.conversations) {
+      if (!messages || messages[0]?.role !== 'system') continue;
+      const mode = this.conversationModes.get(tabId) || 'ask';
+      messages[0].content = this._buildSystemPrompt(mode);
+    }
+  }
+
   getConversation(tabId, mode = 'ask') {
     if (!this.conversations.has(tabId)) {
-      const systemPrompt = mode === 'act' ? this._getActPrompt() : SYSTEM_PROMPT_ASK;
       this.conversations.set(tabId, [
-        { role: 'system', content: systemPrompt },
+        { role: 'system', content: this._buildSystemPrompt(mode) },
       ]);
       this.conversationModes.set(tabId, mode);
       this._conversationMode = mode;
@@ -1303,9 +1359,8 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     const lastMode = this.conversationModes.get(tabId);
     if (lastMode !== mode) {
       const messages = this.conversations.get(tabId);
-      const systemPrompt = mode === 'act' ? this._getActPrompt() : SYSTEM_PROMPT_ASK;
       if (messages[0]?.role === 'system') {
-        messages[0].content = systemPrompt;
+        messages[0].content = this._buildSystemPrompt(mode);
       }
       this.conversationModes.set(tabId, mode);
       this._conversationMode = mode;
