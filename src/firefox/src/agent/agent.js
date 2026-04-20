@@ -829,8 +829,14 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
    * `keep` most-recent screenshots. Older image_url blocks are replaced with
    * a small text placeholder, and base64 image data embedded in old tool
    * results is stripped. The persisted history is left untouched.
+   *
+   * `provider` (optional): if `provider.supportsVision` is false, force
+   * keep=0 so ALL images are stripped. Protects against "user had vision
+   * on, captured screenshots, then unchecked the vision checkbox" — the
+   * stale image_url blocks would otherwise 500 a text-only endpoint.
    */
-  _pruneOldImages(messages, keep = 1) {
+  _pruneOldImages(messages, provider = null, keep = 1) {
+    if (provider && !provider.supportsVision) keep = 0;
     let imgsKept = 0;
     const out = new Array(messages.length);
     for (let i = messages.length - 1; i >= 0; i--) {
@@ -1524,7 +1530,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       try {
         const useTools = provider.supportsTools;
         const chatOpts = { tools: useTools ? tools : undefined, temperature: 0.3, maxTokens: 4096 };
-        const prunedMessages = this._pruneOldImages(messages);
+        const prunedMessages = this._pruneOldImages(messages, provider);
         this._logDebug({ type: 'llm_request', step: steps, provider: provider.constructor.name, messages: prunedMessages, options: chatOpts });
         const _llmStart = Date.now();
         if (runId) { try { await trace.recordLLMRequest(runId, steps, { providerClass: provider.constructor.name, model: provider.model, messageCount: prunedMessages.length, toolsCount: (chatOpts.tools || []).length }); } catch {} }
@@ -1540,7 +1546,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
           try {
             const useTools = provider.supportsTools;
             const chatOpts = { tools: useTools ? tools : undefined, temperature: 0.3, maxTokens: 4096 };
-            const prunedMessages = this._pruneOldImages(messages);
+            const prunedMessages = this._pruneOldImages(messages, provider);
             this._logDebug({ type: 'llm_request_retry', step: steps, provider: provider.constructor.name, messages: prunedMessages, options: chatOpts });
             result = await provider.chat(prunedMessages, chatOpts);
             this._logDebug({ type: 'llm_response_retry', step: steps, content: result.content, toolCalls: result.toolCalls });
@@ -1558,7 +1564,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
           try {
             const useTools2 = provider.supportsTools;
             const chatOpts2 = { tools: useTools2 ? tools : undefined, temperature: 0.3, maxTokens: 4096 };
-            result = await provider.chat(this._pruneOldImages(messages), chatOpts2);
+            result = await provider.chat(this._pruneOldImages(messages, provider), chatOpts2);
             this._logDebug({ type: 'llm_response_after_retry', step: steps, content: result.content, toolCalls: result.toolCalls });
           } catch (e2) {
             this._logDebug({ type: 'llm_error_final', step: steps, error: e2.message });
@@ -1674,7 +1680,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
         let hasToolCalls = false;
 
         const streamOpts = { tools: provider.supportsTools ? tools : undefined, temperature: 0.3, maxTokens: 4096 };
-        const prunedMessages = this._pruneOldImages(messages);
+        const prunedMessages = this._pruneOldImages(messages, provider);
         this._logDebug({ type: 'llm_stream_request', step: steps, provider: provider.constructor.name, messages: prunedMessages, options: streamOpts });
 
         for await (const chunk of provider.chatStream(prunedMessages, streamOpts)) {
