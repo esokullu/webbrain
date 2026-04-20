@@ -156,6 +156,87 @@ export class Agent {
   }
 
   /**
+   * Add a tab to the "WebBrain" tab group — reused by both the explicit
+   * `new_tab` tool and the click handler's target=_blank redirect fallback.
+   * Preserves the source tab's existing group when present so multi-tab
+   * research chains stay visually together.
+   *
+   * Returns the group id (or -1 if grouping isn't supported / failed).
+   */
+  async _addToWebBrainGroup(sourceTab, tabId) {
+    if (!chrome.tabGroups || !sourceTab?.id || tabId == null) return -1;
+    try {
+      if (typeof sourceTab.groupId === 'number' && sourceTab.groupId >= 0) {
+        await chrome.tabs.group({ groupId: sourceTab.groupId, tabIds: [tabId] });
+        return sourceTab.groupId;
+      }
+      const gid = await chrome.tabs.group({ tabIds: [sourceTab.id, tabId] });
+      await chrome.tabGroups.update(gid, { title: 'WebBrain', color: 'blue', collapsed: false });
+      return gid;
+    } catch (_) { return -1; }
+  }
+
+  /**
+   * target="_blank" redirect. After a click that looks like it may have
+   * opened a new tab (most news sites, Reddit, Google results all force
+   * `target="_blank"`), we detect the spawned tab, close it, and reroute
+   * the URL into the source tab so the agent's next screenshot actually
+   * reflects the content it tried to open. Without this the model gets
+   * stuck clicking the same headline forever while tabs pile up off-screen
+   * (see qwen3.6 Strait-of-Hormuz trace).
+   *
+   * `beforeTabIds` is a Set of tab ids captured right before the click
+   * dispatch. Any tab created after, with openerTabId matching our source
+   * tab, is treated as the click's target. We poll briefly because
+   * `tabs.onCreated` fires before the URL has resolved in some flows.
+   *
+   * Returns { redirected: true, url, closedTabId } on redirect, else null.
+   */
+  async _redirectTargetBlankClick(tabId, beforeTabIds) {
+    try {
+      let newTab = null;
+      // Poll for up to ~900ms — the new tab needs a few ticks to appear
+      // and for Chrome to populate its URL past about:blank.
+      for (let i = 0; i < 9; i++) {
+        await new Promise(r => setTimeout(r, 100));
+        const all = await chrome.tabs.query({});
+        const candidate = all.find(t =>
+          t.id !== tabId &&
+          t.openerTabId === tabId &&
+          !beforeTabIds.has(t.id)
+        );
+        if (candidate) {
+          const url = candidate.pendingUrl || candidate.url || '';
+          // Wait a tick more if the URL hasn't resolved past about:blank.
+          if (url && url !== 'about:blank' && !url.startsWith('chrome://newtab')) {
+            newTab = candidate;
+            break;
+          }
+          // Keep polling so we can capture the real URL once the tab commits.
+          newTab = candidate;
+        }
+      }
+      if (!newTab) return null;
+      const targetUrl = newTab.pendingUrl || newTab.url || '';
+      if (!targetUrl || targetUrl === 'about:blank' || targetUrl.startsWith('chrome://newtab')) {
+        // We saw a new tab but never got a real URL out of it. Close it
+        // and move on — redirecting to about:blank would make things worse.
+        try { await chrome.tabs.remove(newTab.id); } catch {}
+        return null;
+      }
+      const closedTabId = newTab.id;
+      try { await chrome.tabs.remove(newTab.id); } catch {}
+      try { await chrome.tabs.update(tabId, { url: targetUrl }); } catch {}
+      // Give the source tab a beat to commit the navigation so follow-up
+      // screenshots/reads don't race the load.
+      await new Promise(r => setTimeout(r, 600));
+      return { redirected: true, url: targetUrl, closedTabId };
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /**
    * Run loop detection on a freshly recorded call. Returns one of:
    *   { kind: 'none' }
    *   { kind: 'nudge', warning: string }   // soft warning to inject into tool result
@@ -1500,24 +1581,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       }
 
       const tab = await chrome.tabs.create(createProps);
-      let groupId = -1;
-      // Group new tabs with the source tab so "research chains" stay visually
-      // together instead of scattering to the far right of the window.
-      if (sourceTab?.id != null && chrome.tabGroups) {
-        try {
-          if (typeof sourceTab.groupId === 'number' && sourceTab.groupId >= 0) {
-            groupId = sourceTab.groupId;
-            await chrome.tabs.group({ groupId, tabIds: [tab.id] });
-          } else {
-            groupId = await chrome.tabs.group({ tabIds: [sourceTab.id, tab.id] });
-            await chrome.tabGroups.update(groupId, {
-              title: 'WebBrain',
-              color: 'blue',
-              collapsed: false,
-            });
-          }
-        } catch (_) {}
-      }
+      const groupId = await this._addToWebBrainGroup(sourceTab, tab.id);
       return { success: true, tabId: tab.id, url: args.url, groupId: groupId >= 0 ? groupId : null };
     }
 
@@ -2731,10 +2795,18 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
           }
 
           // Wait for scroll to settle, then dispatch a real click via CDP.
+          // Snapshot existing tabs first so we can detect a target=_blank
+          // link that spawns a background tab instead of navigating in-place
+          // (see _redirectTargetBlankClick).
+          const beforeTabIdsText = new Set((await chrome.tabs.query({})).map(t => t.id));
           await new Promise(r => setTimeout(r, 100));
           await cdpClient.dispatchMouseEvent(tabId, 'mouseMoved', info.x, info.y);
           await cdpClient.dispatchMouseEvent(tabId, 'mousePressed', info.x, info.y);
           await cdpClient.dispatchMouseEvent(tabId, 'mouseReleased', info.x, info.y);
+          // Kicked off in parallel with the SELECT post-click check below;
+          // awaited before we return so we can fold the redirect into the
+          // tool result.
+          const newTabPromiseText = this._redirectTargetBlankClick(tabId, beforeTabIdsText);
 
           // Post-click SELECT detection: the click may have activated a
           // <select> via a label, wrapper, or overlapping element. The
@@ -2775,6 +2847,25 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
             ? 'Same element clicked again with no page change. Try click({x, y}) with coordinates from a screenshot, or click({index: N}) from get_interactive_elements.'
             : undefined;
 
+          const redirectedText = await newTabPromiseText;
+          if (redirectedText?.redirected) {
+            // The clicked link had target="_blank". We closed the spawned
+            // tab and navigated the current tab to its URL, so the model's
+            // next screenshot will actually show the destination instead
+            // of the same search results page.
+            this._lastCdpClickIdent.delete(tabId);
+            return {
+              success: true,
+              method: 'cdp-by-text',
+              textMatch: info.mode || (args.textMatch || 'exact'),
+              tag: info.tag,
+              text: info.text,
+              matched: args.text,
+              redirectedFromNewTab: true,
+              url: redirectedText.url,
+              hint: `The clicked link had target="_blank" and opened in a new tab. To keep the agent on one tab, the spawned tab was closed and this tab was navigated to ${redirectedText.url}. Take a screenshot or call read_page to see the destination.`,
+            };
+          }
           return {
             success: true,
             method: 'cdp-by-text',
@@ -2809,7 +2900,18 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
               hint: `This is a <select> dropdown (current: "${selTag.current}"). Do NOT click it — use type_text({text: "option name"}) to select an option. Available options: ${selTag.options.join(', ')}`,
             };
           }
-          return await cdpClient.clickElement(tabId, args.selector);
+          const beforeTabIdsSel = new Set((await chrome.tabs.query({})).map(t => t.id));
+          const selResult = await cdpClient.clickElement(tabId, args.selector);
+          const redirectedSel = await this._redirectTargetBlankClick(tabId, beforeTabIdsSel);
+          if (redirectedSel?.redirected) {
+            return {
+              ...(selResult || { success: true }),
+              redirectedFromNewTab: true,
+              url: redirectedSel.url,
+              hint: `The selector resolved to a target="_blank" link. The spawned tab was closed and this tab was navigated to ${redirectedSel.url} so the agent stays on a single tab.`,
+            };
+          }
+          return selResult;
         }
         if (args.x != null && args.y != null) {
           // Check if the element at these coordinates is or is near a <select>.
@@ -2942,9 +3044,11 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
           const clickX = redir ? redir.x : args.x;
           const clickY = redir ? redir.y : args.y;
 
+          const beforeTabIdsCoord = new Set((await chrome.tabs.query({})).map(t => t.id));
           await cdpClient.dispatchMouseEvent(tabId, 'mouseMoved', clickX, clickY);
           await cdpClient.dispatchMouseEvent(tabId, 'mousePressed', clickX, clickY);
           await cdpClient.dispatchMouseEvent(tabId, 'mouseReleased', clickX, clickY);
+          const newTabPromiseCoord = this._redirectTargetBlankClick(tabId, beforeTabIdsCoord);
 
           // Post-click SELECT detection (same as text-based path above).
           await new Promise(r => setTimeout(r, 200));
@@ -2967,6 +3071,18 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
             };
           }
 
+          const redirectedCoord = await newTabPromiseCoord;
+          if (redirectedCoord?.redirected) {
+            return {
+              success: true,
+              method: 'cdp-coords',
+              x: args.x,
+              y: args.y,
+              redirectedFromNewTab: true,
+              url: redirectedCoord.url,
+              hint: `The clicked coordinate hit a target="_blank" link. The spawned tab was closed and this tab was navigated to ${redirectedCoord.url} so the agent stays on a single tab.`,
+            };
+          }
           return { success: true, method: 'cdp-coords', x: args.x, y: args.y };
         }
         // index-based: fall through to content-script path which knows the
@@ -3559,10 +3675,14 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
         continue;
       }
 
-      // No tool calls — this is the final text response
+      // No tool calls — this is the final text response. If the model
+      // returned empty content AND there was a partial assistant text
+      // rendered in a prior step (e.g. the pre-tool "I'll click X" blurb),
+      // DO NOT emit an empty text update — doing so overwrites the rendered
+      // bubble and makes the previously-visible response disappear.
       finalResponse = result.content || '';
       messages.push({ role: 'assistant', content: finalResponse });
-      onUpdate('text', { content: finalResponse });
+      if (finalResponse) onUpdate('text', { content: finalResponse });
       break;
     }
 

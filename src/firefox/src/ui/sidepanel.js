@@ -293,7 +293,10 @@ browser.runtime.onMessage.addListener((msg) => {
       break;
 
     case 'text':
-      if (currentAssistantEl) {
+      // Empty content means "the model returned nothing new at this step".
+      // Don't wipe any previously-rendered assistant text — earlier steps
+      // may already have put useful intermediate prose in the bubble.
+      if (currentAssistantEl && data.content) {
         const textEl = currentAssistantEl.querySelector('.message-text');
         if (textEl) {
           textEl.innerHTML = formatMarkdown(data.content);

@@ -1533,10 +1533,14 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
         continue;
       }
 
-      // No tool calls — this is the final text response
+      // No tool calls — this is the final text response. If the model
+      // returned empty content AND there was a partial assistant text
+      // rendered in a prior step (e.g. the pre-tool "I'll click X" blurb),
+      // DO NOT emit an empty text update — doing so overwrites the rendered
+      // bubble and makes the previously-visible response disappear.
       finalResponse = result.content || '';
       messages.push({ role: 'assistant', content: finalResponse });
-      onUpdate('text', { content: finalResponse });
+      if (finalResponse) onUpdate('text', { content: finalResponse });
       break;
     }
 
