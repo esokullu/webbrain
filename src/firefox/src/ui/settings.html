@@ -46,6 +46,44 @@
     }
     h2:first-of-type { margin-top: 0; }
 
+    /* Tab bar — sticky so it survives long provider lists. */
+    .tabs {
+      display: flex;
+      gap: 2px;
+      margin: 4px 0 20px 0;
+      padding: 4px;
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      position: sticky;
+      top: 0;
+      z-index: 10;
+    }
+    .tab-btn {
+      flex: 1;
+      background: transparent;
+      color: var(--text2);
+      border: none;
+      border-radius: 6px;
+      padding: 9px 12px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.15s, color 0.15s;
+    }
+    .tab-btn:hover { color: var(--text); }
+    .tab-btn.active {
+      background: var(--accent);
+      color: #fff;
+    }
+    .tab-btn.active:hover { color: #fff; }
+
+    .tab-panel { display: none; }
+    .tab-panel.active { display: block; }
+    /* Kill the top margin on section headers inside panels so they don't
+       double up with the tab-bar spacing. */
+    .tab-panel h2:first-of-type { margin-top: 0; }
+
     .provider-card {
       background: var(--bg2);
       border: 1px solid var(--border);
@@ -274,106 +312,162 @@
   <h1>WebBrain Settings</h1>
   <p class="subtitle">Configure your LLM providers and display preferences · v4.0.0</p>
 
+  <!-- Account section stays outside the tabs — it's a zero-height placeholder
+       until auth finishes, at which point settings.js populates it. -->
   <h2 style="display:none;">Account</h2>
   <div id="account-section" style="display:none;"></div>
 
-  <h2>Display</h2>
-  <div id="display-settings">
-    <div class="setting-row">
-      <div class="setting-info">
-        <div class="setting-label">Verbose Mode</div>
-        <div class="setting-desc">Show full tool call details, arguments, and raw JSON results. Off by default for a cleaner chat experience.</div>
-      </div>
-      <label class="toggle">
-        <input type="checkbox" id="toggle-verbose">
-        <span class="toggle-slider"></span>
-      </label>
-    </div>
-    <div class="setting-row">
-      <div class="setting-info">
-        <div class="setting-label">Screenshot Fallback</div>
-        <div class="setting-desc">Capture a screenshot of the page when DOM reading fails or returns insufficient content. Requires a vision-capable model.</div>
-      </div>
-      <label class="toggle">
-        <input type="checkbox" id="toggle-screenshot-fallback">
-        <span class="toggle-slider"></span>
-      </label>
-    </div>
-    <div class="setting-row">
-      <div class="setting-info">
-        <div class="setting-label">Site adapters</div>
-        <div class="setting-desc">Inject short, hand-curated guidance for known high-traffic sites (GitHub, Gmail, Stripe, AWS, etc.) into the agent's first message. Helps the agent avoid common dead-ends.</div>
-      </div>
-      <label class="toggle">
-        <input type="checkbox" id="toggle-site-adapters" checked>
-        <span class="toggle-slider"></span>
-      </label>
-    </div>
-    <div class="setting-row">
-      <div class="setting-info">
-        <div class="setting-label">Auto-screenshot</div>
-        <div class="setting-desc">Automatically capture a screenshot after the agent acts on the page so vision-capable models can see what changed. Costs more tokens. Disabled silently if the active model doesn't support images.</div>
-      </div>
-      <select id="select-auto-screenshot" style="background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:6px 10px;font-family:inherit;cursor:pointer;">
-        <option value="off">Off</option>
-        <option value="navigation">On navigation</option>
-        <option value="state_change">On state change (default)</option>
-        <option value="every_step">Every step</option>
-      </select>
-    </div>
-    <div class="setting-row">
-      <div class="setting-info">
-        <div class="setting-label">Record traces (for model comparison)</div>
-        <div class="setting-desc">Persist every run (LLM requests, responses, tool calls, screenshots) into local IndexedDB so you can inspect and compare models side-by-side. Opens in a separate Traces tab. Off by default because it adds disk writes per step. <a href="traces.html" target="_blank" style="color:var(--accent);">Open Traces page →</a></div>
-      </div>
-      <label class="toggle">
-        <input type="checkbox" id="toggle-tracing">
-        <span class="toggle-slider"></span>
-      </label>
-    </div>
-    <div class="setting-row">
-      <div class="setting-info">
-        <div class="setting-label">Max Agent Steps <span id="steps-value" style="color:var(--accent);font-weight:700;margin-left:4px;">50</span></div>
-        <div class="setting-desc">Maximum number of tool-use steps the agent can take per message. Higher values allow more complex multi-step tasks but may use more tokens.</div>
-      </div>
-      <input type="range" id="range-max-steps" min="5" max="200" value="60" step="5"
-             style="width:120px;accent-color:var(--accent);cursor:pointer;">
-    </div>
-  </div>
+  <nav class="tabs" role="tablist">
+    <button class="tab-btn active" type="button" role="tab" data-tab="display">Display</button>
+    <button class="tab-btn" type="button" role="tab" data-tab="providers">Providers</button>
+    <button class="tab-btn" type="button" role="tab" data-tab="vision">Vision Model</button>
+  </nav>
 
-  <h2>Providers</h2>
-  <div id="providers"></div>
+  <section class="tab-panel active" data-panel="display" role="tabpanel">
+    <div id="display-settings">
+      <div class="setting-row">
+        <div class="setting-info">
+          <div class="setting-label">Verbose Mode</div>
+          <div class="setting-desc">Show full tool call details, arguments, and raw JSON results. Off by default for a cleaner chat experience.</div>
+        </div>
+        <label class="toggle">
+          <input type="checkbox" id="toggle-verbose">
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+      <div class="setting-row">
+        <div class="setting-info">
+          <div class="setting-label">Screenshot Fallback</div>
+          <div class="setting-desc">Capture a screenshot of the page when DOM reading fails or returns insufficient content. Requires a vision-capable model.</div>
+        </div>
+        <label class="toggle">
+          <input type="checkbox" id="toggle-screenshot-fallback">
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+      <div class="setting-row">
+        <div class="setting-info">
+          <div class="setting-label">Site adapters</div>
+          <div class="setting-desc">Inject short, hand-curated guidance for known high-traffic sites (GitHub, Gmail, Stripe, AWS, etc.) into the agent's first message. Helps the agent avoid common dead-ends. Adds a small token cost on the first turn of conversations on matched sites.</div>
+        </div>
+        <label class="toggle">
+          <input type="checkbox" id="toggle-site-adapters" checked>
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+      <div class="setting-row">
+        <div class="setting-info">
+          <div class="setting-label">Auto-screenshot</div>
+          <div class="setting-desc">Automatically capture a viewport screenshot after the agent acts on the page, so vision-capable models can see what changed. Costs more tokens. Disabled silently if the active model doesn't support images.</div>
+        </div>
+        <select id="select-auto-screenshot" style="background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:6px 10px;font-family:inherit;cursor:pointer;">
+          <option value="off">Off</option>
+          <option value="navigation">On navigation</option>
+          <option value="state_change">On state change (default)</option>
+          <option value="every_step">Every step</option>
+        </select>
+      </div>
+      <div class="setting-row">
+        <div class="setting-info">
+          <div class="setting-label">Record traces (for model comparison)</div>
+          <div class="setting-desc">Persist every run (LLM requests, responses, tool calls, screenshots) into local IndexedDB so you can inspect and compare models side-by-side. Opens in a separate Traces tab. Off by default because it adds disk writes per step. <a href="traces.html" target="_blank" style="color:var(--accent);">Open Traces page →</a></div>
+        </div>
+        <label class="toggle">
+          <input type="checkbox" id="toggle-tracing">
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+      <div class="setting-row">
+        <div class="setting-info">
+          <div class="setting-label">Completion sound</div>
+          <div class="setting-desc">Play a short chime in the side panel when the agent finishes a task. Won't play if you cancel the run.</div>
+        </div>
+        <label class="toggle">
+          <input type="checkbox" id="toggle-notify-sound" checked>
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+      <div class="setting-row">
+        <div class="setting-info">
+          <div class="setting-label">Max Agent Steps <span id="steps-value" style="color:var(--accent);font-weight:700;margin-left:4px;">50</span></div>
+          <div class="setting-desc">Maximum number of tool-use steps the agent can take per message. Higher values allow more complex multi-step tasks but may use more tokens.</div>
+        </div>
+        <input type="range" id="range-max-steps" min="5" max="200" value="60" step="5"
+               style="width:120px;accent-color:var(--accent);cursor:pointer;">
+      </div>
+    </div>
+  </section>
 
-  <h2>Vision Model (optional)</h2>
-  <div class="provider-card" id="vision-card">
-    <div style="font-size:12px;color:var(--text2);margin-bottom:12px;line-height:1.5;">
-      If set, screenshots are sent to this model for reading the page, while the active provider above handles planning and tool calls. Leave blank to use the active provider for vision too. OpenAI-compatible endpoints only.
-    </div>
-    <div class="field">
-      <label>API Base URL</label>
-      <input type="text" id="vision-base-url" placeholder="https://api.openai.com/v1">
-    </div>
-    <div class="field">
-      <label>API Key</label>
-      <input type="password" id="vision-api-key" placeholder="sk-...">
-    </div>
-    <div class="field">
-      <label>Model</label>
-      <input type="text" id="vision-model" placeholder="gpt-4o">
-    </div>
-    <div class="btn-row">
-      <button class="btn-primary" id="btn-save-vision">Save</button>
-      <button class="btn-secondary" id="btn-test-vision">Test Connection</button>
-      <button class="btn-secondary" id="btn-clear-vision">Clear</button>
-    </div>
-    <div class="test-result" id="test-vision"></div>
-  </div>
+  <section class="tab-panel" data-panel="providers" role="tabpanel">
+    <div id="providers"></div>
 
-  <div class="info-box">
-    <strong>Getting started with llama.cpp:</strong><br>
-    Run <code>llama-server -m your-model.gguf --port 8080</code> to start a local server.<br>
-    No API key needed — it runs entirely on your machine.
-  </div>
+    <div class="info-box">
+      <strong>Getting started with llama.cpp:</strong><br>
+      Run <code>llama-server -m your-model.gguf --port 8080</code> to start a local server.<br>
+      No API key needed — it runs entirely on your machine.
+    </div>
+  </section>
+
+  <section class="tab-panel" data-panel="vision" role="tabpanel">
+    <div class="provider-card" id="vision-card">
+      <div style="font-size:12px;color:var(--text2);margin-bottom:12px;line-height:1.5;">
+        If set, screenshots are sent to this model for reading the page, while the active provider handles planning and tool calls. Leave blank to use the active provider for vision too. OpenAI-compatible endpoints only.
+      </div>
+      <div class="field">
+        <label>API Base URL</label>
+        <input type="text" id="vision-base-url" placeholder="https://api.openai.com/v1">
+      </div>
+      <div class="field">
+        <label>API Key</label>
+        <input type="password" id="vision-api-key" placeholder="sk-...">
+      </div>
+      <div class="field">
+        <label>Model</label>
+        <input type="text" id="vision-model" placeholder="gpt-4o">
+      </div>
+      <div class="btn-row">
+        <button class="btn-primary" id="btn-save-vision">Save</button>
+        <button class="btn-secondary" id="btn-test-vision">Test Connection</button>
+        <button class="btn-secondary" id="btn-clear-vision">Clear</button>
+      </div>
+      <div class="test-result" id="test-vision"></div>
+    </div>
+  </section>
+
+  <script>
+    // Self-contained tab switcher — no dependency on settings.js so it can
+    // run before the module script loads and never blocks on it.
+    (function () {
+      const STORAGE_KEY = 'webbrainSettingsTab';
+      const buttons = document.querySelectorAll('.tab-btn');
+      const panels = document.querySelectorAll('.tab-panel');
+      function activate(name) {
+        let matched = false;
+        buttons.forEach(b => {
+          const on = b.dataset.tab === name;
+          b.classList.toggle('active', on);
+          if (on) matched = true;
+        });
+        panels.forEach(p => p.classList.toggle('active', p.dataset.panel === name));
+        if (matched) {
+          try { localStorage.setItem(STORAGE_KEY, name); } catch (_) {}
+        }
+      }
+      buttons.forEach(b => b.addEventListener('click', () => activate(b.dataset.tab)));
+      // Restore last-viewed tab so the page doesn't snap back to Display
+      // every reload — makes iterating on a single section less annoying.
+      let initial = 'display';
+      try {
+        const saved = localStorage.getItem(STORAGE_KEY);
+        if (saved && document.querySelector(`.tab-btn[data-tab="${saved}"]`)) initial = saved;
+      } catch (_) {}
+      // Also honour #display / #providers / #vision in the URL, so we can
+      // link straight into a tab from other parts of the extension later.
+      const hash = (location.hash || '').replace('#', '');
+      if (hash && document.querySelector(`.tab-btn[data-tab="${hash}"]`)) initial = hash;
+      activate(initial);
+    })();
+  </script>
 
   <script src="settings.js" type="module"></script>
 </body>
