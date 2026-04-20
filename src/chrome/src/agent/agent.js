@@ -1388,6 +1388,103 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     } catch (e) { /* ignore */ }
   }
 
+  // ─── Scratchpad ──────────────────────────────────────────────────────
+  // A single pinned user message (`[Agent scratchpad...]`) that lives near
+  // the top of the conversation. The model writes to it via the
+  // `scratchpad_write` tool; it survives summarization because both
+  // _manageContext and _emergencyTrim skip messages with this prefix when
+  // looking for the original task, and re-insert the scratchpad into the
+  // rebuilt messages array. Purpose: give the model a durable place to
+  // record facts (download IDs, file paths, progress counters) that it
+  // would otherwise lose when older tool results get compressed away.
+
+  _scratchpadHeader() {
+    return '[Agent scratchpad — your own persistent notes, pinned in context and surviving summarization. Update with scratchpad_write({text, replace?}). Current contents follow:]';
+  }
+
+  _isScratchpadMessage(msg) {
+    return msg && msg.role === 'user'
+      && typeof msg.content === 'string'
+      && msg.content.startsWith('[Agent scratchpad');
+  }
+
+  _findScratchpadIndex(messages) {
+    for (let i = 1; i < messages.length; i++) {
+      if (this._isScratchpadMessage(messages[i])) return i;
+    }
+    return -1;
+  }
+
+  _extractScratchpadBody(content) {
+    if (typeof content !== 'string') return '';
+    // Everything after the first blank line is the body; fall back to empty.
+    const idx = content.indexOf('\n\n');
+    return idx >= 0 ? content.slice(idx + 2) : '';
+  }
+
+  _buildScratchpadMessage(body) {
+    const trimmed = (body || '').replace(/^\s+|\s+$/g, '');
+    return {
+      role: 'user',
+      content: `${this._scratchpadHeader()}\n\n${trimmed || '(empty)'}`,
+    };
+  }
+
+  /**
+   * Handle the scratchpad_write tool. Creates the pinned scratchpad message
+   * the first time it's called, and updates it in place thereafter.
+   */
+  _scratchpadWrite(tabId, args) {
+    const text = (args && typeof args.text === 'string') ? args.text : '';
+    if (!text.trim() && !args?.replace) {
+      return { success: false, error: 'scratchpad_write: `text` is required (non-empty). Pass replace:true with an empty string to clear the pad.' };
+    }
+
+    const messages = this.conversations.get(tabId);
+    if (!messages) {
+      return { success: false, error: 'No active conversation on this tab.' };
+    }
+
+    const idx = this._findScratchpadIndex(messages);
+    const currentBody = idx >= 0 ? this._extractScratchpadBody(messages[idx].content) : '';
+    const replace = !!args?.replace;
+    // Hard cap per-pad at ~8k chars to prevent it from eating the whole
+    // context budget. Older lines get trimmed off the top when we hit it.
+    const MAX_BODY = 8000;
+    let nextBody = replace ? text : (currentBody ? `${currentBody}\n${text}` : text);
+    if (nextBody.length > MAX_BODY) {
+      nextBody = '[...older scratchpad lines dropped — pad is full, consider compacting with replace:true]\n' + nextBody.slice(nextBody.length - MAX_BODY + 100);
+    }
+
+    const msg = this._buildScratchpadMessage(nextBody);
+    if (idx >= 0) {
+      messages[idx] = msg;
+    } else {
+      // Insert just after the pinned original user task (or after system if
+      // no real task is pinned yet). Mirrors the originalTaskIdx lookup in
+      // _manageContext so the scratchpad lives at a stable, near-top spot.
+      let insertAt = 1;
+      for (let i = 1; i < messages.length; i++) {
+        const m = messages[i];
+        if (m.role !== 'user') continue;
+        const c = typeof m.content === 'string' ? m.content : '';
+        if (c.startsWith('[Site guidance') || c.startsWith('[Site context changed') || c.startsWith('[Context window was trimmed') || c.startsWith('[Agent scratchpad')) continue;
+        insertAt = i + 1;
+        break;
+      }
+      messages.splice(insertAt, 0, msg);
+    }
+
+    this._persist(tabId);
+    return {
+      success: true,
+      mode: replace ? 'replace' : 'append',
+      bytes: nextBody.length,
+      note: replace ? 'scratchpad replaced' : 'line appended to scratchpad',
+    };
+  }
+  // ─────────────────────────────────────────────────────────────────────
+
   /**
    * Manage context window — trim and summarize when conversation gets too long.
    * Keeps: system prompt, summary of old messages, recent messages.
@@ -1416,27 +1513,57 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     const systemMsg = messages[0]; // always the system prompt
     // Find the first real user turn (skip any seeded site-guidance context
     // we may have prepended which uses role:'user' with a [Site guidance…]
-    // heading).
+    // heading, and the pinned scratchpad).
     let originalTaskIdx = -1;
     for (let i = 1; i < messages.length; i++) {
       const m = messages[i];
       if (m.role !== 'user') continue;
       const c = typeof m.content === 'string' ? m.content : '';
-      if (c.startsWith('[Site guidance') || c.startsWith('[Site context changed') || c.startsWith('[Context window was trimmed')) continue;
+      if (c.startsWith('[Site guidance') || c.startsWith('[Site context changed') || c.startsWith('[Context window was trimmed') || c.startsWith('[Agent scratchpad')) continue;
       originalTaskIdx = i;
       break;
     }
     const originalTask = originalTaskIdx >= 0 ? messages[originalTaskIdx] : null;
+    // Pin the scratchpad alongside the original task so the model's self-
+    // written notes survive summarization.
+    const scratchpadIdx = this._findScratchpadIndex(messages);
+    const scratchpadMsg = scratchpadIdx >= 0 ? messages[scratchpadIdx] : null;
 
-    const keepRecent = 16; // keep last N messages verbatim
+    // Keep last N messages verbatim. Agents doing heavy tool work (scraping,
+    // batch downloads) burn messages fast — each tool call is 2 messages
+    // (assistant + tool result), so 30 ≈ last 15 tool turns. 16 was too tight
+    // for long-horizon tasks and caused the model to "forget" outcomes from
+    // ~8 steps back (e.g. the file list from list_downloads).
+    const keepRecent = 30;
     // Exclude the pinned original task from both summary and recent slices.
     const afterPin = originalTaskIdx >= 0 ? originalTaskIdx + 1 : 1;
-    const oldMessages = messages.slice(afterPin, -keepRecent);
-    const recentMessages = messages.slice(-keepRecent);
+    const oldMessagesRaw = messages.slice(afterPin, -keepRecent);
+    const recentMessagesRaw = messages.slice(-keepRecent);
+    // Strip the scratchpad out of both slices — we re-pin a single copy of
+    // it in the rebuild step below. Without this we'd either lose it (if it
+    // fell into oldMessages and got summarized away) or duplicate it.
+    const oldMessages = oldMessagesRaw.filter(m => !this._isScratchpadMessage(m));
+    const recentMessages = recentMessagesRaw.filter(m => !this._isScratchpadMessage(m));
 
     if (oldMessages.length < 4) return; // not enough to summarize
 
-    // Build a summary of old messages
+    // Build tool_call_id → name map so each tool result in the summary can be
+    // labelled with the tool that produced it. Without this we'd lose the
+    // association when the assistant turn gets summarized away.
+    const toolNameById = new Map();
+    for (const msg of oldMessages) {
+      if (msg.role === 'assistant' && Array.isArray(msg.tool_calls)) {
+        for (const tc of msg.tool_calls) {
+          if (tc?.id) toolNameById.set(tc.id, tc.function?.name || 'tool');
+        }
+      }
+    }
+
+    // Build a summary of old messages.
+    // We DO emit one-line digests for tool results now — previously they were
+    // skipped ("too verbose"), which meant critical outcomes (e.g. "list_downloads
+    // returned 69 files") silently disappeared when the summarizer ran. On long
+    // tasks that caused the agent to restart work it had already finished.
     let summaryText = 'Previous conversation summary:\n';
     for (const msg of oldMessages) {
       if (msg.role === 'user') {
@@ -1444,10 +1571,18 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       } else if (msg.role === 'assistant' && msg.content && !msg.tool_calls) {
         summaryText += `- Assistant answered: ${this._truncate(msg.content, 150)}\n`;
       } else if (msg.role === 'assistant' && msg.tool_calls) {
-        const toolNames = msg.tool_calls.map(tc => tc.function?.name).join(', ');
-        summaryText += `- Assistant used tools: ${toolNames}\n`;
+        // The *result* lines below carry the tool name and outcome, so we
+        // don't also need a "called X" line for every tool_call here.
+        // Emit a one-liner only if the assistant included prose reasoning
+        // alongside the tool calls.
+        if (msg.content) {
+          summaryText += `- Assistant: ${this._truncate(msg.content, 150)}\n`;
+        }
+      } else if (msg.role === 'tool') {
+        const toolName = toolNameById.get(msg.tool_call_id) || 'tool';
+        const digest = this._digestToolResult(toolName, msg.content);
+        summaryText += `- ${toolName} → ${digest}\n`;
       }
-      // Skip tool result messages in summary (too verbose)
     }
 
     // Try to compress the summary using the LLM if it's still huge
@@ -1476,6 +1611,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     messages.length = 0;
     messages.push(systemMsg);
     if (originalTask) messages.push(originalTask);
+    if (scratchpadMsg) messages.push(scratchpadMsg);
     messages.push(summaryMsg, summaryAck, ...recentMessages);
 
     console.log(`[WebBrain] Context trimmed for tab ${tabId}: ${oldMessages.length} old messages → summary. ${messages.length} messages remain.`);
@@ -1484,6 +1620,107 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
   _truncate(str, len) {
     if (!str) return '';
     return str.length > len ? str.slice(0, len) + '...' : str;
+  }
+
+  /**
+   * One-line digest of a tool result, used when summarizing older turns so
+   * the model retains the key outcome (file count, download IDs, final URL)
+   * even after the full JSON is dropped. Target ≤ 140 chars.
+   *
+   * `content` is the stringified tool result from the messages array; we try
+   * to parse it as JSON and pick the most-useful fact per tool. For anything
+   * we don't recognize, fall back to a length-bounded truncate.
+   */
+  _digestToolResult(name, content) {
+    if (!content) return '(empty)';
+    let parsed = null;
+    try { parsed = JSON.parse(content); } catch { /* not JSON */ }
+    if (!parsed || typeof parsed !== 'object') {
+      return this._truncate(String(content).replace(/\s+/g, ' '), 140);
+    }
+    if (parsed.error) {
+      return `error: ${this._truncate(String(parsed.error), 120)}`;
+    }
+
+    switch (name) {
+      case 'list_downloads': {
+        if (Array.isArray(parsed.downloads)) {
+          const n = parsed.downloads.length;
+          const complete = parsed.downloads.filter(d => d.state === 'complete').length;
+          const latest = parsed.downloads[0];
+          const label = latest ? (latest.filename || latest.url || '') : '';
+          return `${n} downloads listed (${complete} complete)${label ? `; latest: ${this._truncate(label, 70)}` : ''}`;
+        }
+        break;
+      }
+      case 'download_file': {
+        if (parsed.downloadId != null) {
+          return `downloaded id=${parsed.downloadId}${parsed.filename ? `, file=${this._truncate(parsed.filename, 80)}` : ''}`;
+        }
+        break;
+      }
+      case 'download_files': {
+        if (Array.isArray(parsed.results)) {
+          const ok = parsed.results.filter(r => r?.success).length;
+          return `${ok}/${parsed.results.length} downloaded`;
+        }
+        if (parsed.count != null) return `${parsed.count} downloads queued`;
+        break;
+      }
+      case 'read_downloaded_file': {
+        if (parsed.filename) {
+          const len = parsed.originalLength ?? (typeof parsed.text === 'string' ? parsed.text.length : '?');
+          return `read ${this._truncate(parsed.filename, 80)} (${parsed.contentType || '?'}, ${len} chars)`;
+        }
+        break;
+      }
+      case 'navigate': {
+        if (parsed.url) return `now on ${this._truncate(parsed.url, 110)}`;
+        break;
+      }
+      case 'new_tab': {
+        if (parsed.url) return `opened tab ${this._truncate(parsed.url, 100)}`;
+        break;
+      }
+      case 'extract_data': {
+        if (Array.isArray(parsed)) {
+          const rows = parsed.reduce((s, t) => s + (Array.isArray(t?.rows) ? t.rows.length : 0), 0);
+          return `extracted ${parsed.length} item(s), ${rows} row(s)`;
+        }
+        break;
+      }
+      case 'fetch_url':
+      case 'research_url': {
+        const len = parsed.originalLength ?? (typeof parsed.text === 'string' ? parsed.text.length : '?');
+        const title = parsed.title ? ` - ${this._truncate(parsed.title, 60)}` : '';
+        return `${parsed.status ?? 200}${title} (${len} chars)`;
+      }
+      case 'get_accessibility_tree':
+      case 'read_page': {
+        const len = (typeof parsed.text === 'string' ? parsed.text.length : null)
+          ?? (typeof parsed.pageContent === 'string' ? parsed.pageContent.length : '?');
+        return `read page (${len} chars)`;
+      }
+      case 'scroll': {
+        if (parsed.success) {
+          return `scrolled${parsed.containerScrollY != null ? ` (containerY=${Math.round(parsed.containerScrollY)}/${Math.round(parsed.containerScrollHeight ?? 0)})` : ''}`;
+        }
+        break;
+      }
+      case 'screenshot':
+      case 'full_page_screenshot':
+        return parsed.success ? 'screenshot captured' : 'screenshot failed';
+      case 'scratchpad_write': {
+        return `scratchpad ${parsed.mode || 'write'} (${parsed.bytes ?? '?'} chars)`;
+      }
+    }
+
+    // Generic fallback — compact stringified JSON, bounded.
+    try {
+      return this._truncate(JSON.stringify(parsed), 140);
+    } catch {
+      return this._truncate(String(content), 140);
+    }
   }
 
   /**
@@ -1578,12 +1815,16 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       const m = messages[i];
       if (m.role !== 'user') continue;
       const c = typeof m.content === 'string' ? m.content : '';
-      if (c.startsWith('[Site guidance') || c.startsWith('[Site context changed') || c.startsWith('[Context')) continue;
+      if (c.startsWith('[Site guidance') || c.startsWith('[Site context changed') || c.startsWith('[Context') || c.startsWith('[Agent scratchpad')) continue;
       originalTask = m;
       break;
     }
+    // Pin the scratchpad too — even under emergency trim, the model's own
+    // notes should survive.
+    const scratchpadIdx = this._findScratchpadIndex(messages);
+    const scratchpadMsg = scratchpadIdx >= 0 ? messages[scratchpadIdx] : null;
     const keepLast = 6; // keep only 6 most recent messages
-    const recent = messages.slice(-keepLast);
+    const recent = messages.slice(-keepLast).filter(m => !this._isScratchpadMessage(m));
 
     // Also truncate any huge tool results in remaining messages
     for (const msg of recent) {
@@ -1607,6 +1848,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     messages.length = 0;
     messages.push(systemMsg);
     if (originalTask) messages.push(originalTask);
+    if (scratchpadMsg) messages.push(scratchpadMsg);
     messages.push(notice, ack, ...recent);
 
     console.log(`[WebBrain] Emergency context trim: kept ${messages.length} messages.`);
@@ -1768,6 +2010,10 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       } catch (e) {
         return { success: false, error: `Screenshot failed: ${e.message}` };
       }
+    }
+
+    if (name === 'scratchpad_write') {
+      return this._scratchpadWrite(tabId, args);
     }
 
     if (name === 'done') {

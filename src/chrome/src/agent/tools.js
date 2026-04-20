@@ -497,6 +497,21 @@ export const AGENT_TOOLS = [
   {
     type: 'function',
     function: {
+      name: 'scratchpad_write',
+      description: 'Write to your persistent scratchpad — a note pinned near the top of your context that survives conversation summarization. Use it for long tasks where facts need to persist across many tool calls: download IDs you\'ve collected, file paths on disk, pages/items you\'ve already processed, your running plan, intermediate CSV rows you\'ve built up. Without the scratchpad, older tool outcomes are compressed into a short summary as context fills up, so you WILL lose specific details (filenames, counts, which items are done) after ~15 tool turns. Default action appends `text` as a new line. Pass `replace:true` to overwrite the whole pad when you want to compact it. Keep entries short and factual — one line per fact is ideal. Read back your own pad anytime; it\'s visible in every future prompt.',
+      parameters: {
+        type: 'object',
+        properties: {
+          text: { type: 'string', description: 'The note to record. One line ideally. Examples: "Downloaded pages 1-69 as page{N}.html, ids 700-768." / "Pages extracted so far: 1,2,3. Next: 4." / "Plan: read each downloaded file, regex <tr> rows, emit CSV."' },
+          replace: { type: 'boolean', description: 'If true, replace the entire scratchpad with `text`. Default false — appends as a new line.' },
+        },
+        required: ['text'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
       name: 'verify_form',
       description: 'Read all form field values and capture a viewport screenshot. Call this BEFORE submitting important forms to confirm every field has the intended value. Returns field names, types, current values, plus a screenshot.',
       parameters: {
@@ -623,6 +638,7 @@ Available tools:
 - new_tab: Open a new tab
 - done: Signal task completion
 - verify_form: Verify form fields before submitting
+- scratchpad_write: Pin a note in context that survives summarization (use on long tasks to remember download IDs, file paths, progress, plans)
 
 ACCESSIBILITY TREE — read this carefully:
 - Output format is FLAT INDENTED TEXT. Each node is one line:
@@ -672,6 +688,17 @@ CRITICAL — do NOT rush:
 - When creating something (product, post, account, etc.), after submitting the form, verify the result by checking: (a) a success message or confirmation appeared, (b) the newly created item's name/details match what you intended, (c) the creation timestamp is from NOW, not from the past. Do NOT assume an existing item is something you just created.
 - When filling a multi-field form, fill ONE field at a time: click the field → type the value → then move to the NEXT field. Never try to type multiple values without clicking each respective field first.
 - If the user's request contains multiple pieces of data (e.g. "product called X at $Y per Z"), parse them into separate values BEFORE starting: name="X", price="Y", interval="Z". Then fill each into its own form field.
+
+SCRATCHPAD — use this for long tasks:
+- As the conversation grows, older tool outputs get COMPRESSED INTO A SHORT SUMMARY. Specific facts (download IDs, filenames, which items you've finished, the exact row counts) DISAPPEAR. If you need a fact 15+ tool turns later, it will not be there.
+- The fix: \`scratchpad_write({text: "..."})\`. It appends a line to a pinned note that STAYS at the top of your context and survives summarization. Pass \`replace: true\` to rewrite the whole pad (use sparingly — e.g. to compact stale entries).
+- When to write to it:
+  (a) Right after a bulk operation completes — "Downloaded pages 1-69 as page{N}.html, IDs 700-768."
+  (b) Whenever you finalize a plan — "Plan: (1) download all pages (DONE), (2) read each, (3) regex <tr> rows, (4) emit CSV."
+  (c) When you finish a chunk of iterative work — "Processed pages 1-10. Next: 11."
+  (d) When you discover a non-obvious fact you'll need later — "API endpoint /api/investors 404s, use HTML scrape." "Download path: /Users/me/Downloads/page{N}.html."
+- Keep entries SHORT and FACTUAL. One line per fact. The pad is visible on every future turn — scan it before picking your next action, especially if you're about to restart something.
+- Don't use the scratchpad for short tasks (< 5 tool calls) or for prose reasoning. It's working memory, not a journal.
 
 UI vs API — read this carefully:
 - For ANY action that creates, modifies, deletes, sends, submits, buys, transfers, posts, or publishes anything: ALWAYS go through the visible UI of the current page. NEVER call REST/GraphQL/API endpoints directly via \`fetch_url\` with POST/PUT/PATCH/DELETE, NEVER use \`execute_js\` to call \`fetch()\` with mutation methods, NEVER attempt to "call the API directly to save time".
@@ -782,6 +809,7 @@ RULES:
 8. When done, call done({summary: "..."}). Verify success first — check for confirmation messages.
 9. If stuck, try a different approach. Don't repeat the same failing action.
 10. Interact through the visible UI. Do not call APIs directly.
+11. For long tasks, call scratchpad_write({text: "..."}) to remember facts (file paths, download IDs, progress) — older tool results get summarized and their details disappear.
 
 TYPING: Click the field first, then call type_text({text: "..."}) with NO selector. This is the most reliable method.
 
