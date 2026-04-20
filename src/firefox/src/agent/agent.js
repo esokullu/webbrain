@@ -356,6 +356,15 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
           : loopCheck.warning;
       }
 
+      // Strip `_attachImage` BEFORE stringifying the tool result — otherwise
+      // `_limitToolResult` would chop the base64 dataUrl mid-string and the
+      // model would never see a decodable image.
+      let attachedImage = null;
+      if (toolResult && typeof toolResult === 'object' && toolResult._attachImage) {
+        attachedImage = toolResult._attachImage;
+        delete toolResult._attachImage;
+      }
+
       let resultContent = this._limitToolResult(toolResult);
       if (effectiveKind === 'nudge') {
         resultContent = resultContent + '\n' + nudgeWarning;
@@ -366,6 +375,16 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
         tool_call_id: tc.id,
         content: resultContent,
       });
+      if (attachedImage) {
+        const noteText = `[Screenshot from your ${fnName} call. Image is a PNG at native device resolution (image pixels are NOT CSS pixels — prefer click_ax / click({text}) over pixel clicks). Use it to decide the next action.]`;
+        messages.push({
+          role: 'user',
+          content: [
+            { type: 'text', text: noteText },
+            { type: 'image_url', image_url: { url: attachedImage } },
+          ],
+        });
+      }
       if (effectiveKind === 'stop') {
         messages.push({ role: 'assistant', content: stopMessage });
         onUpdate('text', { content: stopMessage });
@@ -911,11 +930,41 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
           format: 'png',
           quality: 80,
         });
-        // Return as base64 for vision-capable models
+        const description = `Screenshot captured (${dataUrl.length} bytes base64 PNG)`;
+
+        // Route the image through whichever vision path is actually wired up.
+        // Returning a bare `{image: dataUrl}` blob looks like success but
+        // gets truncated inside _limitToolResult and never reaches the model
+        // as a decodable image_url block — the text-only model then
+        // hallucinates what's on screen.
+        const provider = this.providerManager.getActive();
+        const visionProvider = await this.providerManager.getVisionProvider();
+
+        if (visionProvider) {
+          const desc = await this._describeScreenshot(tabId, dataUrl, 'screenshot_tool');
+          if (desc) {
+            return {
+              success: true,
+              method: 'vision_describe',
+              description: `[Screenshot described by vision model ${desc.model}]\n${desc.text}`,
+            };
+          }
+        }
+
+        if (provider?.supportsVision) {
+          // The batch loop will strip `_attachImage` before stringifying and
+          // push the image on a follow-up user message as an image_url block.
+          return {
+            success: true,
+            method: 'image_attach',
+            description,
+            _attachImage: dataUrl,
+          };
+        }
+
         return {
-          success: true,
-          image: dataUrl,
-          description: `Screenshot captured (${dataUrl.length} bytes base64 PNG)`,
+          success: false,
+          error: 'This model cannot see images: it has no vision capability and no dedicated vision model is configured. Enable "Model supports vision" for the active provider or set a vision model. For now, use get_accessibility_tree, get_interactive_elements, or read_page.',
         };
       } catch (e) {
         return { success: false, error: `Screenshot failed: ${e.message}` };

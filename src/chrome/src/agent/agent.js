@@ -610,6 +610,16 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
         }
       }
 
+      // Strip `_attachImage` out of the tool result BEFORE stringifying —
+      // otherwise `_limitToolResult` would try to embed the whole dataUrl in
+      // the tool-result text and `_limitToolResult` would chop it to garbage.
+      // The image goes on a follow-up user message instead (see below).
+      let attachedImage = null;
+      if (toolResult && typeof toolResult === 'object' && toolResult._attachImage) {
+        attachedImage = toolResult._attachImage;
+        delete toolResult._attachImage;
+      }
+
       let resultContent = this._limitToolResult(toolResult);
       if (effectiveKind === 'nudge') {
         resultContent = resultContent + '\n' + nudgeWarning;
@@ -621,6 +631,25 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
         tool_call_id: tc.id,
         content: resultContent,
       });
+
+      // Follow-up image attachment. Vision endpoints need the image as an
+      // `image_url` block on a user message — an inline dataUrl inside a
+      // tool-result's JSON text never gets decoded. Mirrors the auto-
+      // screenshot raw-image path above.
+      if (attachedImage) {
+        const noteText = `[Screenshot from your ${fnName} call. Image is a PNG at native device resolution (image pixels are NOT CSS pixels — use click_ax / click({text}) over pixel clicks). Use it to decide the next action.]`;
+        messages.push({
+          role: 'user',
+          content: [
+            { type: 'text', text: noteText },
+            { type: 'image_url', image_url: { url: attachedImage } },
+          ],
+        });
+        const _runIdForShot = this.currentRunId.get(tabId);
+        if (_runIdForShot) {
+          trace.recordScreenshot(_runIdForShot, null, attachedImage, `screenshot-tool:${fnName}`);
+        }
+      }
 
       if (effectiveKind === 'stop') {
         messages.push({ role: 'assistant', content: stopMessage });
@@ -1587,20 +1616,26 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
 
     if (name === 'screenshot') {
       try {
-        // Try CDP first for better quality, fallback to tabs API
+        // Capture the image. The dataUrl is handed back through the special
+        // `_attachImage` field so the batch loop can push it as an image_url
+        // block on a follow-up user message (see _executeToolBatch) — exactly
+        // how auto-screenshot already does it.
+        //
+        // Why not just return {image: dataUrl}? `_limitToolResult` stringifies
+        // and chops at 8KB, which shreds any real PNG into invalid base64. And
+        // OpenAI-compatible vision endpoints expect `image_url` blocks inside a
+        // user message, not a base64 string embedded in a tool-result's JSON
+        // text. Either way the model never sees the picture.
+        let dataUrl = null;
+        let description = '';
+        let probe = null;
+        let coordAligned = false;
         try {
           await cdpClient.attach(tabId);
           await cdpClient.sendCommand(tabId, 'Page.enable');
-          // Run probe + bringToFront in parallel with capture prep. Probe is
-          // best-effort context for the model; bringToFront defends against
-          // stale/blank surface captures when the tab is occluded.
-          const probe = await this._captureViewportProbe(tabId);
+          probe = await this._captureViewportProbe(tabId);
           await this._bringToFrontForCapture(tabId);
-          // coord_aligned: force CSS-pixel alignment (scale=1). Required
-          // if the model plans to pixel-click the capture via
-          // click({x,y}). Default false — native surface resolution is
-          // higher fidelity for reading the page.
-          const coordAligned = !!(args && args.coord_aligned);
+          coordAligned = !!(args && args.coord_aligned);
           const capArgs = { format: 'png', fromSurface: true };
           if (coordAligned) {
             const w = Math.max(1, Math.round(probe?.innerWidth || 1024));
@@ -1608,19 +1643,9 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
             capArgs.clip = { x: 0, y: 0, width: w, height: h, scale: 1 };
           }
           const screenshot = await cdpClient.sendCommand(tabId, 'Page.captureScreenshot', capArgs);
-          return {
-            success: true,
-            image: `data:image/png;base64,${screenshot.data}`,
-            description: `Screenshot captured via CDP (${screenshot.data.length} bytes, ${coordAligned ? 'CSS-pixel aligned for pixel clicks' : 'native resolution'})`,
-            page: probe || undefined,
-            coordAligned,
-          };
+          dataUrl = `data:image/png;base64,${screenshot.data}`;
+          description = `Screenshot captured via CDP (${screenshot.data.length} bytes, ${coordAligned ? 'CSS-pixel aligned for pixel clicks' : 'native resolution'})`;
         } catch {
-          // Fallback to tabs API. captureVisibleTab takes a windowId and
-          // captures whatever's visible in that window — NOT the tab we
-          // ask for. If the agent's tab isn't currently the active tab,
-          // we'd silently capture an unrelated page. Refuse and tell the
-          // model so it can plan without misleading visual context.
           const tab = await chrome.tabs.get(tabId);
           if (!tab?.active) {
             return {
@@ -1628,16 +1653,55 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
               error: 'Cannot capture screenshot: this tab is not the active tab in its window. Switch to the tab to take a screenshot, or use a different tool.',
             };
           }
-          const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, {
-            format: 'png',
-            quality: 80,
-          });
+          dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'png', quality: 80 });
+          description = `Screenshot captured (${dataUrl.length} bytes base64 PNG)`;
+        }
+
+        // Pick the presentation path based on what the active providers can
+        // actually do with an image. Order matters: a dedicated vision model
+        // (cheaper, summary-only) wins over the main provider's own vision.
+        const provider = this.providerManager.getActive();
+        const visionProvider = await this.providerManager.getVisionProvider();
+
+        if (visionProvider) {
+          // Describe via the sidecar vision model. Return text only; no image
+          // attachment needed — the main provider never needs to see pixels.
+          const desc = await this._describeScreenshot(tabId, dataUrl, 'screenshot_tool');
+          if (desc) {
+            return {
+              success: true,
+              method: 'vision_describe',
+              description: `[Screenshot described by vision model ${desc.model}]\n${desc.text}`,
+              page: probe || undefined,
+              coordAligned,
+            };
+          }
+          // Sub-call failed — fall through to raw-image path if the main
+          // provider supports vision, otherwise bail out with a useful error.
+        }
+
+        if (provider?.supportsVision) {
+          // Raw-image path: hand the dataUrl to the batch loop via
+          // `_attachImage`. The loop will strip it before stringifying the
+          // tool result (keeping the tool-result text tiny) and then push a
+          // `user` message containing the image_url block.
           return {
             success: true,
-            image: dataUrl,
-            description: `Screenshot captured (${dataUrl.length} bytes base64 PNG)`,
+            method: 'image_attach',
+            description,
+            page: probe || undefined,
+            coordAligned,
+            _attachImage: dataUrl,
           };
         }
+
+        // No vision anywhere — the model literally cannot see this. Return
+        // an error rather than a deceptive "success" so the agent doesn't
+        // hallucinate about what's on screen.
+        return {
+          success: false,
+          error: 'This model cannot see images: it has no vision capability and no dedicated vision model is configured. In provider settings, enable "Model supports vision" for the active provider or set a vision model. For now, use get_accessibility_tree, get_interactive_elements, or read_page to inspect the page.',
+        };
       } catch (e) {
         return { success: false, error: `Screenshot failed: ${e.message}` };
       }
