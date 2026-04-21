@@ -1,6 +1,10 @@
 {
   "rewrites": [
     { "source": "/privacy", "destination": "/privacy.html" },
+    { "source": "/blog", "destination": "/blog/index.html" },
+    { "source": "/blog/", "destination": "/blog/index.html" },
+    { "source": "/blog/:slug", "destination": "/blog/:slug/index.html" },
+    { "source": "/blog/:slug/", "destination": "/blog/:slug/index.html" },
     { "source": "/:path*\\.(png|jpg|jpeg|gif|webp|svg|ico|css|js|map|txt|xml|json|woff|woff2|ttf|otf)", "destination": "/:path*" },
     { "source": "/(.*)", "destination": "/index.html" }
   ],

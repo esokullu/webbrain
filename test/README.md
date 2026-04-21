@@ -49,3 +49,46 @@ npm run test:anonymous -- --setup                   # open settings only
 ```
 
 Headed by default so you can watch runs and intervene. Budget ≈ 10–30 seconds per scenario + LLM tokens per the configured provider.
+
+## 4. Vision probe — `node test/vision-probe.mjs <image>`
+
+`test/vision-probe.mjs`. One-shot caption-quality check against any OpenAI-compatible vision endpoint (llama.cpp, Ollama, LM Studio, vLLM, LiteLLM, OpenRouter, …) using **the exact same system prompt, user text, and parameters** the extension's vision sub-call sends — `VISION_SYSTEM_PROMPT`, temperature 0, max_tokens 800, `chat_template_kwargs.enable_thinking: false`. If your vision model produces garbage here, it will produce garbage in the extension too.
+
+### Usage
+
+```bash
+node test/vision-probe.mjs <image-path> [endpoint] [model]
+```
+
+- `<image-path>` — PNG/JPEG on disk. Typically a screenshot to check the model against.
+- `endpoint` — defaults to `http://127.0.0.1:8080`. Given a bare host, `/v1/chat/completions` is appended.
+- `model` — optional; if omitted, the server picks. Required for OpenRouter / multi-model servers.
+- `VISION_PROBE_KEY` env var — bearer token, if the endpoint needs one.
+
+### Examples
+
+```bash
+# Local llama.cpp
+node test/vision-probe.mjs ./shot.png
+
+# Local llama.cpp with an explicit model label
+node test/vision-probe.mjs ./shot.png http://127.0.0.1:8080 Gemma-4-E2B-It
+
+# Ollama (note the /v1 suffix matters for OpenAI compat)
+node test/vision-probe.mjs ./shot.png http://localhost:11434/v1 llava:13b
+
+# OpenRouter with a key
+VISION_PROBE_KEY=sk-or-v1-... node test/vision-probe.mjs ./shot.png \
+  https://openrouter.ai/api/v1 openai/gpt-4o
+```
+
+### What to look for
+
+The prompt asks the model for a 6-section structured caption (page purpose, exact visible text, inputs, state signals, blockers, unknowns). The planner depends on sections **2 (exact strings)** and **4 (state signals)** above all — those drive `click({text})` and error-state detection. When evaluating a candidate vision model:
+
+- Does it quote button/link text **verbatim**, or does it paraphrase?
+- Does it hallucinate strings that aren't on the screen?
+- Does it surface red error borders, disabled buttons, CAPTCHAs, cookie banners?
+- Does it correctly flag "unknown" when it can't read a number, not guess?
+
+Keep the two constants at the top of `vision-probe.mjs` in sync with `src/chrome/src/agent/agent.js` (`VISION_SYSTEM_PROMPT` and the user-message text). If the real prompt changes, update the probe so results stay comparable.

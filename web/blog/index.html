@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>WebBrain Blog</title>
+  <meta name="description" content="Engineering notes from WebBrain — the open-source AI browser agent.">
+  <meta property="og:title" content="WebBrain Blog">
+  <meta property="og:description" content="Engineering notes from WebBrain — the open-source AI browser agent.">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://webbrain.one/blog">
+  <meta property="og:image" content="https://webbrain.one/og-image.svg">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="WebBrain Blog">
+  <meta name="twitter:description" content="Engineering notes from WebBrain.">
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <link rel="canonical" href="https://webbrain.one/blog">
+  <style>
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+    :root {
+      --bg: #0b0e17;
+      --bg-card: #111827;
+      --bg-card-hover: #1a2233;
+      --surface: #161d2e;
+      --border: rgba(255,255,255,0.07);
+      --text: #e4e4ec;
+      --text-dim: #8b8fa4;
+      --accent: #6c63ff;
+      --accent2: #a78bfa;
+      --radius: 16px;
+      --max-w: 760px;
+    }
+    html { scroll-behavior: smooth; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Inter, Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.7;
+    }
+    a { color: var(--accent2); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+
+    .glow-bg {
+      position: fixed;
+      inset: 0;
+      z-index: -1;
+      pointer-events: none;
+    }
+    .glow-bg::before, .glow-bg::after {
+      content: ''; position: absolute; border-radius: 50%; filter: blur(120px); opacity: 0.35;
+    }
+    .glow-bg::before { width: 500px; height: 500px; background: var(--accent); top: -200px; left: -150px; }
+    .glow-bg::after  { width: 500px; height: 500px; background: var(--accent2); bottom: -200px; right: -150px; opacity: 0.25; }
+
+    nav {
+      position: sticky; top: 0; z-index: 100;
+      background: rgba(11,14,23,0.85);
+      backdrop-filter: saturate(160%) blur(12px);
+      -webkit-backdrop-filter: saturate(160%) blur(12px);
+      border-bottom: 1px solid var(--border);
+    }
+    .nav-inner {
+      max-width: var(--max-w);
+      margin: 0 auto;
+      padding: 16px 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .nav-brand { font-weight: 700; font-size: 18px; color: var(--text); }
+    .nav-brand .emoji { margin-right: 4px; }
+    .nav-links a { color: var(--text-dim); margin-left: 20px; font-size: 14px; }
+    .nav-links a:hover { color: var(--text); text-decoration: none; }
+
+    main {
+      max-width: var(--max-w);
+      margin: 0 auto;
+      padding: 80px 24px 120px;
+    }
+    .page-label {
+      display: inline-block;
+      font-size: 12px;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--accent2);
+      padding: 4px 10px;
+      border: 1px solid rgba(167,139,250,0.25);
+      border-radius: 999px;
+      margin-bottom: 18px;
+    }
+    h1 {
+      font-size: 40px;
+      line-height: 1.15;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      margin-bottom: 12px;
+    }
+    .page-sub {
+      color: var(--text-dim);
+      font-size: 17px;
+      max-width: 580px;
+      margin-bottom: 48px;
+    }
+
+    .post-list { display: flex; flex-direction: column; gap: 18px; }
+    .post-card {
+      display: block;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 24px 26px;
+      transition: background 0.18s, border-color 0.18s, transform 0.18s;
+    }
+    .post-card:hover {
+      background: var(--bg-card-hover);
+      border-color: rgba(108,99,255,0.25);
+      transform: translateY(-1px);
+      text-decoration: none;
+    }
+    .post-meta {
+      font-size: 12px;
+      color: var(--text-dim);
+      letter-spacing: 0.02em;
+      margin-bottom: 8px;
+    }
+    .post-title {
+      font-size: 21px;
+      font-weight: 600;
+      color: var(--text);
+      margin-bottom: 6px;
+      letter-spacing: -0.01em;
+    }
+    .post-excerpt {
+      color: var(--text-dim);
+      font-size: 15px;
+      line-height: 1.6;
+    }
+
+    footer {
+      max-width: var(--max-w);
+      margin: 0 auto;
+      padding: 40px 24px;
+      border-top: 1px solid var(--border);
+      display: flex;
+      justify-content: space-between;
+      color: var(--text-dim);
+      font-size: 13px;
+    }
+    footer a { color: var(--text-dim); }
+    footer a:hover { color: var(--text); }
+
+    @media (max-width: 640px) {
+      h1 { font-size: 32px; }
+      .page-sub { font-size: 15px; }
+      main { padding: 60px 20px 100px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="glow-bg"></div>
+
+  <nav>
+    <div class="nav-inner">
+      <a href="/" class="nav-brand"><span class="emoji">🧠</span> WebBrain<span style="opacity:0.5; font-weight:400;">.one</span></a>
+      <div class="nav-links">
+        <a href="/">Home</a>
+        <a href="/blog">Blog</a>
+        <a href="https://github.com/esokullu/webbrain" target="_blank">GitHub</a>
+      </div>
+    </div>
+  </nav>
+
+  <main>
+    <span class="page-label">Blog</span>
+    <h1>Engineering notes</h1>
+    <p class="page-sub">Short write-ups on design decisions, failure modes, and benchmarks from building an open-source AI browser agent.</p>
+
+    <div class="post-list">
+      <a href="/blog/vision-model-shootout" class="post-card">
+        <div class="post-meta">April 21, 2026 · 7 min read</div>
+        <div class="post-title">Four vision models, one screenshot: which one is actually worth running locally for a browser agent?</div>
+        <div class="post-excerpt">We fed the same Google sign-in page through Gemma&nbsp;4-E2B, Gemma&nbsp;4-31B, Qwen3.5-27B, and Qwen3.6-35B-A3B using the exact system prompt WebBrain's vision sub-call ships with. The spread on OCR accuracy, latency, and token cost is wider than you'd expect — and one model quietly changed our mind about which architecture to reach for.</div>
+      </a>
+    </div>
+  </main>
+
+  <footer>
+    <div>© 2026 WebBrain · <a href="/privacy">Privacy</a></div>
+    <div><a href="https://github.com/esokullu/webbrain" target="_blank">GitHub</a></div>
+  </footer>
+</body>
+</html>
