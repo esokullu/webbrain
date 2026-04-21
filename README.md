@@ -2,16 +2,6 @@
 
 Open-source AI browser agent for Chrome and Firefox. Chat with any web page, automate browser tasks, and run multi-step agent workflows — powered by your choice of LLM.
 
-**Current version:** `4.2.0`
-
-## What's New in 4.2.0 (from 1.x)
-
-- **Safety-first API behavior** via `/allow-api` per-conversation override (UI-first for mutations by default)
-- **Cross-origin iframe interaction tools** (`iframe_read`, `iframe_click`, `iframe_type`) for embedded forms and widgets
-- **Network research tools** (`fetch_url`, `research_url`) for fast read-only data retrieval
-- **Download workflow tools** (`download_file`, `download_files`, `list_downloads`, `read_downloaded_file`)
-- **Trace viewer and quality-of-life upgrades** including step-limit continuation and stronger context controls
-
 ## Features
 
 - **Page Reading** — Extracts text, links, forms, tables, and interactive elements from any page
@@ -167,14 +157,22 @@ The default UI-first rule exists because API actions are invisible (you don't se
 - **SPA navigation detection in Firefox.** Some single-page applications may not trigger content-script re-injection after client-side navigation.
 - **Firefox temporary add-on** — Firefox requires the extension to be loaded as a temporary add-on during development, which is removed on restart.
 
+## What's New in 4.2.0 (from 1.x)
+
+- **Safety-first API behavior** via `/allow-api` per-conversation override (UI-first for mutations by default)
+- **Cross-origin iframe interaction tools** (`iframe_read`, `iframe_click`, `iframe_type`) for embedded forms and widgets
+- **Network research tools** (`fetch_url`, `research_url`) for fast read-only data retrieval
+- **Download workflow tools** (`download_file`, `download_files`, `list_downloads`, `read_downloaded_file`)
+- **Trace viewer and quality-of-life upgrades** including step-limit continuation and stronger context controls
+
 ## Roadmap
 
 - [ ] **Conversation export/import** — Save and load chat histories
 - [ ] **Custom tool definitions** — User-defined tools via settings
 - [ ] **Keyboard shortcuts** — Hotkeys for opening panel, sending messages, switching modes
 - [ ] **Context menu integration** — Right-click → "Ask WebBrain about this"
-- [ ] **Screenshot/vision tool** — Send screenshots to multimodal models for visual understanding
-- [ ] **Chrome Web Store / Firefox AMO** — Official store listings
+- [X] **Screenshot/vision tool** — Send screenshots to multimodal models for visual understanding
+- [X] **Chrome Web Store / Firefox AMO** — Official store listings
 
 ## Adding a New Provider
 
