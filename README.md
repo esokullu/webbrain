@@ -2,6 +2,16 @@
 
 Open-source AI browser agent for Chrome and Firefox. Chat with any web page, automate browser tasks, and run multi-step agent workflows — powered by your choice of LLM.
 
+**Current version:** `4.2.0`
+
+## What's New in 4.2.0 (from 1.x)
+
+- **Safety-first API behavior** via `/allow-api` per-conversation override (UI-first for mutations by default)
+- **Cross-origin iframe interaction tools** (`iframe_read`, `iframe_click`, `iframe_type`) for embedded forms and widgets
+- **Network research tools** (`fetch_url`, `research_url`) for fast read-only data retrieval
+- **Download workflow tools** (`download_file`, `download_files`, `list_downloads`, `read_downloaded_file`)
+- **Trace viewer and quality-of-life upgrades** including step-limit continuation and stronger context controls
+
 ## Features
 
 - **Page Reading** — Extracts text, links, forms, tables, and interactive elements from any page
@@ -42,7 +52,7 @@ git clone https://github.com/esokullu/webbrain.git
 
 1. Open Firefox → `about:debugging#/runtime/this-firefox`
 2. Click **Load Temporary Add-on**
-3. Navigate to the `webbrain-firefox` folder and select `manifest.json`
+3. Navigate to `src/firefox/` and select `manifest.json`
 
 > **Note:** Temporary add-ons are removed when Firefox restarts. For permanent installation, the extension needs to be signed via [addons.mozilla.org](https://addons.mozilla.org).
 
@@ -87,32 +97,24 @@ Click the gear icon or go to the extension's Options page to configure:
 ## Architecture
 
 ```
-webbrain/                          webbrain-firefox/
+src/chrome/                        src/firefox/
 ├── manifest.json (MV3)            ├── manifest.json (MV2)
 ├── src/                           ├── src/
 │   ├── background.js              │   ├── background.js (+ background.html)
 │   ├── agent/                     │   ├── agent/
-│   │   ├── agent.js               │   │   ├── agent.js
-│   │   └── tools.js               │   │   └── tools.js
 │   ├── content/                   │   ├── content/
-│   │   └── content.js             │   │   └── content.js
 │   ├── providers/                 │   ├── providers/
-│   │   ├── base.js                │   │   ├── base.js
-│   │   ├── llamacpp.js            │   │   ├── llamacpp.js
-│   │   ├── openai.js              │   │   ├── openai.js
-│   │   ├── anthropic.js           │   │   ├── anthropic.js
-│   │   └── manager.js             │   │   └── manager.js
-│   └── ui/                        │   └── ui/
-│       ├── sidepanel.html         │       ├── sidepanel.html
-│       ├── sidepanel.js           │       ├── sidepanel.js
-│       ├── settings.html          │       ├── settings.html
-│       └── settings.js            │       └── settings.js
-├── styles/                        ├── styles/
-│   └── sidepanel.css              │   └── sidepanel.css
-├── web/                           └── icons/
-│   ├── index.html
-│   └── vercel.json
-└── icons/
+│   ├── network/                   │   ├── network/
+│   ├── trace/                     │   ├── trace/
+│   ├── ui/                        │   └── ui/
+│   └── offscreen/                 ├── styles/
+├── styles/                        ├── icons/
+└── icons/                         └── LICENSE
+
+web/
+├── index.html
+├── privacy.html
+└── vercel.json
 ```
 
 Key difference: Chrome uses Manifest V3 (service worker, `chrome.scripting`, `sidePanel` API), Firefox uses Manifest V2 (background page, `browser.tabs.executeScript`, `sidebar_action`).
