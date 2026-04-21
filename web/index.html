@@ -121,6 +121,14 @@
       },
       {
         "@type": "Question",
+        "name": "What's the most recommended model?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "As of April 21, 2026, we recommend Qwen 3.6 35B (https://huggingface.co/Qwen/Qwen3.6-35B-A3B). See the benchmark write-up: https://www.webbrain.one/blog/vision-model-shootout — it performed better than Gemma 4 for vision in WebBrain's screenshot benchmark while still being practical on RTX 5090 and often RTX 4090 with INT4 AutoRound quantization (https://huggingface.co/Intel/Qwen3.6-35B-A3B-int4-AutoRound). For maximum speed, run it on vLLM; optional speculative decoding with DFlash can improve throughput further."
+        }
+      },
+      {
+        "@type": "Question",
         "name": "What does WebBrain do with cookie banners and paywalls?",
         "acceptedAnswer": {
           "@type": "Answer",
@@ -388,6 +396,12 @@
       background: linear-gradient(135deg, var(--accent), var(--accent2));
       -webkit-background-clip: text;
       -webkit-text-fill-color: transparent;
+    }
+    .sp-header .sp-brand .sp-domain {
+      font-weight: 500;
+      opacity: 1;
+      background: none;
+      -webkit-text-fill-color: rgba(228,228,236,0.75);
     }
     .sp-status {
       width: 7px; height: 7px;
@@ -916,7 +930,7 @@
         </div>
         <div class="side-panel">
           <div class="sp-header">
-            <span class="sp-brand">🧠 WebBrain</span>
+            <span class="sp-brand">🧠 WebBrain<span class="sp-domain">.one</span></span>
             <span class="sp-status"></span>
           </div>
           <div class="sp-messages">
@@ -1197,6 +1211,15 @@
     <details class="faq-item">
       <summary>Which AI models does WebBrain support?</summary>
       <p>WebBrain supports four provider types: llama.cpp (any local GGUF model), OpenAI (GPT-4o, GPT-4, etc.), Claude (Claude Opus, Sonnet, Haiku via native API), and OpenRouter (access to 100+ models from various providers). Any OpenAI-compatible API endpoint works, so you can also use services like Together AI, Groq, Mistral, or any local server with an OpenAI-compatible interface.</p>
+    </details>
+
+    <details class="faq-item">
+      <summary>What's the most recommended model?</summary>
+      <p>As of <strong>April 21, 2026</strong>, the top recommendation is <a href="https://huggingface.co/Qwen/Qwen3.6-35B-A3B" target="_blank">Qwen 3.6 35B</a>. Why: in our vision benchmark (<a href="https://www.webbrain.one/blog/vision-model-shootout" target="_blank">vision-model-shootout</a>), it outperformed Gemma 4 on screenshot understanding while remaining practical for local inference.</p>
+      <p>For consumer GPUs, RTX 5090 is ideal, and RTX 4090 is often workable with INT4 AutoRound quantization via <a href="https://huggingface.co/Intel/Qwen3.6-35B-A3B-int4-AutoRound" target="_blank">Intel/Qwen3.6-35B-A3B-int4-AutoRound</a>.</p>
+      <p>For max speed, we recommend serving on <strong>vLLM</strong>. Sample command:</p>
+      <p><code>python -u -m vllm.entrypoints.openai.api_server --model Intel/Qwen3.6-35B-A3B-int4-AutoRound --served-model-name qwen3.6-35b --quantization auto --dtype bfloat16 --max-model-len 65536 --max-num-batched-tokens 32768 --max-num-seqs 4 --host 0.0.0.0 --port 8000 --gpu-memory-utilization 0.92 --enable-prefix-caching --enable-chunked-prefill --limit-mm-per-prompt '{"image": 4, "video": 1}' --mm-processor-cache-type shm --reasoning-parser qwen3 --enable-auto-tool-choice --tool-call-parser qwen3_coder --trust-remote-code --allowed-origins '["*"]' --speculative-config '{"method": "dflash", "model": "z-lab/Qwen3.6-35B-A3B-DFlash", "num_speculative_tokens": 15}' --attention-backend flash_attn</code></p>
+      <p><em>DFlash speculative decoding is optional.</em></p>
     </details>
 
     <details class="faq-item">
