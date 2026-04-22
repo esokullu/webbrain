@@ -480,6 +480,182 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     return { action: 'continue' };
   }
 
+  // ───────────── Image-budget (token-conscious screenshots) ─────────────
+  // See src/chrome/src/agent/agent.js for the full rationale. Firefox MV2
+  // runs in a background PAGE (not a worker) so we have a real `document`
+  // and can use regular <canvas> / toBlob instead of OffscreenCanvas.
+  // Constants match Anthropic's Claude-for-Chrome defaults and the Chrome
+  // Agent's IMAGE_BUDGET — keep them in sync.
+  static IMAGE_BUDGET = {
+    pxPerToken: 28,
+    maxTargetPx: 1568,
+    maxTargetTokens: 1568,
+    maxBase64Chars: 1398100,
+    initialJpegQuality: 0.75,
+    minJpegQuality: 0.10,
+    jpegQualityStep: 0.05,
+  };
+
+  static _estimateImageTokens(w, h, pxPerToken) {
+    return Math.ceil((w / pxPerToken) * (h / pxPerToken));
+  }
+
+  static _fitImageDimensions(origW, origH, budget = Agent.IMAGE_BUDGET) {
+    const { pxPerToken, maxTargetPx, maxTargetTokens } = budget;
+    if (origW <= maxTargetPx && origH <= maxTargetPx &&
+        Agent._estimateImageTokens(origW, origH, pxPerToken) <= maxTargetTokens) {
+      return [origW, origH];
+    }
+    if (origH > origW) {
+      const [h, w] = Agent._fitImageDimensions(origH, origW, budget);
+      return [w, h];
+    }
+    const aspect = origW / origH;
+    let hi = origW, lo = 1;
+    // eslint-disable-next-line no-constant-condition
+    while (true) {
+      if (lo + 1 >= hi) return [lo, Math.max(Math.round(lo / aspect), 1)];
+      const mid = Math.floor((lo + hi) / 2);
+      const midH = Math.max(Math.round(mid / aspect), 1);
+      if (mid <= maxTargetPx &&
+          Agent._estimateImageTokens(mid, midH, pxPerToken) <= maxTargetTokens) {
+        lo = mid;
+      } else {
+        hi = mid;
+      }
+    }
+  }
+
+  /**
+   * Load a dataUrl into an <img>, returning it after `load`. Used by the
+   * budget helpers since Firefox MV2's background page has DOM.
+   */
+  _loadImageFromDataUrl(dataUrl) {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => resolve(img);
+      img.onerror = () => reject(new Error('Failed to load image'));
+      img.src = dataUrl;
+    });
+  }
+
+  _canvasToBlob(canvas, type, quality) {
+    return new Promise((resolve, reject) => {
+      canvas.toBlob((blob) => {
+        if (blob) resolve(blob);
+        else reject(new Error('Failed to encode canvas'));
+      }, type, quality);
+    });
+  }
+
+  static _bufferToDataUrl(buf, mime) {
+    const bytes = new Uint8Array(buf);
+    let bin = '';
+    const chunk = 0x8000;
+    for (let i = 0; i < bytes.length; i += chunk) {
+      bin += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk));
+    }
+    return `data:${mime};base64,${btoa(bin)}`;
+  }
+
+  /**
+   * Decode, resize to the budget target dims, and JPEG-quality-iterate
+   * until the base64 fits. DOM-based (not OffscreenCanvas) because MV2's
+   * background page has a real document. Returns { dataUrl, width, height }.
+   */
+  async _shrinkImageForBudget(dataUrl, origW, origH, budget = Agent.IMAGE_BUDGET) {
+    try {
+      if (!dataUrl) return { dataUrl, width: origW, height: origH };
+
+      if (origW && origH) {
+        const [targetW, targetH] = Agent._fitImageDimensions(origW, origH, budget);
+        const payloadStart = dataUrl.indexOf(',') + 1;
+        const payloadLen = payloadStart > 0 ? dataUrl.length - payloadStart : dataUrl.length;
+        if (targetW === origW && targetH === origH && payloadLen <= budget.maxBase64Chars) {
+          return { dataUrl, width: origW, height: origH };
+        }
+      }
+
+      const img = await this._loadImageFromDataUrl(dataUrl);
+      if (!origW || !origH) {
+        origW = img.naturalWidth || img.width;
+        origH = img.naturalHeight || img.height;
+      }
+      const [targetW, targetH] = Agent._fitImageDimensions(origW, origH, budget);
+      const finalW = Math.min(targetW, origW);
+      const finalH = Math.min(targetH, origH);
+
+      const canvas = document.createElement('canvas');
+      canvas.width = finalW;
+      canvas.height = finalH;
+      const ctx = canvas.getContext('2d');
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = 'high';
+      ctx.drawImage(img, 0, 0, origW, origH, 0, 0, finalW, finalH);
+
+      let quality = budget.initialJpegQuality;
+      let lastBuf = null;
+      while (quality >= budget.minJpegQuality - 1e-9) {
+        const outBlob = await this._canvasToBlob(canvas, 'image/jpeg', quality);
+        const buf = await outBlob.arrayBuffer();
+        lastBuf = buf;
+        if (Math.ceil(buf.byteLength * 4 / 3) <= budget.maxBase64Chars) {
+          return {
+            dataUrl: Agent._bufferToDataUrl(buf, 'image/jpeg'),
+            width: finalW,
+            height: finalH,
+          };
+        }
+        quality -= budget.jpegQualityStep;
+      }
+      return {
+        dataUrl: lastBuf ? Agent._bufferToDataUrl(lastBuf, 'image/jpeg') : dataUrl,
+        width: finalW,
+        height: finalH,
+      };
+    } catch {
+      return { dataUrl, width: origW, height: origH };
+    }
+  }
+
+  /**
+   * Byte-ceiling-only re-encode: preserves dimensions, just drops JPEG
+   * quality until bytes fit. Useful when you've already decided the
+   * dims are correct (e.g. coord-aligned captures) but the payload
+   * happens to exceed the provider's image cap.
+   */
+  async _compressJpegToByteCeiling(dataUrl, budget = Agent.IMAGE_BUDGET) {
+    try {
+      if (!dataUrl) return dataUrl;
+      const payloadStart = dataUrl.indexOf(',') + 1;
+      const payloadLen = payloadStart > 0 ? dataUrl.length - payloadStart : dataUrl.length;
+      if (payloadLen <= budget.maxBase64Chars) return dataUrl;
+
+      const img = await this._loadImageFromDataUrl(dataUrl);
+      const w = img.naturalWidth || img.width;
+      const h = img.naturalHeight || img.height;
+      const canvas = document.createElement('canvas');
+      canvas.width = w;
+      canvas.height = h;
+      canvas.getContext('2d').drawImage(img, 0, 0);
+
+      let quality = budget.initialJpegQuality;
+      let lastBuf = null;
+      while (quality >= budget.minJpegQuality - 1e-9) {
+        const outBlob = await this._canvasToBlob(canvas, 'image/jpeg', quality);
+        const buf = await outBlob.arrayBuffer();
+        lastBuf = buf;
+        if (Math.ceil(buf.byteLength * 4 / 3) <= budget.maxBase64Chars) {
+          return Agent._bufferToDataUrl(buf, 'image/jpeg');
+        }
+        quality -= budget.jpegQualityStep;
+      }
+      return lastBuf ? Agent._bufferToDataUrl(lastBuf, 'image/jpeg') : dataUrl;
+    } catch {
+      return dataUrl;
+    }
+  }
+
   /**
    * Capture a viewport screenshot via the WebExtension tabs API. Firefox
    * supports `scale: 1` on captureVisibleTab to force a CSS-pixel-aligned
@@ -512,13 +688,19 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       } catch (e) { /* fall back to defaults */ }
       // scale: 1 forces 1 image pixel per CSS pixel (Firefox-specific option,
       // ignored by Chrome but Chrome path uses CDP anyway).
-      const dataUrl = await browser.tabs.captureVisibleTab(tab.windowId, {
+      const rawDataUrl = await browser.tabs.captureVisibleTab(tab.windowId, {
         format: 'jpeg',
         quality: 60,
         scale: 1,
       });
-      if (!dataUrl) return null;
-      return { dataUrl, width: w, height: h };
+      if (!rawDataUrl) return null;
+
+      // Firefox's captureVisibleTab doesn't take a clip/scale in a way that
+      // lets us downsize during capture (scale:1 is viewport-lock, not a
+      // factor). So we capture at CSS size and shrink via DOM canvas to
+      // the token budget. On small viewports this is a no-op fast-exit.
+      const shrunk = await this._shrinkImageForBudget(rawDataUrl, w, h);
+      return { dataUrl: shrunk.dataUrl, width: shrunk.width, height: shrunk.height };
     } catch (e) {
       return null;
     }
@@ -960,11 +1142,16 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
             error: 'Cannot capture screenshot: this tab is not the active tab in its window. Switch to the tab to take a screenshot, or use a different tool.',
           };
         }
-        const dataUrl = await browser.tabs.captureVisibleTab(tab.windowId, {
+        const rawUrl = await browser.tabs.captureVisibleTab(tab.windowId, {
           format: 'png',
           quality: 80,
         });
-        const description = `Screenshot captured (${dataUrl.length} bytes base64 PNG)`;
+        // Shrink to the vision budget before handing the image to the
+        // model. Same two-stage dance as Chrome: decode → pick target dims
+        // → draw at target → iterative JPEG quality until bytes fit.
+        const shrunk = await this._shrinkImageForBudget(rawUrl, 0, 0);
+        const dataUrl = shrunk.dataUrl;
+        const description = `Screenshot captured (${dataUrl.length} base64 chars, ${shrunk.width}×${shrunk.height})`;
 
         // Route the image through whichever vision path is actually wired up.
         // Returning a bare `{image: dataUrl}` blob looks like success but
