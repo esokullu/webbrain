@@ -309,27 +309,34 @@
   </style>
 </head>
 <body>
-  <h1>WebBrain Settings</h1>
-  <p class="subtitle">Configure your LLM providers and display preferences · v4.2.1</p>
+  <h1 data-i18n="st.title"></h1>
+  <p class="subtitle" id="subtitle"></p>
 
   <!-- Account section stays outside the tabs — it's a zero-height placeholder
        until auth finishes, at which point settings.js populates it. -->
-  <h2 style="display:none;">Account</h2>
+  <h2 style="display:none;" data-i18n="st.tab.account"></h2>
   <div id="account-section" style="display:none;"></div>
 
   <nav class="tabs" role="tablist">
-    <button class="tab-btn active" type="button" role="tab" data-tab="display">Display</button>
-    <button class="tab-btn" type="button" role="tab" data-tab="providers">Providers</button>
-    <button class="tab-btn" type="button" role="tab" data-tab="vision">Vision</button>
-    <button class="tab-btn" type="button" role="tab" data-tab="profile">Profile</button>
+    <button class="tab-btn active" type="button" role="tab" data-tab="display" data-i18n="st.tab.display"></button>
+    <button class="tab-btn" type="button" role="tab" data-tab="providers" data-i18n="st.tab.providers"></button>
+    <button class="tab-btn" type="button" role="tab" data-tab="vision" data-i18n="st.tab.vision"></button>
+    <button class="tab-btn" type="button" role="tab" data-tab="profile" data-i18n="st.tab.profile"></button>
   </nav>
 
   <section class="tab-panel active" data-panel="display" role="tabpanel">
     <div id="display-settings">
       <div class="setting-row">
         <div class="setting-info">
-          <div class="setting-label">Verbose Mode</div>
-          <div class="setting-desc">Show full tool call details, arguments, and raw JSON results. Off by default for a cleaner chat experience.</div>
+          <div class="setting-label" data-i18n="st.display.language.label"></div>
+          <div class="setting-desc" data-i18n="st.display.language.desc"></div>
+        </div>
+        <select id="select-language" style="background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:6px 10px;font-family:inherit;cursor:pointer;"></select>
+      </div>
+      <div class="setting-row">
+        <div class="setting-info">
+          <div class="setting-label" data-i18n="st.display.verbose.label"></div>
+          <div class="setting-desc" data-i18n="st.display.verbose.desc"></div>
         </div>
         <label class="toggle">
           <input type="checkbox" id="toggle-verbose">
@@ -338,8 +345,8 @@
       </div>
       <div class="setting-row">
         <div class="setting-info">
-          <div class="setting-label">Screenshot Fallback</div>
-          <div class="setting-desc">Capture a screenshot of the page when DOM reading fails or returns insufficient content. Requires a vision-capable model.</div>
+          <div class="setting-label" data-i18n="st.display.screenshot.label"></div>
+          <div class="setting-desc" data-i18n="st.display.screenshot.desc"></div>
         </div>
         <label class="toggle">
           <input type="checkbox" id="toggle-screenshot-fallback">
@@ -348,8 +355,8 @@
       </div>
       <div class="setting-row">
         <div class="setting-info">
-          <div class="setting-label">Site adapters</div>
-          <div class="setting-desc">Inject short, hand-curated guidance for known high-traffic sites (GitHub, Gmail, Stripe, AWS, etc.) into the agent's first message. Helps the agent avoid common dead-ends. Adds a small token cost on the first turn of conversations on matched sites.</div>
+          <div class="setting-label" data-i18n="st.display.site_adapters.label"></div>
+          <div class="setting-desc" data-i18n="st.display.site_adapters.desc"></div>
         </div>
         <label class="toggle">
           <input type="checkbox" id="toggle-site-adapters" checked>
@@ -358,20 +365,20 @@
       </div>
       <div class="setting-row">
         <div class="setting-info">
-          <div class="setting-label">Auto-screenshot</div>
-          <div class="setting-desc">Automatically capture a viewport screenshot after the agent acts on the page, so vision-capable models can see what changed. Costs more tokens. Disabled silently if the active model doesn't support images.</div>
+          <div class="setting-label" data-i18n="st.display.auto_screenshot.label"></div>
+          <div class="setting-desc" data-i18n="st.display.auto_screenshot.desc"></div>
         </div>
         <select id="select-auto-screenshot" style="background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:6px 10px;font-family:inherit;cursor:pointer;">
-          <option value="off">Off</option>
-          <option value="navigation">On navigation</option>
-          <option value="state_change">On state change (default)</option>
-          <option value="every_step">Every step</option>
+          <option value="off" data-i18n="st.display.auto_screenshot.off"></option>
+          <option value="navigation" data-i18n="st.display.auto_screenshot.navigation"></option>
+          <option value="state_change" data-i18n="st.display.auto_screenshot.state_change"></option>
+          <option value="every_step" data-i18n="st.display.auto_screenshot.every_step"></option>
         </select>
       </div>
       <div class="setting-row">
         <div class="setting-info">
-          <div class="setting-label">Record traces (for model comparison)</div>
-          <div class="setting-desc">Persist every run (LLM requests, responses, tool calls, screenshots) into local IndexedDB so you can inspect and compare models side-by-side. Opens in a separate Traces tab. Off by default because it adds disk writes per step. <a href="traces.html" target="_blank" style="color:var(--accent);">Open Traces page →</a></div>
+          <div class="setting-label" data-i18n="st.display.tracing.label"></div>
+          <div class="setting-desc" data-i18n-html="st.display.tracing.desc_html"></div>
         </div>
         <label class="toggle">
           <input type="checkbox" id="toggle-tracing">
@@ -380,8 +387,8 @@
       </div>
       <div class="setting-row">
         <div class="setting-info">
-          <div class="setting-label">Completion sound</div>
-          <div class="setting-desc">Play a short chime in the side panel when the agent finishes a task. Won't play if you cancel the run.</div>
+          <div class="setting-label" data-i18n="st.display.notify_sound.label"></div>
+          <div class="setting-desc" data-i18n="st.display.notify_sound.desc"></div>
         </div>
         <label class="toggle">
           <input type="checkbox" id="toggle-notify-sound" checked>
@@ -390,11 +397,20 @@
       </div>
       <div class="setting-row">
         <div class="setting-info">
-          <div class="setting-label">Max Agent Steps <span id="steps-value" style="color:var(--accent);font-weight:700;margin-left:4px;">50</span></div>
-          <div class="setting-desc">Maximum number of tool-use steps the agent can take per message. Higher values allow more complex multi-step tasks but may use more tokens.</div>
+          <div class="setting-label"><span data-i18n="st.display.max_steps.label"></span> <span id="steps-value" style="color:var(--accent);font-weight:700;margin-left:4px;">50</span></div>
+          <div class="setting-desc" data-i18n="st.display.max_steps.desc"></div>
         </div>
         <input type="range" id="range-max-steps" min="5" max="200" value="60" step="5"
                style="width:120px;accent-color:var(--accent);cursor:pointer;">
+      </div>
+      <div class="setting-row">
+        <div class="setting-info">
+          <div class="setting-label" data-i18n="st.display.traces_link.label"></div>
+          <div class="setting-desc" data-i18n="st.display.traces_link.desc"></div>
+        </div>
+        <a id="btn-open-traces" href="traces.html" target="_blank"
+           style="background:var(--bg3);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:8px 14px;font-size:12px;font-weight:600;cursor:pointer;text-decoration:none;white-space:nowrap;"
+           data-i18n="st.display.traces_link.open"></a>
       </div>
     </div>
   </section>
@@ -402,34 +418,28 @@
   <section class="tab-panel" data-panel="providers" role="tabpanel">
     <div id="providers"></div>
 
-    <div class="info-box">
-      <strong>Getting started with llama.cpp:</strong><br>
-      Run <code>llama-server -m your-model.gguf --port 8080</code> to start a local server.<br>
-      No API key needed — it runs entirely on your machine.
-    </div>
+    <div class="info-box" data-i18n-html="st.providers.info.html"></div>
   </section>
 
   <section class="tab-panel" data-panel="vision" role="tabpanel">
     <div class="provider-card" id="vision-card">
-      <div style="font-size:12px;color:var(--text2);margin-bottom:12px;line-height:1.5;">
-        If set, screenshots are sent to this model for reading the page, while the active provider handles planning and tool calls. Leave blank to use the active provider for vision too. OpenAI-compatible endpoints only.
-      </div>
+      <div style="font-size:12px;color:var(--text2);margin-bottom:12px;line-height:1.5;" data-i18n="st.vision.desc"></div>
       <div class="field">
-        <label>API Base URL</label>
+        <label data-i18n="st.provider.field.api_base_url"></label>
         <input type="text" id="vision-base-url" placeholder="https://api.openai.com/v1">
       </div>
       <div class="field">
-        <label>API Key</label>
+        <label data-i18n="st.provider.field.api_key"></label>
         <input type="password" id="vision-api-key" placeholder="sk-...">
       </div>
       <div class="field">
-        <label>Model</label>
+        <label data-i18n="st.provider.field.model"></label>
         <input type="text" id="vision-model" placeholder="gpt-4o">
       </div>
       <div class="btn-row">
-        <button class="btn-primary" id="btn-save-vision">Save</button>
-        <button class="btn-secondary" id="btn-test-vision">Test Connection</button>
-        <button class="btn-secondary" id="btn-clear-vision">Clear</button>
+        <button class="btn-primary" id="btn-save-vision" data-i18n="st.vision.save"></button>
+        <button class="btn-secondary" id="btn-test-vision" data-i18n="st.vision.test"></button>
+        <button class="btn-secondary" id="btn-clear-vision" data-i18n="st.vision.clear"></button>
       </div>
       <div class="test-result" id="test-vision"></div>
     </div>
@@ -437,14 +447,12 @@
 
   <section class="tab-panel" data-panel="profile" role="tabpanel">
     <div class="provider-card" id="profile-card">
-      <div style="font-size:12px;color:var(--text2);margin-bottom:12px;line-height:1.55;">
-        Store a short bio the agent can use to fill signup forms without asking every time — your name, work email, company, and a <em>throwaway</em> password for low-stakes signups. When enabled, the text below is appended to the agent's system prompt on every conversation.
-      </div>
+      <div style="font-size:12px;color:var(--text2);margin-bottom:12px;line-height:1.55;" data-i18n-html="st.profile.desc_html"></div>
 
       <div class="setting-row" style="margin-bottom:12px;">
         <div class="setting-info">
-          <div class="setting-label">Enable profile auto-fill</div>
-          <div class="setting-desc">Inject the profile text into the agent's system prompt. Disabled = the agent never sees this text.</div>
+          <div class="setting-label" data-i18n="st.profile.enabled.label"></div>
+          <div class="setting-desc" data-i18n="st.profile.enabled.desc"></div>
         </div>
         <label class="toggle">
           <input type="checkbox" id="toggle-profile-enabled">
@@ -453,27 +461,19 @@
       </div>
 
       <div class="field">
-        <label>Profile text</label>
+        <label data-i18n="st.profile.text.label"></label>
         <textarea id="profile-text"
                   rows="8"
-                  placeholder="I'm Jane Doe. My email is jane@example.com. I work for Acme Inc. My default password for low-stakes signups is SomePhrase-42!. I'm based in Berlin."
+                  data-i18n-placeholder="st.profile.text.placeholder"
                   style="width:100%;background:var(--bg3);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:10px 12px;font-size:13px;font-family:inherit;line-height:1.5;outline:none;resize:vertical;"></textarea>
       </div>
       <div class="btn-row">
-        <button class="btn-primary" id="btn-save-profile">Save</button>
-        <button class="btn-secondary" id="btn-clear-profile">Clear</button>
+        <button class="btn-primary" id="btn-save-profile" data-i18n="st.profile.save"></button>
+        <button class="btn-secondary" id="btn-clear-profile" data-i18n="st.profile.clear"></button>
       </div>
       <div class="test-result" id="test-profile"></div>
 
-      <div class="info-box" style="margin-top:16px;">
-        <strong>Security — read this:</strong><br>
-        <ul style="margin:6px 0 0 18px;padding:0;line-height:1.55;">
-          <li>The text you enter here is stored <strong>in plaintext</strong> in your browser's local storage. It is <strong>not</strong> transmitted to the WebBrain project — but it <strong>is</strong> sent to whichever LLM provider you have configured on every turn, as part of the system prompt.</li>
-          <li><strong>Do not put passwords for important accounts</strong> here (Google, Apple, iCloud, banking, work SSO, primary email). Those accounts should use 2FA and you shouldn't need to hand them to an agent anyway.</li>
-          <li>A <strong>throwaway password</strong> you reuse for low-stakes site signups (newsletters, free trials, forum accounts) is the intended use case.</li>
-          <li>If this browser profile is ever compromised, an attacker with disk access can read this text. Keep it minimal.</li>
-        </ul>
-      </div>
+      <div class="info-box" style="margin-top:16px;" data-i18n-html="st.profile.security_html"></div>
     </div>
   </section>
 

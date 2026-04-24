@@ -289,21 +289,21 @@
 </head>
 <body>
   <header>
-    <h1>WebBrain Traces</h1>
-    <span id="count-pill" class="pill">0 runs</span>
+    <h1 data-i18n="tr.title"></h1>
+    <span id="count-pill" class="pill"></span>
     <div class="spacer"></div>
-    <button id="btn-refresh" title="Reload run list">↻ Refresh</button>
-    <button id="btn-compare" title="Enter compare mode (pick 2 runs)">⇔ Compare</button>
-    <button id="btn-export" title="Export selected run as JSON">⇩ Export JSON</button>
-    <button id="btn-delete" class="danger" title="Delete selected run">✕ Delete</button>
-    <button id="btn-clear-all" class="danger" title="Delete every stored run">Clear all</button>
+    <button id="btn-refresh" data-i18n="tr.btn.refresh" data-i18n-title="tr.btn.refresh.title"></button>
+    <button id="btn-compare" data-i18n="tr.btn.compare" data-i18n-title="tr.btn.compare.title"></button>
+    <button id="btn-export" data-i18n="tr.btn.export" data-i18n-title="tr.btn.export.title"></button>
+    <button id="btn-delete" class="danger" data-i18n="tr.btn.delete" data-i18n-title="tr.btn.delete.title"></button>
+    <button id="btn-clear-all" class="danger" data-i18n="tr.btn.clear_all" data-i18n-title="tr.btn.clear_all.title"></button>
   </header>
   <main>
     <aside id="sidebar">
       <div id="filters">
-        <input type="text" id="filter-text" placeholder="Filter by task / model / URL">
+        <input type="text" id="filter-text" data-i18n-placeholder="tr.filter.placeholder">
         <select id="filter-model">
-          <option value="">All models</option>
+          <option value="" data-i18n="tr.filter.all_models"></option>
         </select>
       </div>
       <div id="run-list"></div>
@@ -311,8 +311,8 @@
     <section id="main-pane">
       <div id="empty-state">
         <div>
-          <p style="font-size:14px;margin-bottom:10px;">No run selected.</p>
-          <p style="color:var(--text3);">Pick a run from the left to see its step-by-step timeline. Click <b>Compare</b> to pick two runs and view them side-by-side.</p>
+          <p style="font-size:14px;margin-bottom:10px;" data-i18n="tr.empty.title"></p>
+          <p style="color:var(--text3);" data-i18n-html="tr.empty.hint_html"></p>
         </div>
       </div>
     </section>

@@ -7,6 +7,7 @@ import {
   listRuns, getRun, getRunEvents, getScreenshot,
   deleteRun, clearAllRuns,
 } from '../trace/recorder.js';
+import { t } from './i18n.js';
 
 const listEl = document.getElementById('run-list');
 const mainPane = document.getElementById('main-pane');
@@ -26,11 +27,11 @@ let compareIds = []; // length 0..2
 
 async function refresh() {
   allRuns = await listRuns({ limit: 500 });
-  countPill.textContent = `${allRuns.length} run${allRuns.length === 1 ? '' : 's'}`;
+  countPill.textContent = t(allRuns.length === 1 ? 'tr.run' : 'tr.runs', { n: allRuns.length });
   // Populate model filter.
   const models = Array.from(new Set(allRuns.map(r => r.model).filter(Boolean))).sort();
   const prev = filterModel.value;
-  filterModel.innerHTML = '<option value="">All models</option>' +
+  filterModel.innerHTML = `<option value="">${escapeHtml(t('tr.filter.all_models'))}</option>` +
     models.map(m => `<option value="${escapeAttr(m)}">${escapeHtml(m)}</option>`).join('');
   filterModel.value = models.includes(prev) ? prev : '';
   renderList();
@@ -46,7 +47,7 @@ function renderList() {
       .some(v => (v || '').toLowerCase().includes(needle));
   });
   if (filtered.length === 0) {
-    listEl.innerHTML = `<div style="padding:20px;text-align:center;color:var(--text3);font-size:12px;">No runs match.</div>`;
+    listEl.innerHTML = `<div style="padding:20px;text-align:center;color:var(--text3);font-size:12px;">${escapeHtml(t('tr.no_match'))}</div>`;
     return;
   }
   listEl.innerHTML = filtered.map(r => {
@@ -60,16 +61,16 @@ function renderList() {
       selectedRunId === r.runId ? 'selected' : '',
       compareIds.includes(r.runId) ? 'compare' : '',
     ].filter(Boolean).join(' ');
-    const title = r.userMessage || '(no task)';
+    const title = r.userMessage || t('tr.no_task');
     return `
       <div class="${cls}" data-run-id="${escapeAttr(r.runId)}">
         <div class="run-title"><span class="status-dot ${status}"></span>${escapeHtml(title.slice(0, 120))}</div>
         <div class="run-meta">
           <span class="run-model">${escapeHtml(r.model || '?')}</span>
           <span>${escapeHtml(r.providerId || '')}</span>
-          <span>${steps} step${steps === 1 ? '' : 's'}</span>
+          <span>${escapeHtml(t(steps === 1 ? 'tr.step' : 'tr.steps_plural', { n: steps }))}</span>
           <span>${dur}</span>
-          ${tokens ? `<span>${tokens.toLocaleString()} tok</span>` : ''}
+          ${tokens ? `<span>${escapeHtml(t('tr.tokens_short', { n: tokens.toLocaleString() }))}</span>` : ''}
         </div>
         <div class="run-meta" style="margin-top:3px;"><span>${started}</span></div>
       </div>
@@ -90,7 +91,7 @@ function handleRunClick(runId) {
     if (compareIds.length === 2) renderCompare(compareIds[0], compareIds[1]);
     else {
       mainPane.classList.remove('compare-mode');
-      mainPane.innerHTML = '<div id="empty-state"><div><p style="font-size:14px;">Compare mode</p><p style="color:var(--text3);">Picked ' + compareIds.length + '/2. Click another run to complete the comparison.</p></div></div>';
+      mainPane.innerHTML = `<div id="empty-state"><div><p style="font-size:14px;">${escapeHtml(t('tr.compare_mode.title'))}</p><p style="color:var(--text3);">${escapeHtml(t('tr.compare_mode.picked', { n: compareIds.length }))}</p></div></div>`;
     }
   } else {
     selectedRunId = runId;
@@ -125,18 +126,18 @@ async function renderCompare(aId, bId) {
 async function buildRunView(run, events, compact) {
   const header = `
     <div class="run-header">
-      <h2>${escapeHtml(run.model || 'unknown')}</h2>
+      <h2>${escapeHtml(run.model || t('tr.unknown_model'))}</h2>
       <span class="meta">${escapeHtml(run.providerId || '')} · ${new Date(run.startedAt).toLocaleString()}</span>
     </div>
     <div class="stats-row">
-      <span class="stat">status <b>${escapeHtml(run.status || '')}</b></span>
-      <span class="stat">steps <b>${run.stepCount || 0}</b></span>
-      <span class="stat">duration <b>${run.durationMs ? (run.durationMs / 1000).toFixed(1) + 's' : '—'}</b></span>
-      <span class="stat">in-tokens <b>${(run.totalInputTokens || 0).toLocaleString()}</b></span>
-      <span class="stat">out-tokens <b>${(run.totalOutputTokens || 0).toLocaleString()}</b></span>
+      <span class="stat">${escapeHtml(t('tr.status.label'))} <b>${escapeHtml(run.status || '')}</b></span>
+      <span class="stat">${escapeHtml(t('tr.steps.label'))} <b>${run.stepCount || 0}</b></span>
+      <span class="stat">${escapeHtml(t('tr.duration.label'))} <b>${run.durationMs ? (run.durationMs / 1000).toFixed(1) + 's' : '—'}</b></span>
+      <span class="stat">${escapeHtml(t('tr.intokens.label'))} <b>${(run.totalInputTokens || 0).toLocaleString()}</b></span>
+      <span class="stat">${escapeHtml(t('tr.outtokens.label'))} <b>${(run.totalOutputTokens || 0).toLocaleString()}</b></span>
     </div>
     <div class="run-task">${escapeHtml(run.userMessage || '')}</div>
-    ${run.finalContent ? `<div class="run-task" style="border-left-color:var(--success);"><b style="color:var(--success);">Final:</b> ${escapeHtml(run.finalContent)}</div>` : ''}
+    ${run.finalContent ? `<div class="run-task" style="border-left-color:var(--success);"><b style="color:var(--success);">${escapeHtml(t('tr.final_label'))}</b> ${escapeHtml(run.finalContent)}</div>` : ''}
   `;
   // Build timeline — collect screenshot blobs for img src.
   const shotCache = new Map();
@@ -152,13 +153,17 @@ async function buildRunView(run, events, compact) {
 
 function renderEvent(ev, shotCache, compact) {
   const ts = new Date(ev.ts).toLocaleTimeString();
-  const stepBadge = ev.data?.step != null ? `<span class="step">step ${ev.data.step}</span>` : '';
+  const stepBadge = ev.data?.step != null ? `<span class="step">${escapeHtml(t('tr.event.step', { step: ev.data.step }))}</span>` : '';
   switch (ev.kind) {
     case 'llm_request': {
       return `
         <div class="event llm_request">
-          <div class="event-head"><span class="kind">→ LLM request</span>${stepBadge}<span class="latency">${ts}</span></div>
-          <span class="tool-args">${ev.data?.messageCount || 0} messages, ${ev.data?.toolsCount || 0} tools · ${escapeHtml(ev.data?.model || '')}</span>
+          <div class="event-head"><span class="kind">${escapeHtml(t('tr.event.llm_request'))}</span>${stepBadge}<span class="latency">${ts}</span></div>
+          <span class="tool-args">${escapeHtml(t('tr.event.messages_tools', {
+            m: ev.data?.messageCount || 0,
+            t: ev.data?.toolsCount || 0,
+            model: ev.data?.model || '',
+          }))}</span>
         </div>`;
     }
     case 'llm_response': {
@@ -181,7 +186,7 @@ function renderEvent(ev, shotCache, compact) {
       }
       return `
         <div class="event llm_response">
-          <div class="event-head"><span class="kind">← LLM response</span>${stepBadge}${usage}${lat}<span class="latency">${ts}</span></div>
+          <div class="event-head"><span class="kind">${escapeHtml(t('tr.event.llm_response'))}</span>${stepBadge}${usage}${lat}<span class="latency">${ts}</span></div>
           ${body}
         </div>`;
     }
@@ -191,7 +196,7 @@ function renderEvent(ev, shotCache, compact) {
       const args = ev.data?.args ? JSON.stringify(ev.data.args, null, 2) : '';
       let result = ev.data?.result;
       try { result = typeof result === 'string' ? result : JSON.stringify(result, null, 2); } catch { result = String(result); }
-      if (typeof result === 'string' && result.length > 4000 && compact) result = result.slice(0, 4000) + '\n... [truncated in compare view]';
+      if (typeof result === 'string' && result.length > 4000 && compact) result = result.slice(0, 4000) + '\n' + t('tr.event.description_truncated');
       const ok = ev.data?.result && !ev.data.result.error && ev.data.result.success !== false;
       return `
         <div class="event tool">
@@ -199,8 +204,8 @@ function renderEvent(ev, shotCache, compact) {
             <span class="kind">${ok ? '✓' : '✗'} <span class="tool-name">${escapeHtml(name)}</span></span>
             ${lat}<span class="latency">${ts}</span>
           </div>
-          ${args ? `<details><summary>args</summary><pre>${escapeHtml(args)}</pre></details>` : ''}
-          <details ${ok ? '' : 'open'}><summary>result</summary><pre>${escapeHtml(result || '')}</pre></details>
+          ${args ? `<details><summary>${escapeHtml(t('tr.event.args'))}</summary><pre>${escapeHtml(args)}</pre></details>` : ''}
+          <details ${ok ? '' : 'open'}><summary>${escapeHtml(t('tr.event.result'))}</summary><pre>${escapeHtml(result || '')}</pre></details>
         </div>`;
     }
     case 'screenshot': {
@@ -208,17 +213,17 @@ function renderEvent(ev, shotCache, compact) {
       let src = '';
       if (shot?.blob) src = URL.createObjectURL(shot.blob);
       else if (shot?.dataUrl) src = shot.dataUrl;
-      const caption = ev.data?.caption || 'screenshot';
+      const caption = ev.data?.caption || t('tr.event.screenshot_caption');
       return `
         <div class="event screenshot">
           <div class="event-head"><span class="kind">📷 ${escapeHtml(caption)}</span>${stepBadge}<span class="latency">${ts}</span></div>
-          ${src ? `<img src="${src}" alt="${escapeAttr(caption)}" loading="lazy">` : '<span class="latency">(screenshot blob missing)</span>'}
+          ${src ? `<img src="${src}" alt="${escapeAttr(caption)}" loading="lazy">` : `<span class="latency">${escapeHtml(t('tr.event.screenshot_missing'))}</span>`}
         </div>`;
     }
     case 'error': {
       return `
         <div class="event error">
-          <div class="event-head"><span class="kind">⚠ error</span>${stepBadge}<span class="latency">${ts}</span></div>
+          <div class="event-head"><span class="kind">${escapeHtml(t('tr.event.error_kind'))}</span>${stepBadge}<span class="latency">${ts}</span></div>
           <div class="content-text">${escapeHtml(ev.data?.phase || '')}: ${escapeHtml(ev.data?.message || '')}</div>
         </div>`;
     }
@@ -227,13 +232,13 @@ function renderEvent(ev, shotCache, compact) {
       const model = ev.data?.model ? `<span class="latency">${escapeHtml(ev.data.model)}</span>` : '';
       const ctx = ev.data?.context ? `<span class="tool-args">${escapeHtml(ev.data.context)}</span>` : '';
       const body = ev.data?.error
-        ? `<div class="content-text" style="color:#f88;">vision sub-call failed: ${escapeHtml(ev.data.error)}</div>`
+        ? `<div class="content-text" style="color:#f88;">${escapeHtml(t('tr.event.vision_failed', { error: ev.data.error }))}</div>`
         : (ev.data?.description
-            ? `<details open><summary>description</summary><pre>${escapeHtml(ev.data.description)}</pre></details>`
+            ? `<details open><summary>${escapeHtml(t('tr.event.description'))}</summary><pre>${escapeHtml(ev.data.description)}</pre></details>`
             : '');
       return `
         <div class="event vision_sub_call">
-          <div class="event-head"><span class="kind">👁 vision sub-call</span>${ctx}${model}${lat}<span class="latency">${ts}</span></div>
+          <div class="event-head"><span class="kind">${escapeHtml(t('tr.event.vision_sub_call'))}</span>${ctx}${model}${lat}<span class="latency">${ts}</span></div>
           ${body}
         </div>`;
     }
@@ -268,23 +273,23 @@ document.getElementById('btn-compare').addEventListener('click', () => {
   const btn = document.getElementById('btn-compare');
   if (compareMode) {
     btn.classList.add('primary');
-    btn.textContent = '⇔ Compare (pick 2)';
+    btn.textContent = t('tr.btn.compare.picking');
     compareIds = [];
     selectedRunId = null;
     mainPane.classList.remove('compare-mode');
-    mainPane.innerHTML = '<div id="empty-state"><div><p style="font-size:14px;">Compare mode</p><p style="color:var(--text3);">Click two runs in the list to compare them side-by-side.</p></div></div>';
+    mainPane.innerHTML = `<div id="empty-state"><div><p style="font-size:14px;">${escapeHtml(t('tr.compare_mode.title'))}</p><p style="color:var(--text3);">${escapeHtml(t('tr.compare_mode.hint'))}</p></div></div>`;
   } else {
     btn.classList.remove('primary');
-    btn.textContent = '⇔ Compare';
+    btn.textContent = t('tr.btn.compare');
     compareIds = [];
     mainPane.classList.remove('compare-mode');
-    mainPane.innerHTML = '<div id="empty-state"><div><p style="font-size:14px;">No run selected.</p></div></div>';
+    mainPane.innerHTML = `<div id="empty-state"><div><p style="font-size:14px;">${escapeHtml(t('tr.empty.title'))}</p></div></div>`;
   }
   renderList();
 });
 
 document.getElementById('btn-export').addEventListener('click', async () => {
-  if (!selectedRunId) return alert('Select a run first.');
+  if (!selectedRunId) return alert(t('tr.select_first'));
   const run = await getRun(selectedRunId);
   const events = await getRunEvents(selectedRunId);
   // Resolve screenshot blobs to base64 for portability.
@@ -310,20 +315,25 @@ document.getElementById('btn-export').addEventListener('click', async () => {
 });
 
 document.getElementById('btn-delete').addEventListener('click', async () => {
-  if (!selectedRunId) return alert('Select a run first.');
-  if (!confirm('Delete this run?')) return;
+  if (!selectedRunId) return alert(t('tr.select_first'));
+  if (!confirm(t('tr.confirm_delete'))) return;
   await deleteRun(selectedRunId);
   selectedRunId = null;
-  mainPane.innerHTML = '<div id="empty-state"><div><p>Deleted.</p></div></div>';
+  mainPane.innerHTML = `<div id="empty-state"><div><p>${escapeHtml(t('tr.deleted'))}</p></div></div>`;
   refresh();
 });
 
 document.getElementById('btn-clear-all').addEventListener('click', async () => {
-  if (!confirm('Delete ALL recorded runs? This cannot be undone.')) return;
+  if (!confirm(t('tr.confirm_delete_all'))) return;
   await clearAllRuns();
   selectedRunId = null;
   compareIds = [];
-  mainPane.innerHTML = '<div id="empty-state"><div><p>All runs deleted.</p></div></div>';
+  mainPane.innerHTML = `<div id="empty-state"><div><p>${escapeHtml(t('tr.all_deleted'))}</p></div></div>`;
+  refresh();
+});
+
+// Re-render on locale change so already-rendered content updates in place.
+document.addEventListener('wb-locale-changed', () => {
   refresh();
 });
 

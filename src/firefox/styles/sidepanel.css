@@ -99,6 +99,34 @@ body {
   max-width: 130px;
 }
 
+/* Globe language selector. Native select overlaid on a globe icon so it
+   keeps the header icon-button look while staying accessible. */
+.language-wrapper {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  border-radius: 4px;
+  transition: color 0.2s, background 0.2s;
+}
+.language-wrapper:hover { color: var(--text-primary); background: var(--accent-dim); }
+.language-wrapper .language-icon { pointer-events: none; }
+.language-wrapper select {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  width: 100%;
+  height: 100%;
+  cursor: pointer;
+  border: none;
+  background: transparent;
+  appearance: none;
+}
+
 #header button {
   background: none;
   border: none;

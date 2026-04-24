@@ -2,6 +2,12 @@
  * WebBrain Settings Page — provider configuration + display settings.
  */
 
+import { t, getLocale, setLocale, LANGUAGES } from './i18n.js';
+
+// Version shown in the subtitle. Kept here so it only needs one update per
+// release; the subtitle string itself is translated.
+const EXT_VERSION = '4.2.1';
+
 const providersContainer = document.getElementById('providers');
 const verboseToggle = document.getElementById('toggle-verbose');
 const screenshotToggle = document.getElementById('toggle-screenshot-fallback');
@@ -23,6 +29,30 @@ const profileTextArea = document.getElementById('profile-text');
 const btnSaveProfile = document.getElementById('btn-save-profile');
 const btnClearProfile = document.getElementById('btn-clear-profile');
 const profileTestResult = document.getElementById('test-profile');
+const languageSelect = document.getElementById('select-language');
+const subtitleEl = document.getElementById('subtitle');
+
+function renderSubtitle() {
+  if (subtitleEl) subtitleEl.textContent = t('st.subtitle', { version: EXT_VERSION });
+}
+renderSubtitle();
+
+if (languageSelect) {
+  languageSelect.innerHTML = LANGUAGES.map((l) => `<option value="${l.code}">${l.label}</option>`).join('');
+  languageSelect.value = getLocale();
+  languageSelect.addEventListener('change', () => {
+    setLocale(languageSelect.value);
+    renderSubtitle();
+    renderAuthSection();
+    renderProviders();
+  });
+  document.addEventListener('wb-locale-changed', () => {
+    languageSelect.value = getLocale();
+    renderSubtitle();
+    if (accountSection) renderAuthSection();
+    if (providersContainer) renderProviders();
+  });
+}
 
 let providersData = {};
 let activeProviderId = '';
@@ -76,10 +106,10 @@ function renderAuthSection() {
     accountSection.innerHTML = `
       <div class="account-card">
         <div class="account-info">
-          <div class="account-email">${authEmail}</div>
-          <div class="account-provider">WebBrain Cloud</div>
+          <div class="account-email">${escapeHtml(authEmail)}</div>
+          <div class="account-provider">${escapeHtml(t('st.account.provider_name'))}</div>
         </div>
-        <button class="btn-sign-out" id="btn-sign-out">Sign Out</button>
+        <button class="btn-sign-out" id="btn-sign-out">${escapeHtml(t('st.account.sign_out'))}</button>
       </div>
     `;
     document.getElementById('btn-sign-out').addEventListener('click', logout);
@@ -87,13 +117,19 @@ function renderAuthSection() {
     accountSection.innerHTML = `
       <div class="account-card">
         <div class="account-info">
-          <div class="account-email not-signed-in">Not signed in</div>
+          <div class="account-email not-signed-in">${escapeHtml(t('st.account.not_signed_in'))}</div>
         </div>
-        <button class="btn-sign-in" id="btn-sign-in">Sign In / Register</button>
+        <button class="btn-sign-in" id="btn-sign-in">${escapeHtml(t('st.account.sign_in'))}</button>
       </div>
     `;
     document.getElementById('btn-sign-in').addEventListener('click', openAuthTab);
   }
+}
+
+function escapeHtml(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+  }[c]));
 }
 
 function openAuthTab() {
@@ -123,7 +159,7 @@ window.addEventListener('message', (event) => {
 async function autoConfigureWebbrainProvider() {
   const webbrainConfig = {
     type: 'openai',
-    label: 'WebBrain Cloud',
+    label: t('st.account.provider_name'),
     providerName: 'webbrain',
     baseUrl: 'https://auth.webbrain.one/v1',
     model: authDefaultModel || 'openai/gpt-4o',
@@ -185,14 +221,14 @@ btnSaveVision.addEventListener('click', async () => {
 
   if (!baseUrl && !apiKey && !model) {
     await browser.storage.local.remove('visionModel');
-    flashVisionResult('ok', 'Cleared.');
+    flashVisionResult('ok', t('st.vision.cleared'));
     return;
   }
 
   await browser.storage.local.set({
     visionModel: { baseUrl, apiKey, model },
   });
-  flashVisionResult('ok', 'Saved!');
+  flashVisionResult('ok', t('st.vision.saved'));
 });
 
 btnTestVision.addEventListener('click', async () => {
@@ -202,7 +238,7 @@ btnTestVision.addEventListener('click', async () => {
 
   if (!baseUrl || !model) {
     visionTestResult.className = 'test-result show fail';
-    visionTestResult.textContent = 'Fill in Base URL and Model first.';
+    visionTestResult.textContent = t('st.vision.fill_required');
     setTimeout(() => visionTestResult.classList.remove('show'), 2500);
     return;
   }
@@ -212,16 +248,16 @@ btnTestVision.addEventListener('click', async () => {
   });
 
   visionTestResult.className = 'test-result show';
-  visionTestResult.textContent = 'Testing...';
+  visionTestResult.textContent = t('st.vision.testing');
   visionTestResult.style.color = 'var(--text2)';
 
   const res = await sendToBackground('test_vision_provider');
   if (res.ok) {
     visionTestResult.className = 'test-result show ok';
-    visionTestResult.textContent = `Connected! Model: ${res.model || model}`;
+    visionTestResult.textContent = t('st.vision.connected', { model: res.model || model });
   } else {
     visionTestResult.className = 'test-result show fail';
-    visionTestResult.textContent = `Failed: ${res.error}`;
+    visionTestResult.textContent = t('st.vision.failed', { error: res.error });
   }
 });
 
@@ -230,7 +266,7 @@ btnClearVision.addEventListener('click', async () => {
   visionApiKeyInput.value = '';
   visionModelInput.value = '';
   await browser.storage.local.remove('visionModel');
-  flashVisionResult('ok', 'Cleared.');
+  flashVisionResult('ok', t('st.vision.cleared'));
 });
 
 // --- Profile auto-fill ---
@@ -253,9 +289,9 @@ if (profileEnabledToggle) {
 
 if (btnSaveProfile) {
   btnSaveProfile.addEventListener('click', async () => {
-    const text = (profileTextArea?.value || '').trim();
-    await browser.storage.local.set({ profileText: text });
-    flashProfileResult('ok', 'Saved.');
+    const value = (profileTextArea?.value || '').trim();
+    await browser.storage.local.set({ profileText: value });
+    flashProfileResult('ok', t('st.profile.saved'));
   });
 }
 
@@ -263,7 +299,7 @@ if (btnClearProfile) {
   btnClearProfile.addEventListener('click', async () => {
     if (profileTextArea) profileTextArea.value = '';
     await browser.storage.local.set({ profileText: '' });
-    flashProfileResult('ok', 'Cleared.');
+    flashProfileResult('ok', t('st.profile.cleared'));
   });
 }
 
@@ -272,56 +308,60 @@ if (btnClearProfile) {
 function renderProviders() {
   providersContainer.innerHTML = '';
 
+  // Field definitions reference i18n keys (labelKey) so switching languages
+  // re-renders with translated labels. Placeholders stay as raw values —
+  // they're example URLs or API key shapes and reading them in English is
+  // universal enough.
   const providerConfigs = {
     llamacpp: {
       fields: [
-        { key: 'baseUrl', label: 'Server URL', type: 'text', placeholder: 'http://localhost:8080' },
-        { key: 'model', label: 'Model', type: 'text', placeholder: 'qwen/qwen3.5-9b' },
-        { key: 'supportsVision', label: 'Model supports vision (multimodal)', type: 'checkbox' },
-        { key: 'useCompactPrompt', label: 'Compact prompt (recommended for small models, on by default)', type: 'checkbox' },
+        { key: 'baseUrl', labelKey: 'st.provider.field.server_url', type: 'text', placeholder: 'http://localhost:8080' },
+        { key: 'model', labelKey: 'st.provider.field.model', type: 'text', placeholder: 'qwen/qwen3.5-9b' },
+        { key: 'supportsVision', labelKey: 'st.provider.field.supports_vision', type: 'checkbox' },
+        { key: 'useCompactPrompt', labelKey: 'st.provider.field.compact_prompt', type: 'checkbox' },
       ],
     },
     ollama: {
       fields: [
-        { key: 'baseUrl', label: 'Server URL', type: 'text', placeholder: 'http://localhost:11434/v1' },
-        { key: 'model', label: 'Model', type: 'text', placeholder: 'llama3.1' },
-        { key: 'supportsVision', label: 'Model supports vision (multimodal)', type: 'checkbox' },
-        { key: 'useCompactPrompt', label: 'Compact prompt (recommended for small models, on by default)', type: 'checkbox' },
+        { key: 'baseUrl', labelKey: 'st.provider.field.server_url', type: 'text', placeholder: 'http://localhost:11434/v1' },
+        { key: 'model', labelKey: 'st.provider.field.model', type: 'text', placeholder: 'llama3.1' },
+        { key: 'supportsVision', labelKey: 'st.provider.field.supports_vision', type: 'checkbox' },
+        { key: 'useCompactPrompt', labelKey: 'st.provider.field.compact_prompt', type: 'checkbox' },
       ],
     },
     lmstudio: {
       fields: [
-        { key: 'baseUrl', label: 'Server URL', type: 'text', placeholder: 'http://localhost:1234/v1' },
-        { key: 'model', label: 'Model (optional)', type: 'text', placeholder: 'leave blank to use loaded model' },
-        { key: 'supportsVision', label: 'Model supports vision (multimodal)', type: 'checkbox' },
-        { key: 'useCompactPrompt', label: 'Compact prompt (recommended for small models, on by default)', type: 'checkbox' },
+        { key: 'baseUrl', labelKey: 'st.provider.field.server_url', type: 'text', placeholder: 'http://localhost:1234/v1' },
+        { key: 'model', labelKey: 'st.provider.field.model_optional', type: 'text', placeholderKey: 'st.provider.field.model_loaded_hint' },
+        { key: 'supportsVision', labelKey: 'st.provider.field.supports_vision', type: 'checkbox' },
+        { key: 'useCompactPrompt', labelKey: 'st.provider.field.compact_prompt', type: 'checkbox' },
       ],
     },
     openai: {
       fields: [
-        { key: 'apiKey', label: 'API Key', type: 'password', placeholder: 'sk-...' },
-        { key: 'model', label: 'Model', type: 'text', placeholder: 'gpt-5' },
-        { key: 'baseUrl', label: 'API Base URL', type: 'text', placeholder: 'https://api.openai.com/v1' },
+        { key: 'apiKey', labelKey: 'st.provider.field.api_key', type: 'password', placeholder: 'sk-...' },
+        { key: 'model', labelKey: 'st.provider.field.model', type: 'text', placeholder: 'gpt-5' },
+        { key: 'baseUrl', labelKey: 'st.provider.field.api_base_url', type: 'text', placeholder: 'https://api.openai.com/v1' },
       ],
     },
     openrouter: {
       fields: [
-        { key: 'apiKey', label: 'API Key', type: 'password', placeholder: 'sk-or-...' },
-        { key: 'model', label: 'Model', type: 'text', placeholder: 'anthropic/claude-sonnet-4' },
-        { key: 'baseUrl', label: 'API Base URL', type: 'text', placeholder: 'https://openrouter.ai/api/v1' },
+        { key: 'apiKey', labelKey: 'st.provider.field.api_key', type: 'password', placeholder: 'sk-or-...' },
+        { key: 'model', labelKey: 'st.provider.field.model', type: 'text', placeholder: 'anthropic/claude-sonnet-4' },
+        { key: 'baseUrl', labelKey: 'st.provider.field.api_base_url', type: 'text', placeholder: 'https://openrouter.ai/api/v1' },
       ],
     },
     anthropic: {
       fields: [
-        { key: 'apiKey', label: 'API Key', type: 'password', placeholder: 'sk-ant-...' },
-        { key: 'model', label: 'Model', type: 'text', placeholder: 'claude-sonnet-4-20250514' },
-        { key: 'baseUrl', label: 'API Base URL', type: 'text', placeholder: 'https://api.anthropic.com' },
+        { key: 'apiKey', labelKey: 'st.provider.field.api_key', type: 'password', placeholder: 'sk-ant-...' },
+        { key: 'model', labelKey: 'st.provider.field.model', type: 'text', placeholder: 'claude-sonnet-4-20250514' },
+        { key: 'baseUrl', labelKey: 'st.provider.field.api_base_url', type: 'text', placeholder: 'https://api.anthropic.com' },
       ],
     },
     webbrain: {
       fields: [
-        { key: 'baseUrl', label: 'API Base URL', type: 'text', placeholder: 'https://auth.webbrain.one/v1' },
-        { key: 'model', label: 'Model', type: 'text', placeholder: 'openai/gpt-4o' },
+        { key: 'baseUrl', labelKey: 'st.provider.field.api_base_url', type: 'text', placeholder: 'https://auth.webbrain.one/v1' },
+        { key: 'model', labelKey: 'st.provider.field.model', type: 'text', placeholder: 'openai/gpt-4o' },
       ],
     },
   };
@@ -335,6 +375,8 @@ function renderProviders() {
 
     let fieldsHTML = '';
     for (const field of fieldDefs) {
+      const label = field.labelKey ? t(field.labelKey) : (field.label || field.key);
+      const placeholder = field.placeholderKey ? t(field.placeholderKey) : (field.placeholder || '');
       if (field.type === 'checkbox') {
         // For useCompactPrompt on local providers, default to checked when
         // the config key hasn't been explicitly set yet (matches provider logic).
@@ -348,15 +390,15 @@ function renderProviders() {
           <div class="field" style="display:flex;align-items:center;gap:8px;flex-direction:row;">
             <input type="checkbox" data-provider="${id}" data-key="${field.key}" data-type="checkbox" ${checked}
                    style="width:auto;cursor:pointer;">
-            <label style="margin:0;cursor:pointer;">${field.label}</label>
+            <label style="margin:0;cursor:pointer;">${escapeHtml(label)}</label>
           </div>
         `;
       } else {
         fieldsHTML += `
           <div class="field">
-            <label>${field.label}</label>
+            <label>${escapeHtml(label)}</label>
             <input type="${field.type}" data-provider="${id}" data-key="${field.key}"
-                   value="${config[field.key] || ''}" placeholder="${field.placeholder || ''}">
+                   value="${escapeHtml(config[field.key] || '')}" placeholder="${escapeHtml(placeholder)}">
           </div>
         `;
       }
@@ -365,16 +407,16 @@ function renderProviders() {
     card.innerHTML = `
       <div class="provider-header">
         <div>
-          <span class="provider-name">${config.label || id}</span>
-          <span class="provider-type">${config.type}</span>
+          <span class="provider-name">${escapeHtml(config.label || id)}</span>
+          <span class="provider-type">${escapeHtml(config.type)}</span>
         </div>
-        ${isActive ? '<span style="color:var(--accent);font-size:11px;font-weight:600">ACTIVE</span>' : ''}
+        ${isActive ? `<span style="color:var(--accent);font-size:11px;font-weight:600">${escapeHtml(t('st.providers.active'))}</span>` : ''}
       </div>
       ${fieldsHTML}
       <div class="btn-row">
-        <button class="btn-primary btn-save" data-provider="${id}">Save</button>
-        <button class="btn-secondary btn-test" data-provider="${id}">Test Connection</button>
-        ${!isActive ? `<button class="btn-secondary btn-activate" data-provider="${id}">Set Active</button>` : ''}
+        <button class="btn-primary btn-save" data-provider="${id}">${escapeHtml(t('st.providers.save'))}</button>
+        <button class="btn-secondary btn-test" data-provider="${id}">${escapeHtml(t('st.providers.test'))}</button>
+        ${!isActive ? `<button class="btn-secondary btn-activate" data-provider="${id}">${escapeHtml(t('st.providers.set_active'))}</button>` : ''}
       </div>
       <div class="test-result" id="test-${id}"></div>
     `;
@@ -408,7 +450,7 @@ async function saveProvider(id) {
 
   const testEl = document.getElementById(`test-${id}`);
   testEl.className = 'test-result show ok';
-  testEl.textContent = 'Saved!';
+  testEl.textContent = t('st.providers.saved');
   setTimeout(() => testEl.classList.remove('show'), 2000);
 }
 
@@ -417,16 +459,16 @@ async function testProvider(id) {
 
   const testEl = document.getElementById(`test-${id}`);
   testEl.className = 'test-result show';
-  testEl.textContent = 'Testing...';
+  testEl.textContent = t('st.providers.testing');
   testEl.style.color = 'var(--text2)';
 
   const res = await sendToBackground('test_provider', { providerId: id });
   if (res.ok) {
     testEl.className = 'test-result show ok';
-    testEl.textContent = `Connected! Model: ${res.model || 'unknown'}`;
+    testEl.textContent = t('st.providers.connected', { model: res.model || t('st.providers.unknown_model') });
   } else {
     testEl.className = 'test-result show fail';
-    testEl.textContent = `Failed: ${res.error}`;
+    testEl.textContent = t('st.providers.failed', { error: res.error });
   }
 }
 

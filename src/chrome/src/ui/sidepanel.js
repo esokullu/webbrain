@@ -3,6 +3,8 @@
  * Default: human-friendly compact output. Verbose mode: full tool debug.
  */
 
+import { t, getLocale, setLocale, LANGUAGES, applyDOMTranslations } from './i18n.js';
+
 const messagesEl = document.getElementById('messages');
 const inputEl = document.getElementById('user-input');
 const sendBtn = document.getElementById('btn-send');
@@ -100,35 +102,36 @@ function schedulePersist() {
 // delta, tool step update) eventually gets persisted.
 const persistObserver = new MutationObserver(schedulePersist);
 
-// Human-friendly labels for tool names
-const TOOL_LABELS = {
-  read_page: 'Reading page',
-  get_interactive_elements: 'Scanning interactive elements',
-  click: 'Clicking',
-  type_text: 'Typing',
-  scroll: 'Scrolling',
-  navigate: 'Navigating',
-  extract_data: 'Extracting data',
-  wait_for_element: 'Waiting for element',
-  get_selection: 'Reading selection',
-  execute_js: 'Running script',
-  new_tab: 'Opening new tab',
-  screenshot: 'Taking screenshot',
-  done: 'Finishing up',
+// Tool names → i18n key for the human-friendly label. Resolved at render
+// time so language changes take effect without a reload.
+const TOOL_KEYS = {
+  read_page: 'tool.read_page',
+  get_interactive_elements: 'tool.get_interactive_elements',
+  click: 'tool.click',
+  type_text: 'tool.type_text',
+  scroll: 'tool.scroll',
+  navigate: 'tool.navigate',
+  extract_data: 'tool.extract_data',
+  wait_for_element: 'tool.wait_for_element',
+  get_selection: 'tool.get_selection',
+  execute_js: 'tool.execute_js',
+  new_tab: 'tool.new_tab',
+  screenshot: 'tool.screenshot',
+  done: 'tool.done',
 };
 
 function friendlyToolLabel(name, args) {
-  const base = TOOL_LABELS[name] || name;
   // Add context from args where it makes sense
-  if (name === 'click' && args?.selector) return `Clicking "${truncate(args.selector, 30)}"`;
-  if (name === 'click' && args?.index != null) return `Clicking element #${args.index}`;
-  if (name === 'type_text' && args?.text) return `Typing "${truncate(args.text, 25)}"`;
-  if (name === 'navigate' && args?.url) return `Going to ${truncate(args.url, 35)}`;
-  if (name === 'new_tab' && args?.url) return `Opening ${truncate(args.url, 35)}`;
-  if (name === 'scroll') return `Scrolling ${args?.direction || 'down'}`;
-  if (name === 'extract_data') return `Extracting ${args?.type || 'data'}`;
-  if (name === 'wait_for_element' && args?.selector) return `Waiting for "${truncate(args.selector, 30)}"`;
-  return base;
+  if (name === 'click' && args?.selector) return t('tool.click.selector', { selector: truncate(args.selector, 30) });
+  if (name === 'click' && args?.index != null) return t('tool.click.index', { index: args.index });
+  if (name === 'type_text' && args?.text) return t('tool.type_text.text', { text: truncate(args.text, 25) });
+  if (name === 'navigate' && args?.url) return t('tool.navigate.url', { url: truncate(args.url, 35) });
+  if (name === 'new_tab' && args?.url) return t('tool.new_tab.url', { url: truncate(args.url, 35) });
+  if (name === 'scroll') return t('tool.scroll.direction', { direction: args?.direction || 'down' });
+  if (name === 'extract_data') return t('tool.extract_data.type', { type: args?.type || 'data' });
+  if (name === 'wait_for_element' && args?.selector) return t('tool.wait_for_element.selector', { selector: truncate(args.selector, 30) });
+  const key = TOOL_KEYS[name];
+  return key ? t(key) : name;
 }
 
 
@@ -248,7 +251,7 @@ async function switchToTab(newTabId) {
     rebindCopyButtons();
   } else {
     messagesEl.innerHTML = '';
-    addMessage('system', 'How can I help with this page?');
+    addMessage('system', t('sp.help_message'));
   }
   scrollToBottom();
 }
@@ -264,9 +267,9 @@ function rebindCopyButtons() {
       const textEl = content?.querySelector('.message-text');
       if (textEl) {
         navigator.clipboard.writeText(textEl.innerText).then(() => {
-          btn.textContent = 'Copied!';
+          btn.textContent = t('sp.copied');
           btn.classList.add('copied');
-          setTimeout(() => { btn.textContent = 'Copy'; btn.classList.remove('copied'); }, 1500);
+          setTimeout(() => { btn.textContent = t('sp.copy'); btn.classList.remove('copied'); }, 1500);
         });
       }
     });
@@ -280,9 +283,9 @@ function rebindCopyButtons() {
       const codeEl = wrapper?.querySelector('pre code');
       if (codeEl) {
         navigator.clipboard.writeText(codeEl.textContent).then(() => {
-          btn.textContent = 'Copied!';
+          btn.textContent = t('sp.copied');
           btn.classList.add('copied');
-          setTimeout(() => { btn.textContent = 'Copy'; btn.classList.remove('copied'); }, 1500);
+          setTimeout(() => { btn.textContent = t('sp.copy'); btn.classList.remove('copied'); }, 1500);
         });
       }
     });
@@ -312,10 +315,12 @@ async function testConnection() {
       providerId: providerSelect.value,
     });
     statusDot.className = `status-dot ${res.ok ? 'online' : 'offline'}`;
-    statusDot.title = res.ok ? `Connected (${res.model || providerSelect.value})` : `Error: ${res.error}`;
+    statusDot.title = res.ok
+      ? t('sp.status.connected', { model: res.model || providerSelect.value })
+      : t('sp.status.error', { msg: res.error });
   } catch {
     statusDot.className = 'status-dot offline';
-    statusDot.title = 'Connection failed';
+    statusDot.title = t('sp.status.failed');
   }
 }
 
@@ -338,7 +343,7 @@ function parseSlashCommands(text) {
     apiMutationsAllowed = true;
     updateApiBadge();
     if (!wasAlreadyAllowed) {
-      addMessage('system', '🔓 <strong>API mutations enabled</strong> for this conversation. The agent may now use POST/PUT/PATCH/DELETE via fetch_url and execute_js when it judges API to be more reliable than UI for a step. UI-first remains the default. This flag clears when you reset the conversation.');
+      addMessage('system', t('sp.api.enabled_html'));
     }
     return text.slice(m[0].length).trim();
   }
@@ -352,7 +357,7 @@ function updateApiBadge() {
       badge = document.createElement('div');
       badge.id = 'api-badge';
       badge.className = 'api-badge';
-      badge.innerHTML = '<span>🔓 API mutations allowed</span>';
+      badge.innerHTML = t('sp.api.badge_html');
       const inputArea = document.getElementById('input-area');
       inputArea?.parentNode?.insertBefore(badge, inputArea);
     }
@@ -383,7 +388,7 @@ async function sendMessage() {
   autoResizeInput();
 
   addMessage('user', text);
-  showActivity('Thinking...');
+  showActivity(t('sp.activity.thinking'));
 
   currentAssistantEl = addMessage('assistant', '');
 
@@ -399,7 +404,7 @@ async function sendMessage() {
       // Agent was stopped — show what we got so far
       const textEl = currentAssistantEl?.querySelector('.message-text');
       if (textEl && !textEl.textContent.trim()) {
-        textEl.innerHTML = formatMarkdown(res?.content || '[Stopped by user]');
+        textEl.innerHTML = formatMarkdown(res?.content || t('sp.stopped_by_user'));
         addMessageCopyButton(currentAssistantEl);
       }
     } else if (res.content && currentAssistantEl) {
@@ -411,7 +416,7 @@ async function sendMessage() {
     }
   } catch (e) {
     if (!abortRequested) {
-      addMessage('error', `Error: ${e.message}`);
+      addMessage('error', t('sp.error_prefix', { msg: e.message }));
     }
   } finally {
     finalizeSteps();
@@ -439,7 +444,7 @@ chrome.runtime.onMessage.addListener((msg) => {
 
   switch (type) {
     case 'thinking':
-      showActivity(`Thinking (step ${data.step})...`);
+      showActivity(t('sp.activity.thinking_step', { step: data.step }));
       break;
 
     case 'text':
@@ -493,7 +498,7 @@ chrome.runtime.onMessage.addListener((msg) => {
     case 'error':
       hideActivity();
       if (currentAssistantEl) markLastStepFailed();
-      addMessage('error', `Error: ${data.message}`);
+      addMessage('error', t('sp.error_prefix', { msg: data.message }));
       break;
 
     case 'max_steps_reached':
@@ -559,7 +564,7 @@ function appendCompactStep(toolName, args) {
   // Small toggle to peek at details
   const toggle = document.createElement('button');
   toggle.className = 'step-details-toggle';
-  toggle.textContent = 'details';
+  toggle.textContent = t('sp.step.details');
   toggle.addEventListener('click', (e) => {
     e.stopPropagation();
     const details = step.nextElementSibling;
@@ -576,7 +581,7 @@ function appendCompactStep(toolName, args) {
   // Hidden details panel (populated when result arrives)
   const details = document.createElement('div');
   details.className = 'step-details';
-  details.innerHTML = `<div class="detail-label">Input</div><div class="detail-args">${escapeHtml(JSON.stringify(args, null, 2))}</div>`;
+  details.innerHTML = `<div class="detail-label">${escapeHtml(t('sp.step.input_label'))}</div><div class="detail-args">${escapeHtml(JSON.stringify(args, null, 2))}</div>`;
   container.appendChild(details);
 }
 
@@ -600,7 +605,7 @@ function markLastStepDone(toolName, result) {
     if (details && details.classList.contains('step-details')) {
       const resultDiv = document.createElement('div');
       resultDiv.className = 'detail-result';
-      resultDiv.innerHTML = `<div class="detail-label">Result</div>${escapeHtml(truncate(JSON.stringify(result), 300))}`;
+      resultDiv.innerHTML = `<div class="detail-label">${escapeHtml(t('sp.step.result_label'))}</div>${escapeHtml(truncate(JSON.stringify(result), 300))}`;
       details.appendChild(resultDiv);
     }
   }
@@ -709,8 +714,8 @@ function showContinueButton() {
   const bar = document.createElement('div');
   bar.className = 'continue-bar';
   bar.innerHTML = `
-    <span class="continue-text">Reached the step limit (${agent_maxSteps || 60} steps). Want me to keep going?</span>
-    <button class="continue-btn" id="btn-continue">Continue</button>
+    <span class="continue-text">${escapeHtml(t('sp.continue_bar', { steps: agent_maxSteps || 60 }))}</span>
+    <button class="continue-btn" id="btn-continue">${escapeHtml(t('sp.continue_btn'))}</button>
   `;
   messagesEl.appendChild(bar);
   scrollToBottom();
@@ -727,7 +732,7 @@ async function continueAgent() {
   sendBtn.disabled = true;
 
   currentAssistantEl = addMessage('assistant', '');
-  showActivity('Continuing...');
+  showActivity(t('sp.activity.continuing'));
 
   try {
     const res = await sendToBackground('continue', {
@@ -744,7 +749,7 @@ async function continueAgent() {
     }
   } catch (e) {
     if (!abortRequested) {
-      addMessage('error', `Error: ${e.message}`);
+      addMessage('error', t('sp.error_prefix', { msg: e.message }));
     }
   } finally {
     finalizeSteps();
@@ -882,7 +887,7 @@ function formatMarkdown(text) {
   codeBlocks.forEach((block, i) => {
     const escaped = block.code.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
     const langLabel = block.lang ? `<span class="code-lang">${escapeHtml(block.lang)}</span>` : '';
-    const copyBtn = `<button class="code-copy-btn" data-code-index="${i}" title="Copy code">Copy</button>`;
+    const copyBtn = `<button class="code-copy-btn" data-code-index="${i}" title="${escapeHtml(t('sp.copy.code.title'))}">${escapeHtml(t('sp.copy'))}</button>`;
     const header = `<div class="code-block-header">${langLabel}${copyBtn}</div>`;
     text = text.replace(
       `__CODEBLOCK_${i}__`,
@@ -909,9 +914,9 @@ function formatMarkdown(text) {
           const codeEl = wrapper?.querySelector('pre code');
           if (codeEl) {
             navigator.clipboard.writeText(codeEl.textContent).then(() => {
-              btn.textContent = 'Copied!';
+              btn.textContent = t('sp.copied');
               btn.classList.add('copied');
-              setTimeout(() => { btn.textContent = 'Copy'; btn.classList.remove('copied'); }, 1500);
+              setTimeout(() => { btn.textContent = t('sp.copy'); btn.classList.remove('copied'); }, 1500);
             });
           }
         });
@@ -929,15 +934,15 @@ function addMessageCopyButton(msgEl) {
   if (!content) return;
   const btn = document.createElement('button');
   btn.className = 'msg-copy-btn';
-  btn.textContent = 'Copy';
-  btn.title = 'Copy message';
+  btn.textContent = t('sp.copy');
+  btn.title = t('sp.copy.code.title');
   btn.addEventListener('click', () => {
     const textEl = content.querySelector('.message-text');
     if (textEl) {
       navigator.clipboard.writeText(textEl.innerText).then(() => {
-        btn.textContent = 'Copied!';
+        btn.textContent = t('sp.copied');
         btn.classList.add('copied');
-        setTimeout(() => { btn.textContent = 'Copy'; btn.classList.remove('copied'); }, 1500);
+        setTimeout(() => { btn.textContent = t('sp.copy'); btn.classList.remove('copied'); }, 1500);
       });
     }
   });
@@ -987,13 +992,16 @@ function setMode(mode) {
     modeActBtn.classList.remove('active', 'act');
     actWarning.classList.add('hidden');
     inputArea.classList.remove('act-mode');
-    inputEl.placeholder = 'Ask anything about this page...';
+    inputEl.placeholder = t('sp.input.ask_placeholder');
+    // Keep the data- attribute in sync so locale changes auto-apply.
+    inputEl.dataset.i18nPlaceholder = 'sp.input.ask_placeholder';
   } else {
     modeActBtn.classList.add('active', 'act');
     modeAskBtn.classList.remove('active');
     actWarning.classList.remove('hidden');
     inputArea.classList.add('act-mode');
-    inputEl.placeholder = 'Tell me what to do on this page...';
+    inputEl.placeholder = t('sp.input.act_placeholder');
+    inputEl.dataset.i18nPlaceholder = 'sp.input.act_placeholder';
   }
 }
 
@@ -1007,12 +1015,7 @@ modeActBtn.addEventListener('click', async () => {
   try {
     const stored = await chrome.storage.local.get('actConfirmed');
     if (!stored.actConfirmed) {
-      const ok = confirm(
-        'Act mode lets WebBrain click, type, scroll, and navigate on your behalf.\n\n' +
-        'It runs inside your authenticated browser session, so it has the same access as you do on every site you\'re logged into.\n\n' +
-        'Watch what it does and stop it any time with the ◼ button.\n\n' +
-        'Continue?'
-      );
+      const ok = confirm(t('sp.mode.act.confirm'));
       if (!ok) return;
       chrome.storage.local.set({ actConfirmed: true }).catch(() => {});
     }
@@ -1026,7 +1029,7 @@ modeActBtn.addEventListener('click', async () => {
 stopBtn.addEventListener('click', async () => {
   if (!isProcessing) return;
   abortRequested = true;
-  showActivity('Stopping...');
+  showActivity(t('sp.activity.stopping'));
 
   try {
     await sendToBackground('abort', { tabId: currentTabId });
@@ -1041,7 +1044,7 @@ stopBtn.addEventListener('click', async () => {
       if (currentAssistantEl) {
         const textEl = currentAssistantEl.querySelector('.message-text');
         if (textEl && !textEl.textContent.trim()) {
-          textEl.innerHTML = '<em>Stopped by user.</em>';
+          textEl.innerHTML = t('sp.stopped_by_user_html');
         }
       }
       isProcessing = false;
@@ -1070,7 +1073,7 @@ inputEl.addEventListener('input', autoResizeInput);
 clearBtn.addEventListener('click', async () => {
   await sendToBackground('clear_conversation', { tabId: currentTabId });
   messagesEl.innerHTML = '';
-  addMessage('system', 'Conversation cleared. How can I help?');
+  addMessage('system', t('sp.cleared_message'));
   if (currentTabId != null) {
     tabChats.delete(currentTabId);
     chrome.storage.session?.remove(TAB_CHAT_PREFIX + currentTabId).catch(() => {});
@@ -1089,10 +1092,20 @@ settingsBtn.addEventListener('click', () => {
   chrome.runtime.openOptionsPage();
 });
 
-const tracesBtn = document.getElementById('btn-traces');
-if (tracesBtn) {
-  tracesBtn.addEventListener('click', () => {
-    chrome.tabs.create({ url: chrome.runtime.getURL('src/ui/traces.html') });
+// --- Language selector (globe icon in header) ---
+const languageSelect = document.getElementById('language-select');
+if (languageSelect) {
+  languageSelect.innerHTML = LANGUAGES
+    .map((l) => `<option value="${l.code}">${l.label}</option>`)
+    .join('');
+  languageSelect.value = getLocale();
+  languageSelect.addEventListener('change', () => {
+    setLocale(languageSelect.value);
+    // Re-apply placeholder since it flips with ask/act mode
+    applyDOMTranslations(document);
+  });
+  document.addEventListener('wb-locale-changed', () => {
+    languageSelect.value = getLocale();
   });
 }
 
