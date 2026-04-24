@@ -3,62 +3,1445 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>WebBrain — Chrome ve Firefox için açık kaynak yapay zeka tarayıcı ajanı</title>
-  <meta name="description" content="WebBrain, Chrome ve Firefox için ücretsiz ve açık kaynak bir yapay zeka tarayıcı ajanıdır. Sayfaları okuyun, veri çıkarın ve görevleri yerel veya bulut modellerle otomatikleştirin.">
+  <title>WebBrain — Chrome ve Firefox için ücretsiz, açık kaynaklı AI tarayıcı ajanı</title>
+  <meta name="description" content="WebBrain, Claude&#39;un tarayıcı eklentisine ücretsiz ve açık kaynaklı bir alternatiftir. Chrome ve Firefox için AI tarayıcı ajanı — sayfaları okur, veri çıkarır, görevleri otomatikleştirir. llama.cpp, OpenAI, Claude, OpenRouter ile uyumlu. Çok dilli arayüz, token tasarruflu ekran görüntüleri. MIT lisanslı.">
+  <meta name="keywords" content="AI tarayıcı ajanı, tarayıcı otomasyonu, açık kaynaklı tarayıcı eklentisi, Claude tarayıcı eklentisi alternatifi, OpenClaw alternatifi, web otomasyonu, LLM tarayıcı eklentisi, Chrome AI eklentisi, Firefox AI eklentisi, llama.cpp tarayıcı, GPT tarayıcı ajanı, tarayıcı AI asistanı, web kazıma AI, çok dilli tarayıcı AI, token tasarruflu AI eklentisi">
+  <meta property="og:title" content="WebBrain — Ücretsiz, açık kaynaklı AI tarayıcı ajanı">
+  <meta property="og:description" content="Claude&#39;un tarayıcı eklentisine açık kaynaklı alternatif. Chrome ve Firefox için AI tarayıcı uzantısı. Herhangi bir web sayfasını oku, anla ve otomatikleştir. Çoklu LLM sağlayıcı desteği. Çok dilli arayüz. Sonsuza kadar ücretsiz.">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://webbrain.one/tr/">
+  <meta property="og:site_name" content="WebBrain">
+  <meta property="og:locale" content="tr-TR">
+  <meta property="og:image" content="https://webbrain.one/og-image.svg">
+  <meta property="og:image:secure_url" content="https://webbrain.one/og-image.svg">
+  <meta property="og:image:type" content="image/svg+xml">
+  <meta property="og:image:alt" content="WebBrain simgesi">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="WebBrain — Açık kaynaklı AI tarayıcı ajanı">
+  <meta name="twitter:description" content="Claude tarayıcı eklentisine ücretsiz açık kaynaklı alternatif. Chrome ve Firefox için AI ajanı. Yerel veya bulut LLM&#39;lerle çalışır. 5 dilli arayüz. Varsayılan olarak token tasarruflu.">
+  <meta name="twitter:image" content="https://webbrain.one/og-image.svg">
+  <meta name="twitter:image:alt" content="WebBrain simgesi">
+  <meta name="robots" content="index, follow">
   <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <link rel="canonical" href="https://webbrain.one/tr/">
+  <link rel="alternate" hreflang="en" href="https://webbrain.one/">
+  <link rel="alternate" hreflang="es" href="https://webbrain.one/es/">
+  <link rel="alternate" hreflang="fr" href="https://webbrain.one/fr/">
+  <link rel="alternate" hreflang="tr" href="https://webbrain.one/tr/">
+  <link rel="alternate" hreflang="zh" href="https://webbrain.one/zh/">
+  <link rel="alternate" hreflang="x-default" href="https://webbrain.one/">
+  <!-- JSON-LD Structured Data -->
+  <script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  "name": "WebBrain",
+  "applicationCategory": "BrowserApplication",
+  "operatingSystem": "Chrome, Firefox",
+  "offers": {
+    "@type": "Offer",
+    "price": "0",
+    "priceCurrency": "USD"
+  },
+  "description": "WebBrain, Claude'un tarayıcı eklentisine ücretsiz ve açık kaynaklı bir alternatiftir. Chrome ve Firefox için AI tarayıcı ajanı — sayfaları okur, veri çıkarır, görevleri otomatikleştirir. llama.cpp, OpenAI, Claude, OpenRouter ile uyumlu. Çok dilli arayüz, token tasarruflu ekran görüntüleri. MIT lisanslı.",
+  "url": "https://webbrain.one/tr/",
+  "inLanguage": "tr-TR",
+  "downloadUrl": "https://chromewebstore.google.com/detail/webbrain/ljhijonmfahplgbbacgcfnaihbjljhhb",
+  "softwareVersion": "4.2.1",
+  "author": {
+    "@type": "Person",
+    "name": "Emre Sokullu",
+    "url": "https://emresokullu.com"
+  },
+  "license": "https://opensource.org/licenses/MIT",
+  "isAccessibleForFree": true,
+  "screenshot": "https://webbrain.one/og-image.svg"
+}
+  </script>
+  <script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  "inLanguage": "tr-TR",
+  "mainEntity": [
+    {
+      "@type": "Question",
+      "name": "WebBrain, Claude'un tarayıcı eklentisine ücretsiz bir alternatif mi?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Evet. WebBrain benzer AI tarayıcı ajan yetenekleri sunar — sayfa okuma, veri çıkarma, düğmelere tıklama, form doldurma ve çok adımlı iş akışlarını otomatikleştirme. Claude Pro aboneliği gerektiren ve yalnızca Anthropic modelleriyle çalışan tescilli Claude eklentisinin aksine WebBrain tamamen ücretsiz, açık kaynaklı (MIT lisansı) ve makinende tamamen çalışan yerel modeller de dahil olmak üzere birden çok LLM sağlayıcısını destekler."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "WebBrain; OpenClaw, Browser-Use ve diğer AI ajan çatılarından nasıl farklı?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Bunlar farklı kategoride araçlar. WebBrain bir tarayıcı uzantısı — Chrome veya Firefox'a kurar ve yan panelde sohbet edersin, kod gerekmez. OpenClaw ve Browser-Use gibi çatılar ise genellikle başlıksız tarayıcılar ve CDP kullanarak Python'da otomatik tarayıcı işlem hatları kuran geliştiriciler için SDK'dır. Kısaca: WebBrain, günlük gezinme için bir AI asistanı; ajan çatıları ise kazıma botları ve test otomasyonu inşa etmek içindir. İkisini de kullanabilirsin — birbirlerini tamamlarlar."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "WebBrain'i tamamen çevrimdışı kullanabilir miyim?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Evet. WebBrain'in varsayılan sağlayıcısı llama.cpp'dir; bilgisayarında yerel bir AI modeli çalıştırır. API anahtarı gerekmez, AI için internet gerekmez ve hiçbir veri makinenden çıkmaz. Bir GGUF modeli indir, llama-server'ı başlat ve tamamen özel bir AI tarayıcı ajanın olsun. Ollama'yı OpenAI uyumlu uç noktasıyla da kullanabilirsin."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "WebBrain hangi AI modellerini destekliyor?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "WebBrain dört sağlayıcı türünü destekler: llama.cpp (herhangi bir yerel GGUF modeli), OpenAI (GPT-4o, GPT-4 vb.), Claude (yerel API üzerinden Claude Opus, Sonnet, Haiku) ve OpenRouter (çeşitli sağlayıcılardan 100+ modele erişim). OpenAI uyumlu herhangi bir API uç noktası çalışır; Together AI, Groq, Mistral veya OpenAI uyumlu arayüze sahip herhangi bir yerel sunucuyu da kullanabilirsin."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "En çok önerilen model nedir?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "21 Nisan 2026 itibarıyla en çok önerdiğimiz model Qwen 3.6 35B. Nedeni: görme kıyaslamamızda (vision-model-shootout) ekran görüntüsü anlamada Gemma 4'ü geçti ve yerel çıkarım için hâlâ pratik. Tüketici GPU'larında RTX 5090 ideal; RTX 4090 ise Intel/Qwen3.6-35B-A3B-int4-AutoRound üzerinden INT4 AutoRound niceleme ile sıklıkla çalıştırılabilir. Maksimum hız için vLLM ile servis etmeni öneririz. Örnek komut: python -u -m vllm.entrypoints.openai.api_server --model Intel/Qwen3.6-35B-A3B-int4-AutoRound --served-model-name qwen3.6-35b --quantization auto --dtype bfloat16 --max-model-len 65536 --max-num-batched-tokens 32768 --max-num-seqs 4 --host 0.0.0.0 --port 8000 --gpu-memory-utilization 0.92 --enable-prefix-caching --enable-chunked-prefill --limit-mm-per-prompt '{\"image\": 4, \"video\": 1}' --mm-processor-cache-type shm --reasoning-parser qwen3 --enable-auto-tool-choice --tool-call-parser qwen3_coder --trust-remote-code --allowed-origins '[\"*\"]' --speculative-config '{\"method\": \"dflash\", \"model\": \"z-lab/Qwen3.6-35B-A3B-DFlash\", \"num_speculative_tokens\": 15}' --attention-backend flash_attn DFlash spekülatif çözümleme isteğe bağlıdır."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Ağımdaki yerel bir LLM sunucusuna (vLLM, Ollama, llama.cpp) bağlanırken «Failed to fetch» alıyorum",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "LLM sunucunuz yerel ağınızdaki başka bir makinedeyse (ör. http://192.168.1.x:8000), sunucu CORS başlıkları göndermedikçe Chrome isteği engeller. Çözüm sunucuya göre değişir: vLLM: --allowed-origins '[\"*\"]' ile başlatın (değer bir JSON listesi olmalıdır). Ollama: Başlatmadan önce OLLAMA_ORIGINS=* ortam değişkenini ayarlayın. llama.cpp: CORS varsayılan olarak açıktır — değişiklik gerekmez. Sunucunuz localhost'ta (tarayıcıyla aynı makinede) çalışıyorsa genellikle CORS gerekmez. Sorun yalnızca yerel ağdaki makineler arası bağlantıları etkiler. WebBrain ayarlarındaki taban URL'nin /v1 ile bittiğinden emin olun (ör. http://192.168.1.47:8000/v1)."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "WebBrain Firefox'ta çalışıyor mu?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Evet. WebBrain hem Chrome sürümü (sidePanel API'sini kullanan Manifest V3) hem de Firefox sürümüyle (sidebar_action'ı kullanan Manifest V2) birlikte gelir. Her iki sürümün özellikleri aynıdır. Firefox sürümü geliştirme için geçici eklenti olarak yüklenebilir ya da kalıcı kurulum için addons.mozilla.org'da yayımlanabilir."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "WebBrain güvenli mi? Web sayfalarını değiştirebilir mi?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "WebBrain'in iki kipi vardır: Sor kipi (varsayılan) salt okunurdur ve sayfada hiçbir şeyi değiştiremez. Uygula kipi tam tarayıcı ajan yeteneklerini (tıklama, yazma, gezinme) açar, ancak etkinleştirilmeden önce kullanıcıdan açık onay ister ve görünür bir uyarı banner'ı ile gelir. İstediğin an Durdur düğmesiyle ajanı durdurabilirsin. Uzantının kaynak kodu denetim için tamamen GitHub'da açıktır."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "WebBrain'i web kazıma ve veri çıkarma için nasıl kullanırım?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Herhangi bir web sayfasını aç, WebBrain yan panelini aç ve doğal dille sor: «Bu sayfadaki tüm ürün adlarını ve fiyatlarını çıkar», «Bu sayfadaki tüm e-posta adreslerini getir» veya «Bu makaleyi madde madde özetle». AI ajanı sayfa içeriğini okur, yapısını anlar ve çıkardığı veriyi döner. Daha karmaşık kazımalar için Uygula kipine geç; ajan sayfalar arasında gezinir, sayfalama düğmelerine tıklar ve verileri birden çok sayfada birleştirebilir."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "WebBrain API'leri doğrudan mı çağırır, yoksa her zaman arayüzden mi gider?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Varsayılan olarak WebBrain; oluşturan, değiştiren, silen, gönderen, yayınlayan, paylaşan veya satın alan her eylem için her zaman görünür arayüzden gider. Sayfaya gider, formu doldurur ve düğmeye tıklar — tam da senin yapacağın gibi. Mutasyonlar için arka planda fetch() ile REST/GraphQL uç noktalarını doğrudan çağırmayı reddeder. Bu kasıtlıdır: API eylemleri görünmezdir (ne gönderildiğini görmezsin), çoğu zaman yapılandırmadığın ayrı yetki jetonları gerektirir ve görünür bir yanlış tıklamaya göre çok daha geniş bir etki alanına sahiptir. UI-first: her şey ekrandadır, olağan tarayıcı oturumundadır ve durdurulabilir. Veri okumak için — bir README alma, issue arama, fiyat karşılaştırma, durum sayfasını kontrol etme — WebBrain, fetch_url ve research_url araçlarıyla arka plan HTTP isteklerini rahatça kullanır. Okumak eylem değildir; uzak bir serviste hiçbir şey değişmez, bu nedenle güvenlik endişeleri burada geçerli değildir. Belirli bir görev için API mutasyonlarına özellikle izin vermek istiyorsan, mesajının başına /allow-api yaz (isteğe bağlı olarak kısa bir görev tanımı ekle). Konuşma başına geçerli bu geçersiz kılma, arayüz gerçekten başarısız ya da kullanılamaz olduğunda WebBrain'in API uç noktalarına geri düşmesine izin verir; arayüz çalıştığında yine arayüzü tercih eder. Geçersiz kılma aktifken giriş alanının üstünde yapışkan bir rozet görünür ve konuşma sıfırlandığında bayrak temizlenir."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "WebBrain bir sayfada çalışırken başka bir sekmeye geçebilir miyim?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Evet, Chrome'da — ajan arka plan service worker'ında çalışır ve başladığı sekmeye bağlıdır; yani odağını başka yere taşısan bile o belirli sekmeyi tıklamaya, yazmaya ve okumaya devam eder. Bir sekmeyi hedefleyen araçlar (CDP ile tıklama, yazma, gezinme, ekran görüntüsü) Chrome'da arka plan sekmelerinde çalışır. Bir görev sürerken yan çubuk girişi kilitler; böylece yeni sekmede kazara ikinci bir görev başlatamazsın — mevcut olanı beklemen ya da durdurman gerekir. Tarayıcılar arka plan sekmelerindeki zamanlayıcıları ve animasyonları yavaşlattığı için ağır animasyonlu siteler biraz daha yavaş tepki verebilir. Firefox'ta ajan yine orijinal sekmesinde çalışmaya devam eder, ancak otomatik ekran görüntüleri kısıtlıdır: Firefox'un ekran görüntüsü API'si yalnızca aktif sekmeyi yakalayabilir, arka plandaki belirli bir sekmeyi değil. WebBrain bunu algılar ve alakasız bir sayfanın görüntüsünü modele beslemektense o tur için ekran görüntüsünü atlar. Ajan, sen sekmesine geri dönene dek metin tabanlı bağlamla planlamaya devam eder. Ajanın çalıştığı sekmede aktif olarak tıklamaktan ya da yazmaktan kaçın — aynı sayfa üzerinde senin ve ajanın birbirinizle yarıştığı yarış koşulları doğar. Sekme değiştirmek sorun değil; aynı sekmeyi beraber sürmek sorun."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Profil otomatik doldurma nasıl çalışır ve güvenli mi?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Profil otomatik doldurma, Ayarlar → Profil altında isteğe bağlı bir özelliktir. Kısa bir biyografi girersin — ad, iş e-postası, şirket ve düşük riskli kayıtlar için tek kullanımlık bir parola — ve açarsın. Etkinleştirildiğinde WebBrain bu metni ajanın sistem istemine ekler, böylece kayıt formlarını her seferinde sormadan doldurabilir. Metin tarayıcının yerel depolamasında düz metin olarak saklanır. WebBrain projesine iletilmez ama yapılandırdığın LLM sağlayıcısına her turda sistem isteminin bir parçası olarak gönderilir. Varsayılan kapalı. Önemli hesapların parolalarını (Google, Apple, iCloud, bankacılık, iş SSO'su, birincil e-posta) buraya koyma. Bu hesaplar 2FA kullanmalı ve zaten bir ajana teslim edilmemeli. Amaçlanan kullanım durumu, bülten kayıtları ve ücretsiz denemeler için tekrar tekrar kullandığın tek kullanımlık bir paroladır."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "WebBrain, çerez banner'ları ve ödeme duvarlarıyla ne yapar?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Çerez banner'ları: WebBrain yaygın çerçevelerin (OneTrust, Cookiebot, Didomi, Quantcast, Google Funding Choices, TrustArc) onay banner'larını tanır ve sayfa üzerinde akıl yürütmeden önce kapatır. Öncelik açıkça görünürse «Tümünü reddet» / «Gerekli olmayanları reddet» / «Yalnızca gerekliler»; aksi hâlde «Tercihleri yönet» labirentine kaybolmak yerine «Tümünü kabul et»e düşer. Ödeme duvarları: WebBrain ödeme duvarını dürüstçe bildirir ve gerçekten ne gördüğünü (başlık, alt başlık, ilk paragraflar) söyler. Ödeme duvarlarını aşmaya çalışmaz — ne archive.today, ne 12ft.io, ne çerez silme, ne JS devre dışı bırakma, ne okuma modu hileleri. Tam makaleyi istiyorsan abonelikle giriş yap ya da WebBrain'den aynı haberin ücretsiz kapsamını aramasını iste."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "WebBrain arayüzü hangi dilleri destekler?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Eklenti; English, Español, Français, Türkçe ve 中文 dillerinde tamamen çevrilmiş arayüzle gelir. İlk kullanımda tarayıcı dilini otomatik algılar; sonrasında istediğin an yan panel başlığındaki küre simgesinden ya da Ayarlar → Görüntü içindeki Dil satırından değiştirebilirsin. Ayar, browser.storage.local üzerinden yan panel, seçenekler sayfası ve izler sayfası arasında eşitlenir. Bu pazarlama sitesi de buna uygun şekilde yerelleştirildi: /es/, /fr/, /tr/, /zh/ hepsi İngilizce sayfayı yansıtır."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "WebBrain bulut LLM faturalarını nasıl kontrol altında tutar?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Üç bağımsız katman: Token bilincine sahip ekran görüntüleri. Herhangi bir görüntü makineden çıkmadan önce WebBrain onu yeniden boyutlandırır (kısa kenar sınırlanır, en-boy oranı korunur) ve tur başına görüntü token bütçesine sığana kadar yinelemeli olarak JPEG sıkıştırır. GPT-4o'da sana yaklaşık 1.500 giriş tokeni mal olacak 2000×1200 bir ekran görüntüsü, sayfa okuma görevlerinde pratik kayıp olmaksızın yaklaşık 300–500 tokene inerek sıkıştırılır. _fitImageDimensions içinde uygulanır, bütçe matematiği için birim testleri vardır. Akıllı bağlam kırpma. Konuşma geçmişi, araç çıktıları ve satır içi DOM dökümleri tur başına sınırlıdır ve aktif modelin bağlam penceresi dolmaya yaklaştığında önce en eskilerden kırpılır. Bir read_page roman uzunluğunda bir makale döndürdü diye bir çalışmanın 10 binden 100 bin token'a sessizce şişmesini görmezsin. Özel görme modeli. Planlama ve araç çağrıları için ucuz bir metin modelini (ör. GPT-4o-mini), yalnızca ekran görüntüleri için ayrı bir görme modeliyle (ör. GPT-4o) eşleştir; böylece her turda çok kipli model fiyatını ödemezsin. Ayarlar → Görme altında yapılandırılır. Net sonuç: bulut sağlayıcılarıyla uzun oturumlar öngörülebilir kalır. Tam kontrol için yerel llama.cpp'yi kullan — token başına sıfır maliyet."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "WebBrain'e katkıda bulunabilir miyim?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Kesinlikle! WebBrain MIT lisanslıdır ve katkılara açıktır. Issue'lar, özellik istekleri ve katkı kılavuzu için GitHub deposuna göz at."
+      }
+    }
+  ]
+}
+  </script>
   <style>
-    :root { --bg:#0b0e17; --card:#111827; --text:#e4e4ec; --muted:#8b8fa4; --accent:#6c63ff; --accent2:#a78bfa; --border:rgba(255,255,255,.08); }
-    * { box-sizing: border-box; }
-    body { margin:0; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Inter,Roboto,sans-serif; background:var(--bg); color:var(--text); line-height:1.6; }
-    .wrap { max-width:980px; margin:0 auto; padding:24px; }
-    .top { display:flex; justify-content:space-between; align-items:center; gap:16px; }
-    .brand { font-weight:800; font-size:24px; background:linear-gradient(135deg,var(--accent),var(--accent2)); -webkit-background-clip:text; -webkit-text-fill-color:transparent; }
-    .lang-dropdown { background:rgba(255,255,255,.05); color:var(--text); border:1px solid var(--border); border-radius:8px; padding:8px 10px; font-size:14px; }
-    .hero { background:linear-gradient(180deg, rgba(108,99,255,.15), transparent); border:1px solid var(--border); border-radius:16px; padding:28px; margin-top:24px; }
-    h1 { margin:0 0 10px; font-size:38px; line-height:1.15; }
-    p { color:var(--muted); }
-    .cta { display:flex; flex-wrap:wrap; gap:12px; margin-top:18px; }
-    .btn { display:inline-block; padding:10px 16px; border-radius:10px; text-decoration:none; font-weight:600; }
-    .btn.primary { background:var(--accent); color:white; }
-    .btn.secondary { border:1px solid var(--border); color:var(--text); }
-    .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:14px; margin-top:20px; }
-    .card { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:16px; }
-    h3 { margin:0 0 6px; }
-    footer { margin:36px 0 20px; color:var(--muted); font-size:14px; }
+    /* ================================================================
+       RESET & BASE
+       ================================================================ */
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+    :root {
+      --bg: #0b0e17;
+      --bg-card: #111827;
+      --bg-card-hover: #1a2233;
+      --surface: #161d2e;
+      --border: rgba(255,255,255,0.07);
+      --text: #e4e4ec;
+      --text-dim: #8b8fa4;
+      --accent: #6c63ff;
+      --accent-glow: rgba(108,99,255,0.25);
+      --accent2: #a78bfa;
+      --success: #34d399;
+      --warning: #fbbf24;
+      --radius: 16px;
+      --radius-sm: 10px;
+      --max-w: 1100px;
+    }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Inter, Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+      overflow-x: hidden;
+    }
+
+    a { color: var(--accent2); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+
+    /* ================================================================
+       GLOW BACKGROUND
+       ================================================================ */
+    .glow-bg {
+      position: fixed;
+      inset: 0;
+      z-index: -1;
+      overflow: hidden;
+    }
+    .glow-bg::before {
+      content: '';
+      position: absolute;
+      width: 600px; height: 600px;
+      top: -120px; left: 50%;
+      transform: translateX(-50%);
+      background: radial-gradient(circle, var(--accent-glow) 0%, transparent 70%);
+      filter: blur(80px);
+    }
+    .glow-bg::after {
+      content: '';
+      position: absolute;
+      width: 400px; height: 400px;
+      bottom: 10%; right: -100px;
+      background: radial-gradient(circle, rgba(167,139,250,0.12) 0%, transparent 70%);
+      filter: blur(60px);
+    }
+
+    /* ================================================================
+       NAV
+       ================================================================ */
+    nav {
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      backdrop-filter: blur(20px);
+      background: rgba(11,14,23,0.8);
+      border-bottom: 1px solid var(--border);
+    }
+    .nav-inner {
+      max-width: var(--max-w);
+      margin: 0 auto;
+      padding: 14px 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .nav-brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 20px;
+      font-weight: 800;
+      background: linear-gradient(135deg, var(--accent), var(--accent2));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    .nav-brand span.emoji { -webkit-text-fill-color: initial; font-size: 22px; }
+    .nav-links { display: flex; gap: 28px; align-items: center; }
+    .nav-links a {
+      color: var(--text-dim);
+      font-size: 14px;
+      font-weight: 500;
+      transition: color 0.2s;
+    }
+    .nav-links a:hover { color: var(--text); text-decoration: none; }
+    .lang-dropdown {
+      background: rgba(255,255,255,0.05);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 6px 10px;
+      font-size: 13px;
+    }
+    .lang-dropdown:focus { outline: 2px solid var(--accent-glow); outline-offset: 1px; }
+    .nav-cta {
+      background: var(--accent) !important;
+      color: #fff !important;
+      -webkit-text-fill-color: initial !important;
+      padding: 8px 20px;
+      border-radius: 8px;
+      font-weight: 600;
+      font-size: 13px;
+      transition: background 0.2s, transform 0.1s;
+    }
+    .nav-cta:hover { background: #5a52d5 !important; transform: translateY(-1px); text-decoration: none !important; }
+
+    /* ================================================================
+       HERO
+       ================================================================ */
+    .hero {
+      max-width: var(--max-w);
+      margin: 0 auto;
+      padding: 100px 24px 80px;
+      text-align: center;
+    }
+    @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
+
+    .hero h1 {
+      font-size: clamp(40px, 6vw, 68px);
+      font-weight: 800;
+      line-height: 1.1;
+      margin-bottom: 20px;
+      letter-spacing: -1.5px;
+    }
+    .hero h1 .gradient {
+      background: linear-gradient(135deg, var(--accent), var(--accent2), #e879f9);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    .hero p {
+      font-size: 18px;
+      color: var(--text-dim);
+      max-width: 600px;
+      margin: 0 auto 36px;
+      line-height: 1.7;
+    }
+    .hero-actions {
+      display: flex;
+      gap: 14px;
+      justify-content: center;
+      flex-wrap: wrap;
+    }
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 14px 28px;
+      border-radius: var(--radius-sm);
+      font-size: 15px;
+      font-weight: 600;
+      cursor: pointer;
+      border: none;
+      transition: all 0.2s;
+    }
+    .btn-primary {
+      background: var(--accent);
+      color: #fff;
+      box-shadow: 0 4px 24px var(--accent-glow);
+    }
+    .btn-primary:hover { background: #5a52d5; transform: translateY(-2px); text-decoration: none; color: #fff; }
+    .btn-secondary {
+      background: var(--surface);
+      color: var(--text);
+      border: 1px solid var(--border);
+    }
+    .btn-secondary:hover { background: var(--bg-card-hover); transform: translateY(-2px); text-decoration: none; }
+    .btn svg { width: 18px; height: 18px; }
+
+    /* Hero screenshot mockup */
+    .hero-visual {
+      margin-top: 60px;
+      position: relative;
+    }
+    .browser-mockup {
+      max-width: 820px;
+      margin: 0 auto;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+      box-shadow: 0 24px 80px rgba(0,0,0,0.4);
+    }
+    .browser-bar {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 12px 16px;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+    }
+    .browser-dots { display: flex; gap: 6px; }
+    .browser-dots span {
+      width: 10px; height: 10px;
+      border-radius: 50%;
+    }
+    .browser-dots span:nth-child(1) { background: #ef4444; }
+    .browser-dots span:nth-child(2) { background: #fbbf24; }
+    .browser-dots span:nth-child(3) { background: #34d399; }
+    .browser-url {
+      flex: 1;
+      margin-left: 12px;
+      background: rgba(0,0,0,0.3);
+      border-radius: 6px;
+      padding: 5px 12px;
+      font-size: 12px;
+      color: var(--text-dim);
+    }
+    .browser-body {
+      display: flex;
+      min-height: 380px;
+    }
+    .browser-page {
+      flex: 1;
+      padding: 24px;
+      font-size: 13px;
+      color: var(--text-dim);
+      line-height: 1.8;
+    }
+    .browser-page h3 { color: var(--text); margin-bottom: 8px; font-size: 16px; }
+    .browser-page .placeholder-line {
+      height: 10px;
+      background: rgba(255,255,255,0.04);
+      border-radius: 4px;
+      margin-bottom: 8px;
+    }
+    .browser-page .placeholder-line:nth-child(odd) { width: 90%; }
+    .browser-page .placeholder-line:nth-child(even) { width: 70%; }
+
+    /* Side panel mockup */
+    .side-panel {
+      width: 300px;
+      border-left: 1px solid var(--border);
+      background: #1a1a2e;
+      display: flex;
+      flex-direction: column;
+      flex-shrink: 0;
+    }
+    .sp-header {
+      padding: 10px 14px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .sp-header .sp-brand {
+      font-size: 14px;
+      font-weight: 700;
+      background: linear-gradient(135deg, var(--accent), var(--accent2));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    .sp-header .sp-brand .sp-domain {
+      font-weight: 500;
+      opacity: 1;
+      background: none;
+      -webkit-text-fill-color: rgba(228,228,236,0.75);
+    }
+    .sp-status {
+      width: 7px; height: 7px;
+      background: var(--success);
+      border-radius: 50%;
+    }
+    .sp-messages {
+      flex: 1;
+      padding: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      overflow: hidden;
+    }
+    .sp-msg {
+      padding: 8px 12px;
+      border-radius: 10px;
+      font-size: 12px;
+      line-height: 1.5;
+      max-width: 90%;
+      animation: fadeUp 0.4s ease both;
+    }
+    @keyframes fadeUp {
+      from { opacity: 0; transform: translateY(8px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    .sp-msg.user {
+      background: var(--accent);
+      color: #fff;
+      align-self: flex-end;
+      animation-delay: 0.2s;
+    }
+    .sp-msg.assistant {
+      background: #16213e;
+      border: 1px solid rgba(255,255,255,0.06);
+      align-self: flex-start;
+      animation-delay: 0.5s;
+    }
+    .sp-msg .step {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 10px;
+      color: var(--text-dim);
+      margin-bottom: 4px;
+    }
+    .sp-msg .step .check { color: var(--success); }
+    .sp-input {
+      padding: 10px;
+      border-top: 1px solid var(--border);
+    }
+    .sp-input-box {
+      display: flex;
+      align-items: center;
+      background: #1e2746;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 8px 12px;
+      font-size: 11px;
+      color: var(--text-dim);
+    }
+
+    /* ================================================================
+       FEATURES
+       ================================================================ */
+    .section {
+      max-width: var(--max-w);
+      margin: 0 auto;
+      padding: 80px 24px;
+    }
+    .section-label {
+      text-align: center;
+      font-size: 13px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 2px;
+      color: var(--accent);
+      margin-bottom: 12px;
+    }
+    .section-title {
+      text-align: center;
+      font-size: clamp(28px, 4vw, 42px);
+      font-weight: 700;
+      margin-bottom: 16px;
+      letter-spacing: -0.5px;
+    }
+    .section-subtitle {
+      text-align: center;
+      color: var(--text-dim);
+      max-width: 560px;
+      margin: 0 auto 48px;
+      font-size: 16px;
+    }
+
+    .features-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+      gap: 20px;
+    }
+    .feature-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 28px;
+      transition: all 0.25s;
+    }
+    .feature-card:hover {
+      background: var(--bg-card-hover);
+      border-color: rgba(108,99,255,0.2);
+      transform: translateY(-4px);
+      box-shadow: 0 12px 40px rgba(0,0,0,0.3);
+    }
+    .feature-icon {
+      width: 44px; height: 44px;
+      background: var(--accent-glow);
+      border-radius: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 20px;
+      margin-bottom: 16px;
+    }
+    .feature-card h3 {
+      font-size: 17px;
+      font-weight: 600;
+      margin-bottom: 8px;
+    }
+    .feature-card p {
+      color: var(--text-dim);
+      font-size: 14px;
+      line-height: 1.6;
+    }
+
+    /* ================================================================
+       PROVIDERS
+       ================================================================ */
+    .providers-row {
+      display: flex;
+      justify-content: center;
+      gap: 14px;
+      flex-wrap: nowrap;
+      margin-top: 40px;
+    }
+    .provider-badge {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 12px 16px;
+      font-size: 13px;
+      font-weight: 600;
+      transition: all 0.2s;
+      white-space: nowrap;
+    }
+    .provider-badge:hover {
+      border-color: var(--accent);
+      background: var(--bg-card-hover);
+    }
+    .provider-badge .p-icon {
+      width: 32px; height: 32px;
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 18px;
+    }
+    .provider-badge .p-icon.local { background: rgba(52,211,153,0.15); color: var(--success); }
+    .provider-badge .p-icon.ollama { background: rgba(38,121,255,0.15); color: #2679ff; }
+    .provider-badge .p-icon.openai { background: rgba(16,163,127,0.15); color: #10a37f; }
+    .provider-badge .p-icon.anthropic { background: rgba(204,149,96,0.15); color: #cc9560; }
+    .provider-badge .p-icon.openrouter { background: rgba(108,99,255,0.15); color: var(--accent2); }
+    .provider-badge .p-icon.studiolm { background: rgba(245,158,11,0.15); color: #f59e0b; }
+    .provider-badge .p-icon.vllm { background: rgba(99,102,241,0.15); color: #6366f1; }
+
+    /* ================================================================
+       MODES
+       ================================================================ */
+    .modes-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 24px;
+      max-width: 760px;
+      margin: 0 auto;
+    }
+    .mode-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 32px;
+      text-align: center;
+      transition: all 0.25s;
+    }
+    .mode-card:hover {
+      transform: translateY(-4px);
+      box-shadow: 0 12px 40px rgba(0,0,0,0.3);
+    }
+    .mode-card.ask { border-top: 3px solid var(--accent); }
+    .mode-card.act { border-top: 3px solid var(--warning); }
+    .mode-card .mode-icon { font-size: 36px; margin-bottom: 16px; }
+    .mode-card h3 { font-size: 20px; margin-bottom: 8px; }
+    .mode-card p { color: var(--text-dim); font-size: 14px; }
+
+    /* ================================================================
+       DOWNLOAD / INSTALL
+       ================================================================ */
+    .download-section {
+      text-align: center;
+    }
+    .download-cards {
+      display: flex;
+      justify-content: center;
+      gap: 24px;
+      flex-wrap: wrap;
+      margin-top: 40px;
+    }
+    .download-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 36px 40px;
+      text-align: center;
+      min-width: 260px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      transition: all 0.25s;
+    }
+    .download-card:hover {
+      border-color: var(--accent);
+      transform: translateY(-4px);
+      box-shadow: 0 12px 40px rgba(0,0,0,0.3);
+    }
+    .download-card .browser-icon { font-size: 42px; margin-bottom: 16px; }
+    .download-card h3 { font-size: 18px; margin-bottom: 6px; }
+    .download-card p { color: var(--text-dim); font-size: 13px; margin-bottom: 20px; }
+    .download-card-actions {
+      width: 100%;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      margin-top: auto;
+    }
+    .download-card .btn { width: 100%; justify-content: center; }
+    .download-card-chrome {
+      min-width: 340px;
+      padding: 42px 44px;
+      border-color: rgba(0, 212, 255, 0.45);
+    }
+
+    /* ================================================================
+       OPEN SOURCE
+       ================================================================ */
+    .oss-banner {
+      max-width: 760px;
+      margin: 0 auto;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 40px;
+      text-align: center;
+    }
+    .oss-banner h3 { font-size: 24px; margin-bottom: 12px; }
+    .oss-banner p { color: var(--text-dim); font-size: 15px; margin-bottom: 24px; max-width: 500px; margin-left: auto; margin-right: auto; }
+
+    /* ================================================================
+       FOOTER
+       ================================================================ */
+    footer {
+      border-top: 1px solid var(--border);
+      padding: 32px 24px;
+      text-align: center;
+      color: var(--text-dim);
+      font-size: 13px;
+    }
+    footer a { color: var(--text-dim); }
+    footer a:hover { color: var(--text); }
+    .footer-inner {
+      max-width: var(--max-w);
+      margin: 0 auto;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 12px;
+    }
+    .footer-links { display: flex; gap: 20px; }
+
+    .safety-note {
+      max-width: var(--max-w);
+      margin: 0 auto 24px;
+      background: rgba(251,191,36,0.1);
+      border: 1px solid rgba(251,191,36,0.35);
+      border-radius: var(--radius-sm);
+      padding: 18px 20px;
+      color: var(--text);
+      text-align: left;
+      line-height: 1.55;
+      font-size: 13px;
+    }
+    .safety-note h4 {
+      font-size: 14px;
+      margin-bottom: 8px;
+      letter-spacing: 0.4px;
+      text-transform: uppercase;
+      color: var(--warning);
+    }
+    .safety-note ul {
+      margin: 0;
+      padding-left: 18px;
+    }
+    .safety-note li { margin-bottom: 6px; }
+    .safety-note li:last-child { margin-bottom: 0; }
+
+    /* ================================================================
+       COMPARISON TABLE
+       ================================================================ */
+    .compare-table-wrap {
+      overflow-x: auto;
+      max-width: 920px;
+      margin: 0 auto;
+    }
+    .compare-table {
+      width: 100%;
+      border-collapse: collapse;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      overflow: hidden;
+      font-size: 14px;
+    }
+    .compare-table th,
+    .compare-table td {
+      padding: 12px 16px;
+      text-align: left;
+      border-bottom: 1px solid var(--border);
+    }
+    .compare-table thead th {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text-dim);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      background: var(--surface);
+    }
+    .compare-table thead th.highlight {
+      color: var(--accent);
+    }
+    .compare-table td.highlight {
+      color: var(--accent2);
+      font-weight: 600;
+    }
+    .compare-table tbody tr {
+      transition: background 0.15s;
+    }
+    .compare-table tbody tr:hover {
+      background: rgba(108,99,255,0.04);
+    }
+
+    /* ================================================================
+       FAQ
+       ================================================================ */
+    .faq-list {
+      max-width: 760px;
+      margin: 32px auto 0;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .faq-item {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      overflow: hidden;
+      transition: border-color 0.2s;
+    }
+    .faq-item[open] {
+      border-color: rgba(108,99,255,0.25);
+    }
+    .faq-item summary {
+      padding: 16px 20px;
+      font-size: 15px;
+      font-weight: 600;
+      cursor: pointer;
+      list-style: none;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      transition: color 0.2s;
+    }
+    .faq-item summary::-webkit-details-marker { display: none; }
+    .faq-item summary::after {
+      content: '+';
+      font-size: 20px;
+      color: var(--text-dim);
+      flex-shrink: 0;
+      margin-left: 16px;
+      transition: transform 0.2s;
+    }
+    .faq-item[open] summary::after {
+      content: '−';
+      color: var(--accent);
+    }
+    .faq-item summary:hover { color: var(--accent2); }
+    .faq-item p {
+      padding: 0 20px 16px;
+      color: var(--text-dim);
+      font-size: 14px;
+      line-height: 1.7;
+    }
+    .faq-item p a {
+      color: var(--accent2);
+    }
+
+    /* ================================================================
+       DEMO VIDEO
+       ================================================================ */
+    .video-showcase {
+      max-width: 900px;
+      margin: 0 auto;
+    }
+    .video-frame {
+      position: relative;
+      width: 100%;
+      padding-bottom: 56.25%;
+      border-radius: var(--radius);
+      overflow: hidden;
+      border: 1px solid var(--border);
+      background: #000;
+      box-shadow: 0 20px 40px rgba(0,0,0,0.35);
+    }
+    .video-frame iframe {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      border: 0;
+    }
+
+    /* ================================================================
+       RESPONSIVE
+       ================================================================ */
+    @media (max-width: 768px) {
+      .browser-body { flex-direction: column; }
+      .side-panel { width: 100%; border-left: none; border-top: 1px solid var(--border); min-height: 260px; }
+      .modes-grid { grid-template-columns: 1fr; }
+      .nav-links a:not(.nav-cta) { display: none; }
+      .providers-row { flex-wrap: wrap; justify-content: center; }
+      .video-showcase { max-width: 380px; }
+      .video-frame { padding-bottom: 177.78%; }
+    }
+    @media (max-width: 480px) {
+      .hero { padding: 60px 16px 50px; }
+      .hero-actions { flex-direction: column; align-items: center; }
+      .btn { width: 100%; justify-content: center; }
+    }
   </style>
+
+  <!-- Privacy-friendly analytics by Plausible -->
+  <script async src="https://plausible.io/js/pa-yWGfwxkkKSVs-eTuaKYpy.js"></script>
+  <script>
+    window.plausible=window.plausible||function(){(plausible.q=plausible.q||[]).push(arguments)},plausible.init=plausible.init||function(i){plausible.o=i||{}};
+    plausible.init()
+  </script>
 </head>
 <body>
-  <div class="wrap">
-    <div class="top">
-      <div class="brand">🧠 WebBrain</div>
-      <select class="lang-dropdown" aria-label="Dil seçin" onchange="if(this.value){window.location.href=this.value}">
-        <option value="/">English</option>
-        <option value="/es/">Español</option>
-        <option value="/fr/">Français</option>
-        <option value="/tr/" selected>Türkçe</option>
-        <option value="/zh/">中文</option>
+
+<div class="glow-bg"></div>
+
+<!-- NAV -->
+<nav>
+  <div class="nav-inner">
+    <a href="https://webbrain.one/tr/" class="nav-brand" style="text-decoration:none;">
+      <span class="emoji">🧠</span> WebBrain<span style="opacity:0.5; font-weight:400;">.one</span>
+    </a>
+    <div class="nav-links">
+      <a href="#features">Özellikler</a>
+      <a href="#demo">Tanıtım</a>
+      <a href="#providers">Sağlayıcılar</a>
+      <a href="#compare">Karşılaştır</a>
+      <a href="#download">İndir</a>
+      <a href="#faq">SSS</a>
+      <a href="/blog">Blog</a>
+      <select class="lang-dropdown" id="lang-dropdown" aria-label="Dil seç" data-current="tr">
+        <option value="en">English</option>
+        <option value="es">Español</option>
+        <option value="fr">Français</option>
+        <option value="tr">Türkçe</option>
+        <option value="zh">中文</option>
       </select>
+      <a href="https://github.com/esokullu/webbrain" class="nav-cta" target="_blank">GitHub</a>
     </div>
-
-    <section class="hero">
-      <h1>Ücretsiz ve açık kaynak yapay zeka destekli web otomasyonu.</h1>
-      <p>WebBrain, Chrome ve Firefox'ta çalışır. Sayfaları okuyabilir, araştırma yapabilir ve görevleri yerel LLM'lerle (llama.cpp) veya bulut sağlayıcılarıyla (OpenAI, Claude, OpenRouter) otomatikleştirebilirsiniz.</p>
-      <div class="cta">
-        <a class="btn primary" href="https://chromewebstore.google.com/detail/webbrain/ljhijonmfahplgbbacgcfnaihbjljhhb">Chrome'a Yükle</a>
-        <a class="btn secondary" href="https://addons.mozilla.org/firefox/addon/webbrain/">Firefox'a Yükle</a>
-        <a class="btn secondary" href="https://github.com/emres/webbrain">GitHub'da Gör</a>
-      </div>
-    </section>
-
-    <section class="grid">
-      <article class="card"><h3>Önce gizlilik</h3><p>Yerel model desteği sayesinde verileriniz bilgisayarınızda kalabilir.</p></article>
-      <article class="card"><h3>Genişletilebilir</h3><p>Birden fazla sağlayıcı ve otomasyon iş akışı ile uyumludur.</p></article>
-      <article class="card"><h3>%100 açık kaynak</h3><p>MIT lisansı ve GitHub üzerinde herkese açık geliştirme.</p></article>
-    </section>
-
-    <footer>
-      Bu sayfa ana sitenin Türkçe sürümüdür. Ayrıca <a href="/privacy.html">gizlilik politikasını</a> veya <a href="/blog/">blogu</a> (İngilizce) ziyaret edebilirsiniz.
-    </footer>
   </div>
+</nav>
+
+<!-- HERO -->
+<section class="hero">
+  <h1>Açık kaynaklı AI <span class="gradient">tarayıcı ajanı</span></h1>
+  <p>WebBrain, Chrome ve Firefox&#39;a AI ajan yeteneklerini getiren ücretsiz ve açık kaynaklı bir tarayıcı uzantısıdır. Sayfaları oku, veri çıkar, web görevlerini otomatikleştir — seçtiğin LLM ile. Tescilli tarayıcı AI eklentilerine kendine ait sunucularda barındırılabilir bir alternatif.</p>
+  <div class="hero-actions">
+    <a href="#download" class="btn btn-primary">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+      Uzantıyı yükle
+    </a>
+    <a href="https://github.com/esokullu/webbrain" target="_blank" class="btn btn-secondary">
+      <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0 0 24 12c0-6.63-5.37-12-12-12z"/></svg>
+      GitHub&#39;da gör
+    </a>
+  </div>
+
+  <!-- Browser mockup -->
+  <div class="hero-visual">
+    <div class="browser-mockup">
+      <div class="browser-bar">
+        <div class="browser-dots">
+          <span></span><span></span><span></span>
+        </div>
+        <div class="browser-url">https://example.com/urunler</div>
+      </div>
+      <div class="browser-body">
+        <div class="browser-page">
+          <h3>Ürün Kataloğu</h3>
+          <div class="placeholder-line"></div>
+          <div class="placeholder-line"></div>
+          <div class="placeholder-line"></div>
+          <div class="placeholder-line"></div>
+          <div class="placeholder-line"></div>
+          <div class="placeholder-line"></div>
+          <div class="placeholder-line"></div>
+          <div class="placeholder-line"></div>
+          <div class="placeholder-line"></div>
+          <div class="placeholder-line"></div>
+        </div>
+        <div class="side-panel">
+          <div class="sp-header">
+            <span class="sp-brand">🧠 WebBrain<span class="sp-domain">.one</span></span>
+            <span class="sp-status"></span>
+          </div>
+          <div class="sp-messages">
+            <div class="sp-msg user">Bu sayfadaki tüm ürün adlarını ve fiyatlarını çıkar</div>
+            <div class="sp-msg assistant">
+              <div class="step"><span class="check">&#10003;</span> Sayfa okunuyor</div>
+              <div class="step"><span class="check">&#10003;</span> Veri çıkarılıyor</div>
+              <div style="margin-top:6px;"><strong>24 ürün</strong> bulundu. İşte sonuçlar:</div>
+              <div style="margin-top:4px; font-size:11px; color: var(--text-dim);">
+                1. Widget Pro — $29.99<br>
+                2. Super Gadget — $49.99<br>
+                3. MegaTool X — $19.99<br>
+                <span style="color:var(--accent2);">...ve 21 tane daha</span>
+              </div>
+            </div>
+          </div>
+          <div class="sp-input">
+            <div class="sp-input-box">Bu sayfayla ilgili istediğini sor...</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- DEMO VIDEO -->
+<section class="section" id="demo" style="padding-top: 30px;">
+  <div class="section-label">Tanıtım</div>
+  <h2 class="section-title">WebBrain iş başında</h2>
+  <p class="section-subtitle">WebBrain&#39;in sayfaları nasıl okuduğunu, veri çıkardığını ve tarayıcı görevlerini otomatikleştirdiğini izle.</p>
+  <div class="video-showcase">
+    <div class="video-frame">
+      <iframe id="demo-video" src="https://www.youtube.com/embed/3eFAQ-b65J0" data-desktop-src="https://www.youtube.com/embed/3eFAQ-b65J0" data-mobile-src="https://www.youtube.com/embed/Nov3sw7FE_Q?playsinline=1" title="WebBrain tanıtım videosu" loading="lazy" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe>
+    </div>
+  </div>
+</section>
+
+<!-- FEATURES -->
+<section class="section" id="features">
+  <div class="section-label">Özellikler</div>
+  <h2 class="section-title">Bir tarayıcı AI&#39;sında ihtiyacın olan her şey</h2>
+  <p class="section-subtitle">Tarayıcının yan panelinde yaşayan ve her web sayfasını anlayan eksiksiz bir AI ajanı.</p>
+
+  <div class="features-grid">
+    <div class="feature-card">
+      <div class="feature-icon">📖</div>
+      <h3>Sayfa anlama</h3>
+      <p>Her web sayfasını okur ve anlar — makaleler, belgeler, panolar, formlar. Soru sor, mevcut sayfadan anında yanıt al.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">🤖</div>
+      <h3>Tam tarayıcı ajanı</h3>
+      <p>Senin yerine tıklar, yazar, kaydırır, gezinir ve sayfalarla etkileşir. Doğal dil talimatlarıyla tekrar eden işleri otomatikleştir.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">📊</div>
+      <h3>Veri çıkarma</h3>
+      <p>Her sayfadan yapılandırılmış veri çıkar — tablolar, listeler, bağlantılar, formlar. Ürün kataloglarını, arama sonuçlarını ya da herhangi bir sayfa içeriğini dışa aktar.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">🔌</div>
+      <h3>Çoklu LLM sağlayıcı</h3>
+      <p>Yerel llama.cpp, OpenAI, Claude ve OpenRouter ile çalışır. Tercih ettiğin modeli kullan — ya da yerel AI ile tamamen çevrimdışı çalış.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">🛡️</div>
+      <h3>Önce gizlilik</h3>
+      <p>Verilerin sana ait. Yerel LLM ile sıfır veri sızıntısı. Telemetri yok, takip yok, hesap gerekmez. Tamamen açık kaynaklı.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">⚡</div>
+      <h3>Akıllı bağlam</h3>
+      <p>Otomatik bağlam yönetimi token taşmalarını önler. Konuşma geçmişini akıllıca kırpar ve araç çıktılarını sınırlar — pürüzsüz, kesintisiz oturumlar.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">👁️</div>
+      <h3>Özel görme modeli</h3>
+      <p>Planlama için hızlı bir metin modeli ile ekran görüntülerini okuyan ayrı bir görme modelini birleştir. Her şey için tek bir büyük çok kipli model kullanmaktan daha ucuz ve hızlı.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">🗂️</div>
+      <h3>Sekme grupları</h3>
+      <p>Ajanın açtığı her sekme özel bir «WebBrain» grubuna katılır; böylece araştırma zincirlerin pencerene dağılmak yerine görsel olarak bir arada kalır. target=&quot;_blank&quot; bağlantılara yapılan tıklamalar, sekme çoğalmasını önlemek için mevcut sekmeye döner.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">👤</div>
+      <h3>Profil otomatik doldurma</h3>
+      <p>İsteğe bağlı düz metin biyografi — ad, iş e-postası, şirket, tek kullanımlık bir parola — ajanın düşük riskli kayıt formlarını her seferinde sormadan geçmesini sağlar. Varsayılan kapalı, her şey yerelde saklanır.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">🍪</div>
+      <h3>Çerez ve ödeme duvarı farkındalığı</h3>
+      <p>Sayfa üzerinde akıl yürütmeden önce onam banner&#39;larını (OneTrust, Cookiebot, Didomi, Quantcast) kapatır. Ödeme duvarlarını algılar ve içerik uydurmak ya da aşmaya çalışmak yerine dürüstçe söyler.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">🌐</div>
+      <h3>Çok dilli arayüz</h3>
+      <p>Eklenti English, Español, Français, Türkçe ve 中文 dillerinde geliyor. İlk kullanımda tarayıcı dilini otomatik algılar; yan paneldeki küre simgesinden istediğin an değiştirebilirsin. Pazarlama sitesi de buna uygun olarak yerelleştirildi.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">💰</div>
+      <h3>Token bilincine sahip</h3>
+      <p>Ekran görüntüleri, makineden çıkmadan önce yeniden boyutlandırılır ve yinelemeli olarak JPEG sıkıştırılır; böylece görüntü tokenleri küçük kalır. Akıllı bağlam kırpma ve araç çıktısı sınırları, bulut faturalarını öngörülebilir tutar — uzun oturumlarda sürpriz harcama yok.</p>
+    </div>
+  </div>
+</section>
+
+<!-- PROVIDERS -->
+<section class="section" id="providers" style="padding-top: 40px;">
+  <div class="section-label">LLM sağlayıcıları</div>
+  <h2 class="section-title">Kendi AI&#39;nı getir</h2>
+  <p class="section-subtitle">OpenAI uyumlu herhangi bir API&#39;ye bağlan veya yerel bir model çalıştır. Uzantı ayarlarından istediğin an sağlayıcı değiştir.</p>
+
+  <div class="providers-row">
+    <div class="provider-badge">
+      <div class="p-icon local">🦙</div>
+      llama.cpp
+    </div>
+    <div class="provider-badge">
+      <div class="p-icon ollama">◉</div>
+      Ollama
+    </div>
+    <div class="provider-badge">
+      <div class="p-icon openai">⬡</div>
+      OpenAI
+    </div>
+    <div class="provider-badge">
+      <div class="p-icon anthropic">◈</div>
+      Claude
+    </div>
+    <div class="provider-badge">
+      <div class="p-icon openrouter">◆</div>
+      OpenRouter
+    </div>
+    <div class="provider-badge">
+      <div class="p-icon studiolm">✦</div>
+      StudioLM
+    </div>
+    <div class="provider-badge">
+      <div class="p-icon vllm">▣</div>
+      VLLM
+    </div>
+  </div>
+</section>
+
+<!-- MODES -->
+<section class="section" id="modes">
+  <div class="section-label">Etkileşim kipleri</div>
+  <h2 class="section-title">Sor ya da Uygula</h2>
+  <p class="section-subtitle">Farklı ihtiyaçlar için iki kip. Varsayılan salt okunur, gerektiğinde tam ajan gücü.</p>
+
+  <div class="modes-grid">
+    <div class="mode-card ask">
+      <div class="mode-icon">💬</div>
+      <h3>Sor kipi</h3>
+      <p>Salt okunur. Geçerli sayfayla ilgili soru sor, bilgi çıkar, içerik özetle. Güvenli ve müdahalesiz — hiçbir şey değiştirilmez.</p>
+    </div>
+    <div class="mode-card act">
+      <div class="mode-icon">⚡</div>
+      <h3>Uygula kipi</h3>
+      <p>Tam ajan. Düğmelere tıkla, formları doldur, sayfalar arasında gezin, betikleri çalıştır. Karmaşık çok adımlı tarayıcı iş akışlarını tek talimatla otomatikleştir.</p>
+    </div>
+  </div>
+</section>
+
+<!-- DOWNLOAD -->
+<section class="section download-section" id="download">
+  <div class="section-label">Başla</div>
+  <h2 class="section-title">WebBrain&#39;i yükle</h2>
+  <p class="section-subtitle">Chrome ve Firefox için mevcut. Ücretsiz, açık kaynaklı, hesap gerekmez.</p>
+
+  <div class="download-cards">
+    <div class="download-card download-card-chrome">
+      <div class="browser-icon">🌐</div>
+      <h3>Chrome ve Chromium</h3>
+      <p>Manifest V3 · Chrome 116+ · Ayrıca Brave, Edge, Opera, Vivaldi ve diğer Chromium uyumlu tarayıcılarla çalışır.</p>
+      <div class="download-card-actions">
+        <a href="https://chromewebstore.google.com/detail/webbrain/ljhijonmfahplgbbacgcfnaihbjljhhb" target="_blank" rel="noopener noreferrer" class="btn btn-primary">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          Chrome Web Store&#39;dan indir
+        </a>
+        <a href="https://github.com/esokullu/webbrain/tree/main/src/chrome" target="_blank" rel="noopener noreferrer" class="btn btn-secondary">
+          Chrome kaynağını gör
+        </a>
+      </div>
+    </div>
+    <div class="download-card">
+      <div class="browser-icon">🦊</div>
+      <h3>Firefox</h3>
+      <p>Manifest V2 · Firefox 109+</p>
+      <div class="download-card-actions">
+        <a href="https://addons.mozilla.org/en-US/firefox/addon/webbrain/" target="_blank" rel="noopener noreferrer" class="btn btn-primary" style="background: #ff9800;">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          Firefox Add-ons&#39;tan indir
+        </a>
+        <a href="https://github.com/esokullu/webbrain/tree/main/src/firefox" target="_blank" rel="noopener noreferrer" class="btn btn-secondary">
+          Firefox kaynağını gör
+        </a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- COMPARISON TABLE -->
+<section class="section" id="compare">
+  <div class="section-label">Neden WebBrain?</div>
+  <h2 class="section-title">WebBrain nasıl karşılaştırılır?</h2>
+  <p class="section-subtitle">WebBrain, tarayıcıya özgü AI eklentileri ile tam ajan çatıları arasında yer alır. Konumu şöyle.</p>
+
+  <!-- vs Browser Plugins -->
+  <h3 style="font-size:16px; color:var(--text-dim); margin-bottom:16px; text-align:center;">Tarayıcı AI eklentilerine karşı</h3>
+  <div class="compare-table-wrap">
+    <table class="compare-table">
+      <thead>
+        <tr>
+          <th>Özellik</th>
+          <th class="highlight">WebBrain</th>
+          <th>Chrome&#39;da Claude</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td>Açık kaynak</td><td class="highlight">MIT Lisansı</td><td>Tescilli</td></tr>
+        <tr><td>Fiyat</td><td class="highlight">Sonsuza kadar ücretsiz</td><td>Claude Pro gerektirir (20$/ay)</td></tr>
+        <tr><td>Yerel LLM desteği</td><td class="highlight">llama.cpp, Ollama</td><td>Hayır — yalnızca Claude</td></tr>
+        <tr><td>Çoklu sağlayıcı</td><td class="highlight">4 sağlayıcı (yerel + bulut)</td><td>Yalnızca Claude</td></tr>
+        <tr><td>Chrome</td><td class="highlight">Evet (MV3)</td><td>Evet</td></tr>
+        <tr><td>Firefox</td><td class="highlight">Evet (MV2)</td><td>Hayır</td></tr>
+        <tr><td>Yan panel UI</td><td class="highlight">Evet</td><td>Evet</td></tr>
+        <tr><td>Sor / Uygula kipleri</td><td class="highlight">Evet</td><td>Benzer</td></tr>
+        <tr><td>Tamamen çevrimdışı</td><td class="highlight">Evet (yerel LLM ile)</td><td>Hayır — bulut gerekir</td></tr>
+        <tr><td>Sayfa etkileşimi</td><td>İçerik betiği</td><td>Chrome DevTools Protocol</td></tr>
+        <tr><td>Kendin barındırabilirsin</td><td class="highlight">Evet</td><td>Hayır</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- vs Agent Frameworks -->
+  <h3 style="font-size:16px; color:var(--text-dim); margin: 40px 0 16px; text-align:center;">AI ajan çatılarına karşı <span style="font-weight:400; font-size:13px;">(farklı kategori)</span></h3>
+  <div class="compare-table-wrap">
+    <table class="compare-table">
+      <thead>
+        <tr>
+          <th>Boyut</th>
+          <th class="highlight">WebBrain</th>
+          <th>OpenClaw / Browser-Use / vb.</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td>Nedir?</td><td class="highlight">Tarayıcı uzantısı (son kullanıcı aracı)</td><td>Ajan çatı / SDK (geliştirici aracı)</td></tr>
+        <tr><td>Hedef kullanıcı</td><td class="highlight">Herkes — kod gerekmez</td><td>Otomasyon geliştiren yazılımcılar</td></tr>
+        <tr><td>Kurulum</td><td class="highlight">Tek tıkla tarayıcı kurulumu</td><td>Python/Docker kurulumu gerekir</td></tr>
+        <tr><td>UI</td><td class="highlight">Dahili yan panel sohbeti</td><td>UI yok — yalnızca kod ya da API</td></tr>
+        <tr><td>Tarayıcı kontrolü</td><td>İçerik betiği (hafif)</td><td>CDP / Playwright (tam kontrol)</td></tr>
+        <tr><td>Çoklu sekme iş akışları</td><td>Sekme başına konuşmalar</td><td>Programlanabilir çok sekmeli orkestrasyon</td></tr>
+        <tr><td>Başlıksız kip</td><td>Hayır — tarayıcında çalışır</td><td>Evet — başlıksız otomasyon</td></tr>
+        <tr><td>Genişletilebilirlik</td><td>Özel LLM sağlayıcıları ekle</td><td>Tam Python SDK, özel araçlar</td></tr>
+        <tr><td>En iyisi</td><td class="highlight">Günlük gezinmede AI asistanı</td><td>Otomatik kazıma / test işlem hatları</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p style="text-align:center; color:var(--text-dim); font-size:13px; margin-top:24px; max-width:600px; margin-left:auto; margin-right:auto;">
+    WebBrain, gezinirken bir AI asistanı isteyen son kullanıcılar için bir tarayıcı uzantısıdır. OpenClaw gibi ajan çatıları, otomatik tarayıcı işlem hatları inşa eden geliştiricilere yönelik araçlardır. Farklı işler için farklı araçlar — ve her ikisini de kullanabilirsin.
+  </p>
+</section>
+
+<!-- FAQ -->
+<section class="section" id="faq">
+  <div class="section-label">SSS</div>
+  <h2 class="section-title">Sık Sorulan Sorular</h2>
+
+  <div class="faq-list">
+    <details class="faq-item">
+      <summary>WebBrain, Claude&#39;un tarayıcı eklentisine ücretsiz bir alternatif mi?</summary>
+      <p>Evet. WebBrain benzer AI tarayıcı ajan yetenekleri sunar — sayfa okuma, veri çıkarma, düğmelere tıklama, form doldurma ve çok adımlı iş akışlarını otomatikleştirme. Claude Pro aboneliği gerektiren ve yalnızca Anthropic modelleriyle çalışan tescilli Claude eklentisinin aksine WebBrain tamamen ücretsiz, açık kaynaklı (MIT lisansı) ve makinende tamamen çalışan yerel modeller de dahil olmak üzere birden çok LLM sağlayıcısını destekler.</p>
+    </details>
+
+    <details class="faq-item">
+      <summary>WebBrain; OpenClaw, Browser-Use ve diğer AI ajan çatılarından nasıl farklı?</summary>
+      <p>Bunlar farklı kategoride araçlar. WebBrain bir tarayıcı uzantısı — Chrome veya Firefox'a kurar ve yan panelde sohbet edersin, kod gerekmez. OpenClaw ve Browser-Use gibi çatılar ise genellikle başlıksız tarayıcılar ve CDP kullanarak Python'da otomatik tarayıcı işlem hatları kuran geliştiriciler için SDK'dır. Kısaca: WebBrain, günlük gezinme için bir AI asistanı; ajan çatıları ise kazıma botları ve test otomasyonu inşa etmek içindir. İkisini de kullanabilirsin — birbirlerini tamamlarlar.</p>
+    </details>
+
+    <details class="faq-item">
+      <summary>WebBrain&#39;i tamamen çevrimdışı kullanabilir miyim?</summary>
+      <p>Evet. WebBrain'in varsayılan sağlayıcısı llama.cpp'dir; bilgisayarında yerel bir AI modeli çalıştırır. API anahtarı gerekmez, AI için internet gerekmez ve hiçbir veri makinenden çıkmaz. Bir GGUF modeli indir, llama-server'ı başlat ve tamamen özel bir AI tarayıcı ajanın olsun. Ollama'yı OpenAI uyumlu uç noktasıyla da kullanabilirsin.</p>
+    </details>
+
+    <details class="faq-item">
+      <summary>WebBrain hangi AI modellerini destekliyor?</summary>
+      <p>WebBrain dört sağlayıcı türünü destekler: llama.cpp (herhangi bir yerel GGUF modeli), OpenAI (GPT-4o, GPT-4 vb.), Claude (yerel API üzerinden Claude Opus, Sonnet, Haiku) ve OpenRouter (çeşitli sağlayıcılardan 100+ modele erişim). OpenAI uyumlu herhangi bir API uç noktası çalışır; Together AI, Groq, Mistral veya OpenAI uyumlu arayüze sahip herhangi bir yerel sunucuyu da kullanabilirsin.</p>
+    </details>
+
+    <details class="faq-item">
+      <summary>En çok önerilen model nedir?</summary>
+      <p><strong>21 Nisan 2026</strong> itibarıyla en çok önerdiğimiz model <a href="https://huggingface.co/Qwen/Qwen3.6-35B-A3B" target="_blank">Qwen 3.6 35B</a>. Nedeni: görme kıyaslamamızda (<a href="https://www.webbrain.one/blog/vision-model-shootout" target="_blank">vision-model-shootout</a>) ekran görüntüsü anlamada Gemma 4'ü geçti ve yerel çıkarım için hâlâ pratik.</p><p>Tüketici GPU'larında RTX 5090 ideal; RTX 4090 ise <a href="https://huggingface.co/Intel/Qwen3.6-35B-A3B-int4-AutoRound" target="_blank">Intel/Qwen3.6-35B-A3B-int4-AutoRound</a> üzerinden INT4 AutoRound niceleme ile sıklıkla çalıştırılabilir.</p><p>Maksimum hız için <strong>vLLM</strong> ile servis etmeni öneririz. Örnek komut:</p><p><code>python -u -m vllm.entrypoints.openai.api_server --model Intel/Qwen3.6-35B-A3B-int4-AutoRound --served-model-name qwen3.6-35b --quantization auto --dtype bfloat16 --max-model-len 65536 --max-num-batched-tokens 32768 --max-num-seqs 4 --host 0.0.0.0 --port 8000 --gpu-memory-utilization 0.92 --enable-prefix-caching --enable-chunked-prefill --limit-mm-per-prompt '{"image": 4, "video": 1}' --mm-processor-cache-type shm --reasoning-parser qwen3 --enable-auto-tool-choice --tool-call-parser qwen3_coder --trust-remote-code --allowed-origins '["*"]' --speculative-config '{"method": "dflash", "model": "z-lab/Qwen3.6-35B-A3B-DFlash", "num_speculative_tokens": 15}' --attention-backend flash_attn</code></p><p><em>DFlash spekülatif çözümleme isteğe bağlıdır.</em></p>
+    </details>
+
+    <details class="faq-item">
+      <summary>Ağımdaki yerel bir LLM sunucusuna (vLLM, Ollama, llama.cpp) bağlanırken «Failed to fetch» alıyorum</summary>
+      <p>LLM sunucunuz yerel ağınızdaki başka bir makinedeyse (ör. <code>http://192.168.1.x:8000</code>), sunucu <strong>CORS başlıkları</strong> göndermedikçe Chrome isteği engeller. Çözüm sunucuya göre değişir:</p><p><strong>vLLM:</strong> <code>--allowed-origins '["*"]'</code> ile başlatın (değer bir JSON listesi olmalıdır).<br><strong>Ollama:</strong> Başlatmadan önce <code>OLLAMA_ORIGINS=*</code> ortam değişkenini ayarlayın.<br><strong>llama.cpp:</strong> CORS varsayılan olarak açıktır — değişiklik gerekmez.</p><p>Sunucunuz <code>localhost</code>'ta (tarayıcıyla aynı makinede) çalışıyorsa genellikle CORS gerekmez. Sorun yalnızca yerel ağdaki makineler arası bağlantıları etkiler. WebBrain ayarlarındaki taban URL'nin <code>/v1</code> ile bittiğinden emin olun (ör. <code>http://192.168.1.47:8000/v1</code>).</p>
+    </details>
+
+    <details class="faq-item">
+      <summary>WebBrain Firefox&#39;ta çalışıyor mu?</summary>
+      <p>Evet. WebBrain hem Chrome sürümü (sidePanel API'sini kullanan Manifest V3) hem de Firefox sürümüyle (sidebar_action'ı kullanan Manifest V2) birlikte gelir. Her iki sürümün özellikleri aynıdır. Firefox sürümü geliştirme için geçici eklenti olarak yüklenebilir ya da kalıcı kurulum için addons.mozilla.org'da yayımlanabilir.</p>
+    </details>
+
+    <details class="faq-item">
+      <summary>WebBrain güvenli mi? Web sayfalarını değiştirebilir mi?</summary>
+      <p>WebBrain'in iki kipi vardır: Sor kipi (varsayılan) salt okunurdur ve sayfada hiçbir şeyi değiştiremez. Uygula kipi tam tarayıcı ajan yeteneklerini (tıklama, yazma, gezinme) açar, ancak etkinleştirilmeden önce kullanıcıdan açık onay ister ve görünür bir uyarı banner'ı ile gelir. İstediğin an Durdur düğmesiyle ajanı durdurabilirsin. Uzantının kaynak kodu denetim için tamamen GitHub'da açıktır.</p>
+    </details>
+
+    <details class="faq-item">
+      <summary>WebBrain&#39;i web kazıma ve veri çıkarma için nasıl kullanırım?</summary>
+      <p>Herhangi bir web sayfasını aç, WebBrain yan panelini aç ve doğal dille sor: «Bu sayfadaki tüm ürün adlarını ve fiyatlarını çıkar», «Bu sayfadaki tüm e-posta adreslerini getir» veya «Bu makaleyi madde madde özetle». AI ajanı sayfa içeriğini okur, yapısını anlar ve çıkardığı veriyi döner. Daha karmaşık kazımalar için Uygula kipine geç; ajan sayfalar arasında gezinir, sayfalama düğmelerine tıklar ve verileri birden çok sayfada birleştirebilir.</p>
+    </details>
+
+    <details class="faq-item">
+      <summary>WebBrain API&#39;leri doğrudan mı çağırır, yoksa her zaman arayüzden mi gider?</summary>
+      <p>Varsayılan olarak WebBrain; oluşturan, değiştiren, silen, gönderen, yayınlayan, paylaşan veya satın alan her eylem için <strong>her zaman görünür arayüzden gider</strong>. Sayfaya gider, formu doldurur ve düğmeye tıklar — tam da senin yapacağın gibi. Mutasyonlar için arka planda <code>fetch()</code> ile REST/GraphQL uç noktalarını doğrudan çağırmayı reddeder. Bu kasıtlıdır: API eylemleri görünmezdir (ne gönderildiğini görmezsin), çoğu zaman yapılandırmadığın ayrı yetki jetonları gerektirir ve görünür bir yanlış tıklamaya göre çok daha geniş bir etki alanına sahiptir. UI-first: her şey ekrandadır, olağan tarayıcı oturumundadır ve durdurulabilir.</p><p><strong>Veri okumak</strong> için — bir README alma, issue arama, fiyat karşılaştırma, durum sayfasını kontrol etme — WebBrain, <code>fetch_url</code> ve <code>research_url</code> araçlarıyla arka plan HTTP isteklerini rahatça kullanır. Okumak eylem değildir; uzak bir serviste hiçbir şey değişmez, bu nedenle güvenlik endişeleri burada geçerli değildir.</p><p>Belirli bir görev için API mutasyonlarına özellikle izin vermek istiyorsan, mesajının başına <code>/allow-api</code> yaz (isteğe bağlı olarak kısa bir görev tanımı ekle). Konuşma başına geçerli bu geçersiz kılma, arayüz gerçekten başarısız ya da kullanılamaz olduğunda WebBrain'in API uç noktalarına geri düşmesine izin verir; arayüz çalıştığında yine arayüzü tercih eder. Geçersiz kılma aktifken giriş alanının üstünde yapışkan bir rozet görünür ve konuşma sıfırlandığında bayrak temizlenir.</p>
+    </details>
+
+    <details class="faq-item">
+      <summary>WebBrain bir sayfada çalışırken başka bir sekmeye geçebilir miyim?</summary>
+      <p>Evet, Chrome'da — ajan arka plan service worker'ında çalışır ve başladığı sekmeye bağlıdır; yani odağını başka yere taşısan bile o belirli sekmeyi tıklamaya, yazmaya ve okumaya devam eder. Bir sekmeyi hedefleyen araçlar (CDP ile tıklama, yazma, gezinme, ekran görüntüsü) Chrome'da arka plan sekmelerinde çalışır. Bir görev sürerken yan çubuk girişi kilitler; böylece yeni sekmede kazara ikinci bir görev başlatamazsın — mevcut olanı beklemen ya da durdurman gerekir. Tarayıcılar arka plan sekmelerindeki zamanlayıcıları ve animasyonları yavaşlattığı için ağır animasyonlu siteler biraz daha yavaş tepki verebilir.</p><p>Firefox'ta ajan yine orijinal sekmesinde çalışmaya devam eder, ancak otomatik ekran görüntüleri kısıtlıdır: Firefox'un ekran görüntüsü API'si yalnızca aktif sekmeyi yakalayabilir, arka plandaki belirli bir sekmeyi değil. WebBrain bunu algılar ve alakasız bir sayfanın görüntüsünü modele beslemektense o tur için ekran görüntüsünü atlar. Ajan, sen sekmesine geri dönene dek metin tabanlı bağlamla planlamaya devam eder.</p><p><strong>Ajanın çalıştığı sekmede aktif olarak tıklamaktan ya da yazmaktan kaçın</strong> — aynı sayfa üzerinde senin ve ajanın birbirinizle yarıştığı yarış koşulları doğar. Sekme değiştirmek sorun değil; aynı sekmeyi beraber sürmek sorun.</p>
+    </details>
+
+    <details class="faq-item">
+      <summary>Profil otomatik doldurma nasıl çalışır ve güvenli mi?</summary>
+      <p>Profil otomatik doldurma, <strong>Ayarlar → Profil</strong> altında isteğe bağlı bir özelliktir. Kısa bir biyografi girersin — ad, iş e-postası, şirket ve düşük riskli kayıtlar için <em>tek kullanımlık</em> bir parola — ve açarsın. Etkinleştirildiğinde WebBrain bu metni ajanın sistem istemine ekler, böylece kayıt formlarını her seferinde sormadan doldurabilir.</p><p>Metin tarayıcının yerel depolamasında <strong>düz metin olarak</strong> saklanır. <strong>WebBrain projesine iletilmez</strong> ama yapılandırdığın LLM sağlayıcısına her turda sistem isteminin bir parçası olarak <strong>gönderilir</strong>. Varsayılan kapalı.</p><p><strong>Önemli hesapların parolalarını</strong> (Google, Apple, iCloud, bankacılık, iş SSO'su, birincil e-posta) buraya koyma. Bu hesaplar 2FA kullanmalı ve zaten bir ajana teslim edilmemeli. Amaçlanan kullanım durumu, bülten kayıtları ve ücretsiz denemeler için tekrar tekrar kullandığın tek kullanımlık bir paroladır.</p>
+    </details>
+
+    <details class="faq-item">
+      <summary>WebBrain, çerez banner&#39;ları ve ödeme duvarlarıyla ne yapar?</summary>
+      <p><strong>Çerez banner'ları:</strong> WebBrain yaygın çerçevelerin (OneTrust, Cookiebot, Didomi, Quantcast, Google Funding Choices, TrustArc) onay banner'larını tanır ve sayfa üzerinde akıl yürütmeden önce kapatır. Öncelik açıkça görünürse «Tümünü reddet» / «Gerekli olmayanları reddet» / «Yalnızca gerekliler»; aksi hâlde «Tercihleri yönet» labirentine kaybolmak yerine «Tümünü kabul et»e düşer.</p><p><strong>Ödeme duvarları:</strong> WebBrain ödeme duvarını dürüstçe bildirir ve gerçekten ne gördüğünü (başlık, alt başlık, ilk paragraflar) söyler. Ödeme duvarlarını aşmaya <strong>çalışmaz</strong> — ne archive.today, ne 12ft.io, ne çerez silme, ne JS devre dışı bırakma, ne okuma modu hileleri. Tam makaleyi istiyorsan abonelikle giriş yap ya da WebBrain'den aynı haberin ücretsiz kapsamını aramasını iste.</p>
+    </details>
+
+    <details class="faq-item">
+      <summary>WebBrain arayüzü hangi dilleri destekler?</summary>
+      <p>Eklenti; <strong>English, Español, Français, Türkçe ve 中文</strong> dillerinde tamamen çevrilmiş arayüzle gelir. İlk kullanımda tarayıcı dilini otomatik algılar; sonrasında istediğin an yan panel başlığındaki küre simgesinden ya da <strong>Ayarlar → Görüntü</strong> içindeki Dil satırından değiştirebilirsin. Ayar, <code>browser.storage.local</code> üzerinden yan panel, seçenekler sayfası ve izler sayfası arasında eşitlenir. Bu pazarlama sitesi de buna uygun şekilde yerelleştirildi: <code>/es/</code>, <code>/fr/</code>, <code>/tr/</code>, <code>/zh/</code> hepsi İngilizce sayfayı yansıtır.</p>
+    </details>
+
+    <details class="faq-item">
+      <summary>WebBrain bulut LLM faturalarını nasıl kontrol altında tutar?</summary>
+      <p>Üç bağımsız katman:</p><p><strong>Token bilincine sahip ekran görüntüleri.</strong> Herhangi bir görüntü makineden çıkmadan önce WebBrain onu yeniden boyutlandırır (kısa kenar sınırlanır, en-boy oranı korunur) ve tur başına görüntü token bütçesine sığana kadar yinelemeli olarak JPEG sıkıştırır. GPT-4o'da sana yaklaşık 1.500 giriş tokeni mal olacak 2000×1200 bir ekran görüntüsü, sayfa okuma görevlerinde pratik kayıp olmaksızın yaklaşık 300–500 tokene inerek sıkıştırılır. <code>_fitImageDimensions</code> içinde uygulanır, bütçe matematiği için birim testleri vardır.</p><p><strong>Akıllı bağlam kırpma.</strong> Konuşma geçmişi, araç çıktıları ve satır içi DOM dökümleri tur başına sınırlıdır ve aktif modelin bağlam penceresi dolmaya yaklaştığında önce en eskilerden kırpılır. Bir <code>read_page</code> roman uzunluğunda bir makale döndürdü diye bir çalışmanın 10 binden 100 bin token'a sessizce şişmesini görmezsin.</p><p><strong>Özel görme modeli.</strong> Planlama ve araç çağrıları için ucuz bir metin modelini (ör. GPT-4o-mini), yalnızca ekran görüntüleri için ayrı bir görme modeliyle (ör. GPT-4o) eşleştir; böylece her turda çok kipli model fiyatını ödemezsin. <strong>Ayarlar → Görme</strong> altında yapılandırılır.</p><p>Net sonuç: bulut sağlayıcılarıyla uzun oturumlar öngörülebilir kalır. Tam kontrol için yerel llama.cpp'yi kullan — token başına sıfır maliyet.</p>
+    </details>
+
+    <details class="faq-item">
+      <summary>WebBrain&#39;e katkıda bulunabilir miyim?</summary>
+      <p>Kesinlikle! WebBrain MIT lisanslıdır ve katkılara açıktır. Issue'lar, özellik istekleri ve katkı kılavuzu için <a href="https://github.com/esokullu/webbrain" target="_blank">GitHub deposuna</a> göz at.</p>
+    </details>
+  </div>
+</section>
+
+<!-- OPEN SOURCE -->
+<section class="section">
+  <div class="oss-banner">
+    <h3>%100 açık kaynak</h3>
+    <p>WebBrain MIT lisanslıdır. Kodu incele, özelliklere katkı ver ya da çatallayıp kendine özelleştir.</p>
+    <a href="https://github.com/esokullu/webbrain" target="_blank" class="btn btn-secondary">
+      <svg viewBox="0 0 24 24" fill="currentColor" width="18" height="18"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0 0 24 12c0-6.63-5.37-12-12-12z"/></svg>
+      GitHub&#39;da yıldızla
+    </a>
+  </div>
+</section>
+
+<!-- FOOTER -->
+<footer>
+  <div class="safety-note" id="safety">
+    <h4>Önemli güvenlik uyarısı</h4>
+    <ul>
+      <li>WebBrain&#39;in Uygula kipi senin adına gerçek eylemler gerçekleştirebilir. Devam etmeden önce istekleri, hedefleri ve sonuçları gözden geçirmek senin sorumluluğundadır.</li>
+      <li>WebBrain planlama için ekran görüntüsü alabilir. Riskini kabul etmediğin sürece hassas sayfalarda (örneğin sağlık, finans, flört veya özel hesap portalları) ajan kipini kullanmaktan kaçın.</li>
+      <li>Web içeriği, AI davranışını manipüle etmek üzere tasarlanmış zararlı prompt enjeksiyonları içerebilir. Önerilen eylemleri her zaman gözden geçir ve beklenmeyen görünen çalışmaları durdur.</li>
+    </ul>
+  </div>
+  <div class="footer-inner">
+    <span>© 2026 WebBrain. <a href="https://emresokullu.com" target="_blank">Emre Sokullu</a> tarafından yapıldı.</span>
+    <div class="footer-links">
+      <a href="https://github.com/esokullu/webbrain" target="_blank">GitHub</a>
+      <a href="#safety">Güvenlik uyarısı</a>
+      <a href="/privacy">Gizlilik politikası</a>
+      <a href="https://github.com/esokullu/webbrain/issues" target="_blank">Hata bildir</a>
+      <a href="https://github.com/esokullu/webbrain/blob/main/LICENSE" target="_blank">MIT Lisansı</a>
+    </div>
+  </div>
+</footer>
+
+<script>
+  (function () {
+    const demoVideo = document.getElementById('demo-video');
+    if (!demoVideo) return;
+
+    const mobileQuery = window.matchMedia('(max-width: 768px)');
+
+    function syncDemoVideoSource(event) {
+      const isMobile = event.matches ?? mobileQuery.matches;
+      const nextSrc = isMobile ? demoVideo.dataset.mobileSrc : demoVideo.dataset.desktopSrc;
+      if (nextSrc && demoVideo.src !== nextSrc) {
+        demoVideo.src = nextSrc;
+      }
+    }
+
+    syncDemoVideoSource(mobileQuery);
+
+    if (typeof mobileQuery.addEventListener === 'function') {
+      mobileQuery.addEventListener('change', syncDemoVideoSource);
+    } else if (typeof mobileQuery.addListener === 'function') {
+      mobileQuery.addListener(syncDemoVideoSource);
+    }
+  })();
+</script>
+
+<!-- Path-preserving language dropdown. Strips any leading locale segment
+     from the current path, then prepends the new one so /es/foo → /fr/foo
+     instead of collapsing to the locale homepage. -->
+<script>
+  (function () {
+    const LOCALES = ['en', 'es', 'fr', 'tr', 'zh'];
+    const sel = document.getElementById('lang-dropdown');
+    if (!sel) return;
+    const current = sel.dataset.current || 'en';
+    sel.value = current;
+    sel.addEventListener('change', function () {
+      const target = sel.value;
+      if (!LOCALES.includes(target)) return;
+      const { pathname, search, hash } = window.location;
+      const parts = pathname.split('/').filter(Boolean);
+      if (parts.length && LOCALES.includes(parts[0])) {
+        parts.shift(); // drop leading locale
+      }
+      const rest = parts.length ? '/' + parts.join('/') : '/';
+      const next = target === 'en' ? rest : '/' + target + rest;
+      window.location.href = next + search + hash;
+    });
+  })();
+</script>
+
 </body>
 </html>

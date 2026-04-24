@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"
+        xmlns:xhtml="http://www.w3.org/1999/xhtml">
+  <url>
+    <loc>https://webbrain.one/</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://webbrain.one/"/>
+    <xhtml:link rel="alternate" hreflang="es" href="https://webbrain.one/es/"/>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://webbrain.one/fr/"/>
+    <xhtml:link rel="alternate" hreflang="tr" href="https://webbrain.one/tr/"/>
+    <xhtml:link rel="alternate" hreflang="zh" href="https://webbrain.one/zh/"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://webbrain.one/"/>
+  </url>
+  <url>
+    <loc>https://webbrain.one/es/</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://webbrain.one/"/>
+    <xhtml:link rel="alternate" hreflang="es" href="https://webbrain.one/es/"/>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://webbrain.one/fr/"/>
+    <xhtml:link rel="alternate" hreflang="tr" href="https://webbrain.one/tr/"/>
+    <xhtml:link rel="alternate" hreflang="zh" href="https://webbrain.one/zh/"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://webbrain.one/"/>
+  </url>
+  <url>
+    <loc>https://webbrain.one/fr/</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://webbrain.one/"/>
+    <xhtml:link rel="alternate" hreflang="es" href="https://webbrain.one/es/"/>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://webbrain.one/fr/"/>
+    <xhtml:link rel="alternate" hreflang="tr" href="https://webbrain.one/tr/"/>
+    <xhtml:link rel="alternate" hreflang="zh" href="https://webbrain.one/zh/"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://webbrain.one/"/>
+  </url>
+  <url>
+    <loc>https://webbrain.one/tr/</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://webbrain.one/"/>
+    <xhtml:link rel="alternate" hreflang="es" href="https://webbrain.one/es/"/>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://webbrain.one/fr/"/>
+    <xhtml:link rel="alternate" hreflang="tr" href="https://webbrain.one/tr/"/>
+    <xhtml:link rel="alternate" hreflang="zh" href="https://webbrain.one/zh/"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://webbrain.one/"/>
+  </url>
+  <url>
+    <loc>https://webbrain.one/zh/</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://webbrain.one/"/>
+    <xhtml:link rel="alternate" hreflang="es" href="https://webbrain.one/es/"/>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://webbrain.one/fr/"/>
+    <xhtml:link rel="alternate" hreflang="tr" href="https://webbrain.one/tr/"/>
+    <xhtml:link rel="alternate" hreflang="zh" href="https://webbrain.one/zh/"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://webbrain.one/"/>
+  </url>
+  <url>
+    <loc>https://webbrain.one/privacy</loc>
+  </url>
+  <url>
+    <loc>https://webbrain.one/blog/</loc>
+  </url>
+</urlset>

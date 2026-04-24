@@ -15,6 +15,13 @@
   <meta name="twitter:description" content="Engineering notes from WebBrain.">
   <link rel="icon" type="image/svg+xml" href="/favicon.svg">
   <link rel="canonical" href="https://webbrain.one/blog">
+  <!-- Blog is English-only for now; alternates point to locale homepages. -->
+  <link rel="alternate" hreflang="en" href="https://webbrain.one/">
+  <link rel="alternate" hreflang="es" href="https://webbrain.one/es/">
+  <link rel="alternate" hreflang="fr" href="https://webbrain.one/fr/">
+  <link rel="alternate" hreflang="tr" href="https://webbrain.one/tr/">
+  <link rel="alternate" hreflang="zh" href="https://webbrain.one/zh/">
+  <link rel="alternate" hreflang="x-default" href="https://webbrain.one/">
   <style>
     *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
     :root {
@@ -165,6 +172,14 @@
       <div class="nav-links">
         <a href="/">Home</a>
         <a href="/blog">Blog</a>
+        <select class="lang-dropdown" id="lang-dropdown" aria-label="Select language" data-current="en"
+                style="background:rgba(255,255,255,0.05); color:inherit; border:1px solid rgba(255,255,255,0.08); border-radius:8px; padding:6px 10px; font-size:13px;">
+          <option value="en">English</option>
+          <option value="es">Español</option>
+          <option value="fr">Français</option>
+          <option value="tr">Türkçe</option>
+          <option value="zh">中文</option>
+        </select>
         <a href="https://github.com/esokullu/webbrain" target="_blank">GitHub</a>
       </div>
     </div>
@@ -188,5 +203,21 @@
     <div>© 2026 WebBrain · <a href="/privacy">Privacy</a></div>
     <div><a href="https://github.com/esokullu/webbrain" target="_blank">GitHub</a></div>
   </footer>
+
+  <!-- Blog is English-only; dropdown takes the user to the selected locale's
+       homepage rather than 404ing on a non-existent /xx/blog. -->
+  <script>
+    (function () {
+      const LOCALES = ['en', 'es', 'fr', 'tr', 'zh'];
+      const sel = document.getElementById('lang-dropdown');
+      if (!sel) return;
+      sel.value = sel.dataset.current || 'en';
+      sel.addEventListener('change', function () {
+        const target = sel.value;
+        if (!LOCALES.includes(target)) return;
+        window.location.href = target === 'en' ? '/' : '/' + target + '/';
+      });
+    })();
+  </script>
 </body>
 </html>

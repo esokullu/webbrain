@@ -3,62 +3,1445 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>WebBrain — Agent navigateur IA open source pour Chrome et Firefox</title>
-  <meta name="description" content="WebBrain est un agent navigateur IA gratuit et open source pour Chrome et Firefox. Lisez des pages, extrayez des données et automatisez des tâches avec des modèles locaux ou cloud.">
+  <title>WebBrain — Agent de navigateur IA gratuit et open source pour Chrome et Firefox</title>
+  <meta name="description" content="WebBrain est une alternative gratuite et open source au plugin navigateur de Claude. Agent IA pour Chrome et Firefox : lire des pages, extraire des données, automatiser des tâches. Compatible avec llama.cpp, OpenAI, Claude, OpenRouter. Interface multilingue, captures économes en tokens. Licence MIT.">
+  <meta name="keywords" content="agent navigateur IA, automatisation navigateur, plugin navigateur open source, alternative plugin Claude, alternative OpenClaw, automatisation web, extension navigateur LLM, extension Chrome IA, module Firefox IA, llama.cpp navigateur, agent GPT navigateur, assistant IA navigateur, scraping web IA, IA navigateur multilingue, extension IA économe en tokens">
+  <meta property="og:title" content="WebBrain — Agent de navigateur IA gratuit et open source">
+  <meta property="og:description" content="L&#39;alternative open source au plugin navigateur de Claude. Extension IA pour Chrome et Firefox. Lire, comprendre et automatiser n&#39;importe quelle page web. Support multi-fournisseur de LLM. Interface multilingue. Gratuit pour toujours.">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://webbrain.one/fr/">
+  <meta property="og:site_name" content="WebBrain">
+  <meta property="og:locale" content="fr-FR">
+  <meta property="og:image" content="https://webbrain.one/og-image.svg">
+  <meta property="og:image:secure_url" content="https://webbrain.one/og-image.svg">
+  <meta property="og:image:type" content="image/svg+xml">
+  <meta property="og:image:alt" content="Icône WebBrain">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="WebBrain — Agent de navigateur IA open source">
+  <meta name="twitter:description" content="Alternative gratuite et open source au plugin Claude. Agent IA pour Chrome et Firefox. Fonctionne avec des LLM locaux ou cloud. Interface en 5 langues. Consommation de tokens maîtrisée par défaut.">
+  <meta name="twitter:image" content="https://webbrain.one/og-image.svg">
+  <meta name="twitter:image:alt" content="Icône WebBrain">
+  <meta name="robots" content="index, follow">
   <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <link rel="canonical" href="https://webbrain.one/fr/">
+  <link rel="alternate" hreflang="en" href="https://webbrain.one/">
+  <link rel="alternate" hreflang="es" href="https://webbrain.one/es/">
+  <link rel="alternate" hreflang="fr" href="https://webbrain.one/fr/">
+  <link rel="alternate" hreflang="tr" href="https://webbrain.one/tr/">
+  <link rel="alternate" hreflang="zh" href="https://webbrain.one/zh/">
+  <link rel="alternate" hreflang="x-default" href="https://webbrain.one/">
+  <!-- JSON-LD Structured Data -->
+  <script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  "name": "WebBrain",
+  "applicationCategory": "BrowserApplication",
+  "operatingSystem": "Chrome, Firefox",
+  "offers": {
+    "@type": "Offer",
+    "price": "0",
+    "priceCurrency": "USD"
+  },
+  "description": "WebBrain est une alternative gratuite et open source au plugin navigateur de Claude. Agent IA pour Chrome et Firefox : lire des pages, extraire des données, automatiser des tâches. Compatible avec llama.cpp, OpenAI, Claude, OpenRouter. Interface multilingue, captures économes en tokens. Licence MIT.",
+  "url": "https://webbrain.one/fr/",
+  "inLanguage": "fr-FR",
+  "downloadUrl": "https://chromewebstore.google.com/detail/webbrain/ljhijonmfahplgbbacgcfnaihbjljhhb",
+  "softwareVersion": "4.2.1",
+  "author": {
+    "@type": "Person",
+    "name": "Emre Sokullu",
+    "url": "https://emresokullu.com"
+  },
+  "license": "https://opensource.org/licenses/MIT",
+  "isAccessibleForFree": true,
+  "screenshot": "https://webbrain.one/og-image.svg"
+}
+  </script>
+  <script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  "inLanguage": "fr-FR",
+  "mainEntity": [
+    {
+      "@type": "Question",
+      "name": "WebBrain est-il une alternative gratuite au plugin navigateur de Claude ?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Oui. WebBrain fournit des capacités d'agent IA similaires — lecture de pages, extraction de données, clics sur boutons, remplissage de formulaires et automatisation de flux multi-étapes. Contrairement au plugin propriétaire de Claude, qui nécessite un abonnement Claude Pro et ne fonctionne qu'avec les modèles d'Anthropic, WebBrain est totalement gratuit, open source (licence MIT) et prend en charge plusieurs fournisseurs de LLM, y compris des modèles locaux exécutés entièrement sur votre machine."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Quelle est la différence entre WebBrain et OpenClaw, Browser-Use et les autres frameworks d'agents IA ?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Ce sont des catégories d'outils différentes. WebBrain est une extension de navigateur — vous l'installez dans Chrome ou Firefox et discutez avec elle dans un panneau latéral, sans coder. Des frameworks comme OpenClaw et Browser-Use sont des SDK pour développeurs, destinés à construire des pipelines automatisés en Python, généralement avec des navigateurs headless et CDP. Autrement dit : WebBrain est pour naviguer au quotidien avec un assistant IA ; les frameworks sont pour construire des bots de scraping et automatiser des tests. Vous pouvez utiliser les deux — ils sont complémentaires."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Puis-je utiliser WebBrain totalement hors ligne ?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Oui. Le fournisseur par défaut de WebBrain est llama.cpp, qui exécute un modèle IA local sur votre ordinateur. Aucune clé d'API, aucune connexion Internet pour l'IA et aucune donnée ne quitte votre machine. Téléchargez un modèle GGUF, démarrez llama-server et vous disposez d'un agent IA totalement privé. Vous pouvez aussi utiliser Ollama via son endpoint compatible OpenAI."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Quels modèles d'IA WebBrain prend-il en charge ?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "WebBrain prend en charge quatre types de fournisseurs : llama.cpp (n'importe quel modèle GGUF local), OpenAI (GPT-4o, GPT-4, etc.), Claude (Claude Opus, Sonnet, Haiku via l'API native) et OpenRouter (accès à plus de 100 modèles de divers fournisseurs). Tout endpoint compatible OpenAI fonctionne : vous pouvez donc aussi utiliser des services comme Together AI, Groq, Mistral ou tout serveur local à interface compatible OpenAI."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Quel est le modèle le plus recommandé ?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Au 21 avril 2026, notre recommandation principale est Qwen 3.6 35B. Raison : dans notre benchmark vision (vision-model-shootout), il surpasse Gemma 4 en compréhension de captures tout en restant exploitable en inférence locale. Côté GPU grand public, une RTX 5090 est idéale, et la RTX 4090 reste souvent exploitable avec la quantisation INT4 AutoRound via Intel/Qwen3.6-35B-A3B-int4-AutoRound. Pour un débit maximal, servez-le avec vLLM. Exemple de commande : python -u -m vllm.entrypoints.openai.api_server --model Intel/Qwen3.6-35B-A3B-int4-AutoRound --served-model-name qwen3.6-35b --quantization auto --dtype bfloat16 --max-model-len 65536 --max-num-batched-tokens 32768 --max-num-seqs 4 --host 0.0.0.0 --port 8000 --gpu-memory-utilization 0.92 --enable-prefix-caching --enable-chunked-prefill --limit-mm-per-prompt '{\"image\": 4, \"video\": 1}' --mm-processor-cache-type shm --reasoning-parser qwen3 --enable-auto-tool-choice --tool-call-parser qwen3_coder --trust-remote-code --allowed-origins '[\"*\"]' --speculative-config '{\"method\": \"dflash\", \"model\": \"z-lab/Qwen3.6-35B-A3B-DFlash\", \"num_speculative_tokens\": 15}' --attention-backend flash_attn Le décodage spéculatif DFlash est optionnel."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "J'obtiens « Failed to fetch » en me connectant à un serveur LLM local (vLLM, Ollama, llama.cpp) sur mon réseau",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Si votre serveur LLM est sur une autre machine du réseau local (par ex. http://192.168.1.x:8000), Chrome bloque la requête sauf si le serveur envoie des en-têtes CORS. La solution dépend du serveur : vLLM : démarrer avec --allowed-origins '[\"*\"]' (la valeur doit être une liste JSON). Ollama : définir la variable OLLAMA_ORIGINS=* avant le démarrage. llama.cpp : CORS est activé par défaut — rien à changer. Si votre serveur tourne sur localhost (même machine que le navigateur), CORS n'est généralement pas requis. Le problème concerne seulement les connexions entre machines sur le réseau local. Vérifiez que l'URL de base dans les paramètres WebBrain se termine par /v1 (par ex. http://192.168.1.47:8000/v1)."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "WebBrain fonctionne-t-il sur Firefox ?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Oui. WebBrain est livré avec une version Chrome (Manifest V3, via l'API sidePanel) et une version Firefox (Manifest V2, via sidebar_action). Les deux versions ont les mêmes fonctionnalités. La version Firefox peut être chargée comme module temporaire pour le développement, ou publiée sur addons.mozilla.org pour une installation permanente."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "WebBrain est-il sûr ? Peut-il modifier les pages web ?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "WebBrain a deux modes : le mode Demander (par défaut) est en lecture seule et ne peut rien modifier sur la page. Le mode Agir active les capacités complètes de l'agent (clic, saisie, navigation) mais demande une confirmation explicite de l'utilisateur avant activation et affiche un avertissement visible. Vous pouvez arrêter l'agent à tout moment avec le bouton Arrêter. Le code source de l'extension est entièrement ouvert à l'audit sur GitHub."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Comment utiliser WebBrain pour le scraping et l'extraction de données ?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Ouvrez n'importe quelle page web, ouvrez le panneau latéral WebBrain et demandez en langage naturel : « Extrais tous les noms de produits et prix de cette page », « Donne-moi toutes les adresses e-mail de cette page » ou « Résume cet article en puces ». L'agent lit le contenu, comprend la structure et renvoie les données extraites. Pour du scraping plus complexe, passez en mode Agir : l'agent peut naviguer entre les pages, cliquer sur les boutons de pagination et agréger les données sur plusieurs pages."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "WebBrain appelle-t-il les API directement ou passe-t-il toujours par l'interface ?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Par défaut, WebBrain passe toujours par l'interface visible pour toute action qui crée, modifie, supprime, envoie, publie, poste ou achète quoi que ce soit. Il navigue jusqu'à la page, remplit le formulaire et clique sur le bouton — exactement comme vous. Il refuse d'appeler directement des endpoints REST/GraphQL via fetch() en arrière-plan pour des mutations. C'est délibéré : les actions par API sont invisibles (vous ne voyez pas ce qui est envoyé), exigent souvent des jetons d'auth que vous n'avez peut-être pas configurés, et ont un rayon d'impact bien plus large qu'un mauvais clic visible. UI-first signifie que tout est à l'écran, dans votre session habituelle, et interruptible. Pour lire des données — récupérer un README, consulter un ticket, comparer des prix, vérifier une page de statut — WebBrain utilise librement les requêtes HTTP en arrière-plan via les outils fetch_url et research_url. Lire n'est pas agir ; rien ne change sur un service distant, donc les garde-fous ne s'appliquent pas. Si vous voulez autoriser les mutations par API pour une tâche précise, tapez /allow-api en début de message (éventuellement suivi d'une courte description). Cette dérogation par conversation permet à WebBrain de basculer vers des endpoints API quand l'interface échoue vraiment, tout en privilégiant l'UI quand elle fonctionne. Un badge collant reste visible au-dessus de la zone de saisie tant que la dérogation est active, et se dissipe quand vous réinitialisez la conversation."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Puis-je changer d'onglet pendant que WebBrain travaille sur une page ?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Oui, sur Chrome — l'agent tourne dans le service worker d'arrière-plan, lié à l'onglet où il a démarré, et continue donc à cliquer, taper et lire cet onglet précis même quand vous changez de focus. Les outils ciblant un onglet (clic, saisie, navigation, capture via CDP) fonctionnent sur des onglets en arrière-plan sous Chrome. La barre latérale verrouille la saisie tant qu'une tâche est en cours, pour ne pas en démarrer une seconde par inadvertance sur le nouvel onglet — vous devez attendre ou arrêter la première. À noter que les navigateurs limitent les timers et animations des onglets d'arrière-plan, donc les sites très animés peuvent répondre un peu plus lentement. Sur Firefox, l'agent continue aussi de s'exécuter sur son onglet d'origine, mais les captures automatiques sont limitées : l'API de capture de Firefox ne sait capturer que l'onglet actif, pas un onglet précis en arrière-plan. WebBrain le détecte et saute la capture pour ce tour plutôt que d'envoyer au modèle l'image d'une page sans rapport. L'agent continue alors à planifier à partir du contexte textuel jusqu'à ce que vous reveniez à son onglet. Évitez de cliquer ou de saisir activement dans le même onglet que l'agent — cela crée des conditions de course où vous et l'agent vous disputez la même page. Changer d'onglet : très bien. Co-piloter le même onglet : à éviter."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Comment fonctionne l'auto-remplissage de profil, et est-ce sûr ?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "L'auto-remplissage de profil est une fonctionnalité optionnelle dans Paramètres → Profil. Vous saisissez une courte bio — nom, e-mail pro, entreprise et un mot de passe jetable pour les inscriptions à faible enjeu — et vous l'activez. Une fois actif, WebBrain ajoute ce texte au prompt système de l'agent, afin qu'il puisse remplir les formulaires d'inscription sans vous demander à chaque fois. Le texte est stocké en clair dans le stockage local du navigateur. Il n'est pas transmis au projet WebBrain, mais il est envoyé au fournisseur de LLM que vous avez configuré à chaque tour, dans le prompt système. Désactivé par défaut. N'y mettez pas les mots de passe de comptes importants (Google, Apple, iCloud, banque, SSO pro, e-mail principal). Ces comptes devraient utiliser la 2FA et ne devraient pas être confiés à un agent. L'usage prévu est un mot de passe jetable réutilisé pour des newsletters et des essais gratuits."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Que fait WebBrain avec les bannières de cookies et les paywalls ?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Bannières de cookies : WebBrain reconnaît les bannières de consentement des frameworks courants (OneTrust, Cookiebot, Didomi, Quantcast, Google Funding Choices, TrustArc) et les écarte avant de raisonner sur la page. Priorité à « Tout refuser » / « Refuser non essentiels » / « Uniquement nécessaires » quand c'est clairement visible ; par défaut, il choisit « Tout accepter » plutôt que de se perdre dans le labyrinthe « Gérer les préférences ». Paywalls : WebBrain signale le paywall honnêtement et vous dit ce qu'il a réellement pu voir (titre, chapô, premiers paragraphes). Il n'essaie pas de contourner les paywalls — pas d'archive.today, pas de 12ft.io, pas d'effacement de cookies, pas de désactivation du JS, pas de ruses de mode lecture. Pour l'article complet, connectez-vous avec un abonnement ou demandez à WebBrain de chercher une couverture gratuite de la même histoire."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Quelles langues l'interface de WebBrain prend-elle en charge ?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "L'extension est livrée avec une interface entièrement traduite en English, Español, Français, Türkçe et 中文. À la première utilisation, elle détecte automatiquement la langue du navigateur ; ensuite, vous pouvez changer à tout moment depuis l'icône globe dans l'en-tête du panneau latéral ou depuis la ligne Langue dans Paramètres → Affichage. Le réglage est synchronisé entre le panneau latéral, la page d'options et la page des traces via browser.storage.local. Ce site marketing est localisé en conséquence : /es/, /fr/, /tr/, /zh/ reflètent la page anglaise."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Comment WebBrain garde-t-il sous contrôle les factures des LLM cloud ?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Trois couches indépendantes : Captures économes en tokens. Avant qu'une image ne quitte votre machine, WebBrain la redimensionne (côté court plafonné, ratio conservé) et la compresse itérativement en JPEG jusqu'à entrer dans le budget de tokens d'image par tour. Une capture 2000×1200 qui vous coûterait environ 1 500 tokens d'entrée sur GPT-4o est ramenée à environ 300–500 tokens sans perte pratique pour la lecture de pages. Implémenté dans _fitImageDimensions avec des tests unitaires sur le calcul du budget. Rognage intelligent du contexte. Historique, sortie d'outils et dumps DOM inline sont plafonnés par tour et rognés du plus ancien au plus récent quand le contexte du modèle actif approche de la saturation. Vous ne verrez pas une exécution passer silencieusement de 10 k à 100 k tokens parce qu'un read_page a renvoyé un article interminable. Modèle de vision dédié. Combinez un modèle texte bon marché (par ex. GPT-4o-mini) pour la planification et les appels d'outils avec un modèle de vision (par ex. GPT-4o) réservé aux captures, pour ne pas payer le tarif multimodal à chaque tour. À configurer dans Paramètres → Vision. Résultat : les longues sessions avec des fournisseurs cloud restent prévisibles. Pour un contrôle total, utilisez llama.cpp en local — coût par token nul."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Puis-je contribuer à WebBrain ?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Absolument ! WebBrain est sous licence MIT et accueille les contributions. Consultez le dépôt GitHub pour les issues, demandes de fonctionnalités et consignes de contribution."
+      }
+    }
+  ]
+}
+  </script>
   <style>
-    :root { --bg:#0b0e17; --card:#111827; --text:#e4e4ec; --muted:#8b8fa4; --accent:#6c63ff; --accent2:#a78bfa; --border:rgba(255,255,255,.08); }
-    * { box-sizing: border-box; }
-    body { margin:0; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Inter,Roboto,sans-serif; background:var(--bg); color:var(--text); line-height:1.6; }
-    .wrap { max-width:980px; margin:0 auto; padding:24px; }
-    .top { display:flex; justify-content:space-between; align-items:center; gap:16px; }
-    .brand { font-weight:800; font-size:24px; background:linear-gradient(135deg,var(--accent),var(--accent2)); -webkit-background-clip:text; -webkit-text-fill-color:transparent; }
-    .lang-dropdown { background:rgba(255,255,255,.05); color:var(--text); border:1px solid var(--border); border-radius:8px; padding:8px 10px; font-size:14px; }
-    .hero { background:linear-gradient(180deg, rgba(108,99,255,.15), transparent); border:1px solid var(--border); border-radius:16px; padding:28px; margin-top:24px; }
-    h1 { margin:0 0 10px; font-size:38px; line-height:1.15; }
-    p { color:var(--muted); }
-    .cta { display:flex; flex-wrap:wrap; gap:12px; margin-top:18px; }
-    .btn { display:inline-block; padding:10px 16px; border-radius:10px; text-decoration:none; font-weight:600; }
-    .btn.primary { background:var(--accent); color:white; }
-    .btn.secondary { border:1px solid var(--border); color:var(--text); }
-    .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:14px; margin-top:20px; }
-    .card { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:16px; }
-    h3 { margin:0 0 6px; }
-    footer { margin:36px 0 20px; color:var(--muted); font-size:14px; }
+    /* ================================================================
+       RESET & BASE
+       ================================================================ */
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+    :root {
+      --bg: #0b0e17;
+      --bg-card: #111827;
+      --bg-card-hover: #1a2233;
+      --surface: #161d2e;
+      --border: rgba(255,255,255,0.07);
+      --text: #e4e4ec;
+      --text-dim: #8b8fa4;
+      --accent: #6c63ff;
+      --accent-glow: rgba(108,99,255,0.25);
+      --accent2: #a78bfa;
+      --success: #34d399;
+      --warning: #fbbf24;
+      --radius: 16px;
+      --radius-sm: 10px;
+      --max-w: 1100px;
+    }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Inter, Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+      overflow-x: hidden;
+    }
+
+    a { color: var(--accent2); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+
+    /* ================================================================
+       GLOW BACKGROUND
+       ================================================================ */
+    .glow-bg {
+      position: fixed;
+      inset: 0;
+      z-index: -1;
+      overflow: hidden;
+    }
+    .glow-bg::before {
+      content: '';
+      position: absolute;
+      width: 600px; height: 600px;
+      top: -120px; left: 50%;
+      transform: translateX(-50%);
+      background: radial-gradient(circle, var(--accent-glow) 0%, transparent 70%);
+      filter: blur(80px);
+    }
+    .glow-bg::after {
+      content: '';
+      position: absolute;
+      width: 400px; height: 400px;
+      bottom: 10%; right: -100px;
+      background: radial-gradient(circle, rgba(167,139,250,0.12) 0%, transparent 70%);
+      filter: blur(60px);
+    }
+
+    /* ================================================================
+       NAV
+       ================================================================ */
+    nav {
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      backdrop-filter: blur(20px);
+      background: rgba(11,14,23,0.8);
+      border-bottom: 1px solid var(--border);
+    }
+    .nav-inner {
+      max-width: var(--max-w);
+      margin: 0 auto;
+      padding: 14px 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .nav-brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 20px;
+      font-weight: 800;
+      background: linear-gradient(135deg, var(--accent), var(--accent2));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    .nav-brand span.emoji { -webkit-text-fill-color: initial; font-size: 22px; }
+    .nav-links { display: flex; gap: 28px; align-items: center; }
+    .nav-links a {
+      color: var(--text-dim);
+      font-size: 14px;
+      font-weight: 500;
+      transition: color 0.2s;
+    }
+    .nav-links a:hover { color: var(--text); text-decoration: none; }
+    .lang-dropdown {
+      background: rgba(255,255,255,0.05);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 6px 10px;
+      font-size: 13px;
+    }
+    .lang-dropdown:focus { outline: 2px solid var(--accent-glow); outline-offset: 1px; }
+    .nav-cta {
+      background: var(--accent) !important;
+      color: #fff !important;
+      -webkit-text-fill-color: initial !important;
+      padding: 8px 20px;
+      border-radius: 8px;
+      font-weight: 600;
+      font-size: 13px;
+      transition: background 0.2s, transform 0.1s;
+    }
+    .nav-cta:hover { background: #5a52d5 !important; transform: translateY(-1px); text-decoration: none !important; }
+
+    /* ================================================================
+       HERO
+       ================================================================ */
+    .hero {
+      max-width: var(--max-w);
+      margin: 0 auto;
+      padding: 100px 24px 80px;
+      text-align: center;
+    }
+    @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
+
+    .hero h1 {
+      font-size: clamp(40px, 6vw, 68px);
+      font-weight: 800;
+      line-height: 1.1;
+      margin-bottom: 20px;
+      letter-spacing: -1.5px;
+    }
+    .hero h1 .gradient {
+      background: linear-gradient(135deg, var(--accent), var(--accent2), #e879f9);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    .hero p {
+      font-size: 18px;
+      color: var(--text-dim);
+      max-width: 600px;
+      margin: 0 auto 36px;
+      line-height: 1.7;
+    }
+    .hero-actions {
+      display: flex;
+      gap: 14px;
+      justify-content: center;
+      flex-wrap: wrap;
+    }
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 14px 28px;
+      border-radius: var(--radius-sm);
+      font-size: 15px;
+      font-weight: 600;
+      cursor: pointer;
+      border: none;
+      transition: all 0.2s;
+    }
+    .btn-primary {
+      background: var(--accent);
+      color: #fff;
+      box-shadow: 0 4px 24px var(--accent-glow);
+    }
+    .btn-primary:hover { background: #5a52d5; transform: translateY(-2px); text-decoration: none; color: #fff; }
+    .btn-secondary {
+      background: var(--surface);
+      color: var(--text);
+      border: 1px solid var(--border);
+    }
+    .btn-secondary:hover { background: var(--bg-card-hover); transform: translateY(-2px); text-decoration: none; }
+    .btn svg { width: 18px; height: 18px; }
+
+    /* Hero screenshot mockup */
+    .hero-visual {
+      margin-top: 60px;
+      position: relative;
+    }
+    .browser-mockup {
+      max-width: 820px;
+      margin: 0 auto;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+      box-shadow: 0 24px 80px rgba(0,0,0,0.4);
+    }
+    .browser-bar {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 12px 16px;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+    }
+    .browser-dots { display: flex; gap: 6px; }
+    .browser-dots span {
+      width: 10px; height: 10px;
+      border-radius: 50%;
+    }
+    .browser-dots span:nth-child(1) { background: #ef4444; }
+    .browser-dots span:nth-child(2) { background: #fbbf24; }
+    .browser-dots span:nth-child(3) { background: #34d399; }
+    .browser-url {
+      flex: 1;
+      margin-left: 12px;
+      background: rgba(0,0,0,0.3);
+      border-radius: 6px;
+      padding: 5px 12px;
+      font-size: 12px;
+      color: var(--text-dim);
+    }
+    .browser-body {
+      display: flex;
+      min-height: 380px;
+    }
+    .browser-page {
+      flex: 1;
+      padding: 24px;
+      font-size: 13px;
+      color: var(--text-dim);
+      line-height: 1.8;
+    }
+    .browser-page h3 { color: var(--text); margin-bottom: 8px; font-size: 16px; }
+    .browser-page .placeholder-line {
+      height: 10px;
+      background: rgba(255,255,255,0.04);
+      border-radius: 4px;
+      margin-bottom: 8px;
+    }
+    .browser-page .placeholder-line:nth-child(odd) { width: 90%; }
+    .browser-page .placeholder-line:nth-child(even) { width: 70%; }
+
+    /* Side panel mockup */
+    .side-panel {
+      width: 300px;
+      border-left: 1px solid var(--border);
+      background: #1a1a2e;
+      display: flex;
+      flex-direction: column;
+      flex-shrink: 0;
+    }
+    .sp-header {
+      padding: 10px 14px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .sp-header .sp-brand {
+      font-size: 14px;
+      font-weight: 700;
+      background: linear-gradient(135deg, var(--accent), var(--accent2));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    .sp-header .sp-brand .sp-domain {
+      font-weight: 500;
+      opacity: 1;
+      background: none;
+      -webkit-text-fill-color: rgba(228,228,236,0.75);
+    }
+    .sp-status {
+      width: 7px; height: 7px;
+      background: var(--success);
+      border-radius: 50%;
+    }
+    .sp-messages {
+      flex: 1;
+      padding: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      overflow: hidden;
+    }
+    .sp-msg {
+      padding: 8px 12px;
+      border-radius: 10px;
+      font-size: 12px;
+      line-height: 1.5;
+      max-width: 90%;
+      animation: fadeUp 0.4s ease both;
+    }
+    @keyframes fadeUp {
+      from { opacity: 0; transform: translateY(8px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    .sp-msg.user {
+      background: var(--accent);
+      color: #fff;
+      align-self: flex-end;
+      animation-delay: 0.2s;
+    }
+    .sp-msg.assistant {
+      background: #16213e;
+      border: 1px solid rgba(255,255,255,0.06);
+      align-self: flex-start;
+      animation-delay: 0.5s;
+    }
+    .sp-msg .step {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 10px;
+      color: var(--text-dim);
+      margin-bottom: 4px;
+    }
+    .sp-msg .step .check { color: var(--success); }
+    .sp-input {
+      padding: 10px;
+      border-top: 1px solid var(--border);
+    }
+    .sp-input-box {
+      display: flex;
+      align-items: center;
+      background: #1e2746;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 8px 12px;
+      font-size: 11px;
+      color: var(--text-dim);
+    }
+
+    /* ================================================================
+       FEATURES
+       ================================================================ */
+    .section {
+      max-width: var(--max-w);
+      margin: 0 auto;
+      padding: 80px 24px;
+    }
+    .section-label {
+      text-align: center;
+      font-size: 13px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 2px;
+      color: var(--accent);
+      margin-bottom: 12px;
+    }
+    .section-title {
+      text-align: center;
+      font-size: clamp(28px, 4vw, 42px);
+      font-weight: 700;
+      margin-bottom: 16px;
+      letter-spacing: -0.5px;
+    }
+    .section-subtitle {
+      text-align: center;
+      color: var(--text-dim);
+      max-width: 560px;
+      margin: 0 auto 48px;
+      font-size: 16px;
+    }
+
+    .features-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+      gap: 20px;
+    }
+    .feature-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 28px;
+      transition: all 0.25s;
+    }
+    .feature-card:hover {
+      background: var(--bg-card-hover);
+      border-color: rgba(108,99,255,0.2);
+      transform: translateY(-4px);
+      box-shadow: 0 12px 40px rgba(0,0,0,0.3);
+    }
+    .feature-icon {
+      width: 44px; height: 44px;
+      background: var(--accent-glow);
+      border-radius: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 20px;
+      margin-bottom: 16px;
+    }
+    .feature-card h3 {
+      font-size: 17px;
+      font-weight: 600;
+      margin-bottom: 8px;
+    }
+    .feature-card p {
+      color: var(--text-dim);
+      font-size: 14px;
+      line-height: 1.6;
+    }
+
+    /* ================================================================
+       PROVIDERS
+       ================================================================ */
+    .providers-row {
+      display: flex;
+      justify-content: center;
+      gap: 14px;
+      flex-wrap: nowrap;
+      margin-top: 40px;
+    }
+    .provider-badge {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 12px 16px;
+      font-size: 13px;
+      font-weight: 600;
+      transition: all 0.2s;
+      white-space: nowrap;
+    }
+    .provider-badge:hover {
+      border-color: var(--accent);
+      background: var(--bg-card-hover);
+    }
+    .provider-badge .p-icon {
+      width: 32px; height: 32px;
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 18px;
+    }
+    .provider-badge .p-icon.local { background: rgba(52,211,153,0.15); color: var(--success); }
+    .provider-badge .p-icon.ollama { background: rgba(38,121,255,0.15); color: #2679ff; }
+    .provider-badge .p-icon.openai { background: rgba(16,163,127,0.15); color: #10a37f; }
+    .provider-badge .p-icon.anthropic { background: rgba(204,149,96,0.15); color: #cc9560; }
+    .provider-badge .p-icon.openrouter { background: rgba(108,99,255,0.15); color: var(--accent2); }
+    .provider-badge .p-icon.studiolm { background: rgba(245,158,11,0.15); color: #f59e0b; }
+    .provider-badge .p-icon.vllm { background: rgba(99,102,241,0.15); color: #6366f1; }
+
+    /* ================================================================
+       MODES
+       ================================================================ */
+    .modes-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 24px;
+      max-width: 760px;
+      margin: 0 auto;
+    }
+    .mode-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 32px;
+      text-align: center;
+      transition: all 0.25s;
+    }
+    .mode-card:hover {
+      transform: translateY(-4px);
+      box-shadow: 0 12px 40px rgba(0,0,0,0.3);
+    }
+    .mode-card.ask { border-top: 3px solid var(--accent); }
+    .mode-card.act { border-top: 3px solid var(--warning); }
+    .mode-card .mode-icon { font-size: 36px; margin-bottom: 16px; }
+    .mode-card h3 { font-size: 20px; margin-bottom: 8px; }
+    .mode-card p { color: var(--text-dim); font-size: 14px; }
+
+    /* ================================================================
+       DOWNLOAD / INSTALL
+       ================================================================ */
+    .download-section {
+      text-align: center;
+    }
+    .download-cards {
+      display: flex;
+      justify-content: center;
+      gap: 24px;
+      flex-wrap: wrap;
+      margin-top: 40px;
+    }
+    .download-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 36px 40px;
+      text-align: center;
+      min-width: 260px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      transition: all 0.25s;
+    }
+    .download-card:hover {
+      border-color: var(--accent);
+      transform: translateY(-4px);
+      box-shadow: 0 12px 40px rgba(0,0,0,0.3);
+    }
+    .download-card .browser-icon { font-size: 42px; margin-bottom: 16px; }
+    .download-card h3 { font-size: 18px; margin-bottom: 6px; }
+    .download-card p { color: var(--text-dim); font-size: 13px; margin-bottom: 20px; }
+    .download-card-actions {
+      width: 100%;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      margin-top: auto;
+    }
+    .download-card .btn { width: 100%; justify-content: center; }
+    .download-card-chrome {
+      min-width: 340px;
+      padding: 42px 44px;
+      border-color: rgba(0, 212, 255, 0.45);
+    }
+
+    /* ================================================================
+       OPEN SOURCE
+       ================================================================ */
+    .oss-banner {
+      max-width: 760px;
+      margin: 0 auto;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 40px;
+      text-align: center;
+    }
+    .oss-banner h3 { font-size: 24px; margin-bottom: 12px; }
+    .oss-banner p { color: var(--text-dim); font-size: 15px; margin-bottom: 24px; max-width: 500px; margin-left: auto; margin-right: auto; }
+
+    /* ================================================================
+       FOOTER
+       ================================================================ */
+    footer {
+      border-top: 1px solid var(--border);
+      padding: 32px 24px;
+      text-align: center;
+      color: var(--text-dim);
+      font-size: 13px;
+    }
+    footer a { color: var(--text-dim); }
+    footer a:hover { color: var(--text); }
+    .footer-inner {
+      max-width: var(--max-w);
+      margin: 0 auto;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 12px;
+    }
+    .footer-links { display: flex; gap: 20px; }
+
+    .safety-note {
+      max-width: var(--max-w);
+      margin: 0 auto 24px;
+      background: rgba(251,191,36,0.1);
+      border: 1px solid rgba(251,191,36,0.35);
+      border-radius: var(--radius-sm);
+      padding: 18px 20px;
+      color: var(--text);
+      text-align: left;
+      line-height: 1.55;
+      font-size: 13px;
+    }
+    .safety-note h4 {
+      font-size: 14px;
+      margin-bottom: 8px;
+      letter-spacing: 0.4px;
+      text-transform: uppercase;
+      color: var(--warning);
+    }
+    .safety-note ul {
+      margin: 0;
+      padding-left: 18px;
+    }
+    .safety-note li { margin-bottom: 6px; }
+    .safety-note li:last-child { margin-bottom: 0; }
+
+    /* ================================================================
+       COMPARISON TABLE
+       ================================================================ */
+    .compare-table-wrap {
+      overflow-x: auto;
+      max-width: 920px;
+      margin: 0 auto;
+    }
+    .compare-table {
+      width: 100%;
+      border-collapse: collapse;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      overflow: hidden;
+      font-size: 14px;
+    }
+    .compare-table th,
+    .compare-table td {
+      padding: 12px 16px;
+      text-align: left;
+      border-bottom: 1px solid var(--border);
+    }
+    .compare-table thead th {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text-dim);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      background: var(--surface);
+    }
+    .compare-table thead th.highlight {
+      color: var(--accent);
+    }
+    .compare-table td.highlight {
+      color: var(--accent2);
+      font-weight: 600;
+    }
+    .compare-table tbody tr {
+      transition: background 0.15s;
+    }
+    .compare-table tbody tr:hover {
+      background: rgba(108,99,255,0.04);
+    }
+
+    /* ================================================================
+       FAQ
+       ================================================================ */
+    .faq-list {
+      max-width: 760px;
+      margin: 32px auto 0;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .faq-item {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      overflow: hidden;
+      transition: border-color 0.2s;
+    }
+    .faq-item[open] {
+      border-color: rgba(108,99,255,0.25);
+    }
+    .faq-item summary {
+      padding: 16px 20px;
+      font-size: 15px;
+      font-weight: 600;
+      cursor: pointer;
+      list-style: none;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      transition: color 0.2s;
+    }
+    .faq-item summary::-webkit-details-marker { display: none; }
+    .faq-item summary::after {
+      content: '+';
+      font-size: 20px;
+      color: var(--text-dim);
+      flex-shrink: 0;
+      margin-left: 16px;
+      transition: transform 0.2s;
+    }
+    .faq-item[open] summary::after {
+      content: '−';
+      color: var(--accent);
+    }
+    .faq-item summary:hover { color: var(--accent2); }
+    .faq-item p {
+      padding: 0 20px 16px;
+      color: var(--text-dim);
+      font-size: 14px;
+      line-height: 1.7;
+    }
+    .faq-item p a {
+      color: var(--accent2);
+    }
+
+    /* ================================================================
+       DEMO VIDEO
+       ================================================================ */
+    .video-showcase {
+      max-width: 900px;
+      margin: 0 auto;
+    }
+    .video-frame {
+      position: relative;
+      width: 100%;
+      padding-bottom: 56.25%;
+      border-radius: var(--radius);
+      overflow: hidden;
+      border: 1px solid var(--border);
+      background: #000;
+      box-shadow: 0 20px 40px rgba(0,0,0,0.35);
+    }
+    .video-frame iframe {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      border: 0;
+    }
+
+    /* ================================================================
+       RESPONSIVE
+       ================================================================ */
+    @media (max-width: 768px) {
+      .browser-body { flex-direction: column; }
+      .side-panel { width: 100%; border-left: none; border-top: 1px solid var(--border); min-height: 260px; }
+      .modes-grid { grid-template-columns: 1fr; }
+      .nav-links a:not(.nav-cta) { display: none; }
+      .providers-row { flex-wrap: wrap; justify-content: center; }
+      .video-showcase { max-width: 380px; }
+      .video-frame { padding-bottom: 177.78%; }
+    }
+    @media (max-width: 480px) {
+      .hero { padding: 60px 16px 50px; }
+      .hero-actions { flex-direction: column; align-items: center; }
+      .btn { width: 100%; justify-content: center; }
+    }
   </style>
+
+  <!-- Privacy-friendly analytics by Plausible -->
+  <script async src="https://plausible.io/js/pa-yWGfwxkkKSVs-eTuaKYpy.js"></script>
+  <script>
+    window.plausible=window.plausible||function(){(plausible.q=plausible.q||[]).push(arguments)},plausible.init=plausible.init||function(i){plausible.o=i||{}};
+    plausible.init()
+  </script>
 </head>
 <body>
-  <div class="wrap">
-    <div class="top">
-      <div class="brand">🧠 WebBrain</div>
-      <select class="lang-dropdown" aria-label="Choisir la langue" onchange="if(this.value){window.location.href=this.value}">
-        <option value="/">English</option>
-        <option value="/es/">Español</option>
-        <option value="/fr/" selected>Français</option>
-        <option value="/tr/">Türkçe</option>
-        <option value="/zh/">中文</option>
+
+<div class="glow-bg"></div>
+
+<!-- NAV -->
+<nav>
+  <div class="nav-inner">
+    <a href="https://webbrain.one/fr/" class="nav-brand" style="text-decoration:none;">
+      <span class="emoji">🧠</span> WebBrain<span style="opacity:0.5; font-weight:400;">.one</span>
+    </a>
+    <div class="nav-links">
+      <a href="#features">Fonctionnalités</a>
+      <a href="#demo">Démo</a>
+      <a href="#providers">Fournisseurs</a>
+      <a href="#compare">Comparer</a>
+      <a href="#download">Télécharger</a>
+      <a href="#faq">FAQ</a>
+      <a href="/blog">Blog</a>
+      <select class="lang-dropdown" id="lang-dropdown" aria-label="Choisir la langue" data-current="fr">
+        <option value="en">English</option>
+        <option value="es">Español</option>
+        <option value="fr">Français</option>
+        <option value="tr">Türkçe</option>
+        <option value="zh">中文</option>
       </select>
+      <a href="https://github.com/esokullu/webbrain" class="nav-cta" target="_blank">GitHub</a>
     </div>
-
-    <section class="hero">
-      <h1>Automatisation web avec IA, gratuite et open source.</h1>
-      <p>WebBrain fonctionne sur Chrome et Firefox. Vous pouvez lire des pages, faire de la recherche et automatiser des tâches avec des LLM locaux (llama.cpp) ou des fournisseurs cloud (OpenAI, Claude, OpenRouter).</p>
-      <div class="cta">
-        <a class="btn primary" href="https://chromewebstore.google.com/detail/webbrain/ljhijonmfahplgbbacgcfnaihbjljhhb">Installer sur Chrome</a>
-        <a class="btn secondary" href="https://addons.mozilla.org/firefox/addon/webbrain/">Installer sur Firefox</a>
-        <a class="btn secondary" href="https://github.com/emres/webbrain">Voir sur GitHub</a>
-      </div>
-    </section>
-
-    <section class="grid">
-      <article class="card"><h3>Confidentialité d'abord</h3><p>Support des modèles locaux : vos données peuvent rester sur votre machine.</p></article>
-      <article class="card"><h3>Extensible</h3><p>Compatible avec plusieurs fournisseurs et workflows d'automatisation.</p></article>
-      <article class="card"><h3>100% open source</h3><p>Licence MIT et développement public sur GitHub.</p></article>
-    </section>
-
-    <footer>
-      Ceci est la version française de la page d'accueil. Vous pouvez aussi consulter la <a href="/privacy.html">politique de confidentialité</a> ou le <a href="/blog/">blog</a> (en anglais).
-    </footer>
   </div>
+</nav>
+
+<!-- HERO -->
+<section class="hero">
+  <h1>L'agent de navigateur <span class="gradient">IA open source</span></h1>
+  <p>WebBrain est une extension de navigateur gratuite et open source qui apporte les capacités d&#39;un agent IA à Chrome et Firefox. Lisez des pages, extrayez des données et automatisez des tâches web — avec le LLM de votre choix. L&#39;alternative auto-hébergeable aux plugins d&#39;IA propriétaires.</p>
+  <div class="hero-actions">
+    <a href="#download" class="btn btn-primary">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+      Installer l&#39;extension
+    </a>
+    <a href="https://github.com/esokullu/webbrain" target="_blank" class="btn btn-secondary">
+      <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0 0 24 12c0-6.63-5.37-12-12-12z"/></svg>
+      Voir sur GitHub
+    </a>
+  </div>
+
+  <!-- Browser mockup -->
+  <div class="hero-visual">
+    <div class="browser-mockup">
+      <div class="browser-bar">
+        <div class="browser-dots">
+          <span></span><span></span><span></span>
+        </div>
+        <div class="browser-url">https://example.com/produits</div>
+      </div>
+      <div class="browser-body">
+        <div class="browser-page">
+          <h3>Catalogue produits</h3>
+          <div class="placeholder-line"></div>
+          <div class="placeholder-line"></div>
+          <div class="placeholder-line"></div>
+          <div class="placeholder-line"></div>
+          <div class="placeholder-line"></div>
+          <div class="placeholder-line"></div>
+          <div class="placeholder-line"></div>
+          <div class="placeholder-line"></div>
+          <div class="placeholder-line"></div>
+          <div class="placeholder-line"></div>
+        </div>
+        <div class="side-panel">
+          <div class="sp-header">
+            <span class="sp-brand">🧠 WebBrain<span class="sp-domain">.one</span></span>
+            <span class="sp-status"></span>
+          </div>
+          <div class="sp-messages">
+            <div class="sp-msg user">Extraire tous les noms de produits et leurs prix sur cette page</div>
+            <div class="sp-msg assistant">
+              <div class="step"><span class="check">&#10003;</span> Lecture de la page</div>
+              <div class="step"><span class="check">&#10003;</span> Extraction des données</div>
+              <div style="margin-top:6px;"><strong>24 produits</strong> trouvés. Voici les résultats :</div>
+              <div style="margin-top:4px; font-size:11px; color: var(--text-dim);">
+                1. Widget Pro — $29.99<br>
+                2. Super Gadget — $49.99<br>
+                3. MegaTool X — $19.99<br>
+                <span style="color:var(--accent2);">...et 21 autres</span>
+              </div>
+            </div>
+          </div>
+          <div class="sp-input">
+            <div class="sp-input-box">Posez une question sur cette page...</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- DEMO VIDEO -->
+<section class="section" id="demo" style="padding-top: 30px;">
+  <div class="section-label">Démo</div>
+  <h2 class="section-title">WebBrain en action</h2>
+  <p class="section-subtitle">Découvrez comment WebBrain lit les pages, extrait des données et automatise les tâches du navigateur.</p>
+  <div class="video-showcase">
+    <div class="video-frame">
+      <iframe id="demo-video" src="https://www.youtube.com/embed/3eFAQ-b65J0" data-desktop-src="https://www.youtube.com/embed/3eFAQ-b65J0" data-mobile-src="https://www.youtube.com/embed/Nov3sw7FE_Q?playsinline=1" title="Vidéo de démonstration de WebBrain" loading="lazy" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe>
+    </div>
+  </div>
+</section>
+
+<!-- FEATURES -->
+<section class="section" id="features">
+  <div class="section-label">Fonctionnalités</div>
+  <h2 class="section-title">Tout ce qu&#39;il faut pour une IA dans le navigateur</h2>
+  <p class="section-subtitle">Un agent IA complet qui vit dans la barre latérale du navigateur et comprend n&#39;importe quelle page web.</p>
+
+  <div class="features-grid">
+    <div class="feature-card">
+      <div class="feature-icon">📖</div>
+      <h3>Compréhension des pages</h3>
+      <p>Lit et comprend n&#39;importe quelle page web — articles, documentation, tableaux de bord, formulaires. Posez des questions et obtenez des réponses immédiates à partir du contenu de la page.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">🤖</div>
+      <h3>Agent complet de navigateur</h3>
+      <p>Clique, tape, défile, navigue et interagit avec les pages à votre place. Automatisez les tâches répétitives avec des instructions en langage naturel.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">📊</div>
+      <h3>Extraction de données</h3>
+      <p>Extrayez des données structurées de n&#39;importe quelle page — tableaux, listes, liens, formulaires. Exportez catalogues produits, résultats de recherche ou tout contenu de page.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">🔌</div>
+      <h3>Multi-fournisseur de LLM</h3>
+      <p>Fonctionne avec llama.cpp en local, OpenAI, Claude et OpenRouter. Utilisez votre modèle préféré — ou travaillez totalement hors ligne avec une IA locale.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">🛡️</div>
+      <h3>Vie privée d&#39;abord</h3>
+      <p>Vos données restent les vôtres. Avec un LLM local, aucune fuite possible. Pas de télémétrie, pas de traçage, pas de compte requis. Totalement open source.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">⚡</div>
+      <h3>Contexte intelligent</h3>
+      <p>La gestion automatique du contexte évite le dépassement de tokens. Rognage intelligent de l&#39;historique et limitation de la sortie des outils pour des sessions fluides et continues.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">👁️</div>
+      <h3>Modèle de vision dédié</h3>
+      <p>Associez un modèle texte rapide pour la planification à un modèle de vision dédié pour lire les captures. Plus économique et plus rapide qu&#39;un unique gros modèle multimodal pour tout faire.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">🗂️</div>
+      <h3>Groupes d&#39;onglets</h3>
+      <p>Tout onglet que l&#39;agent ouvre rejoint un groupe « WebBrain » dédié, pour que vos enchaînements de recherche restent visuellement groupés au lieu d&#39;éparpiller votre fenêtre. Les clics sur les liens target=&quot;_blank&quot; se replient dans l&#39;onglet courant pour éviter la prolifération.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">👤</div>
+      <h3>Auto-remplissage du profil</h3>
+      <p>Une biographie optionnelle en texte brut — nom, e-mail pro, entreprise, un mot de passe jetable — permet à l&#39;agent de passer les formulaires d&#39;inscription à faible enjeu sans poser la question à chaque fois. Désactivé par défaut, stocké uniquement en local.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">🍪</div>
+      <h3>Cookies et paywalls</h3>
+      <p>Rejette les bannières de consentement (OneTrust, Cookiebot, Didomi, Quantcast) avant de raisonner sur la page. Détecte les paywalls et le dit honnêtement au lieu d&#39;inventer du contenu ou de tenter de les contourner.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">🌐</div>
+      <h3>Interface multilingue</h3>
+      <p>L&#39;extension existe en English, Español, Français, Türkçe et 中文. Détection automatique de la langue du navigateur à la première utilisation ; vous pouvez changer à tout moment via l&#39;icône globe du panneau latéral. Le site marketing est localisé en conséquence.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">💰</div>
+      <h3>Économe en tokens</h3>
+      <p>Les captures sont redimensionnées et compressées itérativement en JPEG avant de quitter votre machine, pour garder les tokens d&#39;image faibles. Le rognage intelligent du contexte et les plafonds de sortie d&#39;outils rendent les factures cloud prévisibles — pas de surprise sur les sessions longues.</p>
+    </div>
+  </div>
+</section>
+
+<!-- PROVIDERS -->
+<section class="section" id="providers" style="padding-top: 40px;">
+  <div class="section-label">Fournisseurs LLM</div>
+  <h2 class="section-title">Apportez votre propre IA</h2>
+  <p class="section-subtitle">Connectez-vous à n&#39;importe quelle API compatible OpenAI ou exécutez un modèle local. Changez de fournisseur à tout moment depuis les paramètres de l&#39;extension.</p>
+
+  <div class="providers-row">
+    <div class="provider-badge">
+      <div class="p-icon local">🦙</div>
+      llama.cpp
+    </div>
+    <div class="provider-badge">
+      <div class="p-icon ollama">◉</div>
+      Ollama
+    </div>
+    <div class="provider-badge">
+      <div class="p-icon openai">⬡</div>
+      OpenAI
+    </div>
+    <div class="provider-badge">
+      <div class="p-icon anthropic">◈</div>
+      Claude
+    </div>
+    <div class="provider-badge">
+      <div class="p-icon openrouter">◆</div>
+      OpenRouter
+    </div>
+    <div class="provider-badge">
+      <div class="p-icon studiolm">✦</div>
+      StudioLM
+    </div>
+    <div class="provider-badge">
+      <div class="p-icon vllm">▣</div>
+      VLLM
+    </div>
+  </div>
+</section>
+
+<!-- MODES -->
+<section class="section" id="modes">
+  <div class="section-label">Modes d&#39;interaction</div>
+  <h2 class="section-title">Demander ou Agir</h2>
+  <p class="section-subtitle">Deux modes pour des besoins différents. Lecture seule par défaut, toute la puissance de l&#39;agent quand vous en avez besoin.</p>
+
+  <div class="modes-grid">
+    <div class="mode-card ask">
+      <div class="mode-icon">💬</div>
+      <h3>Mode Demander</h3>
+      <p>Lecture seule. Posez des questions sur la page courante, extrayez des informations, résumez du contenu. Sûr et non intrusif — rien n&#39;est modifié.</p>
+    </div>
+    <div class="mode-card act">
+      <div class="mode-icon">⚡</div>
+      <h3>Mode Agir</h3>
+      <p>Agent complet. Cliquer sur des boutons, remplir des formulaires, naviguer, exécuter des scripts. Automatisez des flux complexes multi-étapes en une seule instruction.</p>
+    </div>
+  </div>
+</section>
+
+<!-- DOWNLOAD -->
+<section class="section download-section" id="download">
+  <div class="section-label">Démarrer</div>
+  <h2 class="section-title">Installer WebBrain</h2>
+  <p class="section-subtitle">Disponible pour Chrome et Firefox. Gratuit, open source, sans compte.</p>
+
+  <div class="download-cards">
+    <div class="download-card download-card-chrome">
+      <div class="browser-icon">🌐</div>
+      <h3>Chrome et Chromium</h3>
+      <p>Manifest V3 · Chrome 116+ · Fonctionne aussi avec Brave, Edge, Opera, Vivaldi et les autres navigateurs compatibles Chromium.</p>
+      <div class="download-card-actions">
+        <a href="https://chromewebstore.google.com/detail/webbrain/ljhijonmfahplgbbacgcfnaihbjljhhb" target="_blank" rel="noopener noreferrer" class="btn btn-primary">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          Télécharger sur le Chrome Web Store
+        </a>
+        <a href="https://github.com/esokullu/webbrain/tree/main/src/chrome" target="_blank" rel="noopener noreferrer" class="btn btn-secondary">
+          Voir les sources Chrome
+        </a>
+      </div>
+    </div>
+    <div class="download-card">
+      <div class="browser-icon">🦊</div>
+      <h3>Firefox</h3>
+      <p>Manifest V2 · Firefox 109+</p>
+      <div class="download-card-actions">
+        <a href="https://addons.mozilla.org/en-US/firefox/addon/webbrain/" target="_blank" rel="noopener noreferrer" class="btn btn-primary" style="background: #ff9800;">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          Télécharger sur Firefox Add-ons
+        </a>
+        <a href="https://github.com/esokullu/webbrain/tree/main/src/firefox" target="_blank" rel="noopener noreferrer" class="btn btn-secondary">
+          Voir les sources Firefox
+        </a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- COMPARISON TABLE -->
+<section class="section" id="compare">
+  <div class="section-label">Pourquoi WebBrain ?</div>
+  <h2 class="section-title">Comment WebBrain se compare-t-il ?</h2>
+  <p class="section-subtitle">WebBrain se situe à l&#39;intersection des plugins IA natifs du navigateur et des frameworks d&#39;agents complets. Voici comment il se positionne.</p>
+
+  <!-- vs Browser Plugins -->
+  <h3 style="font-size:16px; color:var(--text-dim); margin-bottom:16px; text-align:center;">Face aux plugins IA de navigateur</h3>
+  <div class="compare-table-wrap">
+    <table class="compare-table">
+      <thead>
+        <tr>
+          <th>Fonctionnalité</th>
+          <th class="highlight">WebBrain</th>
+          <th>Claude dans Chrome</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td>Open source</td><td class="highlight">Licence MIT</td><td>Propriétaire</td></tr>
+        <tr><td>Prix</td><td class="highlight">Gratuit pour toujours</td><td>Nécessite Claude Pro (20 $/mois)</td></tr>
+        <tr><td>Support LLM local</td><td class="highlight">llama.cpp, Ollama</td><td>Non — Claude uniquement</td></tr>
+        <tr><td>Multi-fournisseur</td><td class="highlight">4 fournisseurs (local + cloud)</td><td>Claude uniquement</td></tr>
+        <tr><td>Chrome</td><td class="highlight">Oui (MV3)</td><td>Oui</td></tr>
+        <tr><td>Firefox</td><td class="highlight">Oui (MV2)</td><td>Non</td></tr>
+        <tr><td>Panneau latéral</td><td class="highlight">Oui</td><td>Oui</td></tr>
+        <tr><td>Modes Demander / Agir</td><td class="highlight">Oui</td><td>Similaire</td></tr>
+        <tr><td>Totalement hors ligne</td><td class="highlight">Oui (avec LLM local)</td><td>Non — cloud requis</td></tr>
+        <tr><td>Interaction avec la page</td><td>Content script</td><td>Chrome DevTools Protocol</td></tr>
+        <tr><td>Auto-hébergeable</td><td class="highlight">Oui</td><td>Non</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- vs Agent Frameworks -->
+  <h3 style="font-size:16px; color:var(--text-dim); margin: 40px 0 16px; text-align:center;">Face aux frameworks d'agents IA <span style="font-weight:400; font-size:13px;">(catégorie différente)</span></h3>
+  <div class="compare-table-wrap">
+    <table class="compare-table">
+      <thead>
+        <tr>
+          <th>Aspect</th>
+          <th class="highlight">WebBrain</th>
+          <th>OpenClaw / Browser-Use / etc.</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td>Qu&#39;est-ce que c&#39;est ?</td><td class="highlight">Extension de navigateur (outil utilisateur final)</td><td>Framework / SDK (outil développeur)</td></tr>
+        <tr><td>Utilisateur cible</td><td class="highlight">Tout le monde — sans code</td><td>Développeurs construisant des automatisations</td></tr>
+        <tr><td>Installation</td><td class="highlight">Installation en un clic</td><td>Installation Python/Docker requise</td></tr>
+        <tr><td>Interface</td><td class="highlight">Chat intégré en panneau latéral</td><td>Pas d&#39;UI — code ou API uniquement</td></tr>
+        <tr><td>Contrôle du navigateur</td><td>Content script (léger)</td><td>CDP / Playwright (contrôle total)</td></tr>
+        <tr><td>Flux multi-onglets</td><td>Conversations par onglet</td><td>Orchestration multi-onglets programmable</td></tr>
+        <tr><td>Mode headless</td><td>Non — s&#39;exécute dans votre navigateur</td><td>Oui — automatisation headless</td></tr>
+        <tr><td>Extensibilité</td><td>Ajouter des fournisseurs LLM personnalisés</td><td>SDK Python complet, outils personnalisés</td></tr>
+        <tr><td>Idéal pour</td><td class="highlight">Assistant IA de navigation quotidienne</td><td>Pipelines de scraping / tests automatisés</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p style="text-align:center; color:var(--text-dim); font-size:13px; margin-top:24px; max-width:600px; margin-left:auto; margin-right:auto;">
+    WebBrain est une extension navigateur pour les utilisateurs qui veulent un assistant IA pendant qu&#39;ils naviguent. Les frameworks comme OpenClaw sont des outils pour les développeurs qui construisent des pipelines automatisés. Des outils différents pour des besoins différents — et vous pouvez utiliser les deux.
+  </p>
+</section>
+
+<!-- FAQ -->
+<section class="section" id="faq">
+  <div class="section-label">FAQ</div>
+  <h2 class="section-title">Foire aux questions</h2>
+
+  <div class="faq-list">
+    <details class="faq-item">
+      <summary>WebBrain est-il une alternative gratuite au plugin navigateur de Claude ?</summary>
+      <p>Oui. WebBrain fournit des capacités d'agent IA similaires — lecture de pages, extraction de données, clics sur boutons, remplissage de formulaires et automatisation de flux multi-étapes. Contrairement au plugin propriétaire de Claude, qui nécessite un abonnement Claude Pro et ne fonctionne qu'avec les modèles d'Anthropic, WebBrain est totalement gratuit, open source (licence MIT) et prend en charge plusieurs fournisseurs de LLM, y compris des modèles locaux exécutés entièrement sur votre machine.</p>
+    </details>
+
+    <details class="faq-item">
+      <summary>Quelle est la différence entre WebBrain et OpenClaw, Browser-Use et les autres frameworks d&#39;agents IA ?</summary>
+      <p>Ce sont des catégories d'outils différentes. WebBrain est une extension de navigateur — vous l'installez dans Chrome ou Firefox et discutez avec elle dans un panneau latéral, sans coder. Des frameworks comme OpenClaw et Browser-Use sont des SDK pour développeurs, destinés à construire des pipelines automatisés en Python, généralement avec des navigateurs headless et CDP. Autrement dit : WebBrain est pour naviguer au quotidien avec un assistant IA ; les frameworks sont pour construire des bots de scraping et automatiser des tests. Vous pouvez utiliser les deux — ils sont complémentaires.</p>
+    </details>
+
+    <details class="faq-item">
+      <summary>Puis-je utiliser WebBrain totalement hors ligne ?</summary>
+      <p>Oui. Le fournisseur par défaut de WebBrain est llama.cpp, qui exécute un modèle IA local sur votre ordinateur. Aucune clé d'API, aucune connexion Internet pour l'IA et aucune donnée ne quitte votre machine. Téléchargez un modèle GGUF, démarrez llama-server et vous disposez d'un agent IA totalement privé. Vous pouvez aussi utiliser Ollama via son endpoint compatible OpenAI.</p>
+    </details>
+
+    <details class="faq-item">
+      <summary>Quels modèles d&#39;IA WebBrain prend-il en charge ?</summary>
+      <p>WebBrain prend en charge quatre types de fournisseurs : llama.cpp (n'importe quel modèle GGUF local), OpenAI (GPT-4o, GPT-4, etc.), Claude (Claude Opus, Sonnet, Haiku via l'API native) et OpenRouter (accès à plus de 100 modèles de divers fournisseurs). Tout endpoint compatible OpenAI fonctionne : vous pouvez donc aussi utiliser des services comme Together AI, Groq, Mistral ou tout serveur local à interface compatible OpenAI.</p>
+    </details>
+
+    <details class="faq-item">
+      <summary>Quel est le modèle le plus recommandé ?</summary>
+      <p>Au <strong>21 avril 2026</strong>, notre recommandation principale est <a href="https://huggingface.co/Qwen/Qwen3.6-35B-A3B" target="_blank">Qwen 3.6 35B</a>. Raison : dans notre benchmark vision (<a href="https://www.webbrain.one/blog/vision-model-shootout" target="_blank">vision-model-shootout</a>), il surpasse Gemma 4 en compréhension de captures tout en restant exploitable en inférence locale.</p><p>Côté GPU grand public, une RTX 5090 est idéale, et la RTX 4090 reste souvent exploitable avec la quantisation INT4 AutoRound via <a href="https://huggingface.co/Intel/Qwen3.6-35B-A3B-int4-AutoRound" target="_blank">Intel/Qwen3.6-35B-A3B-int4-AutoRound</a>.</p><p>Pour un débit maximal, servez-le avec <strong>vLLM</strong>. Exemple de commande :</p><p><code>python -u -m vllm.entrypoints.openai.api_server --model Intel/Qwen3.6-35B-A3B-int4-AutoRound --served-model-name qwen3.6-35b --quantization auto --dtype bfloat16 --max-model-len 65536 --max-num-batched-tokens 32768 --max-num-seqs 4 --host 0.0.0.0 --port 8000 --gpu-memory-utilization 0.92 --enable-prefix-caching --enable-chunked-prefill --limit-mm-per-prompt '{"image": 4, "video": 1}' --mm-processor-cache-type shm --reasoning-parser qwen3 --enable-auto-tool-choice --tool-call-parser qwen3_coder --trust-remote-code --allowed-origins '["*"]' --speculative-config '{"method": "dflash", "model": "z-lab/Qwen3.6-35B-A3B-DFlash", "num_speculative_tokens": 15}' --attention-backend flash_attn</code></p><p><em>Le décodage spéculatif DFlash est optionnel.</em></p>
+    </details>
+
+    <details class="faq-item">
+      <summary>J&#39;obtiens « Failed to fetch » en me connectant à un serveur LLM local (vLLM, Ollama, llama.cpp) sur mon réseau</summary>
+      <p>Si votre serveur LLM est sur une autre machine du réseau local (par ex. <code>http://192.168.1.x:8000</code>), Chrome bloque la requête sauf si le serveur envoie des <strong>en-têtes CORS</strong>. La solution dépend du serveur :</p><p><strong>vLLM :</strong> démarrer avec <code>--allowed-origins '["*"]'</code> (la valeur doit être une liste JSON).<br><strong>Ollama :</strong> définir la variable <code>OLLAMA_ORIGINS=*</code> avant le démarrage.<br><strong>llama.cpp :</strong> CORS est activé par défaut — rien à changer.</p><p>Si votre serveur tourne sur <code>localhost</code> (même machine que le navigateur), CORS n'est généralement pas requis. Le problème concerne seulement les connexions entre machines sur le réseau local. Vérifiez que l'URL de base dans les paramètres WebBrain se termine par <code>/v1</code> (par ex. <code>http://192.168.1.47:8000/v1</code>).</p>
+    </details>
+
+    <details class="faq-item">
+      <summary>WebBrain fonctionne-t-il sur Firefox ?</summary>
+      <p>Oui. WebBrain est livré avec une version Chrome (Manifest V3, via l'API sidePanel) et une version Firefox (Manifest V2, via sidebar_action). Les deux versions ont les mêmes fonctionnalités. La version Firefox peut être chargée comme module temporaire pour le développement, ou publiée sur addons.mozilla.org pour une installation permanente.</p>
+    </details>
+
+    <details class="faq-item">
+      <summary>WebBrain est-il sûr ? Peut-il modifier les pages web ?</summary>
+      <p>WebBrain a deux modes : le mode Demander (par défaut) est en lecture seule et ne peut rien modifier sur la page. Le mode Agir active les capacités complètes de l'agent (clic, saisie, navigation) mais demande une confirmation explicite de l'utilisateur avant activation et affiche un avertissement visible. Vous pouvez arrêter l'agent à tout moment avec le bouton Arrêter. Le code source de l'extension est entièrement ouvert à l'audit sur GitHub.</p>
+    </details>
+
+    <details class="faq-item">
+      <summary>Comment utiliser WebBrain pour le scraping et l&#39;extraction de données ?</summary>
+      <p>Ouvrez n'importe quelle page web, ouvrez le panneau latéral WebBrain et demandez en langage naturel : « Extrais tous les noms de produits et prix de cette page », « Donne-moi toutes les adresses e-mail de cette page » ou « Résume cet article en puces ». L'agent lit le contenu, comprend la structure et renvoie les données extraites. Pour du scraping plus complexe, passez en mode Agir : l'agent peut naviguer entre les pages, cliquer sur les boutons de pagination et agréger les données sur plusieurs pages.</p>
+    </details>
+
+    <details class="faq-item">
+      <summary>WebBrain appelle-t-il les API directement ou passe-t-il toujours par l&#39;interface ?</summary>
+      <p>Par défaut, WebBrain <strong>passe toujours par l'interface visible</strong> pour toute action qui crée, modifie, supprime, envoie, publie, poste ou achète quoi que ce soit. Il navigue jusqu'à la page, remplit le formulaire et clique sur le bouton — exactement comme vous. Il refuse d'appeler directement des endpoints REST/GraphQL via <code>fetch()</code> en arrière-plan pour des mutations. C'est délibéré : les actions par API sont invisibles (vous ne voyez pas ce qui est envoyé), exigent souvent des jetons d'auth que vous n'avez peut-être pas configurés, et ont un rayon d'impact bien plus large qu'un mauvais clic visible. UI-first signifie que tout est à l'écran, dans votre session habituelle, et interruptible.</p><p>Pour <strong>lire</strong> des données — récupérer un README, consulter un ticket, comparer des prix, vérifier une page de statut — WebBrain utilise librement les requêtes HTTP en arrière-plan via les outils <code>fetch_url</code> et <code>research_url</code>. Lire n'est pas agir ; rien ne change sur un service distant, donc les garde-fous ne s'appliquent pas.</p><p>Si vous voulez autoriser les mutations par API pour une tâche précise, tapez <code>/allow-api</code> en début de message (éventuellement suivi d'une courte description). Cette dérogation par conversation permet à WebBrain de basculer vers des endpoints API quand l'interface échoue vraiment, tout en privilégiant l'UI quand elle fonctionne. Un badge collant reste visible au-dessus de la zone de saisie tant que la dérogation est active, et se dissipe quand vous réinitialisez la conversation.</p>
+    </details>
+
+    <details class="faq-item">
+      <summary>Puis-je changer d&#39;onglet pendant que WebBrain travaille sur une page ?</summary>
+      <p>Oui, sur Chrome — l'agent tourne dans le service worker d'arrière-plan, lié à l'onglet où il a démarré, et continue donc à cliquer, taper et lire cet onglet précis même quand vous changez de focus. Les outils ciblant un onglet (clic, saisie, navigation, capture via CDP) fonctionnent sur des onglets en arrière-plan sous Chrome. La barre latérale verrouille la saisie tant qu'une tâche est en cours, pour ne pas en démarrer une seconde par inadvertance sur le nouvel onglet — vous devez attendre ou arrêter la première. À noter que les navigateurs limitent les timers et animations des onglets d'arrière-plan, donc les sites très animés peuvent répondre un peu plus lentement.</p><p>Sur Firefox, l'agent continue aussi de s'exécuter sur son onglet d'origine, mais les captures automatiques sont limitées : l'API de capture de Firefox ne sait capturer que l'onglet actif, pas un onglet précis en arrière-plan. WebBrain le détecte et saute la capture pour ce tour plutôt que d'envoyer au modèle l'image d'une page sans rapport. L'agent continue alors à planifier à partir du contexte textuel jusqu'à ce que vous reveniez à son onglet.</p><p><strong>Évitez de cliquer ou de saisir activement dans le même onglet que l'agent</strong> — cela crée des conditions de course où vous et l'agent vous disputez la même page. Changer d'onglet : très bien. Co-piloter le même onglet : à éviter.</p>
+    </details>
+
+    <details class="faq-item">
+      <summary>Comment fonctionne l&#39;auto-remplissage de profil, et est-ce sûr ?</summary>
+      <p>L'auto-remplissage de profil est une fonctionnalité optionnelle dans <strong>Paramètres → Profil</strong>. Vous saisissez une courte bio — nom, e-mail pro, entreprise et un mot de passe <em>jetable</em> pour les inscriptions à faible enjeu — et vous l'activez. Une fois actif, WebBrain ajoute ce texte au prompt système de l'agent, afin qu'il puisse remplir les formulaires d'inscription sans vous demander à chaque fois.</p><p>Le texte est stocké <strong>en clair</strong> dans le stockage local du navigateur. Il n'est <strong>pas</strong> transmis au projet WebBrain, mais il <strong>est</strong> envoyé au fournisseur de LLM que vous avez configuré à chaque tour, dans le prompt système. Désactivé par défaut.</p><p><strong>N'y mettez pas les mots de passe de comptes importants</strong> (Google, Apple, iCloud, banque, SSO pro, e-mail principal). Ces comptes devraient utiliser la 2FA et ne devraient pas être confiés à un agent. L'usage prévu est un mot de passe jetable réutilisé pour des newsletters et des essais gratuits.</p>
+    </details>
+
+    <details class="faq-item">
+      <summary>Que fait WebBrain avec les bannières de cookies et les paywalls ?</summary>
+      <p><strong>Bannières de cookies :</strong> WebBrain reconnaît les bannières de consentement des frameworks courants (OneTrust, Cookiebot, Didomi, Quantcast, Google Funding Choices, TrustArc) et les écarte avant de raisonner sur la page. Priorité à « Tout refuser » / « Refuser non essentiels » / « Uniquement nécessaires » quand c'est clairement visible ; par défaut, il choisit « Tout accepter » plutôt que de se perdre dans le labyrinthe « Gérer les préférences ».</p><p><strong>Paywalls :</strong> WebBrain signale le paywall honnêtement et vous dit ce qu'il a réellement pu voir (titre, chapô, premiers paragraphes). Il <strong>n'essaie pas</strong> de contourner les paywalls — pas d'archive.today, pas de 12ft.io, pas d'effacement de cookies, pas de désactivation du JS, pas de ruses de mode lecture. Pour l'article complet, connectez-vous avec un abonnement ou demandez à WebBrain de chercher une couverture gratuite de la même histoire.</p>
+    </details>
+
+    <details class="faq-item">
+      <summary>Quelles langues l&#39;interface de WebBrain prend-elle en charge ?</summary>
+      <p>L'extension est livrée avec une interface entièrement traduite en <strong>English, Español, Français, Türkçe et 中文</strong>. À la première utilisation, elle détecte automatiquement la langue du navigateur ; ensuite, vous pouvez changer à tout moment depuis l'icône globe dans l'en-tête du panneau latéral ou depuis la ligne Langue dans <strong>Paramètres → Affichage</strong>. Le réglage est synchronisé entre le panneau latéral, la page d'options et la page des traces via <code>browser.storage.local</code>. Ce site marketing est localisé en conséquence : <code>/es/</code>, <code>/fr/</code>, <code>/tr/</code>, <code>/zh/</code> reflètent la page anglaise.</p>
+    </details>
+
+    <details class="faq-item">
+      <summary>Comment WebBrain garde-t-il sous contrôle les factures des LLM cloud ?</summary>
+      <p>Trois couches indépendantes :</p><p><strong>Captures économes en tokens.</strong> Avant qu'une image ne quitte votre machine, WebBrain la redimensionne (côté court plafonné, ratio conservé) et la compresse itérativement en JPEG jusqu'à entrer dans le budget de tokens d'image par tour. Une capture 2000×1200 qui vous coûterait environ 1 500 tokens d'entrée sur GPT-4o est ramenée à environ 300–500 tokens sans perte pratique pour la lecture de pages. Implémenté dans <code>_fitImageDimensions</code> avec des tests unitaires sur le calcul du budget.</p><p><strong>Rognage intelligent du contexte.</strong> Historique, sortie d'outils et dumps DOM inline sont plafonnés par tour et rognés du plus ancien au plus récent quand le contexte du modèle actif approche de la saturation. Vous ne verrez pas une exécution passer silencieusement de 10 k à 100 k tokens parce qu'un <code>read_page</code> a renvoyé un article interminable.</p><p><strong>Modèle de vision dédié.</strong> Combinez un modèle texte bon marché (par ex. GPT-4o-mini) pour la planification et les appels d'outils avec un modèle de vision (par ex. GPT-4o) réservé aux captures, pour ne pas payer le tarif multimodal à chaque tour. À configurer dans <strong>Paramètres → Vision</strong>.</p><p>Résultat : les longues sessions avec des fournisseurs cloud restent prévisibles. Pour un contrôle total, utilisez llama.cpp en local — coût par token nul.</p>
+    </details>
+
+    <details class="faq-item">
+      <summary>Puis-je contribuer à WebBrain ?</summary>
+      <p>Absolument ! WebBrain est sous licence MIT et accueille les contributions. Consultez le <a href="https://github.com/esokullu/webbrain" target="_blank">dépôt GitHub</a> pour les issues, demandes de fonctionnalités et consignes de contribution.</p>
+    </details>
+  </div>
+</section>
+
+<!-- OPEN SOURCE -->
+<section class="section">
+  <div class="oss-banner">
+    <h3>100 % open source</h3>
+    <p>WebBrain est sous licence MIT. Inspectez le code, contribuez à de nouvelles fonctionnalités, ou forkez-le pour en faire le vôtre.</p>
+    <a href="https://github.com/esokullu/webbrain" target="_blank" class="btn btn-secondary">
+      <svg viewBox="0 0 24 24" fill="currentColor" width="18" height="18"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0 0 24 12c0-6.63-5.37-12-12-12z"/></svg>
+      Ajouter une étoile sur GitHub
+    </a>
+  </div>
+</section>
+
+<!-- FOOTER -->
+<footer>
+  <div class="safety-note" id="safety">
+    <h4>Avertissement important</h4>
+    <ul>
+      <li>Le mode Agir de WebBrain peut effectuer de véritables actions en votre nom. Vous êtes responsable de la vérification des prompts, des destinations et des résultats avant de continuer.</li>
+      <li>WebBrain peut capturer des captures d&#39;écran pour planifier. Évitez d&#39;utiliser le mode agent sur des pages sensibles (santé, finance, rencontres ou portails de comptes privés) sauf si vous acceptez le risque.</li>
+      <li>Le contenu web peut contenir des injections de prompts malveillantes destinées à manipuler le comportement de l&#39;IA. Vérifiez toujours les actions proposées et stoppez les exécutions qui semblent inattendues.</li>
+    </ul>
+  </div>
+  <div class="footer-inner">
+    <span>© 2026 WebBrain. Créé par <a href="https://emresokullu.com" target="_blank">Emre Sokullu</a>.</span>
+    <div class="footer-links">
+      <a href="https://github.com/esokullu/webbrain" target="_blank">GitHub</a>
+      <a href="#safety">Avertissement</a>
+      <a href="/privacy">Politique de confidentialité</a>
+      <a href="https://github.com/esokullu/webbrain/issues" target="_blank">Signaler un bug</a>
+      <a href="https://github.com/esokullu/webbrain/blob/main/LICENSE" target="_blank">Licence MIT</a>
+    </div>
+  </div>
+</footer>
+
+<script>
+  (function () {
+    const demoVideo = document.getElementById('demo-video');
+    if (!demoVideo) return;
+
+    const mobileQuery = window.matchMedia('(max-width: 768px)');
+
+    function syncDemoVideoSource(event) {
+      const isMobile = event.matches ?? mobileQuery.matches;
+      const nextSrc = isMobile ? demoVideo.dataset.mobileSrc : demoVideo.dataset.desktopSrc;
+      if (nextSrc && demoVideo.src !== nextSrc) {
+        demoVideo.src = nextSrc;
+      }
+    }
+
+    syncDemoVideoSource(mobileQuery);
+
+    if (typeof mobileQuery.addEventListener === 'function') {
+      mobileQuery.addEventListener('change', syncDemoVideoSource);
+    } else if (typeof mobileQuery.addListener === 'function') {
+      mobileQuery.addListener(syncDemoVideoSource);
+    }
+  })();
+</script>
+
+<!-- Path-preserving language dropdown. Strips any leading locale segment
+     from the current path, then prepends the new one so /es/foo → /fr/foo
+     instead of collapsing to the locale homepage. -->
+<script>
+  (function () {
+    const LOCALES = ['en', 'es', 'fr', 'tr', 'zh'];
+    const sel = document.getElementById('lang-dropdown');
+    if (!sel) return;
+    const current = sel.dataset.current || 'en';
+    sel.value = current;
+    sel.addEventListener('change', function () {
+      const target = sel.value;
+      if (!LOCALES.includes(target)) return;
+      const { pathname, search, hash } = window.location;
+      const parts = pathname.split('/').filter(Boolean);
+      if (parts.length && LOCALES.includes(parts[0])) {
+        parts.shift(); // drop leading locale
+      }
+      const rest = parts.length ? '/' + parts.join('/') : '/';
+      const next = target === 'en' ? rest : '/' + target + rest;
+      window.location.href = next + search + hash;
+    });
+  })();
+</script>
+
 </body>
 </html>

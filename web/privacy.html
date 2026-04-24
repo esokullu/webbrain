@@ -7,6 +7,14 @@
   <meta name="description" content="WebBrain privacy policy. Your data stays local. No tracking, no analytics, no third-party data sharing.">
   <meta name="robots" content="index, follow">
   <link rel="canonical" href="https://webbrain.one/privacy">
+  <!-- Privacy is English-only for now; alternates point to locale homepages
+       so search engines still cluster the site's locale tree correctly. -->
+  <link rel="alternate" hreflang="en" href="https://webbrain.one/">
+  <link rel="alternate" hreflang="es" href="https://webbrain.one/es/">
+  <link rel="alternate" hreflang="fr" href="https://webbrain.one/fr/">
+  <link rel="alternate" hreflang="tr" href="https://webbrain.one/tr/">
+  <link rel="alternate" hreflang="zh" href="https://webbrain.one/zh/">
+  <link rel="alternate" hreflang="x-default" href="https://webbrain.one/">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧠</text></svg>">
   <style>
     :root {
@@ -68,6 +76,16 @@
       transition: all 0.2s;
     }
     .nav-back:hover { color: var(--text); border-color: var(--accent); text-decoration: none; }
+    .nav-right { display: flex; align-items: center; gap: 12px; }
+    .lang-dropdown {
+      background: rgba(255,255,255,0.05);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 6px 10px;
+      font-size: 13px;
+    }
+    .lang-dropdown:focus { outline: 2px solid rgba(108,99,255,0.25); outline-offset: 1px; }
 
     .container {
       max-width: var(--max-w);
@@ -142,7 +160,16 @@
     <a href="/" class="nav-brand" style="text-decoration:none;">
       <span class="emoji">🧠</span> WebBrain<span style="opacity:0.5; font-weight:400;">.one</span>
     </a>
-    <a href="/" class="nav-back">← Back to home</a>
+    <div class="nav-right">
+      <select class="lang-dropdown" id="lang-dropdown" aria-label="Select language" data-current="en">
+        <option value="en">English</option>
+        <option value="es">Español</option>
+        <option value="fr">Français</option>
+        <option value="tr">Türkçe</option>
+        <option value="zh">中文</option>
+      </select>
+      <a href="/" class="nav-back">← Back to home</a>
+    </div>
   </div>
 </nav>
 
@@ -215,6 +242,23 @@
 <footer>
   &copy; 2026 <a href="https://emresokullu.com" target="_blank">Emre Sokullu</a>. WebBrain is open source under the MIT License.
 </footer>
+
+<!-- Language switcher. privacy.html is English-only, so selecting another
+     language takes the user to that locale's homepage rather than 404ing
+     on a non-existent /xx/privacy. -->
+<script>
+  (function () {
+    const LOCALES = ['en', 'es', 'fr', 'tr', 'zh'];
+    const sel = document.getElementById('lang-dropdown');
+    if (!sel) return;
+    sel.value = sel.dataset.current || 'en';
+    sel.addEventListener('change', function () {
+      const target = sel.value;
+      if (!LOCALES.includes(target)) return;
+      window.location.href = target === 'en' ? '/' : '/' + target + '/';
+    });
+  })();
+</script>
 
 </body>
 </html>
