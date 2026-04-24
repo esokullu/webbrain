@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>WebBrain — 适用于 Chrome 和 Firefox 的开源 AI 浏览器代理</title>
+  <meta name="description" content="WebBrain 是一款免费开源的 AI 浏览器代理，支持 Chrome 和 Firefox。可读取网页、提取数据，并用本地或云端模型自动化任务。">
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <style>
+    :root { --bg:#0b0e17; --card:#111827; --text:#e4e4ec; --muted:#8b8fa4; --accent:#6c63ff; --accent2:#a78bfa; --border:rgba(255,255,255,.08); }
+    * { box-sizing: border-box; }
+    body { margin:0; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Inter,Roboto,'PingFang SC','Microsoft YaHei',sans-serif; background:var(--bg); color:var(--text); line-height:1.6; }
+    .wrap { max-width:980px; margin:0 auto; padding:24px; }
+    .top { display:flex; justify-content:space-between; align-items:center; gap:16px; }
+    .brand { font-weight:800; font-size:24px; background:linear-gradient(135deg,var(--accent),var(--accent2)); -webkit-background-clip:text; -webkit-text-fill-color:transparent; }
+    .lang-dropdown { background:rgba(255,255,255,.05); color:var(--text); border:1px solid var(--border); border-radius:8px; padding:8px 10px; font-size:14px; }
+    .hero { background:linear-gradient(180deg, rgba(108,99,255,.15), transparent); border:1px solid var(--border); border-radius:16px; padding:28px; margin-top:24px; }
+    h1 { margin:0 0 10px; font-size:38px; line-height:1.15; }
+    p { color:var(--muted); }
+    .cta { display:flex; flex-wrap:wrap; gap:12px; margin-top:18px; }
+    .btn { display:inline-block; padding:10px 16px; border-radius:10px; text-decoration:none; font-weight:600; }
+    .btn.primary { background:var(--accent); color:white; }
+    .btn.secondary { border:1px solid var(--border); color:var(--text); }
+    .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:14px; margin-top:20px; }
+    .card { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:16px; }
+    h3 { margin:0 0 6px; }
+    footer { margin:36px 0 20px; color:var(--muted); font-size:14px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="top">
+      <div class="brand">🧠 WebBrain</div>
+      <select class="lang-dropdown" aria-label="选择语言" onchange="if(this.value){window.location.href=this.value}">
+        <option value="/">English</option>
+        <option value="/es/">Español</option>
+        <option value="/fr/">Français</option>
+        <option value="/tr/">Türkçe</option>
+        <option value="/zh/" selected>中文</option>
+      </select>
+    </div>
+
+    <section class="hero">
+      <h1>免费、开源的 AI 网页自动化工具。</h1>
+      <p>WebBrain 可在 Chrome 与 Firefox 中运行。你可以读取网页、做信息研究，并使用本地 LLM（llama.cpp）或云服务（OpenAI、Claude、OpenRouter）自动执行任务。</p>
+      <div class="cta">
+        <a class="btn primary" href="https://chromewebstore.google.com/detail/webbrain/ljhijonmfahplgbbacgcfnaihbjljhhb">安装到 Chrome</a>
+        <a class="btn secondary" href="https://addons.mozilla.org/firefox/addon/webbrain/">安装到 Firefox</a>
+        <a class="btn secondary" href="https://github.com/emres/webbrain">查看 GitHub</a>
+      </div>
+    </section>
+
+    <section class="grid">
+      <article class="card"><h3>隐私优先</h3><p>支持本地模型，数据可保留在你的设备上。</p></article>
+      <article class="card"><h3>可扩展</h3><p>兼容多个模型提供商与自动化工作流。</p></article>
+      <article class="card"><h3>100% 开源</h3><p>MIT 许可证，GitHub 公开开发。</p></article>
+    </section>
+
+    <footer>
+      这是首页的中文版本。你也可以查看<a href="/privacy.html">隐私政策</a>或访问<a href="/blog/">博客</a>（英文）。
+    </footer>
+  </div>
+</body>
+</html>

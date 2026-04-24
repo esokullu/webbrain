@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>WebBrain — Chrome ve Firefox için açık kaynak yapay zeka tarayıcı ajanı</title>
+  <meta name="description" content="WebBrain, Chrome ve Firefox için ücretsiz ve açık kaynak bir yapay zeka tarayıcı ajanıdır. Sayfaları okuyun, veri çıkarın ve görevleri yerel veya bulut modellerle otomatikleştirin.">
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <style>
+    :root { --bg:#0b0e17; --card:#111827; --text:#e4e4ec; --muted:#8b8fa4; --accent:#6c63ff; --accent2:#a78bfa; --border:rgba(255,255,255,.08); }
+    * { box-sizing: border-box; }
+    body { margin:0; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Inter,Roboto,sans-serif; background:var(--bg); color:var(--text); line-height:1.6; }
+    .wrap { max-width:980px; margin:0 auto; padding:24px; }
+    .top { display:flex; justify-content:space-between; align-items:center; gap:16px; }
+    .brand { font-weight:800; font-size:24px; background:linear-gradient(135deg,var(--accent),var(--accent2)); -webkit-background-clip:text; -webkit-text-fill-color:transparent; }
+    .lang-dropdown { background:rgba(255,255,255,.05); color:var(--text); border:1px solid var(--border); border-radius:8px; padding:8px 10px; font-size:14px; }
+    .hero { background:linear-gradient(180deg, rgba(108,99,255,.15), transparent); border:1px solid var(--border); border-radius:16px; padding:28px; margin-top:24px; }
+    h1 { margin:0 0 10px; font-size:38px; line-height:1.15; }
+    p { color:var(--muted); }
+    .cta { display:flex; flex-wrap:wrap; gap:12px; margin-top:18px; }
+    .btn { display:inline-block; padding:10px 16px; border-radius:10px; text-decoration:none; font-weight:600; }
+    .btn.primary { background:var(--accent); color:white; }
+    .btn.secondary { border:1px solid var(--border); color:var(--text); }
+    .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:14px; margin-top:20px; }
+    .card { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:16px; }
+    h3 { margin:0 0 6px; }
+    footer { margin:36px 0 20px; color:var(--muted); font-size:14px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="top">
+      <div class="brand">🧠 WebBrain</div>
+      <select class="lang-dropdown" aria-label="Dil seçin" onchange="if(this.value){window.location.href=this.value}">
+        <option value="/">English</option>
+        <option value="/es/">Español</option>
+        <option value="/fr/">Français</option>
+        <option value="/tr/" selected>Türkçe</option>
+        <option value="/zh/">中文</option>
+      </select>
+    </div>
+
+    <section class="hero">
+      <h1>Ücretsiz ve açık kaynak yapay zeka destekli web otomasyonu.</h1>
+      <p>WebBrain, Chrome ve Firefox'ta çalışır. Sayfaları okuyabilir, araştırma yapabilir ve görevleri yerel LLM'lerle (llama.cpp) veya bulut sağlayıcılarıyla (OpenAI, Claude, OpenRouter) otomatikleştirebilirsiniz.</p>
+      <div class="cta">
+        <a class="btn primary" href="https://chromewebstore.google.com/detail/webbrain/ljhijonmfahplgbbacgcfnaihbjljhhb">Chrome'a Yükle</a>
+        <a class="btn secondary" href="https://addons.mozilla.org/firefox/addon/webbrain/">Firefox'a Yükle</a>
+        <a class="btn secondary" href="https://github.com/emres/webbrain">GitHub'da Gör</a>
+      </div>
+    </section>
+
+    <section class="grid">
+      <article class="card"><h3>Önce gizlilik</h3><p>Yerel model desteği sayesinde verileriniz bilgisayarınızda kalabilir.</p></article>
+      <article class="card"><h3>Genişletilebilir</h3><p>Birden fazla sağlayıcı ve otomasyon iş akışı ile uyumludur.</p></article>
+      <article class="card"><h3>%100 açık kaynak</h3><p>MIT lisansı ve GitHub üzerinde herkese açık geliştirme.</p></article>
+    </section>
+
+    <footer>
+      Bu sayfa ana sitenin Türkçe sürümüdür. Ayrıca <a href="/privacy.html">gizlilik politikasını</a> veya <a href="/blog/">blogu</a> (İngilizce) ziyaret edebilirsiniz.
+    </footer>
+  </div>
+</body>
+</html>
