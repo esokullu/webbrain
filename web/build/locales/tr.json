@@ -7,7 +7,7 @@
   "meta.twitter_title": "WebBrain — Açık kaynaklı AI tarayıcı ajanı",
   "meta.twitter_description": "Claude tarayıcı eklentisine ücretsiz açık kaynaklı alternatif. Chrome ve Firefox için AI ajanı. Yerel veya bulut LLM'lerle çalışır. 5 dilli arayüz. Varsayılan olarak token tasarruflu.",
   "meta.image_alt": "WebBrain simgesi",
-  "meta.software_version": "4.2.1",
+  "meta.software_version": "5.0.0",
 
   "nav.features": "Özellikler",
   "nav.demo": "Tanıtım",

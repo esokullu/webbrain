@@ -7,7 +7,7 @@
   "meta.twitter_title": "WebBrain — Agent de navigateur IA open source",
   "meta.twitter_description": "Alternative gratuite et open source au plugin Claude. Agent IA pour Chrome et Firefox. Fonctionne avec des LLM locaux ou cloud. Interface en 5 langues. Consommation de tokens maîtrisée par défaut.",
   "meta.image_alt": "Icône WebBrain",
-  "meta.software_version": "4.2.1",
+  "meta.software_version": "5.0.0",
 
   "nav.features": "Fonctionnalités",
   "nav.demo": "Démo",
