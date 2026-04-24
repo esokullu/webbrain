@@ -240,6 +240,15 @@
       transition: color 0.2s;
     }
     .nav-links a:hover { color: var(--text); text-decoration: none; }
+    .lang-dropdown {
+      background: rgba(255,255,255,0.05);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 6px 10px;
+      font-size: 13px;
+    }
+    .lang-dropdown:focus { outline: 2px solid var(--accent-glow); outline-offset: 1px; }
     .nav-cta {
       background: var(--accent) !important;
       color: #fff !important;
@@ -880,10 +889,13 @@
       <a href="#download">Download</a>
       <a href="#faq">FAQ</a>
       <a href="/blog">Blog</a>
-      <a href="/es/" title="Spanish version">ES</a>
-      <a href="/fr/" title="French version">FR</a>
-      <a href="/tr/" title="Turkish version">TR</a>
-      <a href="/zh/" title="Chinese version">中文</a>
+      <select class="lang-dropdown" aria-label="Select language" onchange="if(this.value){window.location.href=this.value}">
+        <option value="/">English</option>
+        <option value="/es/">Español</option>
+        <option value="/fr/">Français</option>
+        <option value="/tr/">Türkçe</option>
+        <option value="/zh/">中文</option>
+      </select>
       <a href="https://github.com/esokullu/webbrain" class="nav-cta" target="_blank">GitHub</a>
     </div>
   </div>

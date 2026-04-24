@@ -13,8 +13,7 @@
     .wrap { max-width:980px; margin:0 auto; padding:24px; }
     .top { display:flex; justify-content:space-between; align-items:center; gap:16px; }
     .brand { font-weight:800; font-size:24px; background:linear-gradient(135deg,var(--accent),var(--accent2)); -webkit-background-clip:text; -webkit-text-fill-color:transparent; }
-    .langs a { color:var(--muted); margin-left:10px; text-decoration:none; }
-    .langs a:hover, .langs a.active { color:var(--text); }
+    .lang-dropdown { background:rgba(255,255,255,.05); color:var(--text); border:1px solid var(--border); border-radius:8px; padding:8px 10px; font-size:14px; }
     .hero { background:linear-gradient(180deg, rgba(108,99,255,.15), transparent); border:1px solid var(--border); border-radius:16px; padding:28px; margin-top:24px; }
     h1 { margin:0 0 10px; font-size:38px; line-height:1.15; }
     p { color:var(--muted); }
@@ -32,9 +31,13 @@
   <div class="wrap">
     <div class="top">
       <div class="brand">🧠 WebBrain</div>
-      <div class="langs">
-        <a href="/">English</a><a href="/es/">Español</a><a href="/fr/" class="active">Français</a><a href="/tr/">Türkçe</a><a href="/zh/">中文</a>
-      </div>
+      <select class="lang-dropdown" aria-label="Choisir la langue" onchange="if(this.value){window.location.href=this.value}">
+        <option value="/">English</option>
+        <option value="/es/">Español</option>
+        <option value="/fr/" selected>Français</option>
+        <option value="/tr/">Türkçe</option>
+        <option value="/zh/">中文</option>
+      </select>
     </div>
 
     <section class="hero">
