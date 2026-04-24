@@ -409,4 +409,137 @@ test('window of 6 means a loop can fall out of the window', () => {
   assert.equal(result.kind, 'none');
 });
 
+// ────────────────────────────────────────────────────────────────────────
+// Image budget (token-conscious screenshots)
+//
+// These mirror the static helpers on Agent exactly — keep them in sync
+// with src/chrome/src/agent/agent.js `_estimateImageTokens` and
+// `_fitImageDimensions`. We shim rather than import because agent.js
+// pulls in chrome.* and cdp-client.
+// ────────────────────────────────────────────────────────────────────────
+
+const IMAGE_BUDGET_DEFAULT = {
+  pxPerToken: 28,
+  maxTargetPx: 1568,
+  maxTargetTokens: 1568,
+};
+
+function estimateImageTokens(w, h, pxPerToken) {
+  return Math.ceil((w / pxPerToken) * (h / pxPerToken));
+}
+
+function fitImageDimensions(origW, origH, budget = IMAGE_BUDGET_DEFAULT) {
+  const { pxPerToken, maxTargetPx, maxTargetTokens } = budget;
+  if (origW <= maxTargetPx && origH <= maxTargetPx &&
+      estimateImageTokens(origW, origH, pxPerToken) <= maxTargetTokens) {
+    return [origW, origH];
+  }
+  if (origH > origW) {
+    const [h, w] = fitImageDimensions(origH, origW, budget);
+    return [w, h];
+  }
+  const aspect = origW / origH;
+  let hi = origW, lo = 1;
+  while (true) {
+    if (lo + 1 >= hi) return [lo, Math.max(Math.round(lo / aspect), 1)];
+    const mid = Math.floor((lo + hi) / 2);
+    const midH = Math.max(Math.round(mid / aspect), 1);
+    if (mid <= maxTargetPx &&
+        estimateImageTokens(mid, midH, pxPerToken) <= maxTargetTokens) {
+      lo = mid;
+    } else {
+      hi = mid;
+    }
+  }
+}
+
+console.log('\nimage budget');
+
+test('small viewport passes through unchanged (fast path)', () => {
+  // 1280×800 at pxPerToken=28 → 1307 tokens < 1568 — no resize.
+  const [w, h] = fitImageDimensions(1280, 800);
+  assert.equal(w, 1280);
+  assert.equal(h, 800);
+});
+
+test('1080p shrinks to fit the token cap', () => {
+  // 1920×1080 → 2645 tokens (over). Target keeps aspect at ~1.78.
+  const [w, h] = fitImageDimensions(1920, 1080);
+  assert.ok(w <= 1568, `width ${w} > 1568`);
+  assert.ok(h <= 1568, `height ${h} > 1568`);
+  assert.ok(estimateImageTokens(w, h, 28) <= 1568, `tokens over cap: ${estimateImageTokens(w, h, 28)}`);
+  // Aspect ratio preserved within 1 pixel (rounding).
+  const origAspect = 1920 / 1080;
+  const newAspect = w / h;
+  assert.ok(Math.abs(origAspect - newAspect) < 0.01, `aspect drift ${newAspect} vs ${origAspect}`);
+});
+
+test('4K and 1440p converge to the same max-budget dims', () => {
+  // Any input with the same 16:9 aspect ratio should produce the same
+  // largest-that-fits output. Catches off-by-one regressions in the
+  // binary search.
+  const [w1440, h1440] = fitImageDimensions(2560, 1440);
+  const [w4k, h4k] = fitImageDimensions(3840, 2160);
+  assert.equal(w1440, w4k);
+  assert.equal(h1440, h4k);
+});
+
+test('tall portrait caps the long side at maxTargetPx', () => {
+  // A 1920×8000 full-page capture — the long side here is height.
+  const [w, h] = fitImageDimensions(1920, 8000);
+  assert.ok(h <= 1568, `height ${h} > 1568`);
+  assert.ok(w > 0, 'width should be positive');
+  assert.ok(estimateImageTokens(w, h, 28) <= 1568);
+});
+
+test('high-DPR 5K viewport stays within budget', () => {
+  // 5120×2880 (retina 5K). Should fit token cap after resize.
+  const [w, h] = fitImageDimensions(5120, 2880);
+  assert.ok(w <= 1568);
+  assert.ok(h <= 1568);
+  assert.ok(estimateImageTokens(w, h, 28) <= 1568);
+});
+
+test('square input returns a square that fits', () => {
+  const [w, h] = fitImageDimensions(3000, 3000);
+  assert.ok(w <= 1568);
+  assert.ok(h <= 1568);
+  // Square in, square (within 1 px) out.
+  assert.ok(Math.abs(w - h) <= 1);
+});
+
+test('pathological 1×100000 strip does not blow up', () => {
+  // Edge case: an extremely thin strip. The binary search used to have
+  // a termination bug when origH >> origW; this locks in that fix.
+  const [w, h] = fitImageDimensions(1, 100000);
+  assert.ok(h <= 1568);
+  assert.ok(w >= 1);
+  assert.ok(estimateImageTokens(w, h, 28) <= 1568);
+});
+
+test('custom budget is honored', () => {
+  // Shrink to a tight 400 token / 400 px budget — no dimension should exceed.
+  const [w, h] = fitImageDimensions(1920, 1080, {
+    pxPerToken: 28, maxTargetPx: 400, maxTargetTokens: 400,
+  });
+  assert.ok(w <= 400);
+  assert.ok(h <= 400);
+  assert.ok(estimateImageTokens(w, h, 28) <= 400);
+});
+
+test('existing dims under caps stay within the monotonic bound', () => {
+  // Fuzz a range of common viewport sizes; invariant: output ≤ input on
+  // every dimension, and output token count ≤ maxTargetTokens.
+  const inputs = [
+    [1366, 768], [1440, 900], [1680, 1050], [1600, 900], [1920, 1200],
+    [2048, 1152], [2304, 1440], [2560, 1600], [2880, 1800],
+  ];
+  for (const [iw, ih] of inputs) {
+    const [ow, oh] = fitImageDimensions(iw, ih);
+    assert.ok(ow <= iw, `w grew: ${iw}→${ow}`);
+    assert.ok(oh <= ih, `h grew: ${ih}→${oh}`);
+    assert.ok(estimateImageTokens(ow, oh, 28) <= 1568, `tokens over cap for ${iw}×${ih} → ${ow}×${oh}`);
+  }
+});
+
 await run();

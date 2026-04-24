@@ -1023,31 +1023,55 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       await cdpClient.attach(tabId);
       await cdpClient.sendCommand(tabId, 'Page.enable');
       await this._bringToFrontForCapture(tabId);
+
+      // Probe the CSS viewport first so we can either (a) clip exactly
+      // to it for pixel-accurate captures, or (b) compute a budget-aware
+      // CDP-side scale that downsizes during capture rather than after.
+      const vp = await cdpClient.evaluate(tabId, '({w: window.innerWidth, h: window.innerHeight})');
+      const cssW = Math.max(1, Math.round(vp?.result?.value?.w || 1024));
+      const cssH = Math.max(1, Math.round(vp?.result?.value?.h || 768));
+
       if (coordAligned) {
-        const vp = await cdpClient.evaluate(tabId, '({w: window.innerWidth, h: window.innerHeight})');
-        const w = Math.max(1, Math.round(vp?.result?.value?.w || 1024));
-        const h = Math.max(1, Math.round(vp?.result?.value?.h || 768));
+        // Pixel-accuracy mode: image pixels must equal CSS pixels so the
+        // planner can click by coordinate off the screenshot. Skip the
+        // token-budget resize — the whole point of this mode is fidelity.
+        // We DO still run the byte-ceiling fallback afterwards: if the
+        // CSS viewport happens to be huge, we'd rather lose some JPEG
+        // quality than overflow the provider's image cap.
         const shot = await cdpClient.sendCommand(tabId, 'Page.captureScreenshot', {
           format: 'jpeg',
           quality: 60,
-          clip: { x: 0, y: 0, width: w, height: h, scale: 1 },
+          clip: { x: 0, y: 0, width: cssW, height: cssH, scale: 1 },
         });
         if (!shot?.data) return null;
-        return {
-          dataUrl: `data:image/jpeg;base64,${shot.data}`,
-          width: w,
-          height: h,
-          coordAligned: true,
-        };
+        const rawDataUrl = `data:image/jpeg;base64,${shot.data}`;
+        const shrunk = await this._compressJpegToByteCeiling(rawDataUrl);
+        return { dataUrl: shrunk, width: cssW, height: cssH, coordAligned: true };
       }
+
+      // Non-coord-aligned mode: pre-compute target dims via the budget
+      // binary-search, then ask CDP to capture + scale in one pass. This
+      // avoids ever materializing a multi-MB native-DPR JPEG that we'd
+      // then have to decode and resize in the service worker.
+      const [targetW, targetH] = Agent._fitImageDimensions(cssW, cssH);
+      const scale = targetW < cssW ? targetW / cssW : 1;
       const shot = await cdpClient.sendCommand(tabId, 'Page.captureScreenshot', {
         format: 'jpeg',
-        quality: 60,
+        quality: Math.round(Agent.IMAGE_BUDGET.initialJpegQuality * 100),
         fromSurface: true,
+        clip: { x: 0, y: 0, width: cssW, height: cssH, scale },
       });
       if (!shot?.data) return null;
+      const rawDataUrl = `data:image/jpeg;base64,${shot.data}`;
+
+      // CDP-side resize + JPEG q=75 usually fits. Iterative quality
+      // downgrade is the safety net for high-DPR screens where the
+      // captured image can still exceed the base64 ceiling.
+      const shrunk = await this._compressJpegToByteCeiling(rawDataUrl);
       return {
-        dataUrl: `data:image/jpeg;base64,${shot.data}`,
+        dataUrl: shrunk,
+        width: targetW,
+        height: targetH,
         coordAligned: false,
       };
     } catch (e) {
@@ -1164,6 +1188,217 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     try {
       await cdpClient.sendCommand(tabId, 'Page.bringToFront');
     } catch { /* ignore */ }
+  }
+
+  // ───────────── Image-budget (token-conscious screenshots) ─────────────
+  // Local vision models are cheap enough that a few thousand image tokens
+  // per screenshot doesn't sting, but the moment you point the dedicated
+  // vision model at a paid API (OpenAI, Anthropic, OpenRouter) every
+  // screenshot's pixel area translates directly into dollars. Anthropic's
+  // own "Claude for Chrome" extension solves this by:
+  //   (1) computing a target (w,h) that fits both a pixel-dimension cap
+  //       AND a token cap, via a binary search over the long side;
+  //   (2) capturing at that reduced size via CDP's clip.scale — and if
+  //       the resulting JPEG is still over a byte ceiling, iteratively
+  //       dropping JPEG quality (0.75 → 0.1 in 0.05 steps) until it fits.
+  //
+  // Defaults below match Anthropic's exactly (pxPerToken=28, 1568/1568,
+  // initial 0.75, step 0.05, min 0.1, ~1.4 MB base64 ceiling) — those
+  // are tuned to Claude's native vision encoder and happen to be
+  // reasonable for most other endpoints too. Override per-capture if you
+  // need sharper (coord_aligned) or looser (full_page) constraints.
+  static IMAGE_BUDGET = {
+    pxPerToken: 28,        // rough px² per vision token across providers
+    maxTargetPx: 1568,     // no dimension bigger than this
+    maxTargetTokens: 1568, // total image tokens budget
+    maxBase64Chars: 1398100, // ~1.4 MB base64, matches Anthropic's cap
+    initialJpegQuality: 0.75,
+    minJpegQuality: 0.10,
+    jpegQualityStep: 0.05,
+  };
+
+  /**
+   * Anthropic's token-cost approximation: ceil((w*h) / pxPerToken²).
+   * Good enough to compare two capture sizes under the same budget; not
+   * exact for any specific provider's tokenizer, but better than eyeballing.
+   */
+  static _estimateImageTokens(w, h, pxPerToken) {
+    return Math.ceil((w / pxPerToken) * (h / pxPerToken));
+  }
+
+  /**
+   * Largest (w, h) ≤ original that fits BOTH maxTargetPx per side AND
+   * maxTargetTokens total at the given pxPerToken. Aspect ratio preserved.
+   * Binary-searches over the long side; short side follows. Ported from
+   * Claude-for-Chrome's `C(w, h, params)` (same algorithm, clearer names).
+   */
+  static _fitImageDimensions(origW, origH, budget = Agent.IMAGE_BUDGET) {
+    const { pxPerToken, maxTargetPx, maxTargetTokens } = budget;
+    // Already fits — no work.
+    if (origW <= maxTargetPx && origH <= maxTargetPx &&
+        Agent._estimateImageTokens(origW, origH, pxPerToken) <= maxTargetTokens) {
+      return [origW, origH];
+    }
+    // Search the long side; the other follows from aspect ratio.
+    if (origH > origW) {
+      const [h, w] = Agent._fitImageDimensions(origH, origW, budget);
+      return [w, h];
+    }
+    const aspect = origW / origH;
+    let hi = origW, lo = 1;
+    // eslint-disable-next-line no-constant-condition
+    while (true) {
+      if (lo + 1 >= hi) {
+        return [lo, Math.max(Math.round(lo / aspect), 1)];
+      }
+      const mid = Math.floor((lo + hi) / 2);
+      const midH = Math.max(Math.round(mid / aspect), 1);
+      if (mid <= maxTargetPx &&
+          Agent._estimateImageTokens(mid, midH, pxPerToken) <= maxTargetTokens) {
+        lo = mid;
+      } else {
+        hi = mid;
+      }
+    }
+  }
+
+  /**
+   * Convert an ArrayBuffer of JPEG/PNG bytes to a base64 dataUrl, chunking
+   * through String.fromCharCode so we don't blow the call stack on
+   * multi-MB images. Pure helper, no state.
+   */
+  static _bufferToDataUrl(buf, mime) {
+    const bytes = new Uint8Array(buf);
+    let bin = '';
+    const chunk = 0x8000;
+    for (let i = 0; i < bytes.length; i += chunk) {
+      bin += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk));
+    }
+    return `data:${mime};base64,${btoa(bin)}`;
+  }
+
+  /**
+   * If `dataUrl`'s base64 payload is already under `maxBase64Chars`, return
+   * it unchanged. Otherwise decode, draw to an OffscreenCanvas, and
+   * re-encode as JPEG, iteratively dropping quality from
+   * `initialJpegQuality` down to `minJpegQuality` in `jpegQualityStep`
+   * increments until the output fits — or until we hit `minJpegQuality`,
+   * in which case we return the min-quality version anyway (best-effort).
+   *
+   * Never throws: returns the original dataUrl on any decode/encode
+   * failure so screenshot paths don't take down the whole agent turn
+   * over a single bad capture.
+   */
+  async _compressJpegToByteCeiling(dataUrl, budget = Agent.IMAGE_BUDGET) {
+    try {
+      if (!dataUrl) return dataUrl;
+      const payloadStart = dataUrl.indexOf(',') + 1;
+      const payloadLen = payloadStart > 0 ? dataUrl.length - payloadStart : dataUrl.length;
+      if (payloadLen <= budget.maxBase64Chars) return dataUrl;
+
+      const resp = await fetch(dataUrl);
+      const blob = await resp.blob();
+      const bmp = await createImageBitmap(blob);
+      const canvas = new OffscreenCanvas(bmp.width, bmp.height);
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(bmp, 0, 0);
+
+      let quality = budget.initialJpegQuality;
+      let lastBuf = null;
+      while (quality >= budget.minJpegQuality - 1e-9) {
+        const outBlob = await canvas.convertToBlob({ type: 'image/jpeg', quality });
+        const buf = await outBlob.arrayBuffer();
+        lastBuf = buf;
+        // Base64 length ≈ 4/3 × byte count (plus rounding). Cheap estimate
+        // avoids the base64 encode cost per iteration.
+        if (Math.ceil(buf.byteLength * 4 / 3) <= budget.maxBase64Chars) {
+          return Agent._bufferToDataUrl(buf, 'image/jpeg');
+        }
+        quality -= budget.jpegQualityStep;
+      }
+      // Floor quality reached and still over budget — send it anyway.
+      return lastBuf ? Agent._bufferToDataUrl(lastBuf, 'image/jpeg') : dataUrl;
+    } catch {
+      return dataUrl;
+    }
+  }
+
+  /**
+   * End-to-end "shrink this screenshot to fit the vision budget" pass.
+   * Decodes, resizes to the target dims picked by `_fitImageDimensions`,
+   * and runs JPEG iterative-quality fallback if bytes are still too large.
+   *
+   * Returns { dataUrl, width, height } — width/height are the actual
+   * pixel dimensions of the returned image (useful for callers that want
+   * to report what the model will see).
+   *
+   * `origW`/`origH` should be the decoded image's natural dimensions.
+   * Pass them in rather than relying on createImageBitmap twice; callers
+   * that captured via CDP already know the viewport dims and can feed
+   * them here.
+   */
+  async _shrinkImageForBudget(dataUrl, origW, origH, budget = Agent.IMAGE_BUDGET) {
+    try {
+      if (!dataUrl) return { dataUrl, width: origW, height: origH };
+
+      // If caller passed dims, check the fast-exit path up front (no decode).
+      if (origW && origH) {
+        const [targetW, targetH] = Agent._fitImageDimensions(origW, origH, budget);
+        const payloadStart = dataUrl.indexOf(',') + 1;
+        const payloadLen = payloadStart > 0 ? dataUrl.length - payloadStart : dataUrl.length;
+        if (targetW === origW && targetH === origH && payloadLen <= budget.maxBase64Chars) {
+          return { dataUrl, width: origW, height: origH };
+        }
+      }
+
+      const resp = await fetch(dataUrl);
+      const blob = await resp.blob();
+      const bmp = await createImageBitmap(blob);
+
+      // If dims weren't passed (e.g. full_page_screenshot where we don't
+      // know the document height up front), use the decoded bitmap's.
+      if (!origW || !origH) {
+        origW = bmp.width;
+        origH = bmp.height;
+      }
+      const [targetW, targetH] = Agent._fitImageDimensions(origW, origH, budget);
+
+      // If the decoded bitmap is already smaller than our target (e.g. CDP
+      // pre-scaled it for us via clip.scale), use the bitmap's own dims.
+      const finalW = Math.min(targetW, bmp.width);
+      const finalH = Math.min(targetH, bmp.height);
+
+      const canvas = new OffscreenCanvas(finalW, finalH);
+      const ctx = canvas.getContext('2d');
+      // High-quality downscale — matters at 2-4× ratios we often hit.
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = 'high';
+      ctx.drawImage(bmp, 0, 0, bmp.width, bmp.height, 0, 0, finalW, finalH);
+
+      // Iterative JPEG quality until bytes fit.
+      let quality = budget.initialJpegQuality;
+      let lastBuf = null;
+      while (quality >= budget.minJpegQuality - 1e-9) {
+        const outBlob = await canvas.convertToBlob({ type: 'image/jpeg', quality });
+        const buf = await outBlob.arrayBuffer();
+        lastBuf = buf;
+        if (Math.ceil(buf.byteLength * 4 / 3) <= budget.maxBase64Chars) {
+          return {
+            dataUrl: Agent._bufferToDataUrl(buf, 'image/jpeg'),
+            width: finalW,
+            height: finalH,
+          };
+        }
+        quality -= budget.jpegQualityStep;
+      }
+      return {
+        dataUrl: lastBuf ? Agent._bufferToDataUrl(lastBuf, 'image/jpeg') : dataUrl,
+        width: finalW,
+        height: finalH,
+      };
+    } catch {
+      return { dataUrl, width: origW, height: origH };
+    }
   }
 
   /**
@@ -1941,15 +2176,39 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
           probe = await this._captureViewportProbe(tabId);
           await this._bringToFrontForCapture(tabId);
           coordAligned = !!(args && args.coord_aligned);
-          const capArgs = { format: 'png', fromSurface: true };
+          const cssW = Math.max(1, Math.round(probe?.innerWidth || 1024));
+          const cssH = Math.max(1, Math.round(probe?.innerHeight || 768));
+
           if (coordAligned) {
-            const w = Math.max(1, Math.round(probe?.innerWidth || 1024));
-            const h = Math.max(1, Math.round(probe?.innerHeight || 768));
-            capArgs.clip = { x: 0, y: 0, width: w, height: h, scale: 1 };
+            // Pixel-accuracy mode: image pixels must equal CSS pixels so
+            // click({x,y}) off the screenshot lands on the real element.
+            // PNG (lossless, no quality knob) so no artifacts at glyph edges.
+            const screenshot = await cdpClient.sendCommand(tabId, 'Page.captureScreenshot', {
+              format: 'png',
+              fromSurface: true,
+              clip: { x: 0, y: 0, width: cssW, height: cssH, scale: 1 },
+            });
+            dataUrl = `data:image/png;base64,${screenshot.data}`;
+            description = `Screenshot captured via CDP (${screenshot.data.length} bytes, CSS-pixel aligned for pixel clicks)`;
+            // Byte-ceiling fallback only — we don't resize in coord mode.
+            dataUrl = await this._compressJpegToByteCeiling(dataUrl);
+          } else {
+            // Budget-aware mode (default): pick target dims via binary
+            // search, ask CDP to capture + scale in one pass, then run
+            // the iterative-quality fallback if bytes are still over.
+            const [targetW, targetH] = Agent._fitImageDimensions(cssW, cssH);
+            const scale = targetW < cssW ? targetW / cssW : 1;
+            const screenshot = await cdpClient.sendCommand(tabId, 'Page.captureScreenshot', {
+              format: 'jpeg',
+              quality: Math.round(Agent.IMAGE_BUDGET.initialJpegQuality * 100),
+              fromSurface: true,
+              clip: { x: 0, y: 0, width: cssW, height: cssH, scale },
+            });
+            const rawUrl = `data:image/jpeg;base64,${screenshot.data}`;
+            dataUrl = await this._compressJpegToByteCeiling(rawUrl);
+            const resized = scale < 1 ? ` (resized ${cssW}×${cssH} → ${targetW}×${targetH} for vision-token budget)` : '';
+            description = `Screenshot captured via CDP (${screenshot.data.length} bytes, JPEG)${resized}`;
           }
-          const screenshot = await cdpClient.sendCommand(tabId, 'Page.captureScreenshot', capArgs);
-          dataUrl = `data:image/png;base64,${screenshot.data}`;
-          description = `Screenshot captured via CDP (${screenshot.data.length} bytes, ${coordAligned ? 'CSS-pixel aligned for pixel clicks' : 'native resolution'})`;
         } catch {
           const tab = await chrome.tabs.get(tabId);
           if (!tab?.active) {
@@ -1958,8 +2217,19 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
               error: 'Cannot capture screenshot: this tab is not the active tab in its window. Switch to the tab to take a screenshot, or use a different tool.',
             };
           }
-          dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'png', quality: 80 });
-          description = `Screenshot captured (${dataUrl.length} bytes base64 PNG)`;
+          // Tabs API fallback: no clip/scale available. Capture full, then
+          // decode + resize + recompress via OffscreenCanvas to fit budget.
+          const rawUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'png', quality: 80 });
+          if (!coordAligned) {
+            const cssW = Math.max(1, Math.round(probe?.innerWidth || 1024));
+            const cssH = Math.max(1, Math.round(probe?.innerHeight || 768));
+            const shrunk = await this._shrinkImageForBudget(rawUrl, cssW, cssH);
+            dataUrl = shrunk.dataUrl;
+            description = `Screenshot captured via tabs API (${dataUrl.length} bytes base64, resized to ${shrunk.width}×${shrunk.height})`;
+          } else {
+            dataUrl = await this._compressJpegToByteCeiling(rawUrl);
+            description = `Screenshot captured via tabs API (${dataUrl.length} bytes base64)`;
+          }
         }
 
         // Pick the presentation path based on what the active providers can
@@ -2172,10 +2442,41 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
         await cdpClient.attach(tabId);
         await this._bringToFrontForCapture(tabId);
         const imageData = await cdpClient.captureFullPageScreenshot(tabId);
+        const rawUrl = `data:image/png;base64,${imageData}`;
+
+        // Full-page captures are the worst case for size — a 1920×8000
+        // document at native DPR easily blows past any provider's image
+        // budget. Always shrink to the token/byte budget. Dimensions come
+        // from decoding the bitmap (we don't know the real doc size up
+        // front the way we do for viewport captures).
+        const shrunk = await this._shrinkImageForBudget(rawUrl, 0, 0);
+
+        // Check the planner/vision setup. A text-only model with no
+        // vision sub-call can't consume this at all — refuse rather
+        // than hand over a huge useless payload.
+        const provider = this.providerManager.getActive();
+        const visionProvider = await this.providerManager.getVisionProvider();
+        if (visionProvider) {
+          const desc = await this._describeScreenshot(tabId, shrunk.dataUrl, 'full_page_screenshot');
+          if (desc) {
+            return {
+              success: true,
+              method: 'vision_describe',
+              description: `[Full-page screenshot described by vision model ${desc.model}, ${shrunk.width}×${shrunk.height} after budget fit]\n${desc.text}`,
+            };
+          }
+        }
+        if (provider?.supportsVision) {
+          return {
+            success: true,
+            method: 'image_attach',
+            description: `Full page screenshot captured and fit to vision budget (${shrunk.width}×${shrunk.height}, ${shrunk.dataUrl.length} base64 chars)`,
+            _attachImage: shrunk.dataUrl,
+          };
+        }
         return {
-          success: true,
-          image: `data:image/png;base64,${imageData}`,
-          description: `Full page screenshot captured (${imageData.length} bytes)`,
+          success: false,
+          error: 'This model cannot see images. Enable "Model supports vision" for the active provider or configure a dedicated vision model.',
         };
       } catch (e) {
         return { success: false, error: `Full page screenshot failed: ${e.message}` };
