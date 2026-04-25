@@ -266,7 +266,12 @@ imgModal.addEventListener('click', () => imgModal.classList.remove('show'));
 
 // ----- Toolbar handlers ------------------------------------------------------
 
-document.getElementById('btn-refresh').addEventListener('click', refresh);
+document.getElementById('btn-refresh').addEventListener('click', async () => {
+  await refresh();
+  // Manual refresh might surface a newly-started run; kick polling back on
+  // if so. Idempotent — does nothing if a timer is already pending.
+  if (hasRunningJob()) scheduleAutoRefresh();
+});
 
 document.getElementById('btn-compare').addEventListener('click', () => {
   compareMode = !compareMode;
@@ -358,19 +363,38 @@ function blobToBase64(blob) {
   });
 }
 
-// Auto-refresh every 5s while visible (so a running job shows new steps).
+// Auto-refresh while visible AND while at least one run is still running —
+// so a live job shows new steps but a finished page doesn't keep re-rendering
+// under the user's cursor while they're trying to examine a single run.
+// Self-rescheduling setTimeout (not setInterval) so the gating check can
+// short-circuit the next tick.
+const AUTO_REFRESH_MS = 30000;
 let _autoTimer = null;
-function startAutoRefresh() {
-  stopAutoRefresh();
-  _autoTimer = setInterval(() => {
-    refresh();
-    if (selectedRunId && !compareMode) renderRun(selectedRunId);
-  }, 5000);
+function hasRunningJob() {
+  return allRuns.some((r) => r.status === 'running');
 }
-function stopAutoRefresh() { if (_autoTimer) { clearInterval(_autoTimer); _autoTimer = null; } }
+async function autoRefreshTick() {
+  _autoTimer = null;
+  if (document.hidden) return;
+  await refresh();
+  if (selectedRunId && !compareMode) renderRun(selectedRunId);
+  if (hasRunningJob()) scheduleAutoRefresh();
+}
+function scheduleAutoRefresh() {
+  if (_autoTimer || document.hidden) return;
+  _autoTimer = setTimeout(autoRefreshTick, AUTO_REFRESH_MS);
+}
+function stopAutoRefresh() {
+  if (_autoTimer) { clearTimeout(_autoTimer); _autoTimer = null; }
+}
 document.addEventListener('visibilitychange', () => {
-  if (document.hidden) stopAutoRefresh(); else startAutoRefresh();
+  if (document.hidden) stopAutoRefresh();
+  else if (hasRunningJob()) scheduleAutoRefresh();
 });
 
-refresh();
-startAutoRefresh();
+// Initial load: always do one refresh so the list populates, then only keep
+// polling if the freshly-loaded data shows a live run.
+(async () => {
+  await refresh();
+  if (hasRunningJob()) scheduleAutoRefresh();
+})();
