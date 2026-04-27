@@ -823,13 +823,15 @@ function scheduleMathRender() {
       const target = document.getElementById('messages');
       if (!target) return;
       window.renderMathInElement(target, {
-        // Delimiters in order of precedence. $$ must come before $ so the
-        // longer pattern wins.
+        // Delimiters in order of precedence. We deliberately do NOT enable
+        // single-`$...$` as an inline-math delimiter: LLM responses very
+        // often contain dollar amounts ("$1,263 ... $2,526") and KaTeX
+        // would pair them up and italicize the prose between them. Users
+        // who genuinely want inline math can use \\( ... \\) or $$...$$.
         delimiters: [
           { left: '$$', right: '$$', display: true },
           { left: '\\[', right: '\\]', display: true },
           { left: '\\(', right: '\\)', display: false },
-          { left: '$', right: '$', display: false },
         ],
         // Don't crash the whole message on a bad expression — show the raw
         // source in red instead.

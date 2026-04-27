@@ -607,7 +607,14 @@ Guidelines:
 1. Read the page first (a11y tree by default) to understand the context, then answer the user's question.
 2. Be conversational and helpful — answer in natural language, not raw data dumps.
 3. If the user asks you to do something that requires clicking or typing, let them know they need to switch to Act mode.
-4. Summarize, analyze, and explain — that's your strength in this mode.`;
+4. Summarize, analyze, and explain — that's your strength in this mode.
+
+LISTINGS & PAGINATION — read this:
+- Listing / search-result pages (URLs with ?page=, ?p=, ?sd=, ?offset=, ?after=, &cursor=; or pages with many product/result cards): EXTRACT first, paginate second.
+- Pattern: from the current page, list each visible item to the user as concrete bullets (title + price/date/identifier + canonical link), THEN move to the next page. Do NOT queue 2-3 page fetches and try to deliver everything at the end — the step budget runs out and you ship nothing.
+- Wrong tool for listings: \`get_accessibility_tree({filter:"all"})\` overflows the maxChars limit on most listing pages. If you hit "Output exceeds N character limit" once, do NOT retry the same call with a higher maxChars — switch tool. Use \`get_accessibility_tree({filter:"visible", maxDepth:8-10})\`, \`read_page\`, or \`extract_data({type:"links"})\` instead.
+- Don't refetch a URL you already fetched in this conversation. \`fetch_url\` and \`research_url\` against the same URL return the same content — reuse it.
+- For terminal-list tasks ("give me the links", "list the items under $N"), call \`done({summary})\` with what you have as soon as it's useful. Partial-but-delivered beats complete-but-never-delivered.`;
 
 export const SYSTEM_PROMPT_ACT = `You are WebBrain, an AI browser agent running in Act mode. You can read web pages, interact with elements, navigate, and perform multi-step tasks autonomously.
 
@@ -788,7 +795,14 @@ SCROLLING — read this:
 - Many forms and pages have content below the visible viewport. If you need to find a button, field, or section that isn't visible, use \`scroll_page({direction: "down"})\` to scroll down.
 - When filling forms, scroll down to see ALL fields before starting. Many forms have important fields (price, billing interval, description) below the fold.
 - If you can't find a button or field by text or selector, scroll down before giving up — it may be below the fold.
-- After filling visible fields, always scroll down to check for more fields before submitting.`;
+- After filling visible fields, always scroll down to check for more fields before submitting.
+
+LISTINGS & PAGINATION — read this:
+- Listing / search-result pages (URLs with query params like ?page=, ?p=, ?sd=, ?offset=, ?after=, &cursor=; or pages that show many product/result cards with Next/Sonraki/Suivant/下一页 controls): EXTRACT first, paginate second.
+- Required pattern: from the current page, list each visible item to the user as concrete bullets (title + price/date/identifier + canonical link), THEN move to the next page. Do not queue 2-3 pages of fetches and try to deliver everything at the end — the step budget runs out and you ship nothing.
+- Wrong tool for listings: \`get_accessibility_tree({filter:"all"})\` overflows the maxChars limit on almost every listing page (each card is dozens of nodes × dozens of cards). If you hit "Output exceeds N character limit" once, do NOT retry the same call with a higher maxChars — that is the wrong tool for this page. Switch to \`get_accessibility_tree({filter:"visible", maxDepth:8-10})\` for the in-viewport cards, then scroll + re-read; or use \`read_page\` if you need prose; or use \`extract_data({type:"links"})\` for raw href harvesting.
+- Don't refetch a URL you already fetched in this conversation. \`fetch_url\`, \`research_url\`, and \`navigate\` against the same URL all return the same content — reuse what you already have rather than calling another tool to "verify". If the previous fetch result was truncated, scroll/extract within it; don't hit the URL again.
+- Terminal-list tasks ("give me the links", "list the products under $N", "find all matching items"): call \`done({summary})\` with the items you have collected as soon as you have a useful answer. Partial-but-delivered beats complete-but-never-delivered. Don't paginate forever in pursuit of completeness.`;
 
 /**
  * Compact system prompt for small/local models (< 8B parameters).
@@ -810,6 +824,11 @@ RULES:
 9. If stuck, try a different approach. Don't repeat the same failing action.
 10. Interact through the visible UI. Do not call APIs directly.
 11. For long tasks, call scratchpad_write({text: "..."}) to remember facts (file paths, download IDs, progress) — older tool results get summarized and their details disappear.
+
+LISTINGS & PAGINATION — read this:
+- On listing/search pages (?page=, ?p=, ?sd=, ?offset=, Next/Sonraki controls): extract item title + price + link from the current page and reply to the user with a partial bullet list, THEN paginate. Don't queue multiple pages and answer at the end.
+- Don't refetch a URL you already fetched. Don't retry get_accessibility_tree with a larger maxChars after it errored — switch tool (use filter:"visible" with maxDepth:8, or read_page, or extract_data).
+- For "give me the list" tasks, call done({summary}) as soon as you have a usable answer; don't chase completeness.
 
 TYPING: Click the field first, then call type_text({text: "..."}) with NO selector. This is the most reliable method.
 

@@ -7,7 +7,7 @@
   "meta.twitter_title": "WebBrain — 开源 AI 浏览器代理",
   "meta.twitter_description": "Claude 浏览器插件的免费开源替代品。面向 Chrome 与 Firefox 的 AI 代理。支持本地或云端 LLM。5 种语言界面。默认节省 token。",
   "meta.image_alt": "WebBrain 图标",
-  "meta.software_version": "5.0.1",
+  "meta.software_version": "5.0.2",
 
   "nav.features": "功能",
   "nav.demo": "演示",

@@ -7,7 +7,7 @@
   "meta.twitter_title": "WebBrain — Open-Source AI Browser Agent",
   "meta.twitter_description": "Free, open-source alternative to Claude browser plugin. AI agent for Chrome & Firefox. Works with local or cloud LLMs. 5-language UI. Token-conscious by default.",
   "meta.image_alt": "WebBrain icon",
-  "meta.software_version": "5.0.1",
+  "meta.software_version": "5.0.2",
 
   "nav.features": "Features",
   "nav.demo": "Demo",
