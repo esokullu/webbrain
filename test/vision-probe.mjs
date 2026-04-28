@@ -89,9 +89,14 @@ const body = {
   temperature: 0,
   max_tokens: 800,
   stream: false,
-  // Qwen3/3.5-style servers: suppress chain-of-thought preambles. Harmless
-  // on servers that ignore unknown fields.
-  chat_template_kwargs: { enable_thinking: false },
+  // Suppress chain-of-thought preambles across the major reasoning model
+  // families:
+  //   - Qwen3/3.5/3.6: `enable_thinking: false`
+  //   - NVIDIA Nemotron-Nano-Reasoning: `think: false`
+  //   - DeepSeek R1 family (some variants): `thinking: false`
+  // Servers ignore unknown kwargs, so packing all three is safe and lets
+  // one probe handle every reasoning model we've benchmarked.
+  chat_template_kwargs: { enable_thinking: false, think: false, thinking: false },
 };
 if (modelArg) body.model = modelArg;
 
