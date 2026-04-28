@@ -1,0 +1,573 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Round 2: Nemotron Omni 30B vs Qwen 3.6 — does cheaper image tokens beat calibrated uncertainty? — WebBrain Blog</title>
+  <meta name="description" content="A second round of vision-model benchmarking for browser agents. NVIDIA's Nemotron Omni 30B-A3B-Reasoning and the dense Qwen 3.6-27B both enter — and one of them is 17% cheaper per image. We measure what changes for a real browser-agent workload, and what doesn't.">
+  <meta name="keywords" content="Nemotron Omni 30B, Qwen 3.6 35B, Qwen 3.6 27B, vision model benchmark, browser agent, MoE vision model, calibrated uncertainty, vision encoder cost, NVFP4, llama.cpp, vLLM, A3B reasoning model">
+  <meta property="og:title" content="Round 2: Nemotron Omni 30B vs Qwen 3.6 — vision shootout for browser agents">
+  <meta property="og:description" content="NVIDIA's Nemotron Omni 30B is 17% cheaper per image and classifies inputs better — but loses on the one axis that matters most for a browser agent. Plus: which model wins for non-English users.">
+  <meta property="og:type" content="article">
+  <meta property="og:url" content="https://webbrain.one/blog/vision-shootout-round-2">
+  <meta property="og:image" content="https://webbrain.one/og-image.svg">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Round 2: Nemotron Omni 30B vs Qwen 3.6 vision shootout">
+  <meta name="twitter:description" content="Cheaper image tokens vs calibrated uncertainty — and a multilingual gotcha that decides the winner.">
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <link rel="canonical" href="https://webbrain.one/blog/vision-shootout-round-2">
+  <!-- Blog post is English-only; alternates point to locale homepages. -->
+  <link rel="alternate" hreflang="en" href="https://webbrain.one/">
+  <link rel="alternate" hreflang="es" href="https://webbrain.one/es/">
+  <link rel="alternate" hreflang="fr" href="https://webbrain.one/fr/">
+  <link rel="alternate" hreflang="tr" href="https://webbrain.one/tr/">
+  <link rel="alternate" hreflang="zh" href="https://webbrain.one/zh/">
+  <link rel="alternate" hreflang="x-default" href="https://webbrain.one/">
+  <style>
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+    :root {
+      --bg: #0b0e17;
+      --bg-card: #111827;
+      --surface: #161d2e;
+      --border: rgba(255,255,255,0.07);
+      --text: #e4e4ec;
+      --text-dim: #8b8fa4;
+      --accent: #6c63ff;
+      --accent2: #a78bfa;
+      --code-bg: #0a0e17;
+      --radius: 12px;
+      --max-w: 760px;
+    }
+    html { scroll-behavior: smooth; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Inter, Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.75;
+      font-size: 17px;
+    }
+    a { color: var(--accent2); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+
+    .glow-bg {
+      position: fixed;
+      inset: 0;
+      z-index: -1;
+      pointer-events: none;
+    }
+    .glow-bg::before, .glow-bg::after {
+      content: ''; position: absolute; border-radius: 50%; filter: blur(120px); opacity: 0.3;
+    }
+    .glow-bg::before { width: 500px; height: 500px; background: var(--accent); top: -200px; left: -150px; }
+    .glow-bg::after  { width: 500px; height: 500px; background: var(--accent2); bottom: -200px; right: -150px; opacity: 0.2; }
+
+    nav {
+      position: sticky; top: 0; z-index: 100;
+      background: rgba(11,14,23,0.85);
+      backdrop-filter: saturate(160%) blur(12px);
+      -webkit-backdrop-filter: saturate(160%) blur(12px);
+      border-bottom: 1px solid var(--border);
+    }
+    .nav-inner {
+      max-width: var(--max-w);
+      margin: 0 auto;
+      padding: 16px 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .nav-brand { font-weight: 700; font-size: 18px; color: var(--text); }
+    .nav-brand .emoji { margin-right: 4px; }
+    .nav-links a { color: var(--text-dim); margin-left: 20px; font-size: 14px; }
+    .nav-links a:hover { color: var(--text); text-decoration: none; }
+
+    article {
+      max-width: var(--max-w);
+      margin: 0 auto;
+      padding: 64px 24px 80px;
+    }
+
+    .meta {
+      font-size: 13px;
+      color: var(--text-dim);
+      margin-bottom: 12px;
+      letter-spacing: 0.02em;
+    }
+    h1 {
+      font-size: 38px;
+      line-height: 1.2;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      margin-bottom: 16px;
+    }
+    .lede {
+      font-size: 19px;
+      color: var(--text-dim);
+      margin-bottom: 40px;
+      line-height: 1.6;
+    }
+
+    h2 {
+      font-size: 24px;
+      font-weight: 700;
+      margin-top: 48px;
+      margin-bottom: 14px;
+      letter-spacing: -0.01em;
+    }
+    h3 {
+      font-size: 18px;
+      font-weight: 600;
+      margin-top: 32px;
+      margin-bottom: 10px;
+      color: var(--text);
+    }
+
+    p { margin-bottom: 16px; }
+    ul, ol { margin: 0 0 16px 20px; }
+    li { margin-bottom: 6px; }
+
+    code {
+      font-family: 'SF Mono', 'Menlo', 'Consolas', monospace;
+      font-size: 0.88em;
+      background: rgba(255,255,255,0.06);
+      padding: 2px 6px;
+      border-radius: 4px;
+      color: #e7dbff;
+    }
+    pre {
+      background: var(--code-bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 18px 20px;
+      overflow-x: auto;
+      margin: 20px 0;
+      font-size: 14px;
+      line-height: 1.55;
+    }
+    pre code {
+      background: transparent;
+      padding: 0;
+      color: #d7cff7;
+      font-size: inherit;
+    }
+
+    blockquote {
+      border-left: 3px solid var(--accent);
+      padding: 4px 0 4px 18px;
+      margin: 20px 0;
+      color: var(--text-dim);
+      font-style: italic;
+    }
+
+    .table-wrap { overflow-x: auto; margin: 24px 0; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 14px;
+      min-width: 560px;
+    }
+    th, td {
+      text-align: left;
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--border);
+      vertical-align: top;
+    }
+    th {
+      color: var(--text-dim);
+      font-weight: 600;
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      background: rgba(255,255,255,0.02);
+    }
+    td code { font-size: 12px; }
+    .win { color: #34d399; font-weight: 600; }
+    .lose { color: #f87171; }
+    .meh { color: #fbbf24; }
+
+    .callout {
+      background: rgba(108,99,255,0.08);
+      border: 1px solid rgba(108,99,255,0.2);
+      border-radius: var(--radius);
+      padding: 16px 20px;
+      margin: 24px 0;
+      font-size: 15px;
+      line-height: 1.65;
+      color: var(--text-dim);
+    }
+    .callout strong { color: var(--text); }
+
+    .author-box {
+      margin-top: 64px;
+      padding-top: 32px;
+      border-top: 1px solid var(--border);
+      color: var(--text-dim);
+      font-size: 14px;
+    }
+    .author-box a { color: var(--accent2); }
+
+    footer {
+      max-width: var(--max-w);
+      margin: 0 auto;
+      padding: 40px 24px;
+      border-top: 1px solid var(--border);
+      display: flex;
+      justify-content: space-between;
+      color: var(--text-dim);
+      font-size: 13px;
+    }
+    footer a { color: var(--text-dim); }
+    footer a:hover { color: var(--text); }
+
+    @media (max-width: 640px) {
+      body { font-size: 16px; }
+      h1 { font-size: 28px; }
+      .lede { font-size: 16px; }
+      article { padding: 48px 20px 64px; }
+      h2 { font-size: 20px; margin-top: 36px; }
+    }
+  </style>
+
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "BlogPosting",
+    "headline": "Round 2: Nemotron Omni 30B vs Qwen 3.6 — does cheaper image tokens beat calibrated uncertainty?",
+    "description": "A second round of vision-model benchmarking for browser agents. Nemotron Omni 30B-A3B-Reasoning and dense Qwen 3.6-27B both enter the ring. Nemotron is 17% cheaper per image and gets affordances right — but loses on calibrated uncertainty, and is English-only.",
+    "author": {
+      "@type": "Person",
+      "name": "Emre Sokullu",
+      "url": "https://emresokullu.com"
+    },
+    "datePublished": "2026-04-29",
+    "image": "https://webbrain.one/og-image.svg",
+    "publisher": {
+      "@type": "Organization",
+      "name": "WebBrain",
+      "logo": {
+        "@type": "ImageObject",
+        "url": "https://webbrain.one/favicon.svg"
+      }
+    },
+    "mainEntityOfPage": {
+      "@type": "WebPage",
+      "@id": "https://webbrain.one/blog/vision-shootout-round-2"
+    }
+  }
+  </script>
+</head>
+<body>
+  <div class="glow-bg"></div>
+
+  <nav>
+    <div class="nav-inner">
+      <a href="/" class="nav-brand"><span class="emoji">🧠</span> WebBrain<span style="opacity:0.5; font-weight:400;">.one</span></a>
+      <div class="nav-links">
+        <a href="/">Home</a>
+        <a href="/blog">Blog</a>
+        <a href="https://github.com/esokullu/webbrain" target="_blank">GitHub</a>
+      </div>
+    </div>
+  </nav>
+
+  <article>
+    <div class="meta">April 29, 2026 · 8 min read · <a href="/blog">← All posts</a></div>
+    <h1>Round 2: Nemotron Omni 30B vs Qwen 3.6 — does cheaper image tokens beat calibrated uncertainty?</h1>
+    <p class="lede">
+      Last week we ran a <a href="/blog/vision-model-shootout">four-way vision-model shootout</a> and Qwen 3.6 35B-A3B walked away with the round. Two new contenders showed up since: NVIDIA's <strong>Nemotron Omni 30B-A3B-Reasoning</strong>, and the dense <strong>Qwen 3.6-27B</strong> for an apples-to-MoE comparison within the same model family. Nemotron has two genuine wins over Qwen — and a third axis where it loses badly. Plus a multilingual gotcha that decides the round for most readers without us touching a benchmark.
+    </p>
+
+    <h2>The setup, again</h2>
+    <p>
+      Same probe (<code>test/vision-probe.mjs</code> in the repo), same prompt (the 6-section structured caption WebBrain's vision sub-call uses), same image (the Google sign-in screen with a focused password field, red error border, and a small email chip with a dropdown affordance). The probe sends the exact system prompt, user message, and parameters our extension's vision sub-call sends, against any OpenAI-compatible endpoint.
+    </p>
+    <p>If you missed round 1: we tested Gemma 4-E2B, Gemma 4-31B, Qwen 3.5-27B, and Qwen 3.6-35B-A3B. Headline finding was that Qwen 3.6's MoE variant beat the dense 27B on every axis — same VRAM, better quality, lower latency. <a href="/blog/vision-model-shootout">Round 1 here</a>. This post adds two models on top.</p>
+
+    <h2>A reasoning-suppression detour, then the numbers</h2>
+    <p>
+      First test on Nemotron: <strong>18.4 seconds</strong>. For a 30B-A3B with 195 completion tokens, that's wrong. The probe sets <code>chat_template_kwargs.enable_thinking: false</code> — the Qwen-style gate — but Nemotron uses <code>think: false</code> instead, so our flag was being ignored. The model was reasoning silently before emitting the structured caption.
+    </p>
+    <p>
+      Adding both keys (<code>enable_thinking: false</code> AND <code>think: false</code> — servers ignore unknown kwargs, so packing both is harmless) brought it down to <strong>12.0 seconds</strong>. We also tried <code>/no_think</code> as a system-prompt prefix per NVIDIA's docs; that did essentially nothing on top of the kwarg. The probe in the repo now sends all three keys (<code>enable_thinking</code>, <code>think</code>, <code>thinking</code> for the DeepSeek family) so future reasoning models are more likely to behave without manual surgery.
+    </p>
+    <p>Once the gate was set right, the comparison stopped being about waiting and started being about caption quality. That's where it got interesting.</p>
+
+    <h2>The two things Nemotron does better</h2>
+
+    <h3>1. It's 17% cheaper per image than Qwen 3.6-A3B</h3>
+    <p>
+      Same screenshot, prompt-token counts:
+    </p>
+    <ul>
+      <li>Gemma 4-31B: <strong>574</strong></li>
+      <li>Nemotron Omni 30B: <strong>3636</strong></li>
+      <li>Qwen 3.6-35B-A3B: <strong>4374</strong> (+20% over Nemotron)</li>
+      <li>Qwen 3.6-27B dense: <strong>5570</strong> (+53% over Nemotron)</li>
+    </ul>
+    <p>
+      Different vision encoder family entirely — Nemotron-3-Nano has a tighter tile budget than Qwen2.5-VL. Doesn't matter if you're running this locally on a 5090 (you're paying in prompt-eval time, not money). Matters a lot if you're pointing the dedicated vision model at a paid endpoint — Nemotron is 17–53% cheaper than the Qwen variants for the exact same input.
+    </p>
+
+    <h3>2. It actually classifies the email chip as a dropdown</h3>
+    <p>
+      The test image's email chip — <code>esokullu@gmail.com</code> with a small chevron next to it — is visually a dropdown affordance. Click it, you get an account picker. It's not a heading, link, button, tab, or menu item, even though its main contents are text.
+    </p>
+    <p>Nemotron classified it the right way:</p>
+    <pre><code>3) Inputs:
+- Label: "esokullu@gmail.com", Type: dropdown, Value: "esokullu@gmail.com",
+   Focused: false, Disabled: false
+- Label: "Enter your password", Type: text input, Value: "",
+   Focused: true, Disabled: false</code></pre>
+    <p>Qwen 3.6-A3B noted the same affordance, but as <em>parenthetical metadata</em> under "visible text" rather than as a structured input:</p>
+    <pre><code>2) Visible text:
+- "esokullu@gmail.com" (with dropdown arrow)</code></pre>
+    <p>
+      For a planning model that has to decide whether to <code>click({text: "esokullu@gmail.com"})</code> (Qwen's framing → "click the visible text" → no defined behavior) versus <code>click_ax({ref_id: "..."})</code> on a combobox role (Nemotron's framing → click-to-toggle a picker), Nemotron's reading is the right one. It encodes the affordance directly in the place the planner looks for actionable elements.
+    </p>
+    <p>
+      There's a real cost to this, though: by classifying the chip as an input, Nemotron <em>technically violated section 2 of the prompt</em> ("list the EXACT strings on buttons, links, headings, tabs, and menu items"). It omitted the email from the visible-text list because it decided the chip wasn't any of those things. Defensible reading — but if downstream code does a <code>.includes("@")</code> check on §2 to find email addresses, Nemotron would silently miss it. Whether you call this a win depends on whether you trust your prompt or your model.
+    </p>
+
+    <h2>The one thing Nemotron does worse — and why it matters</h2>
+    <p>Section 6 of our vision prompt asks for an "Unknowns" list — text the model couldn't read clearly, ambiguous states, anything it isn't sure of. The instruction is verbatim:</p>
+    <blockquote>If you cannot read something clearly, say so. Do not guess numbers, names, or identifiers.</blockquote>
+    <p>
+      Across every model we've tested, this is the bullet that gets the least respect. Most models write "None" by default even when they had visible reasons to be unsure. Round 1's headline finding was that <strong>Qwen 3.6-35B-A3B was the only model that actually used section 6 honestly</strong> — it flagged the red border on the password field as ambiguous (could mean focus, could mean error), and noted that interpretation should be DOM-cross-checked.
+    </p>
+    <p>Nemotron also wrote "Unknowns: None" — even though it had the same red-border ambiguity to flag. So did Qwen 3.6-27B dense.</p>
+    <p>
+      For a browser agent, this is the bullet that decides everything else. An affordance misclassification is recoverable — the planner has <code>get_accessibility_tree</code> to cross-check whether something really is a combobox. An OCR misread is recoverable too — <code>verify_form</code> reads the DOM, not pixels. But <strong>overconfidence is not recoverable.</strong> If the vision model commits to "this is a focus indicator, not an error" and the planner takes that as ground truth, you end up acting on a hallucinated state with no signal that anything's wrong. The "Unknowns" section is the planner's escape hatch — without it, model perception becomes ground truth.
+    </p>
+    <p>
+      So even though Nemotron has cheaper image tokens AND better affordance classification, it loses on the one axis a browser agent values most. Two wins, one loss — but the loss is structural, the wins are nice-to-haves.
+    </p>
+
+    <h2>The Nemotron downside that decides the round for most readers</h2>
+    <p><strong>Nemotron Omni 30B is English-only.</strong></p>
+    <p>
+      WebBrain users on Spanish, French, Turkish, Chinese, German, Arabic, Japanese, Korean, Russian — anyone running the agent on pages in their own language — will get unusable captions out of Nemotron. The page text comes back garbled, half-translated, or transliterated. The Qwen 3.x family is multilingual by design and handles non-English page text natively.
+    </p>
+    <p>
+      For an English-language agent on English-language pages with a paid vision endpoint, Nemotron's 17% token discount is a real argument. For everyone else, it isn't a real option, regardless of how cheap it is per image.
+    </p>
+
+    <h2>The full table</h2>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th></th>
+            <th>Gemma 4-E2B</th>
+            <th>Gemma 4-31B</th>
+            <th>Qwen 3.6-27B dense</th>
+            <th>Qwen 3.6-35B-A3B</th>
+            <th>Nemotron Omni 30B-A3B</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Architecture</td>
+            <td>Dense, ~2B effective</td>
+            <td>Dense 31B</td>
+            <td>Dense 27B</td>
+            <td>MoE 35B / ~3B active</td>
+            <td>MoE 30B / ~3B active, reasoning</td>
+          </tr>
+          <tr>
+            <td>Engine tested</td>
+            <td>llama.cpp</td>
+            <td>llama.cpp</td>
+            <td>vLLM (Intel int4 AutoRound)</td>
+            <td>llama.cpp</td>
+            <td>vLLM (NVFP4)</td>
+          </tr>
+          <tr>
+            <td>Latency</td>
+            <td><span class="win">1.5s</span></td>
+            <td>4.6s</td>
+            <td>5.9s</td>
+            <td><span class="win">5.3s</span></td>
+            <td><span class="lose">12.0s</span> (after reasoning fix)</td>
+          </tr>
+          <tr>
+            <td>Prompt tokens (image)</td>
+            <td><span class="win">574</span></td>
+            <td><span class="win">574</span></td>
+            <td><span class="lose">5570</span></td>
+            <td>4374</td>
+            <td><span class="win">3636</span></td>
+          </tr>
+          <tr>
+            <td>Email chip OCR</td>
+            <td><span class="lose">❌</span></td>
+            <td><span class="lose">❌</span> (<code>esokullullu</code>)</td>
+            <td><span class="win">✓</span></td>
+            <td><span class="win">✓</span></td>
+            <td><span class="win">✓</span></td>
+          </tr>
+          <tr>
+            <td>All 12 visible strings</td>
+            <td><span class="lose">5 of 12</span></td>
+            <td><span class="win">12</span></td>
+            <td><span class="win">12</span></td>
+            <td><span class="win">12</span></td>
+            <td><span class="meh">11 in §2 (email moved to §3 as input)</span></td>
+          </tr>
+          <tr>
+            <td>Affordance classification (email chip = dropdown)</td>
+            <td><span class="lose">missed</span></td>
+            <td><span class="lose">missed</span></td>
+            <td><span class="lose">missed</span></td>
+            <td><span class="meh">noted as parenthetical</span></td>
+            <td><span class="win">explicit <code>Type: dropdown</code></span></td>
+          </tr>
+          <tr>
+            <td>Red error state surfaced</td>
+            <td><span class="lose">missed</span></td>
+            <td>text only</td>
+            <td><span class="win">border + icon + text</span></td>
+            <td><span class="win">border + icon + text + ambiguity flag</span></td>
+            <td><span class="win">border + icon + text</span></td>
+          </tr>
+          <tr>
+            <td>Inferred semantic blocker</td>
+            <td><span class="lose">no</span></td>
+            <td>no</td>
+            <td><span class="win">yes</span></td>
+            <td><span class="win">yes</span></td>
+            <td><span class="win">yes</span></td>
+          </tr>
+          <tr>
+            <td>Honest "Unknowns" section</td>
+            <td><span class="lose">no</span></td>
+            <td><span class="lose">no</span></td>
+            <td><span class="lose">no</span></td>
+            <td><span class="win">YES — only model that did</span></td>
+            <td><span class="lose">no</span></td>
+          </tr>
+          <tr>
+            <td>Multilingual</td>
+            <td>weak</td>
+            <td>partial</td>
+            <td><span class="win">native</span></td>
+            <td><span class="win">native</span></td>
+            <td><span class="lose">English-only</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2>Head-to-head: Qwen 3.6-35B-A3B vs Nemotron Omni 30B-A3B</h2>
+
+    <p>For the two A3B MoEs that are realistically competing for the dedicated-vision-model slot:</p>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Axis</th>
+            <th>Qwen 3.6-35B-A3B</th>
+            <th>Nemotron Omni 30B-A3B</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>OCR fidelity (email, etc.)</td>
+            <td>tie</td>
+            <td>tie — both correct</td>
+          </tr>
+          <tr>
+            <td>State extraction (red border, error, focus)</td>
+            <td>tie</td>
+            <td>tie</td>
+          </tr>
+          <tr>
+            <td>Affordance classification (email chip = dropdown?)</td>
+            <td>parenthetical annotation</td>
+            <td><span class="win">explicit <code>Type: dropdown</code> in §3 ← Nemotron ahead</span></td>
+          </tr>
+          <tr>
+            <td>Calibrated uncertainty (§6 Unknowns)</td>
+            <td><span class="win">✓ flagged red-border ambiguity ← Qwen ahead</span></td>
+            <td>❌ "None"</td>
+          </tr>
+          <tr>
+            <td>Image token cost</td>
+            <td>4374</td>
+            <td><span class="win">3636 (-17%) ← Nemotron ahead</span></td>
+          </tr>
+          <tr>
+            <td>Latency (after reasoning fix)</td>
+            <td><span class="win">5.3s ← Qwen ahead</span></td>
+            <td>12.0s</td>
+          </tr>
+          <tr>
+            <td>Multilingual page text</td>
+            <td><span class="win">native ← Qwen ahead</span></td>
+            <td>English-only</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2>Verdict for consumer devices</h2>
+
+    <p><strong>Qwen 3.6-35B-A3B is still the pick</strong>, and round 2 makes the case stronger, not weaker:</p>
+    <ul>
+      <li><strong>It's faster.</strong> 5.3s vs Nemotron's 12s, even after fixing Nemotron's reasoning gate.</li>
+      <li><strong>It's faster than its own dense sibling.</strong> Qwen 3.6-27B dense is 5.9s — slower than the larger 35B-A3B by virtue of MoE activating only ~3B params per token. Same VRAM bracket when both are quantized comparably, but the MoE wins on inference cost.</li>
+      <li><strong>It's the only model that flags uncertainty</strong>, which a browser agent values more than any of Nemotron's nice-to-haves.</li>
+      <li><strong>It's multilingual.</strong> WebBrain has users in Spanish, Turkish, French, Chinese — Nemotron's English-only ceiling rules it out for any of them, regardless of how cheap it is per image.</li>
+    </ul>
+
+    <p>
+      Reasoning + visual + faster than the dense 27B + multilingual is a remarkable combination on a single 35B-A3B that fits on consumer hardware. The 5090 we tested on can run this comfortably; so can a 4090 with the right quant. For self-hosted browser-agent vision, this is the model to beat.
+    </p>
+
+    <h3>Where Nemotron makes sense anyway</h3>
+    <p>If you tick all of these:</p>
+    <ul>
+      <li>You're operating in English on English pages exclusively.</li>
+      <li>You're paying a paid vision API per image token (the 17% discount actually shows up on a bill).</li>
+      <li>You're willing to give up the calibrated-uncertainty escape hatch.</li>
+      <li>You can engineer around Nemotron's tendency to push interactive elements out of §2 into §3.</li>
+    </ul>
+    <p>Then Nemotron is a real argument. Otherwise, it's an interesting data point — not a default.</p>
+
+    <h2>Where Gemma 4 lands</h2>
+    <p>
+      Round 1 was already not kind to Gemma. Round 2 doesn't change that — both Gemma 4-E2B and Gemma 4-31B are clearly behind every Qwen and Nemotron variant on the metrics that matter for a browser agent. Gemma's main appeal is the 574 image-token count (massively cheaper than the 3636–5570 range of Qwen / Nemotron), but the OCR keeps mangling identifiers (<code>esokullu</code> → <code>esokullullu</code>, <code>emreillu</code>, etc.) and section 6 is always "None". For a browser agent that needs to act on what it reads, that's not a tradeoff — it's a non-starter. Gemma is fine for very high-level page-purpose detection if you don't need precision on names, IDs, or dollar amounts. For an agent doing real form-filling or login-screen handling, neither variant is competitive.
+    </p>
+
+    <h2>What's next</h2>
+    <p>
+      We're going to keep running this probe against new models as they show up — focusing specifically on what fits on consumer GPUs (8–32 GB VRAM) at usable latency. The gap between Gemma and the rest is wide enough now that we'll probably stop including Gemma in headline tables unless something major changes there.
+    </p>
+    <p>The other dimension we want to nail down: <strong>quantization and inference-engine effects.</strong> A few questions we haven't answered cleanly yet:</p>
+    <ul>
+      <li>Does the same model on llama.cpp vs vLLM vs LM Studio produce the same caption quality at the same prompt-token count? Or do the engines preprocess images differently and shift cost?</li>
+      <li>How much of Gemma's <code>esokullullu</code> failure is the model and how much is the quant? Does Q8 fix it? Does FP16 fix it?</li>
+      <li>For Qwen 3.6-35B-A3B specifically: what's the smallest quant that preserves its calibrated-uncertainty behavior? At what point does §6 collapse back to "None"?</li>
+      <li>Is NVFP4 actually faster than int4 AutoRound on a 5090, or is it tied / behind in practice?</li>
+    </ul>
+    <p>Those are the next posts. The probe stays where it is — small, reproducible, same prompt every time. If you want to run your own comparisons, it's three lines:</p>
+    <pre><code>node test/vision-probe.mjs ./shot.png http://127.0.0.1:8080  Qwen3.6-35B-A3B
+node test/vision-probe.mjs ./shot.png http://127.0.0.1:8000  nemotron-omni-30b
+node test/vision-probe.mjs ./shot.png http://localhost:11434/v1  llava:13b</code></pre>
+
+    <div class="callout">
+      <strong>Methodology caveat.</strong> One screenshot is one data point — the same caveat as round 1. Different pages will surface different model weaknesses. The probe is the cheapest possible way to compare models on whatever pages you actually care about; if a candidate model passes on a Google login screen but fails on a Stripe dashboard, that's worth knowing before you wire it in. Run it on your own screens before committing.
+    </div>
+
+    <div class="author-box">
+      Written by <a href="https://emresokullu.com" target="_blank">Emre Sokullu</a>. WebBrain is MIT-licensed and open on <a href="https://github.com/esokullu/webbrain" target="_blank">GitHub</a> — file an issue if you've benchmarked a model worth adding.
+    </div>
+  </article>
+
+  <footer>
+    <div>© 2026 WebBrain · <a href="/privacy">Privacy</a></div>
+    <div><a href="https://github.com/esokullu/webbrain" target="_blank">GitHub</a></div>
+  </footer>
+</body>
+</html>
