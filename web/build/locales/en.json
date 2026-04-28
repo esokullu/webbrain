@@ -215,6 +215,13 @@
   "oss.desc": "WebBrain is MIT-licensed. Inspect the code, contribute features, or fork it and make it your own.",
   "oss.star_btn": "Star on GitHub",
 
+  "share.title": "Spread the word, share the love",
+  "share.desc": "WebBrain is MIT-licensed and runs entirely in your browser. If it's useful, drop us a star or share it — that's how independent open-source projects get found.",
+  "share.star_btn": "⭐ Star on GitHub",
+  "share.x_btn": "Share on X",
+  "share.linkedin_btn": "Share on LinkedIn",
+  "share.text": "WebBrain — free, open-source AI browser agent for Chrome & Firefox. Multilingual UI, token-conscious by default, MIT-licensed.",
+
   "safety.heading": "Important Safety Notice",
   "safety.item_1": "WebBrain Act mode can take real actions on your behalf. You are responsible for reviewing prompts, destinations, and outcomes before continuing.",
   "safety.item_2": "WebBrain may capture screenshots for planning. Avoid using agent mode on sensitive pages (for example health, finance, dating, or private account portals) unless you accept that risk.",

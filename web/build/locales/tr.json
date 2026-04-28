@@ -215,6 +215,13 @@
   "oss.desc": "WebBrain MIT lisanslıdır. Kodu incele, özelliklere katkı ver ya da çatallayıp kendine özelleştir.",
   "oss.star_btn": "GitHub'da yıldızla",
 
+  "share.title": "Haberi yay, sevgini paylaş",
+  "share.desc": "WebBrain MIT lisanslıdır ve tamamen tarayıcında çalışır. İşine yarıyorsa bir yıldız bırak ya da paylaş — bağımsız açık kaynak projeleri ancak böyle duyuluyor.",
+  "share.star_btn": "⭐ GitHub'da yıldızla",
+  "share.x_btn": "X'te paylaş",
+  "share.linkedin_btn": "LinkedIn'de paylaş",
+  "share.text": "WebBrain — Chrome ve Firefox için ücretsiz, açık kaynaklı AI tarayıcı ajanı. Çok dilli arayüz, varsayılan token tasarruflu, MIT lisanslı.",
+
   "safety.heading": "Önemli güvenlik uyarısı",
   "safety.item_1": "WebBrain'in Uygula kipi senin adına gerçek eylemler gerçekleştirebilir. Devam etmeden önce istekleri, hedefleri ve sonuçları gözden geçirmek senin sorumluluğundadır.",
   "safety.item_2": "WebBrain planlama için ekran görüntüsü alabilir. Riskini kabul etmediğin sürece hassas sayfalarda (örneğin sağlık, finans, flört veya özel hesap portalları) ajan kipini kullanmaktan kaçın.",

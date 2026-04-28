@@ -181,6 +181,11 @@ function applyTemplate(template, dict, locale) {
     if (!(k in dict)) { missing.add(k); return ''; }
     return escJson(dict[k]);
   });
+  // URL-encoded values for share intents etc. — {{u:key}} → encodeURIComponent.
+  out = out.replace(/\{\{u:([a-zA-Z0-9_.-]+)\}\}/g, (_, k) => {
+    if (!(k in dict)) { missing.add(k); return ''; }
+    return encodeURIComponent(dict[k]);
+  });
 
   return { html: out, missing };
 }
@@ -200,6 +205,17 @@ async function main() {
       // produces an empty slot.
       dict = { ...en, ...raw };
     }
+    // Synthesize per-locale share-intent URLs from the locale's share text
+    // and home URL. Computed here (not in the JSON) so URL encoding stays
+    // out of the locale files. The shared URL is the locale's homepage so
+    // the recipient lands on a localized version when they open it.
+    const homeUrl = homeUrlFor(locale);
+    const shareText = dict['share.text'] || '';
+    dict = {
+      ...dict,
+      'share.x_intent_url': `https://x.com/intent/post?text=${encodeURIComponent(shareText)}&url=${encodeURIComponent(homeUrl)}`,
+      'share.linkedin_intent_url': `https://www.linkedin.com/sharing/share-offsite/?url=${encodeURIComponent(homeUrl)}`,
+    };
 
     const { html, missing } = applyTemplate(template, dict, locale);
     if (missing.size) {

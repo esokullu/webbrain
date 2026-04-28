@@ -215,6 +215,13 @@
   "oss.desc": "WebBrain est sous licence MIT. Inspectez le code, contribuez à de nouvelles fonctionnalités, ou forkez-le pour en faire le vôtre.",
   "oss.star_btn": "Ajouter une étoile sur GitHub",
 
+  "share.title": "Faites passer le mot, partagez l'amour",
+  "share.desc": "WebBrain est sous licence MIT et fonctionne entièrement dans votre navigateur. Si vous le trouvez utile, mettez-lui une étoile ou partagez-le — c'est comme ça que les projets open source indépendants se font connaître.",
+  "share.star_btn": "⭐ Étoile sur GitHub",
+  "share.x_btn": "Partager sur X",
+  "share.linkedin_btn": "Partager sur LinkedIn",
+  "share.text": "WebBrain — agent navigateur IA gratuit et open source pour Chrome et Firefox. Interface multilingue, économe en tokens, licence MIT.",
+
   "safety.heading": "Avertissement important",
   "safety.item_1": "Le mode Agir de WebBrain peut effectuer de véritables actions en votre nom. Vous êtes responsable de la vérification des prompts, des destinations et des résultats avant de continuer.",
   "safety.item_2": "WebBrain peut capturer des captures d'écran pour planifier. Évitez d'utiliser le mode agent sur des pages sensibles (santé, finance, rencontres ou portails de comptes privés) sauf si vous acceptez le risque.",

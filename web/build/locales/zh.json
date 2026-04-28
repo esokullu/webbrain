@@ -215,6 +215,13 @@
   "oss.desc": "WebBrain 采用 MIT 许可。检查代码、贡献功能,或 fork 一份,打造你自己的版本。",
   "oss.star_btn": "在 GitHub 上加星",
 
+  "share.title": "传播开来,分享这份热爱",
+  "share.desc": "WebBrain 采用 MIT 许可,完全在你的浏览器中运行。如果你觉得有用,请给个星或分享出去 —— 独立开源项目就是靠这种方式被人发现的。",
+  "share.star_btn": "⭐ 在 GitHub 上加星",
+  "share.x_btn": "分享到 X",
+  "share.linkedin_btn": "分享到 LinkedIn",
+  "share.text": "WebBrain — Chrome 和 Firefox 上免费的开源 AI 浏览器代理。多语言界面,默认节省 token,MIT 许可。",
+
   "safety.heading": "重要安全提示",
   "safety.item_1": "WebBrain 的执行模式可以代表你进行真实操作。在继续之前,由你负责检查提示词、目标页面和结果。",
   "safety.item_2": "WebBrain 可能会为了规划而截图。除非你接受风险,否则请避免在敏感页面上使用代理模式(例如健康、金融、约会或私人账户门户)。",
