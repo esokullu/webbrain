@@ -10,8 +10,8 @@ Open-source AI browser agent for Chrome and Firefox. Chat with any web page, aut
 - **Multi-Step Agent** — Autonomous task execution with tool-use loops (configurable, default 25 steps)
 - **Continue from Limit** — When the agent hits the step limit, click Continue to keep going
 - **Multi-Provider LLM** — Supports local and cloud models:
-  - **llama.cpp** (local, default) — No API key needed
-  - **OpenAI** (GPT-4o, etc.)
+  - **llama.cpp** (local, default) — No API key needed. Also **Ollama** and **LM Studio**
+  - **OpenAI** (GPT-5.3, etc.)
   - **OpenRouter** (access 100+ models)
   - **Anthropic Claude** (native API)
 - **Side Panel UI** — Clean chat interface that lives alongside your browsing
