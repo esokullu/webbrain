@@ -320,6 +320,10 @@ async function handleMessage(msg, sender) {
       return await providerManager.testVisionProvider();
     }
 
+    case 'list_ollama_models': {
+      return await providerManager.listOllamaModels(msg.providerId);
+    }
+
     // --- Page Info (quick, no agent loop) ---
     case 'get_page_info': {
       const tabId = msg.tabId || sender.tab?.id;

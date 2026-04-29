@@ -123,6 +123,9 @@ export default {
   'st.providers.connected': 'Bağlandı! Model: {model}',
   'st.providers.unknown_model': 'bilinmiyor',
   'st.providers.failed': 'Başarısız: {error}',
+  'st.providers.load_models': 'Modelleri yükle',
+  'st.providers.loading': 'Yükleniyor…',
+  'st.providers.models_loaded': '{count} model yüklendi',
 
   'st.provider.field.server_url': 'Sunucu URL\'si',
   'st.provider.field.api_base_url': 'API temel URL\'si',

@@ -123,6 +123,9 @@ export default {
   'st.providers.connected': '¡Conectado! Modelo: {model}',
   'st.providers.unknown_model': 'desconocido',
   'st.providers.failed': 'Falló: {error}',
+  'st.providers.load_models': 'Cargar modelos',
+  'st.providers.loading': 'Cargando…',
+  'st.providers.models_loaded': '{count} modelos cargados',
 
   'st.provider.field.server_url': 'URL del servidor',
   'st.provider.field.api_base_url': 'URL base de la API',

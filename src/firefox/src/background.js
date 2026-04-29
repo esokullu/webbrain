@@ -186,6 +186,10 @@ async function handleMessage(msg, sender) {
       return await providerManager.testVisionProvider();
     }
 
+    case 'list_ollama_models': {
+      return await providerManager.listOllamaModels(msg.providerId);
+    }
+
     case 'get_page_info': {
       const tabId = msg.tabId || sender.tab?.id;
       try {

@@ -83,6 +83,21 @@ export class OpenAICompatibleProvider extends BaseLLMProvider {
     body.temperature = options.temperature ?? 0.7;
   }
 
+  _formatHttpError(status, body) {
+    // Ollama enforces an Origin allowlist; browser extensions hit it with a
+    // moz-extension:// or chrome-extension:// origin that isn't on the
+    // default list, producing a 403 with an empty body.
+    if (status === 403 && this.config.providerName === 'ollama') {
+      return (
+        (body ? body + '\n\n' : '') +
+        'Ollama rejected the extension origin. Restart Ollama with OLLAMA_ORIGINS allowing extensions, e.g.:\n' +
+        '  OLLAMA_ORIGINS="*" ollama serve\n' +
+        '(or OLLAMA_ORIGINS="moz-extension://*,chrome-extension://*" for a tighter allowlist).'
+      );
+    }
+    return body;
+  }
+
   async chat(messages, options = {}) {
     const body = {
       model: this.model,
@@ -115,7 +130,7 @@ export class OpenAICompatibleProvider extends BaseLLMProvider {
 
     if (!res.ok) {
       const err = await res.text();
-      throw new Error(`${this.name} error ${res.status}: ${err}`);
+      throw new Error(`${this.name} error ${res.status}: ${this._formatHttpError(res.status, err)}`);
     }
 
     const data = await res.json();
@@ -158,7 +173,7 @@ export class OpenAICompatibleProvider extends BaseLLMProvider {
 
     if (!res.ok) {
       const err = await res.text();
-      throw new Error(`${this.name} stream error ${res.status}: ${err}`);
+      throw new Error(`${this.name} stream error ${res.status}: ${this._formatHttpError(res.status, err)}`);
     }
 
     const reader = res.body.getReader();

@@ -394,11 +394,24 @@ function renderProviders() {
           </div>
         `;
       } else {
+        // For Ollama's model field, attach a <datalist> + a "Load models"
+        // button so users can pick from `ollama list` without typing.
+        const isOllamaModel = id === 'ollama' && field.key === 'model';
+        const listAttr = isOllamaModel ? `list="models-${id}"` : '';
+        const datalistHTML = isOllamaModel ? `<datalist id="models-${id}"></datalist>` : '';
+        const loadBtnHTML = isOllamaModel
+          ? `<button type="button" class="btn-secondary btn-load-models" data-provider="${id}"
+                    style="margin-top:6px;">${escapeHtml(t('st.providers.load_models'))}</button>
+             <span class="load-models-status" data-provider="${id}"
+                   style="margin-left:8px;font-size:12px;color:var(--text2);"></span>`
+          : '';
         fieldsHTML += `
           <div class="field">
             <label>${escapeHtml(label)}</label>
-            <input type="${field.type}" data-provider="${id}" data-key="${field.key}"
+            <input type="${field.type}" data-provider="${id}" data-key="${field.key}" ${listAttr}
                    value="${escapeHtml(config[field.key] || '')}" placeholder="${escapeHtml(placeholder)}">
+            ${datalistHTML}
+            ${loadBtnHTML}
           </div>
         `;
       }
@@ -433,6 +446,32 @@ function renderProviders() {
   document.querySelectorAll('.btn-activate').forEach(btn => {
     btn.addEventListener('click', () => activateProvider(btn.dataset.provider));
   });
+  document.querySelectorAll('.btn-load-models').forEach(btn => {
+    btn.addEventListener('click', () => loadOllamaModels(btn.dataset.provider));
+  });
+}
+
+async function loadOllamaModels(id) {
+  const statusEl = document.querySelector(`.load-models-status[data-provider="${id}"]`);
+  const datalistEl = document.getElementById(`models-${id}`);
+  if (!datalistEl) return;
+  await saveProvider(id, { showFlash: false });
+  if (statusEl) statusEl.textContent = t('st.providers.loading');
+  const res = await sendToBackground('list_ollama_models', { providerId: id });
+  if (res.ok) {
+    datalistEl.innerHTML = res.models
+      .map((m) => `<option value="${escapeHtml(m)}"></option>`)
+      .join('');
+    if (statusEl) {
+      statusEl.textContent = t('st.providers.models_loaded', { count: res.models.length });
+      statusEl.style.color = 'var(--text2)';
+    }
+  } else {
+    if (statusEl) {
+      statusEl.textContent = res.error || 'Failed to load models';
+      statusEl.style.color = 'var(--danger, #c33)';
+    }
+  }
 }
 
 async function saveProvider(id, { showFlash = true } = {}) {

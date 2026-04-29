@@ -207,4 +207,37 @@ export class ProviderManager {
     if (!provider) return { ok: false, error: 'Vision model not configured' };
     return provider.testConnection();
   }
+
+  /**
+   * Fetch the list of installed models from a running Ollama server.
+   * Uses the native /api/tags endpoint (not the OpenAI-compat /v1).
+   */
+  async listOllamaModels(id) {
+    const provider = this.providers.get(id);
+    if (!provider) return { ok: false, error: 'Provider not found' };
+    const baseUrl = (provider.config.baseUrl || '').replace(/\/v1\/?$/, '').replace(/\/$/, '');
+    if (!baseUrl) return { ok: false, error: 'Base URL is empty' };
+    const url = `${baseUrl}/api/tags`;
+    try {
+      const res = await fetch(url, { method: 'GET' });
+      if (!res.ok) {
+        const errBody = await res.text();
+        if (res.status === 403) {
+          return {
+            ok: false,
+            error:
+              'Ollama returned 403 — set OLLAMA_ORIGINS="*" (or moz-extension://*,chrome-extension://*) and restart `ollama serve`.',
+          };
+        }
+        return { ok: false, error: `HTTP ${res.status}: ${errBody}` };
+      }
+      const data = await res.json();
+      const models = Array.isArray(data?.models)
+        ? data.models.map((m) => m?.name).filter(Boolean)
+        : [];
+      return { ok: true, models };
+    } catch (e) {
+      return { ok: false, error: e.message };
+    }
+  }
 }
