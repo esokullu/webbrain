@@ -42,16 +42,37 @@ async function ensureOffscreen() {
  * Try direct fetch first. If it fails with a network error, retry
  * through the offscreen document proxy.
  *
+ * The timeout aborts only the *connection / time-to-headers* phase. Once
+ * fetch() resolves, the timer is cleared so streaming bodies can run as
+ * long as needed. Without this, a stalled endpoint hangs the UI forever.
+ *
  * @param {string} url
- * @param {RequestInit} options
+ * @param {RequestInit & { timeoutMs?: number }} options
  * @returns {Promise<Response>}
  */
 export async function fetchWithFallback(url, options = {}) {
-  // Fast path: try direct fetch first
+  const { timeoutMs = 60000, ...fetchOptions } = options;
+
+  // Fast path: try direct fetch first, with a connection-phase timeout.
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const res = await fetch(url, options);
+    const res = await fetch(url, { ...fetchOptions, signal: controller.signal });
+    clearTimeout(timeoutId);
     return res;
   } catch (directError) {
+    clearTimeout(timeoutId);
+
+    // If we aborted on timeout, surface that directly — don't fall through to
+    // the offscreen proxy, since the same endpoint is likely unresponsive.
+    if (directError.name === 'AbortError') {
+      throw new Error(
+        `Request to ${url} timed out after ${timeoutMs}ms. ` +
+        `The endpoint may be unreachable, blocked by CORS, or stalled. ` +
+        `Check the URL/credentials and that the server is responding.`
+      );
+    }
+
     // Network error (Failed to fetch) — try offscreen proxy
     console.warn(
       `[WebBrain] Direct fetch to ${url} failed (${directError.message}), trying offscreen proxy...`
@@ -60,14 +81,24 @@ export async function fetchWithFallback(url, options = {}) {
     try {
       await ensureOffscreen();
 
-      const proxyResult = await chrome.runtime.sendMessage({
-        type: 'offscreen-fetch',
-        url,
-        method: options.method || 'POST',
-        headers: options.headers || {},
-        body: options.body || undefined,
-        stream: false,
-      });
+      // Race the proxy round-trip against the same timeout, since
+      // chrome.runtime.sendMessage has no native cancellation.
+      const proxyResult = await Promise.race([
+        chrome.runtime.sendMessage({
+          type: 'offscreen-fetch',
+          url,
+          method: fetchOptions.method || 'POST',
+          headers: fetchOptions.headers || {},
+          body: fetchOptions.body || undefined,
+          stream: false,
+        }),
+        new Promise((_, reject) =>
+          setTimeout(
+            () => reject(new Error(`offscreen proxy timed out after ${timeoutMs}ms`)),
+            timeoutMs
+          )
+        ),
+      ]);
 
       if (proxyResult.error) {
         throw new Error(

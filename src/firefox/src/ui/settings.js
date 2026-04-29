@@ -435,7 +435,7 @@ function renderProviders() {
   });
 }
 
-async function saveProvider(id) {
+async function saveProvider(id, { showFlash = true } = {}) {
   const inputs = document.querySelectorAll(`input[data-provider="${id}"]`);
   const config = {};
   inputs.forEach(input => {
@@ -448,14 +448,18 @@ async function saveProvider(id) {
 
   await sendToBackground('update_provider', { providerId: id, config });
 
-  const testEl = document.getElementById(`test-${id}`);
-  testEl.className = 'test-result show ok';
-  testEl.textContent = t('st.providers.saved');
-  setTimeout(() => testEl.classList.remove('show'), 2000);
+  if (showFlash) {
+    const testEl = document.getElementById(`test-${id}`);
+    testEl.className = 'test-result show ok';
+    testEl.textContent = t('st.providers.saved');
+    setTimeout(() => testEl.classList.remove('show'), 2000);
+  }
 }
 
 async function testProvider(id) {
-  await saveProvider(id);
+  // Skip the save-flash so its 2s auto-hide doesn't blank out the test result
+  // mid-flight on slow endpoints.
+  await saveProvider(id, { showFlash: false });
 
   const testEl = document.getElementById(`test-${id}`);
   testEl.className = 'test-result show';
