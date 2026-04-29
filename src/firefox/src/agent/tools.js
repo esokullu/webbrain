@@ -435,6 +435,21 @@ export const AGENT_TOOLS = [
   {
     type: 'function',
     function: {
+      name: 'scratchpad_write',
+      description: 'Write to your persistent scratchpad — a note pinned near the top of your context that survives conversation summarization. Use it for long tasks where facts need to persist across many tool calls: download IDs you\'ve collected, file paths on disk, pages/items you\'ve already processed, your running plan, intermediate CSV rows you\'ve built up. Without the scratchpad, older tool outcomes are compressed into a short summary as context fills up, so you WILL lose specific details (filenames, counts, which items are done) after ~15 tool turns. Default action appends `text` as a new line. Pass `replace:true` to overwrite the whole pad when you want to compact it. Keep entries short and factual — one line per fact is ideal. Read back your own pad anytime; it\'s visible in every future prompt.',
+      parameters: {
+        type: 'object',
+        properties: {
+          text: { type: 'string', description: 'The note to record. One line ideally. Examples: "Downloaded pages 1-69 as page{N}.html, ids 700-768." / "Pages extracted so far: 1,2,3. Next: 4." / "Plan: read each downloaded file, regex <tr> rows, emit CSV."' },
+          replace: { type: 'boolean', description: 'If true, replace the entire scratchpad with `text`. Default false — appends as a new line.' },
+        },
+        required: ['text'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
       name: 'verify_form',
       description: 'Read all form field values and capture a viewport screenshot. Call this BEFORE submitting important forms to confirm every field has the intended value. Returns field names, types, current values, plus a screenshot.',
       parameters: {
@@ -540,6 +555,7 @@ Available tools:
 - new_tab: Open a new tab
 - done: Signal task completion
 - verify_form: Verify form fields before submitting
+- scratchpad_write: Pin a note in context that survives summarization (use on long tasks to remember download IDs, file paths, progress, plans)
 
 IMPORTANT — Current Page Priority:
 - ALWAYS start by reading the CURRENT PAGE to understand what the user is looking at.
@@ -563,6 +579,26 @@ CRITICAL — do NOT rush:
 - When creating something (product, post, account, etc.), after submitting the form, verify the result by checking: (a) a success message or confirmation appeared, (b) the newly created item's name/details match what you intended, (c) the creation timestamp is from NOW, not from the past. Do NOT assume an existing item is something you just created.
 - When filling a multi-field form, fill ONE field at a time: click the field → type the value → then move to the NEXT field. Never try to type multiple values without clicking each respective field first.
 - If the user's request contains multiple pieces of data (e.g. "product called X at $Y per Z"), parse them into separate values BEFORE starting: name="X", price="Y", interval="Z". Then fill each into its own form field.
+
+SCRATCHPAD — use this for long tasks:
+- As the conversation grows, older tool outputs get COMPRESSED INTO A SHORT SUMMARY. Specific facts (download IDs, filenames, which items you've finished, the exact row counts) DISAPPEAR. If you need a fact 15+ tool turns later, it will not be there.
+- The fix: \`scratchpad_write({text: "..."})\`. It appends a line to a pinned note that STAYS at the top of your context and survives summarization. Pass \`replace: true\` to rewrite the whole pad (use sparingly — e.g. to compact stale entries).
+- When to write to it:
+  (a) Right after a bulk operation completes — "Downloaded pages 1-69 as page{N}.html, IDs 700-768."
+  (b) Whenever you finalize a plan — "Plan: (1) download all pages (DONE), (2) read each, (3) regex <tr> rows, (4) emit CSV."
+  (c) When you finish a chunk of iterative work — "Processed pages 1-10. Next: 11."
+  (d) When you discover a non-obvious fact you'll need later — "API endpoint /api/investors 404s, use HTML scrape." "Download path: /Users/me/Downloads/page{N}.html."
+  (e) IMMEDIATELY after \`download_files\` returns success: pin the local path(s) and downloadId(s). The next tool that needs them (\`read_downloaded_file\`) needs exact paths, and after a few screenshots the original tool result will not be reliably attended to.
+- Keep entries SHORT and FACTUAL. One line per fact. The pad is visible on every future turn — scan it before picking your next action, especially if you're about to restart something.
+- Don't use the scratchpad for short tasks (< 5 tool calls) or for prose reasoning. It's working memory, not a journal.
+
+DON'T REDO WORK YOU'VE ALREADY DONE — read this:
+- If a tool returned \`success: true\` earlier this conversation, the work is done. Don't navigate back to the source and re-do it "to be safe". Re-doing wastes time, doubles disk/server cost, and tells the user something is wrong.
+- DOWNLOADS: if \`download_files\` succeeded for a file this conversation, the file is at the path that tool returned. Read it back with \`read_downloaded_file\` if you need its content. Do NOT navigate back to the source folder and re-download. The most common failure: an auto-screenshot pushes the original download_files result out of recent attention, you can't "see" the path anymore, you decide to fetch it again — instead, scan your scratchpad and tool-call history before navigating.
+- FETCHES: if \`fetch_url\` / \`research_url\` already returned content for a URL this conversation, don't re-fetch — the content is in your context. If truncated, scroll/extract within the existing result.
+- VISITS: if you already read \`/foo/bar\`'s accessibility tree, the ref_ids it returned are stable. Re-read a subtree by ref_id (\`get_accessibility_tree({ref_id: "ref_N"})\`) instead of re-navigating.
+- "Verification" of a previous step is a screenshot of the destination, not a redo of the origin step. If a click navigated you somewhere and you're not sure it landed, take a screenshot of the current page; do not re-click the origin.
+- Watch for the loop: doubt → re-navigate to source → re-fetch / re-download → end up further from the goal. If you're about to navigate to a URL or path you've already used this session, STOP and read your scratchpad first.
 
 UI vs API — read this carefully:
 - For ANY action that creates, modifies, deletes, sends, submits, buys, transfers, posts, or publishes: ALWAYS go through the visible UI. NEVER call REST/GraphQL/API endpoints directly via \`fetch_url\` with POST/PUT/PATCH/DELETE, NEVER use \`execute_js\` to call \`fetch()\` with mutation methods.

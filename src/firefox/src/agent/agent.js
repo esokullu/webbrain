@@ -914,6 +914,105 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     this._clearLoopState(tabId);
   }
 
+  // ─── Scratchpad ──────────────────────────────────────────────────────
+  // A single pinned user message (`[Agent scratchpad...]`) that lives near
+  // the top of the conversation. The model writes to it via the
+  // `scratchpad_write` tool; it survives summarization because both
+  // _manageContext and _emergencyTrim skip messages with this prefix when
+  // looking for the original task, and re-insert the scratchpad into the
+  // rebuilt messages array. Purpose: give the model a durable place to
+  // record facts (download IDs, file paths, progress counters) that it
+  // would otherwise lose when older tool results get compressed away.
+  //
+  // Firefox port note: ported from chrome/agent.js. Firefox conversations
+  // are in-memory only (no chrome.storage.session persistence), so this
+  // implementation skips the post-write _persist call.
+
+  _scratchpadHeader() {
+    return '[Agent scratchpad — your own persistent notes, pinned in context and surviving summarization. Update with scratchpad_write({text, replace?}). Current contents follow:]';
+  }
+
+  _isScratchpadMessage(msg) {
+    return msg && msg.role === 'user'
+      && typeof msg.content === 'string'
+      && msg.content.startsWith('[Agent scratchpad');
+  }
+
+  _findScratchpadIndex(messages) {
+    for (let i = 1; i < messages.length; i++) {
+      if (this._isScratchpadMessage(messages[i])) return i;
+    }
+    return -1;
+  }
+
+  _extractScratchpadBody(content) {
+    if (typeof content !== 'string') return '';
+    const idx = content.indexOf('\n\n');
+    return idx >= 0 ? content.slice(idx + 2) : '';
+  }
+
+  _buildScratchpadMessage(body) {
+    const trimmed = (body || '').replace(/^\s+|\s+$/g, '');
+    return {
+      role: 'user',
+      content: `${this._scratchpadHeader()}\n\n${trimmed || '(empty)'}`,
+    };
+  }
+
+  /**
+   * Handle the scratchpad_write tool. Creates the pinned scratchpad message
+   * the first time it's called, and updates it in place thereafter.
+   */
+  _scratchpadWrite(tabId, args) {
+    const text = (args && typeof args.text === 'string') ? args.text : '';
+    if (!text.trim() && !args?.replace) {
+      return { success: false, error: 'scratchpad_write: `text` is required (non-empty). Pass replace:true with an empty string to clear the pad.' };
+    }
+
+    const messages = this.conversations.get(tabId);
+    if (!messages) {
+      return { success: false, error: 'No active conversation on this tab.' };
+    }
+
+    const idx = this._findScratchpadIndex(messages);
+    const currentBody = idx >= 0 ? this._extractScratchpadBody(messages[idx].content) : '';
+    const replace = !!args?.replace;
+    // Hard cap per-pad at ~8k chars to prevent it from eating the whole
+    // context budget. Older lines get trimmed off the top when we hit it.
+    const MAX_BODY = 8000;
+    let nextBody = replace ? text : (currentBody ? `${currentBody}\n${text}` : text);
+    if (nextBody.length > MAX_BODY) {
+      nextBody = '[...older scratchpad lines dropped — pad is full, consider compacting with replace:true]\n' + nextBody.slice(nextBody.length - MAX_BODY + 100);
+    }
+
+    const msg = this._buildScratchpadMessage(nextBody);
+    if (idx >= 0) {
+      messages[idx] = msg;
+    } else {
+      // Insert just after the pinned original user task (or after system if
+      // no real task is pinned yet). Mirrors the originalTaskIdx lookup in
+      // _manageContext so the scratchpad lives at a stable, near-top spot.
+      let insertAt = 1;
+      for (let i = 1; i < messages.length; i++) {
+        const m = messages[i];
+        if (m.role !== 'user') continue;
+        const c = typeof m.content === 'string' ? m.content : '';
+        if (c.startsWith('[Site guidance') || c.startsWith('[Site context changed') || c.startsWith('[Context window was trimmed') || c.startsWith('[Agent scratchpad')) continue;
+        insertAt = i + 1;
+        break;
+      }
+      messages.splice(insertAt, 0, msg);
+    }
+
+    return {
+      success: true,
+      mode: replace ? 'replace' : 'append',
+      bytes: nextBody.length,
+      note: replace ? 'scratchpad replaced' : 'line appended to scratchpad',
+    };
+  }
+  // ─────────────────────────────────────────────────────────────────────
+
   /**
    * Manage context window — trim and summarize when conversation gets too long.
    * Keeps: system prompt, summary of old messages, recent messages.
@@ -934,9 +1033,16 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
 
     // Strategy: keep system prompt + summarize old messages + keep recent messages
     const systemMsg = messages[0]; // always the system prompt
+    // Pin the scratchpad alongside system so the model's self-written notes
+    // survive summarization. Stripped from old/recent slices below to avoid
+    // duplicating it during rebuild.
+    const scratchpadIdx = this._findScratchpadIndex(messages);
+    const scratchpadMsg = scratchpadIdx >= 0 ? messages[scratchpadIdx] : null;
     const keepRecent = 16; // keep last N messages verbatim
-    const oldMessages = messages.slice(1, -keepRecent);
-    const recentMessages = messages.slice(-keepRecent);
+    const oldMessagesRaw = messages.slice(1, -keepRecent);
+    const recentMessagesRaw = messages.slice(-keepRecent);
+    const oldMessages = oldMessagesRaw.filter(m => !this._isScratchpadMessage(m));
+    const recentMessages = recentMessagesRaw.filter(m => !this._isScratchpadMessage(m));
 
     if (oldMessages.length < 4) return; // not enough to summarize
 
@@ -971,12 +1077,14 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       }
     }
 
-    // Rebuild: system + summary + recent
+    // Rebuild: system + scratchpad (if any) + summary + recent
     const summaryMsg = { role: 'user', content: `[Context window was trimmed. ${summaryText}]` };
     const summaryAck = { role: 'assistant', content: 'Understood, I have the conversation context. Continuing.' };
 
     messages.length = 0;
-    messages.push(systemMsg, summaryMsg, summaryAck, ...recentMessages);
+    messages.push(systemMsg);
+    if (scratchpadMsg) messages.push(scratchpadMsg);
+    messages.push(summaryMsg, summaryAck, ...recentMessages);
 
     console.log(`[WebBrain] Context trimmed for tab ${tabId}: ${oldMessages.length} old messages → summary. ${messages.length} messages remain.`);
   }
@@ -1070,8 +1178,12 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
    */
   _emergencyTrim(messages) {
     const systemMsg = messages[0];
+    // Pin the scratchpad too — even under emergency trim, the model's own
+    // notes should survive.
+    const scratchpadIdx = this._findScratchpadIndex(messages);
+    const scratchpadMsg = scratchpadIdx >= 0 ? messages[scratchpadIdx] : null;
     const keepLast = 6; // keep only 6 most recent messages
-    const recent = messages.slice(-keepLast);
+    const recent = messages.slice(-keepLast).filter(m => !this._isScratchpadMessage(m));
 
     // Also truncate any huge tool results in remaining messages
     for (const msg of recent) {
@@ -1093,7 +1205,9 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     };
 
     messages.length = 0;
-    messages.push(systemMsg, notice, ack, ...recent);
+    messages.push(systemMsg);
+    if (scratchpadMsg) messages.push(scratchpadMsg);
+    messages.push(notice, ack, ...recent);
 
     console.log(`[WebBrain] Emergency context trim: kept ${messages.length} messages.`);
   }
@@ -1317,6 +1431,10 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     }
     if (name === 'download_files') {
       return await downloadFiles(args);
+    }
+
+    if (name === 'scratchpad_write') {
+      return this._scratchpadWrite(tabId, args);
     }
 
     if (name === 'verify_form') {
