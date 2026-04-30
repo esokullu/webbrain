@@ -18,6 +18,7 @@
   "nav.blog": "Blog",
   "nav.language_aria": "Dil seç",
   "nav.github": "GitHub",
+  "nav.github_stars_aria": "WebBrain'i GitHub'da yıldızla",
 
   "hero.h1_html": "Açık kaynaklı AI <span class=\"gradient\">tarayıcı ajanı</span>",
   "hero.description": "WebBrain, Chrome ve Firefox'a AI ajan yeteneklerini getiren ücretsiz ve açık kaynaklı bir tarayıcı uzantısıdır. Sayfaları oku, veri çıkar, web görevlerini otomatikleştir — seçtiğin LLM ile. Tescilli tarayıcı AI eklentilerine kendine ait sunucularda barındırılabilir bir alternatif.",
