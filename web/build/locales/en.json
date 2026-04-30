@@ -18,6 +18,7 @@
   "nav.blog": "Blog",
   "nav.language_aria": "Select language",
   "nav.github": "GitHub",
+  "nav.github_stars_aria": "Star WebBrain on GitHub",
 
   "hero.h1_html": "The Open-Source AI <span class=\"gradient\">Browser Agent</span>",
   "hero.description": "WebBrain is a free, open-source browser extension that brings AI agent capabilities to Chrome and Firefox. Read pages, extract data, and automate web tasks — powered by your choice of LLM. The self-hostable alternative to proprietary browser AI plugins.",
