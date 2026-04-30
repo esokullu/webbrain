@@ -821,17 +821,22 @@
     .download-cards {
       display: flex;
       justify-content: center;
-      gap: 24px;
-      flex-wrap: wrap;
+      align-items: stretch;
+      gap: 20px;
+      flex-wrap: nowrap;
       margin-top: 40px;
+      max-width: 820px;
+      margin-left: auto;
+      margin-right: auto;
     }
     .download-card {
       background: var(--bg-card);
       border: 1px solid var(--border);
       border-radius: var(--radius);
-      padding: 36px 40px;
+      padding: 32px 28px;
       text-align: center;
-      min-width: 260px;
+      flex: 1 1 0;
+      min-width: 0;
       display: flex;
       flex-direction: column;
       align-items: center;
@@ -842,7 +847,7 @@
       transform: translateY(-4px);
       box-shadow: 0 12px 40px rgba(0,0,0,0.3);
     }
-    .download-card .browser-icon { font-size: 42px; margin-bottom: 16px; }
+    .download-card .browser-icon { font-size: 38px; margin-bottom: 14px; }
     .download-card h3 { font-size: 18px; margin-bottom: 6px; }
     .download-card p { color: var(--text-dim); font-size: 13px; margin-bottom: 20px; }
     .download-card-actions {
@@ -853,11 +858,17 @@
       margin-top: auto;
     }
     .download-card .btn { width: 100%; justify-content: center; }
+    /* Chrome is the more popular browser so the Chrome card gets ~25% more
+       horizontal real estate than Firefox via flex-grow. Both cards stay
+       on a single row at all desktop/tablet widths; the mobile breakpoint
+       below stacks them. */
     .download-card-chrome {
-      min-width: 340px;
-      padding: 42px 44px;
+      flex-grow: 1.25;
+      padding: 38px 32px;
       border-color: rgba(0, 212, 255, 0.45);
     }
+    .download-card-chrome .browser-icon { font-size: 46px; }
+    .download-card-chrome h3 { font-size: 20px; }
 
     /* ================================================================
        OPEN SOURCE
@@ -1084,6 +1095,13 @@
       .cc-core { width: 64px; height: 64px; font-size: 28px; }
       .video-showcase { max-width: 380px; }
       .video-frame { padding-bottom: 177.78%; }
+    }
+    @media (max-width: 560px) {
+      /* Stack the install cards on small phones — squeezing two side-by-side
+         below this width makes the buttons too cramped to tap reliably. */
+      .download-cards { flex-wrap: wrap; max-width: 360px; }
+      .download-card,
+      .download-card-chrome { flex: 1 1 100%; }
     }
     @media (max-width: 480px) {
       .hero { padding: 60px 16px 50px; }
