@@ -56,14 +56,8 @@ body {
   display: flex;
   align-items: center;
   gap: 8px;
-}
-
-.header-left h1 {
-  font-size: 15px;
-  font-weight: 700;
-  background: linear-gradient(135deg, var(--accent), #a78bfa);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
+  flex: 1;
+  min-width: 0;
 }
 
 .header-right {
@@ -96,7 +90,8 @@ body {
   padding: 4px 8px;
   font-size: 11px;
   cursor: pointer;
-  max-width: 130px;
+  max-width: 180px;
+  min-width: 0;
 }
 
 /* Globe language selector. Native select overlaid on a globe icon so it
