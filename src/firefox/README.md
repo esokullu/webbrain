@@ -7,7 +7,7 @@ Open-source AI browser agent for Chrome and Firefox. Chat with any web page, aut
 - **Page Reading** — Extracts text, links, forms, tables, and interactive elements from any page
 - **Browser Actions** — Click, type, scroll, navigate, and interact with page elements
 - **Ask / Act Modes** — Read-only mode by default, full agent mode with confirmation
-- **Multi-Step Agent** — Autonomous task execution with tool-use loops (configurable, default 25 steps)
+- **Multi-Step Agent** — Autonomous task execution with tool-use loops (configurable, default 60 steps)
 - **Continue from Limit** — When the agent hits the step limit, click Continue to keep going
 - **Multi-Provider LLM** — Supports local and cloud models:
   - **llama.cpp** (local, default) — No API key needed
@@ -73,7 +73,7 @@ Click the gear icon or go to the extension's Options page to configure:
 **Display Settings:**
 - Verbose Mode — Show full tool call JSON (off by default)
 - Screenshot Fallback — Use screenshots when DOM reading fails
-- Max Agent Steps — Configurable step limit (5-50, default 25)
+- Max Agent Steps — Configurable step limit (5-200, default 60)
 
 **Providers:**
 

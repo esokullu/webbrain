@@ -97,3 +97,131 @@ That trace (`webbrain-trace-gpt-4o-run_1777328860857_tb4voc.json` — model labe
 - Hit `get_accessibility_tree({filter:"all"})` overflow twice with different `maxChars` values, never switching to a different tool.
 
 The prompt rules now name these failures explicitly. Worth re-running the same prompt on a fresh trace once a small-tier prompt exists to see whether the rules alone fix it or whether the model still ignores them at small parameter counts.
+
+---
+
+## 5. Fix the install and packaging story
+
+The root manifest (`manifest.json`) is not equivalent to the actual Chrome
+extension manifest under `src/chrome/manifest.json`. The root manifest points
+at `src/background.js` and injects only `src/content/content.js`, while the real
+Chrome code lives under `src/chrome/src/` and also needs
+`accessibility-tree.js`, CDP helpers, offscreen fetch, and the fuller permission
+set.
+
+This makes the "Load unpacked" path easy to get wrong. The root README currently
+needs to be unambiguous about whether developers should load `src/chrome/` or a
+generated release directory. Longer term, add a deterministic package step that
+creates the exact Chrome and Firefox directories used for store submission, then
+document that output as the development/release artifact.
+
+**Concrete next steps:**
+1. Decide whether root `manifest.json` should be deleted, generated, or made a
+   thin redirect-free copy of the Chrome manifest.
+2. Add `build:chrome`, `build:firefox`, and `build:all` scripts that produce
+   reproducible extension directories/zips.
+3. Update the README quick-start instructions to point at the canonical
+   load-unpacked directory.
+
+---
+
+## 6. Audit and stage extension permissions
+
+Chrome currently requests broad permissions up front: `debugger`, `downloads`,
+`unlimitedStorage`, `offscreen`, `privateNetworkAccess`, broad host permissions,
+and `connect-src *`. Most of these map to real features, but the initial install
+surface is large.
+
+Store review and user trust would improve if sensitive capabilities are grouped
+by feature and requested/explained at the moment they are needed where the
+browser APIs permit it. At minimum, settings and docs should explain why each
+high-sensitivity permission exists.
+
+**Concrete next steps:**
+1. Make a permission-to-feature table for Chrome and Firefox.
+2. Identify which permissions can be optional or triggered by an explicit
+   enablement path.
+3. Add UI copy for high-risk capabilities: debugger control, downloads,
+   all-site access, local/private-network LLM access.
+
+---
+
+## 7. Lock down the WebBrain Cloud auth handoff
+
+`src/chrome/src/ui/settings.js` accepts `WB_AUTH_TOKEN` from `window.message`
+and writes the token into extension storage, then auto-configures the WebBrain
+Cloud provider. The handler should validate the sender before trusting the
+payload.
+
+**Concrete next steps:**
+1. Require `event.origin === 'https://auth.webbrain.one'`.
+2. Track the auth popup/tab/window that was opened and require
+   `event.source` to match when the platform makes that reliable.
+3. Validate payload shape before storing: token non-empty string, email string,
+   default model string or absent.
+4. Consider a one-time nonce/state value so an unrelated page cannot spoof the
+   completion message.
+
+---
+
+## 8. Reduce Chrome/Firefox source drift
+
+The Chrome and Firefox source trees are mostly mirrored but not shared. Many
+files differ across `agent`, `tools`, `providers`, `network`, `trace`, and `ui`.
+Some differences are platform-real, but the current layout makes accidental
+parity regressions likely.
+
+**Concrete next steps:**
+1. Extract browser-neutral code into a shared module tree, e.g. provider logic,
+   prompt/tool definitions, adapters, trace formatting, and pure helpers.
+2. Keep browser-specific APIs behind small platform adapters
+   (`chrome.scripting` vs `browser.tabs.executeScript`, CDP vs non-CDP, side
+   panel vs sidebar).
+3. Add a parity check that fails when shared files are changed in one browser
+   tree but not the other, until the common module extraction exists.
+
+---
+
+## 9. Test the real shared logic instead of copied shims
+
+`test/run.js` duplicates pieces of `Agent` logic in `LoopDetectorShim` because
+`agent.js` imports browser-only modules. That means tests can pass while the real
+agent implementation drifts.
+
+**Concrete next steps:**
+1. Move loop detection, coordinate-click bucketing, image budget sizing, and
+   other pure logic into browser-free modules.
+2. Import those modules directly from both `agent.js` and `test/run.js`.
+3. Add regression tests for the text tool-call parser and context trimming,
+   since both are high-impact agent reliability code.
+
+---
+
+## 10. Keep streaming and non-streaming provider behavior in sync
+
+`OpenAICompatibleProvider.chat()` supports `options.extraBody`, but
+`chatStream()` does not. If a local or OpenAI-compatible provider needs extra
+request fields, non-streaming and streaming runs can behave differently.
+
+**Concrete next steps:**
+1. Apply `options.extraBody` in every streaming provider path where the
+   non-streaming path supports it.
+2. Add provider-level tests or small request-shape probes for OpenAI-compatible,
+   llama.cpp, and Anthropic providers.
+3. Document which provider-specific request fields are intentionally supported.
+
+---
+
+## 11. Make release builds reproducible
+
+The repo contains built zip files under `dist/`, but `package.json` only exposes
+tests and `build:web`. Extension release artifacts should be generated from
+source by a checked-in command so reviewers and contributors can reproduce them.
+
+**Concrete next steps:**
+1. Add scripts that cleanly assemble Chrome and Firefox release directories.
+2. Zip those directories with deterministic names based on `package.json` /
+   manifest version.
+3. Add a release checklist that runs tests, verifies manifest versions, builds
+   web assets, creates extension zips, and confirms the generated files match
+   the expected store upload layout.
