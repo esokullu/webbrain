@@ -969,6 +969,10 @@ const {
   WebGPUVisionProvider,
   WEBGPU_DTYPE,
   WEBGPU_LFM25_MODEL_ID,
+  WEBGPU_LFM25_12B_INSTRUCT_MODEL_ID,
+  WEBGPU_LFM25_12B_THINKING_MODEL_ID,
+  WEBGPU_LFM25_VL_16B_MODEL_ID,
+  WEBGPU_LFM25_VL_3B_MODEL_ID,
   WEBGPU_BONSAI27_MODEL_ID,
   WEBGPU_MODEL_ID,
   WEBGPU_MODEL_PRESETS,
@@ -46364,10 +46368,10 @@ test('standalone WebGPU control uses a per-run provider without changing global 
     'the nuclear control should be clickable whenever Apocalypse Mode is enabled');
   assert.match(panel, /function standaloneWebgpuRunPayload\(\) \{[\s\S]*?return isStandaloneWindow && standaloneWebgpuActive[\s\S]*?\? \{ providerId: 'webgpu', \.\.\.offlineRagRunPayload\(\) \}[\s\S]*?: \{\};/,
     'standalone WebGPU state is not carried as a run-scoped override');
-  assert.match(background, /case 'get_providers': \{[\s\S]*?delete providers\.webgpu/,
-    'WebGPU must never appear in the ordinary provider picker');
-  assert.match(background, /case 'set_active_provider': \{[\s\S]*?msg\.providerId === 'webgpu'[\s\S]*?nuclear WebGPU control/,
-    'WebGPU must not become the globally active provider');
+  assert.doesNotMatch(background, /case 'get_providers': \{[\s\S]*?delete providers\.webgpu/,
+    'WebGPU should remain available in the ordinary provider picker');
+  assert.match(background, /case 'set_active_provider': \{\s*await providerManager\.setActive\(msg\.providerId\);/,
+    'WebGPU should use the ordinary global provider activation path');
   assert.match(background, /case 'get_standalone_webgpu_status': \{[\s\S]*?enabled: apocalypse\?\.enabled === true[\s\S]*?ready:/,
     'the standalone control should distinguish Apocalypse enablement from model readiness');
   assert.match(background, /type: 'apocalypse-mode-state'[\s\S]*?enabled: snapshot\.enabled === true/,
@@ -59454,9 +59458,13 @@ test('Chrome exposes separate endpoint-free WebGPU text and vision providers', a
       new WebGPUProvider({ model: 'https://huggingface.co/custom-owner/custom-model/' }).model,
       'custom-owner/custom-model',
     );
-    assert.deepEqual(WEBGPU_MODEL_PRESETS.map(option => ({ id: option.id, label: option.label, runtime: option.runtime, contextWindow: option.contextWindow })), [
-      { id: WEBGPU_LFM25_MODEL_ID, label: 'Minimal text model', runtime: 'onnx', contextWindow: 16384 },
-      { id: WEBGPU_BONSAI27_MODEL_ID, label: 'Basic text model', runtime: 'bitgpu', contextWindow: 4096 },
+    assert.deepEqual(WEBGPU_MODEL_PRESETS.map(option => ({ id: option.id, label: option.label, runtime: option.runtime, contextWindow: option.contextWindow, supportsVision: option.supportsVision })), [
+      { id: WEBGPU_LFM25_MODEL_ID, label: 'Minimal text model', runtime: 'onnx', contextWindow: 16384, supportsVision: false },
+      { id: WEBGPU_LFM25_12B_INSTRUCT_MODEL_ID, label: 'LFM2.5-1.2B-Instruct', runtime: 'onnx', contextWindow: 16384, supportsVision: false },
+      { id: WEBGPU_LFM25_12B_THINKING_MODEL_ID, label: 'LFM2.5-1.2B-Thinking', runtime: 'onnx', contextWindow: 16384, supportsVision: false },
+      { id: WEBGPU_LFM25_VL_16B_MODEL_ID, label: 'LFM2.5-VL-1.6B', runtime: 'onnx-vl', contextWindow: 16384, supportsVision: true },
+      { id: WEBGPU_LFM25_VL_3B_MODEL_ID, label: 'LFM2.5-VL-3B', runtime: 'onnx-vl', contextWindow: 16384, supportsVision: true },
+      { id: WEBGPU_BONSAI27_MODEL_ID, label: 'Basic text model', runtime: 'bitgpu', contextWindow: 4096, supportsVision: false },
     ]);
     assert.equal(new WebGPUProvider({ model: WEBGPU_BONSAI27_MODEL_ID }).dtype, 'q1');
     assert.equal(new WebGPUProvider({ model: WEBGPU_BONSAI27_MODEL_ID }).requiresToolTemplate, false);
@@ -59465,6 +59473,13 @@ test('Chrome exposes separate endpoint-free WebGPU text and vision providers', a
     assert.throws(() => new WebGPUProvider({ model: 'https://example.com/owner/model' }), /huggingface\.co/);
     assert.equal(generalProvider.supportsTools, true);
     assert.equal(generalProvider.supportsVision, false);
+    assert.equal(new WebGPUProvider({ model: WEBGPU_LFM25_VL_16B_MODEL_ID }).supportsVision, true);
+    assert.equal(new WebGPUProvider({ model: WEBGPU_LFM25_VL_3B_MODEL_ID }).supportsVision, true);
+    assert.deepEqual(new WebGPUProvider({ model: WEBGPU_LFM25_VL_16B_MODEL_ID }).dtype, {
+      embed_tokens: 'fp16',
+      vision_encoder: 'fp16',
+      decoder_model_merged: 'q4',
+    }, 'VL 1.6B precision must be keyed by runtime session names so it cannot fall back to FP32');
     const probe = await generalProvider.testConnection();
     assert.equal(probe.ok, true);
     assert.equal(probe.libraryVersion, '4.2.0');
@@ -59577,6 +59592,25 @@ test('Chrome exposes separate endpoint-free WebGPU text and vision providers', a
     assert.ok(!(preservedRemote instanceof WebGPUVisionProvider));
     assert.equal(preservedRemote.config.baseUrl, 'https://vision.example/v1');
     assert.equal(preservedRemote.config.apiKey, 'preserved-secret');
+
+    webgpuExecutionError = '';
+    const multimodalProvider = new WebGPUProvider({ model: WEBGPU_LFM25_VL_3B_MODEL_ID });
+    const multimodalResult = await multimodalProvider.chat(messages, { maxTokens: 222, tools });
+    assert.equal(multimodalResult.content, 'Local answer.');
+    assert.deepEqual(sentMessages.at(-1), {
+      type: 'webgpu-chat',
+      model: WEBGPU_LFM25_VL_3B_MODEL_ID,
+      runtime: 'onnx-vl',
+      device: 'webgpu',
+      dtype: {
+        embed_tokens: 'fp16',
+        vision_encoder: 'fp16',
+        decoder_model_merged: 'q4',
+      },
+      requireTools: false,
+      messages,
+      options: { maxTokens: 222, tools },
+    });
   } finally {
     if (previousChrome === undefined) delete globalThis.chrome;
     else globalThis.chrome = previousChrome;
@@ -60228,10 +60262,39 @@ test('WebGPU worker follows local text-generation and WebBrain VL vision contrac
   const firefoxAgent = fs.readFileSync(path.join(ROOT, 'src/firefox/src/agent/agent.js'), 'utf8');
   const chromePanel = fs.readFileSync(path.join(ROOT, 'src/chrome/src/ui/sidepanel.js'), 'utf8');
   const firefoxPanel = fs.readFileSync(path.join(ROOT, 'src/firefox/src/ui/sidepanel.js'), 'utf8');
+  const chromeTransformers = fs.readFileSync(path.join(ROOT, 'src/chrome/vendor/transformers/transformers.web.js'), 'utf8');
+  const firefoxTransformers = fs.readFileSync(path.join(ROOT, 'src/firefox/vendor/transformers/transformers.web.js'), 'utf8');
   assert.match(worker, /AutoModelForImageTextToText\.from_pretrained/);
   assert.match(worker, /AutoProcessor\.from_pretrained/);
   assert.match(worker, /apply_chat_template/);
-  assert.match(worker, /load_image\(imageUrl\)/);
+  assert.match(worker, /load_image\(imageUrls\[0\]\)/);
+  assert.match(worker, /type === 'multimodal-text-chat'[\s\S]*?runMultimodalText\(payload\)/);
+  assert.match(host, /message\.runtime === 'onnx-vl'[\s\S]*?'multimodal-text-chat'/);
+  assert.match(worker, /session_file_names:[\s\S]*?vision_encoder: 'embed_images'[\s\S]*?decoder_model_merged: 'decoder'/,
+    'the legacy LFM2.5-VL-1.6B ONNX filenames must be mapped into the Transformers.js runtime');
+  assert.match(worker, /image_processor_config_file: 'processor_config\.json'[\s\S]*?chat_template_file: 'chat_template\.jinja'/,
+    'LiquidAI VL repos must use their shipped nested processor config and standalone chat template');
+  assert.match(worker, /clearLegacyLfm25VlWrongPrecisionCache[\s\S]*?wrongPrecisionFile/,
+    'a retry must remove FP32 files cached by the old VL 1.6B dtype mapping');
+  assert.match(chromeTransformers, /async function loadImageProcessorConfig[\s\S]*?source\?\.image_processor/,
+    'the browser runtime must normalize nested Transformers v5 image processor metadata');
+  assert.match(chromeTransformers, /options\.chat_template_file[\s\S]*?getModelText/,
+    'the browser runtime must support standalone model chat-template files');
+  assert.match(chromeTransformers, /const sessionKey = session_name \?\? fileName;[\s\S]*?selectDevice\([^;]*sessionKey[\s\S]*?selectDtype\([^;]*sessionKey/,
+    'aliased ONNX files must resolve device and precision by logical session name');
+  assert.equal(chromeTransformers, firefoxTransformers,
+    'the patched Transformers.js browser bundle must stay byte-identical across builds');
+  for (const modelId of [
+    WEBGPU_LFM25_12B_INSTRUCT_MODEL_ID,
+    WEBGPU_LFM25_12B_THINKING_MODEL_ID,
+    WEBGPU_LFM25_VL_16B_MODEL_ID,
+    WEBGPU_LFM25_VL_3B_MODEL_ID,
+  ]) {
+    assert.match(apocalypseHtml, new RegExp(modelId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')),
+      `${modelId} is missing from the Apocalypse WebGPU picker`);
+  }
+  assert.equal((apocalypseHtml.match(/class="webgpu-capability"/g) || []).length, 2,
+    'both LFM2.5-VL presets must be visibly marked multimodal');
   assert.match(worker, /decoder_model_merged:\s*'q4'/);
   assert.match(worker, /const blocks = \[\.\.\.imageBlocks, \.\.\.textBlocks\]/);
   assert.match(worker, /createVisionProbeImage\(runtime\.library\.RawImage\)/);
@@ -60239,7 +60302,7 @@ test('WebGPU worker follows local text-generation and WebBrain VL vision contrac
   assert.match(worker, /type === 'dispose'[\s\S]*?enqueueModelOperation\(disposeAllRuntimes\)/);
   assert.match(worker, /type === 'preload'[\s\S]*?preloadVisionModel\(payload, request\)/);
   assert.match(worker, /async function getVisionRuntime[\s\S]*?local_files_only: localFilesOnly/);
-  assert.match(worker, /getVisionRuntime\(modelId, dtype, device, \{ localFilesOnly: true \}\)/,
+  assert.match(worker, /getVisionRuntime\(modelId, dtype, device, \{[\s\S]{0,180}localFilesOnly: true,[\s\S]{0,180}owner: 'vision',[\s\S]{0,180}readiness: 'vision'/,
     'automatic screenshot inference must not download missing local vision weights');
   assert.match(worker, /async function markVisionModelReady/);
   assert.match(worker, /WEBGPU_VISION_READY_MARKER_VERSION = 2/);
@@ -60351,11 +60414,13 @@ test('WebGPU worker follows local text-generation and WebBrain VL vision contrac
   const visionLoader = worker.slice(worker.indexOf('async function getVisionRuntime'), worker.indexOf('async function getTextRuntime'));
   const textLoader = worker.slice(worker.indexOf('async function getTextRuntime'), worker.indexOf('function enqueueModelOperation'));
   assert.match(visionLoader, /disposeVisionRuntime\(\)/);
-  assert.doesNotMatch(visionLoader, /disposeTextRuntime\(\)/);
+  assert.match(visionLoader, /owner === 'text'[\s\S]*?disposeTextRuntime\(\)/,
+    'a multimodal text preset must release the previous text-generation pipeline');
   assert.match(textLoader, /disposeTextRuntime\(\)/);
-  assert.doesNotMatch(textLoader, /disposeVisionRuntime\(\)/);
-  assert.match(worker, /type === 'dispose-vision'[\s\S]*?enqueueModelOperation\(disposeVisionRuntime\)/);
-  assert.match(worker, /type === 'dispose-text'[\s\S]*?enqueueModelOperation\(disposeTextRuntime\)/);
+  assert.match(textLoader, /disposeVisionRuntime\('text'\)/,
+    'a text-only preset must release a previous multimodal text runtime');
+  assert.match(worker, /type === 'dispose-vision'[\s\S]*?enqueueModelOperation\(\(\) => disposeVisionRuntime\('vision'\)\)/);
+  assert.match(worker, /type === 'dispose-text'[\s\S]*?enqueueModelOperation\(\(\) => disposeDownloadedTextRuntime\(\)\)/);
   assert.match(worker, /pipeline\('text-generation', modelId/);
   assert.match(worker, /dtype = payload\?\.dtype \|\| 'q4f16'/);
   assert.match(worker, /function textDtypeKey\(dtype\)/);
@@ -60375,7 +60440,7 @@ test('WebGPU worker follows local text-generation and WebBrain VL vision contrac
   assert.match(host, /function isBitgpuTextModel/);
   assert.match(host, /bonsai-worker\.js/);
   assert.match(host, /sendTextWorkerMessage\(message\.model, 'start-download-text'/);
-  assert.match(host, /sendTextWorkerMessage\(message\.model, 'text-chat'/);
+  assert.match(host, /sendTextWorkerMessage\(message\.model, workerMessageType/);
   assert.match(host, /disposeOtherTextRuntime\('bitgpu'\)/);
   assert.match(host, /exclusive: true, runtime: message\.runtime/);
   assert.match(host, /function startExclusiveTextDownload\(message\)[\s\S]*?findActiveTextTransfer\(message\.model\)[\s\S]*?status \|\| ''\)\.toLowerCase\(\) !== 'paused'[\s\S]*?Pause it before switching models[\s\S]*?sendTextWorkerMessage\(message\.model, 'start-download-text'/,
@@ -60485,8 +60550,15 @@ test('WebGPU worker follows local text-generation and WebBrain VL vision contrac
   assert.doesNotMatch(settingsScript, /data-webgpu-download-action=/,
     'the WebGPU provider download block must live on Apocalypse Mode, not Settings');
   assert.doesNotMatch(settingsScript, /saveVisionConfig\(\{\s*type:\s*'webgpu'/);
-  assert.match(settingsScript, /Object\.entries\(providersData\)\.filter\(\(\[id\]\) => id !== 'webgpu'\)/,
-    'Settings still renders the WebGPU provider card');
+  assert.match(settingsScript, /let entries = Object\.entries\(providersData\);/,
+    'Settings should render the WebGPU provider card');
+  const webgpuSettingsBlock = settingsScript.slice(
+    settingsScript.indexOf('    webgpu: {'),
+    settingsScript.indexOf('    azure_openai: {'),
+  );
+  assert.match(webgpuSettingsBlock, /WEBGPU_MODEL_PRESETS/);
+  assert.match(webgpuSettingsBlock, /CONTEXT_WINDOW_FIELD/);
+  assert.match(webgpuSettingsBlock, /PROMPT_TIER_FIELD/);
   assert.match(apocalypseHtml, /data-i18n="ap\.models\.text\.title"/);
   assert.match(apocalypseHtml, /data-i18n="ap\.models\.vision\.title"/);
   assert.match(apocalypseHtml, /data-i18n="ap\.models\.wikipedia\.title"/);
