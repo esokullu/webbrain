@@ -4507,7 +4507,26 @@ test('matches twitter.com and x.com', () => {
     assert.match(notes, /selector:"\[data-testid=\\"tweetTextarea_0\\"\]"/);
     assert.match(notes, /verified:false/);
     assert.match(notes, /keep the composer open/i);
+    const workflow = getAdapter('https://x.com/compose/post')?.workflow;
+    assert.deepEqual(getAdapter('https://x.com/compose/post')?.jobs, ['publish-post']);
+    assert.deepEqual(validateAdapterWorkflowProfile(getAdapter('https://x.com/compose/post')), { ok: true });
+    assert.equal(workflow?.jobs?.['publish-post']?.template, 'publish');
+    assert.equal(workflow?.jobs?.['publish-post']?.requiresSubmission, true);
   }
+});
+
+test('matches Bluesky and exposes a mirrored publish-post workflow', () => {
+  const chromeAdapter = getActiveAdapter('https://bsky.app/');
+  const firefoxAdapter = getActiveAdapterFx('https://bsky.app/profile/webbrain.one');
+  assert.equal(chromeAdapter?.name, 'bluesky');
+  assert.equal(firefoxAdapter?.name, 'bluesky');
+  assert.deepEqual(validateAdapterWorkflowProfile(chromeAdapter), { ok: true });
+  assert.deepEqual(validateAdapterWorkflowProfileFx(firefoxAdapter), { ok: true });
+  assert.deepEqual(firefoxAdapter?.workflow, chromeAdapter?.workflow);
+  assert.deepEqual(chromeAdapter?.jobs, ['publish-post']);
+  assert.match(chromeAdapter?.notes || '', /new bsky\.app\/profile\/<account>\/post\/<id> link/i);
+  assert.notEqual(getActiveAdapter('https://bsky.app.evil.example/')?.name, 'bluesky');
+  assert.notEqual(getActiveAdapterFx('https://bsky.app.evil.example/')?.name, 'bluesky');
 });
 
 test('matches Weibo desktop and mobile surfaces and includes login and posting guidance', () => {
@@ -8878,6 +8897,8 @@ test('12306 exposes a validated regional workflow profile with browser parity', 
     'producthunt',
     'microsoft-forms',
     'gmail',
+    'bluesky',
+    'twitter',
     'linkedin',
     'youtube',
     'railway-12306',
@@ -24455,6 +24476,248 @@ test('completion form classification ignores passive localized utility shells wi
       /const classifyForm = \$\{classifyCompletionForm\.toString\(\)\}/,
       `${label}: done verification probe is not wired to the shared form classifier`,
     );
+  }
+});
+
+test('publication resource records keep the owning social card when it embeds another post', () => {
+  for (const [label, invariant, identity, expectedSelector] of [
+    ['chrome X', CompletionInvariantCh, 'twitter:status:222', 'data-testid="tweet"'],
+    ['firefox X', CompletionInvariantFx, 'twitter:status:222', 'data-testid="tweet"'],
+    ['chrome Bluesky', CompletionInvariantCh, 'bluesky:bsky.app/profile/me.test/post/222', 'feedItem-by-'],
+    ['firefox Bluesky', CompletionInvariantFx, 'bluesky:bsky.app/profile/me.test/post/222', 'feedItem-by-'],
+  ]) {
+    const siblingFeed = { innerText: 'outer post\nquoted post\nsibling post' };
+    // The quoted post lives inside the owning card, so the card boundary alone
+    // does not separate authored text from the embedded post's text.
+    const quotedPermalink = { getAttribute: () => '/other/status/999', href: '/other/status/999' };
+    const quotedCard = {
+      innerText: 'quoted post body',
+      querySelectorAll: () => [quotedPermalink],
+      contains: node => node === quotedPermalink || node === quotedCard,
+    };
+    const permalink = {
+      innerText: '2m',
+      getAttribute: () => '/me/status/222',
+      href: '/me/status/222',
+      closest(selector) {
+        assert.match(selector, new RegExp(expectedSelector));
+        return owningCard;
+      },
+    };
+    quotedPermalink.parentElement = quotedCard;
+    const owningCard = {
+      innerText: 'outer post body\nquoted post body',
+      parentElement: siblingFeed,
+      querySelectorAll: () => [permalink, quotedPermalink],
+      contains: node => node !== siblingFeed,
+    };
+    permalink.parentElement = owningCard;
+    quotedCard.parentElement = owningCard;
+    const identityOf = value => {
+      const text = String(value || '');
+      if (text.includes('/status/222') || text.includes('/post/222')) return identity;
+      return text ? 'other:' + text : '';
+    };
+    const record = invariant.publicationResourceRecordRoot(permalink, identity, identityOf);
+    assert.equal(record.root, owningCard, `${label}: quoted post permalink discarded the owning card`);
+    assert.notEqual(record.root, siblingFeed, `${label}: sibling feed container was accepted as the owning card`);
+    assert.deepEqual(record.excluded, [quotedCard],
+      `${label}: the embedded post could still satisfy the authored body`);
+
+    const reconstructed = Function(`return (${invariant.publicationResourceRecordRoot.toString()});`)();
+    assert.equal(
+      reconstructed(permalink, identity, identityOf).root,
+      owningCard,
+      `${label}: publication card selector is not self-contained for page injection`,
+    );
+
+    // A card with nothing embedded keeps the whole card as authored content.
+    const plainPermalink = {
+      innerText: '2m',
+      getAttribute: () => '/me/status/222',
+      href: '/me/status/222',
+      closest: () => plainCard,
+    };
+    const plainCard = {
+      innerText: 'outer post body',
+      querySelectorAll: () => [plainPermalink],
+      contains: node => node === plainPermalink || node === plainCard,
+    };
+    plainPermalink.parentElement = plainCard;
+    const plainRecord = invariant.publicationResourceRecordRoot(plainPermalink, identity, identityOf);
+    assert.equal(plainRecord.root, plainCard);
+    assert.deepEqual(plainRecord.excluded, [],
+      `${label}: an ordinary post was treated as if it embedded another`);
+
+    // An X Premium long post still belongs to the card the app drew.
+    const longPermalink = {
+      innerText: '2m',
+      getAttribute: () => '/me/status/222',
+      href: '/me/status/222',
+      closest: () => longCard,
+    };
+    const longBody = { innerText: 'x'.repeat(9000), getAttribute: () => null };
+    const longCard = {
+      innerText: 'WebBrain\n' + 'x'.repeat(9000),
+      querySelectorAll: selector => (String(selector).includes('Text') ? [longBody] : [longPermalink]),
+      contains: node => node === longPermalink || node === longCard || node === longBody,
+    };
+    longPermalink.parentElement = longCard;
+    longBody.parentElement = longCard;
+    const longRecord = invariant.publicationResourceRecordRoot(longPermalink, identity, identityOf);
+    assert.equal(longRecord.root, longCard,
+      `${label}: a long post fell out of its own card and lost its body`);
+    assert.deepEqual(longRecord.authored, [longBody],
+      `${label}: the app's own post-text element was not reported`);
+
+    // Post media attachments are captured while avatars and emojis are excluded.
+    const avatarNode = {
+      tagName: 'img',
+      getAttribute: name => (name === 'src' ? 'https://pbs.twimg.com/profile_images/123/avatar.jpg' : null),
+      closest: () => null,
+    };
+    const emojiNode = {
+      tagName: 'img',
+      getAttribute: name => (name === 'data-testid' ? 'emoji' : (name === 'src' ? 'https://abs.twimg.com/emoji/v2/svg/1f600.svg' : null)),
+      closest: selector => (selector.includes('emoji') ? emojiNode : null),
+    };
+    const photoNode = {
+      tagName: 'img',
+      getAttribute: name => (name === 'data-testid' ? 'tweetPhoto' : (name === 'src' ? 'https://pbs.twimg.com/media/pic.jpg' : null)),
+      closest: () => null,
+    };
+    const linkPreviewNode = {
+      tagName: 'img',
+      getAttribute: name => (name === 'src' ? 'https://pbs.twimg.com/card_img/thumb.jpg' : null),
+      closest: selector => (selector.includes('card.layout') ? { testId: 'card.layoutLarge.media' } : null),
+    };
+    const videoNode = {
+      tagName: 'video',
+      getAttribute: name => (name === 'src' ? 'https://video.twimg.com/media/clip.mp4' : null),
+      closest: () => null,
+      contains: () => false,
+    };
+    const videoComponentNode = {
+      tagName: 'div',
+      getAttribute: name => (name === 'data-testid' ? 'videoComponent' : null),
+      closest: () => null,
+      contains: node => node === videoNode,
+    };
+    const mediaCard = {
+      innerText: 'post with image',
+      querySelectorAll: selector => {
+        const s = String(selector);
+        if (s.includes('img') || s.includes('video') || s.includes('tweetPhoto')) {
+          return [avatarNode, emojiNode, linkPreviewNode, photoNode, videoComponentNode, videoNode];
+        }
+        return [plainPermalink];
+      },
+      contains: node => [plainPermalink, mediaCard, avatarNode, emojiNode, linkPreviewNode, photoNode, videoComponentNode, videoNode].includes(node),
+    };
+    const mediaPermalink = {
+      ...plainPermalink,
+      closest: () => mediaCard,
+    };
+    const mediaRecord = invariant.publicationResourceRecordRoot(mediaPermalink, identity, identityOf);
+    assert.equal(mediaRecord.root, mediaCard);
+    assert.deepEqual(mediaRecord.attachments, [photoNode, videoComponentNode],
+      `${label}: media attachments failed to deduplicate nested videoNode or failed to include photo`);
+
+    // Authored post body containing a foreign permalink keeps the postText in authored nodes.
+    const foreignPermalink = { getAttribute: () => '/other/status/888', href: '/other/status/888' };
+    const foreignBodyNode = {
+      innerText: 'Check this out https://x.com/other/status/888',
+      querySelectorAll: selector => (selector === 'a[href]' ? [foreignPermalink] : []),
+      contains: node => node === foreignPermalink,
+    };
+    foreignPermalink.parentElement = foreignBodyNode;
+    foreignPermalink.closest = selector => (selector.includes('Text') ? foreignBodyNode : null);
+    const foreignCardPermalink = {
+      innerText: '2m',
+      getAttribute: () => '/me/status/222',
+      href: '/me/status/222',
+      closest: () => foreignCard,
+    };
+    const foreignCard = {
+      innerText: 'Author\nCheck this out https://x.com/other/status/888',
+      querySelectorAll: selector => (String(selector).includes('Text') ? [foreignBodyNode] : [foreignCardPermalink, foreignPermalink]),
+      contains: node => node === foreignCardPermalink || node === foreignCard || node === foreignBodyNode || node === foreignPermalink,
+    };
+    foreignCardPermalink.parentElement = foreignCard;
+    foreignBodyNode.parentElement = foreignCard;
+    const foreignRecord = invariant.publicationResourceRecordRoot(foreignCardPermalink, identity, identityOf);
+    assert.equal(foreignRecord.root, foreignCard, `${label}: authored permalink discarded the owning card`);
+    assert.deepEqual(foreignRecord.excluded, [], `${label}: authored foreign permalink was treated as an embedded post`);
+    assert.deepEqual(foreignRecord.authored, [foreignBodyNode], `${label}: authored body containing foreign permalink was lost`);
+
+    // A card with multiple distinct embedded posts excludes all of them without
+    // letting the first exclusion short-circuit later embedded post exclusions.
+    const embedCandidate1 = {
+      getAttribute: () => '/other/status/333',
+      href: '/other/status/333',
+      closest: sel => (sel && (sel.includes('quote') || sel.includes('embed')) ? embedContainer1 : null),
+    };
+    const embedContainer1 = {
+      querySelectorAll: () => [embedCandidate1],
+      contains: node => node === embedCandidate1 || node === embedContainer1,
+    };
+    embedCandidate1.parentElement = embedContainer1;
+
+    const embedCandidate2 = {
+      getAttribute: () => '/other/status/444',
+      href: '/other/status/444',
+      closest: sel => (sel && (sel.includes('quote') || sel.includes('embed')) ? embedContainer2 : null),
+    };
+    const embedContainer2 = {
+      querySelectorAll: () => [embedCandidate2],
+      contains: node => node === embedCandidate2 || node === embedContainer2,
+    };
+    embedCandidate2.parentElement = embedContainer2;
+
+    const multiEmbedPermalink = {
+      innerText: '2m',
+      getAttribute: () => '/me/status/222',
+      href: '/me/status/222',
+      closest: () => multiEmbedCard,
+    };
+    const multiEmbedCard = {
+      innerText: 'Author\nQuoting two posts',
+      querySelectorAll: selector => {
+        const s = String(selector);
+        if (s.includes('Text')) return [];
+        return [multiEmbedPermalink, embedCandidate1, embedCandidate2];
+      },
+      contains: node => [multiEmbedCard, multiEmbedPermalink, embedCandidate1, embedContainer1, embedCandidate2, embedContainer2].includes(node),
+    };
+    multiEmbedPermalink.parentElement = multiEmbedCard;
+    embedContainer1.parentElement = multiEmbedCard;
+    embedContainer2.parentElement = multiEmbedCard;
+
+    const multiEmbedRecord = invariant.publicationResourceRecordRoot(multiEmbedPermalink, identity, identityOf);
+    assert.equal(multiEmbedRecord.root, multiEmbedCard, `${label}: multi-embed discarded the owning card`);
+    assert.deepEqual(multiEmbedRecord.excluded, [embedContainer1, embedContainer2],
+      `${label}: failed to exclude multiple distinct embedded posts`);
+  }
+
+  for (const [label, rel] of [
+    ['chrome', 'src/chrome/src/agent/agent.js'],
+    ['firefox', 'src/firefox/src/agent/agent.js'],
+  ]) {
+    const source = fs.readFileSync(path.join(ROOT, rel), 'utf8');
+    assert.match(source, /const publicationRecordRoot = \$\{publicationResourceRecordRoot\.toString\(\)\}/,
+      `${label}: done probe does not inject the shared publication card selector`);
+    assert.match(source, /const record = publicationRecordRoot\(link, identity, publicationResourceIdentity\);/,
+      `${label}: publication records do not use the app-owned card root`);
+    assert.match(source, /const isEmbedded = node => embedded\.some\(entry => entry === node \|\| entry\.contains\?\.\(node\)\)/,
+      `${label}: the record builder does not exclude embedded posts`);
+    assert.match(source, /\.filter\(candidate => !isEmbedded\(candidate\)\)\.slice\(0, 100\)/,
+      `${label}: an embedded post's links still reach the record`);
+    assert.match(source, /const text = normalizeLines\(authoredText\(best\), 5000\);/,
+      `${label}: record text is not restricted to authored content`);
+    assert.match(source, /const bodyText = authoredNodes\.length/,
+      `${label}: the record does not carry the app's own post text`);
+    assert.match(source, /normalizeLines\(authoredNodes\.map\(node => String\(node\.innerText \|\| ''\)\)\.join\('\\\\n'\), 25000\)/,
+      `${label}: authored post text is not sized for a long X Premium post`);
   }
 });
 
@@ -75290,7 +75553,20 @@ test('submit detector source covers submit controls, Enter, set_field, iframes, 
     assert.match(agent, /const labelControlFor = \(el\) => \{[\s\S]*String\(el\.tagName \|\| ''\)\.toUpperCase\(\) !== 'LABEL'[\s\S]*el\.htmlFor[\s\S]*doc\.getElementById\(el\.htmlFor\)[\s\S]*button,input,textarea,select/, `${label}: submit probe should resolve labels to associated controls`);
     assert.match(agent, /const target = labelControlFor\(el\) \|\| el;[\s\S]*const candidate = target\.closest\?\.\('button,input,\[role="button"\],\[onclick\],\[data-action\]'\)/, `${label}: submit-control detection should inspect label-backed controls`);
     assert.match(agent, /const submitControlEvidence = \(el\) => \{/, `${label}: custom submit controls should classify preflight evidence strength`);
-    assert.match(agent, /const submitInfo = \(form, reason, pendingEl = null, pendingValue = null, validationSubmitEvidence = 'strong'\)/, `${label}: submit summaries should carry preflight evidence strength`);
+    assert.match(agent, /if \(!form\) return socialPublishControlEvidence\(candidate\);/, `${label}: form-less social publish controls should still reach the submit probe`);
+    assert.match(agent, /const socialPublishAdapterName = \(\) => \{[\s\S]*x\.com[\s\S]*twitter\.com[\s\S]*bsky\.app/, `${label}: the probe should recognize the X and Bluesky publish surfaces`);
+    assert.match(agent, /\^tweetButton\(\?:Inline\)\?\$/, `${label}: the X Post control should be recognized by its app-owned test id`);
+    assert.match(agent, /\^composerPublish\(\?:Btn\|Button\)\$/, `${label}: the Bluesky publish control should be recognized by its app-owned test id`);
+    assert.match(agent, /const socialPublishComposerFor = \(candidate\) => \{[\s\S]*textarea,\[contenteditable="true"\],\[role="textbox"\]/, `${label}: a form-less publish control must belong to an open composer`);
+    assert.match(agent, /return socialPublishComposerFor\(candidate\)\s*\n\s*\? \{ isSubmit: true, strong: publishTestId \}/, `${label}: only composer-bound social publish controls should count as submits`);
+    assert.match(agent, /if \(testId\) \{\s*\n\s*if \(!publishTestId\) return \{ isSubmit: false, strong: false \};/, `${label}: an app-named control that is not the publish control should be rejected outright`);
+    assert.match(agent, /candidate\.closest\?\.\('nav,\[role="navigation"\],header,\[role="banner"\]'\)/, `${label}: a navigation control that only opens a composer should not count as a publish`);
+    assert.match(agent, /\|\| socialPublishComposerFor\(candidate\)/, `${label}: the composer should stand in for the missing form when summarizing the publish`);
+    assert.match(agent, /Composer on \$\{action\} \(no enclosing HTML form\)/, `${label}: publish confirmations should summarize a form-less composer`);
+    assert.match(agent, /const submitInfo = \(form, reason, pendingEl = null, pendingValue = null, validationSubmitEvidence = 'strong', submitTarget = null\)/, `${label}: submit summaries should carry preflight evidence strength`);
+    assert.match(agent, /const publicationAccountEvidence = \(submitTarget\) => \{/, `${label}: social publication submits should bind the active account`);
+    assert.match(agent, /AppTabBar_Profile_Link/, `${label}: X publishing account should use the app-owned profile navigation link`);
+    assert.match(agent, /publicationAccountIdentityComplete: publicationAccount\.complete/, `${label}: account evidence completeness should survive the page probe`);
     assert.match(agent, /evidence\.strong \? 'strong' : 'heuristic'/, `${label}: custom submit probes should label strong and heuristic evidence`);
     assert.match(agent, /detected\.validationSubmitEvidence === 'strong' \? 'strong' : 'heuristic'/, `${label}: submit evidence strength should survive page-probe normalization`);
     assert.match(agent, /const findTopmostModal = \(\) => \{[\s\S]*dialog\[open\][\s\S]*\[role="dialog"\]\[aria-modal="true"\][\s\S]*\[class\*="DialogOverlay"\]/, `${label}: text submit probing should mirror modal scoping`);
@@ -85761,7 +86037,2093 @@ test('publication workflows classify and bind requested payload fields', async (
     ], `${AgentClass.name}: trusted publication payload fields were not retained`);
     const prompt = agent._progressIntentClassifierMessages(taskText, classifierContext)[0].content;
     assert.match(prompt, /publish-release/);
-    assert.match(prompt, /\bcanonical field names tag, title, notes, body, or visibility\b/);
+    assert.match(prompt, /\bcanonical field names tag, title, notes, body, visibility, or attachment\b/);
+    assert.match(prompt, /for publish-post only, also use account/);
+  }
+});
+
+test('social publication workflow follows the live X or Bluesky destination and uses approved-plan payload context', async () => {
+  for (const [index, AgentClass] of [AgentCh, AgentFx].entries()) {
+    const agent = new AgentClass({ getActive: () => ({ chat: async () => ({ content: '{}' }) }) });
+    agent.useSiteAdapters = true;
+    agent._persist = () => {};
+    const tabId = 9005 + index;
+    let liveUrl = 'https://x.com/compose/post';
+    agent._currentUrl = async () => liveUrl;
+    agent._currentProgressPageScope = () => liveUrl;
+    agent.conversations.set(tabId, [
+      { role: 'system', content: 'system' },
+      { role: 'user', content: 'and now on to X!' },
+    ]);
+    const priorBlueskyWorkflow = agent._resolvePlannerSiteWorkflow('https://bsky.app/', {
+      request_kind: 'execute',
+      site_job: 'publish-post',
+    });
+    const guard = agent._startPlanExecutionGuard(tabId, 'act', {
+      requestKind: 'execute',
+      requiresStateChange: true,
+      requiresSubmission: true,
+      siteWorkflow: priorBlueskyWorkflow,
+      approvedScratchpadText: [
+        '[Approved plan pinned by planner]',
+        '- Publish this exact post on X: Shipping the workflow kernel today.',
+      ].join('\n'),
+    });
+    let classifierCalls = 0;
+    let classifierContext = null;
+    agent._chatWithCostAllowance = async (_provider, messages) => {
+      classifierCalls++;
+      classifierContext = JSON.parse(messages[1].content).siteContext;
+      return {
+        content: JSON.stringify({
+          mode: 'inactive',
+          allowedActions: [],
+          forbiddenActions: [],
+          targets: [],
+          workflowFields: [{ field: 'body', value: 'Shipping the workflow kernel today.' }],
+          confidence: 0.99,
+          pageScopePolicy: 'page',
+        }),
+      };
+    };
+    const provider = { chat: async () => ({ content: '{}' }) };
+    assert.equal(await agent._adoptLiveSocialPublishWorkflow(tabId, provider), true);
+    assert.equal(guard.siteWorkflow?.adapterName, 'twitter');
+    assert.equal(guard.siteWorkflow?.job?.id, 'publish-post');
+    assert.match(classifierContext?.approvedPlan || '', /Shipping the workflow kernel today/);
+    assert.deepEqual(guard.workflowMetadataRequirements, [
+      { field: 'body', value: 'Shipping the workflow kernel today.' },
+    ]);
+
+    liveUrl = 'https://bsky.app/';
+    assert.equal(await agent._adoptLiveSocialPublishWorkflow(tabId, provider), false);
+    assert.equal(guard.siteWorkflow?.adapterName, 'twitter');
+    assert.equal(classifierCalls, 1, AgentClass.name + ': destination rebind unnecessarily reclassified the same task payload');
+    assert.deepEqual(guard.workflowMetadataRequirements, [
+      { field: 'body', value: 'Shipping the workflow kernel today.' },
+    ]);
+
+    const blueskyTabId = tabId + 100;
+    agent.conversations.set(blueskyTabId, [
+      { role: 'system', content: 'system' },
+      { role: 'user', content: 'Post it on Bluesky.' },
+    ]);
+    const blueskyGuard = agent._startPlanExecutionGuard(blueskyTabId, 'act', {
+      requestKind: 'execute',
+      requiresStateChange: true,
+      requiresSubmission: true,
+      approvedScratchpadText: [
+        '[Approved plan pinned by planner]',
+        '- Publish this exact post on Bluesky: Shipping the workflow kernel today.',
+      ].join('\n'),
+    });
+    assert.equal(await agent._adoptLiveSocialPublishWorkflow(blueskyTabId, provider), true);
+    assert.equal(blueskyGuard.siteWorkflow?.adapterName, 'bluesky');
+
+    liveUrl = 'https://x.com/compose/post';
+    const longBodyTabId = tabId + 150;
+    const fullLongText = ('Initial post content '.repeat(700)).trim();
+    agent.conversations.set(longBodyTabId, [
+      { role: 'system', content: 'system' },
+      { role: 'user', content: 'Post this on X: ' + fullLongText },
+    ]);
+    const longBodyGuard = agent._startPlanExecutionGuard(longBodyTabId, 'act', {
+      requestKind: 'execute',
+      requiresStateChange: true,
+      requiresSubmission: true,
+      approvedScratchpadText: [
+        '[Approved plan pinned by planner]',
+        `- Post this on X: ${fullLongText}`,
+      ].join('\n'),
+    });
+    const priorChat = agent._chatWithCostAllowance;
+    agent._chatWithCostAllowance = async () => ({
+      content: JSON.stringify({
+        mode: 'inactive',
+        allowedActions: [],
+        forbiddenActions: [],
+        targets: [],
+        workflowFields: [{ field: 'body', value: fullLongText.slice(0, 100) }],
+        confidence: 0.99,
+        pageScopePolicy: 'page',
+      }),
+    });
+    assert.equal(await agent._adoptLiveSocialPublishWorkflow(longBodyTabId, provider), true);
+    assert.equal(longBodyGuard.workflowMetadataRequirements?.[0]?.value, fullLongText,
+      AgentClass.name + ': long post body was truncated by classifier output instead of preserved from context');
+    agent._chatWithCostAllowance = priorChat;
+
+    liveUrl = 'https://x.com/compose/post';
+    const nonEnglishTabId = tabId + 200;
+    agent.conversations.set(nonEnglishTabId, [
+      { role: 'system', content: 'system' },
+      { role: 'user', content: 'Publícalo en https://x.com/home.' },
+    ]);
+    const nonEnglishGuard = agent._startPlanExecutionGuard(nonEnglishTabId, 'act', {
+      requestKind: 'execute',
+      requiresStateChange: true,
+      requiresSubmission: true,
+      approvedScratchpadText: [
+        '[Approved plan pinned by planner]',
+        '- Publícalo en https://x.com/home: Shipping the workflow kernel today.',
+      ].join('\n'),
+    });
+    assert.equal(await agent._adoptLiveSocialPublishWorkflow(nonEnglishTabId, provider), true);
+    assert.equal(nonEnglishGuard.siteWorkflow?.adapterName, 'twitter',
+      AgentClass.name + ': explicit social destination URL was hidden behind English-only intent words');
+
+    const referenceOnlyTabId = tabId + 250;
+    agent.conversations.set(referenceOnlyTabId, [
+      { role: 'system', content: 'system' },
+      { role: 'user', content: 'Read https://x.com/nasa/status/1234567890 and submit its details in the form.' },
+    ]);
+    const referenceOnlyGuard = agent._startPlanExecutionGuard(referenceOnlyTabId, 'act', {
+      requestKind: 'execute',
+      requiresStateChange: true,
+      requiresSubmission: true,
+      approvedScratchpadText: [
+        '[Approved plan pinned by planner]',
+        '- Read https://x.com/nasa/status/1234567890 and submit its details in the form.',
+      ].join('\n'),
+    });
+    assert.equal(await agent._adoptLiveSocialPublishWorkflow(referenceOnlyTabId, provider), false,
+      AgentClass.name + ': a referenced X permalink was treated as the publication destination');
+    assert.equal(referenceOnlyGuard.siteWorkflow, null);
+    assert.equal(agent._socialPublishDestinationAdapter('https://x.com/nasa/status/1234567890'), '');
+    assert.equal(agent._socialPublishDestinationAdapter('https://bsky.app/profile/nasa.gov/post/3kabc'), '');
+    assert.equal(agent._socialPublishDestinationAdapter('https://x.com/nasa'), '');
+    assert.equal(agent._socialPublishDestinationAdapter('https://x.com/home'), 'twitter');
+    assert.equal(agent._socialPublishDestinationAdapter('https://x.com/compose/post'), 'twitter');
+    assert.equal(agent._socialPublishDestinationAdapter('https://bsky.app/'), 'bluesky');
+
+    // A publish verb and a platform name can both appear in a task that never
+    // asks for a post. Only a verb that governs the platform is a destination.
+    const readOnlyMentionTabId = tabId + 275;
+    agent.conversations.set(readOnlyMentionTabId, [
+      { role: 'system', content: 'system' },
+      { role: 'user', content: "Read Acme's posts on X, then share the findings in the survey." },
+    ]);
+    const readOnlyMentionGuard = agent._startPlanExecutionGuard(readOnlyMentionTabId, 'act', {
+      requestKind: 'execute',
+      requiresStateChange: true,
+      requiresSubmission: true,
+      approvedScratchpadText: [
+        '[Approved plan pinned by planner]',
+        "- Read Acme's posts on X, then share the findings in the survey.",
+      ].join('\n'),
+    });
+    assert.equal(await agent._adoptLiveSocialPublishWorkflow(readOnlyMentionTabId, provider), false,
+      AgentClass.name + ': an unrelated X mention plus a publish verb bound the run to publish-post');
+    assert.equal(readOnlyMentionGuard.siteWorkflow, null);
+    assert.deepEqual(
+      [...agent._trustedSocialPublishTargetAdapters({
+        taskText: 'Read the latest tweets on Twitter and summarize them in the form.',
+      })],
+      [],
+      AgentClass.name + ': reading a platform was treated as publishing to it',
+    );
+    assert.deepEqual(
+      [...agent._trustedSocialPublishTargetAdapters({ taskText: 'Share this to bsky please' })],
+      ['bluesky'],
+    );
+    assert.deepEqual(
+      [...agent._trustedSocialPublishTargetAdapters({ taskText: 'tweet this: hello world' })],
+      ['twitter'],
+    );
+    for (const [taskText, expected, why] of [
+      ['Read https://x.com/home, then submit a summary in the survey.', [],
+        'a feed used as a read source was treated as a destination'],
+      ['Open https://bsky.app/ and read the feed', [],
+        'an opened feed was treated as a destination'],
+      ['Read the publication at https://x.com/home and submit it', [],
+        'the noun "publication" was read as publication intent'],
+      // Publication language is not English-only, and a composer route needs
+      // no verb at all.
+      ['Publ\u00edcalo en https://x.com/home', ['twitter'], 'Spanish publication intent was not recognized'],
+      ['Yay\u0131nla: https://x.com/home', ['twitter'], 'Turkish publication intent was not recognized'],
+      ['\u6295\u7a3f\u3057\u3066\u304f\u3060\u3055\u3044 https://x.com/home', ['twitter'],
+        'Japanese publication intent was not recognized'],
+      ['\u5728 https://x.com/compose/post \u4e0a\u53d1\u5e03\u8fd9\u6761\u6d88\u606f', ['twitter'],
+        'a composer route needed an English verb'],
+      ['Just open https://x.com/compose/post', ['twitter'],
+        'a composer route is a destination by construction'],
+      // A destination can lead the command as easily as follow it.
+      ['On https://x.com/home, publish this update', ['twitter'],
+        'a destination that leads the command was discarded'],
+      // JavaScript places no word boundary around a Cyrillic word.
+      ['\u041e\u043f\u0443\u0431\u043b\u0438\u043a\u0443\u0439 \u044d\u0442\u043e \u043d\u0430 https://x.com/home', ['twitter'],
+        'Russian publication intent was not recognized'],
+      // Scripts without spacing need the read verb to win over the noun.
+      ['\u9605\u8bfb\u63a8\u6587 https://x.com/home \u7136\u540e\u628a\u6458\u8981\u63d0\u4ea4\u5230\u8868\u5355', [],
+        'a CJK content noun was read as a publish command'],
+      ['\u9605\u8bfb\u6295\u7a3f https://x.com/home \u7136\u540e\u628a\u6458\u8981\u63d0\u4ea4\u5230\u8868\u5355', [],
+        'a CJK publish word governed by a read verb was read as intent'],
+      // "post" and "posts" are nouns as often as commands. The clause decides.
+      ['Read posts on https://x.com/home, then submit a summary in the survey', [],
+        'the noun "posts" was read as a publish command'],
+      ['Posts to read on X, then submit a summary in the survey', [],
+        'noun-like publish token followed by read intent was treated as a publish command'],
+      ['Tweets to read on X, then summarize them', [],
+        'tweets followed by read intent was treated as a publish command'],
+      ['Read the post on https://x.com/home and submit a summary in the survey', [],
+        'a read verb governing "post" did not disqualify it'],
+      ['Check the latest posts on https://x.com/home then fill the form', [],
+        'a read verb further from the noun did not disqualify it'],
+      ['Read the summary and publish it on https://x.com/home', ['twitter'],
+        'a publish command in its own clause was lost to an earlier read verb'],
+      ['Inspect https://x.com/compose/post but do not publish anything; submit findings in the survey', [],
+        'negation following a composer route was ignored'],
+      ['Find market share on X, then submit it in the survey', [],
+        'noun use of share was treated as publication intent'],
+      ['Share our update on X, then submit it in the survey', ['twitter'],
+        'valid publication command with share was not recognized'],
+      // Bare platforms use the same multilingual verbs as URLs, not English-only.
+      ['Publícalo en X', ['twitter'],
+        'a Spanish bare platform destination was missed'],
+      ['Publicar en Bluesky', ['bluesky'],
+        'a Spanish bare Bluesky destination was missed'],
+      ['Publiez ceci sur Bluesky', ['bluesky'],
+        'a French bare platform destination was missed'],
+      ['发布到X', ['twitter'],
+        'an unspaced Chinese bare X destination was missed'],
+      ['发布至X', ['twitter'],
+        'a Chinese bare X destination with 至 was missed'],
+      ['发布在X', ['twitter'],
+        'a Chinese bare X destination with 在 was missed'],
+      ['发布到X并在完成后通知我', ['twitter'],
+        'an unspaced Chinese bare X destination followed by unspaced Chinese text was missed'],
+      ['发布到Bluesky', ['bluesky'],
+        'an unspaced Chinese bare Bluesky destination was missed'],
+      ['发布在Bluesky', ['bluesky'],
+        'a Chinese bare Bluesky destination with 在 was missed'],
+      ['在X上发布这条消息', ['twitter'],
+        'a leading Chinese bare X destination with 在...上 was missed'],
+      ['在X发布这条消息', ['twitter'],
+        'a leading Chinese bare X destination with 在 was missed'],
+      ['Xに投稿してください', ['twitter'],
+        'a Japanese bare X destination with に was missed'],
+      ['Xへ投稿してください', ['twitter'],
+        'a Japanese bare X destination with へ was missed'],
+      ['Xで投稿してください', ['twitter'],
+        'a Japanese bare X destination with で was missed'],
+      ['X에 게시해주세요', ['twitter'],
+        'a Korean bare X destination with 에 was missed'],
+      ['Blueskyに投稿してください', ['bluesky'],
+        'a Japanese bare Bluesky destination was missed'],
+      ['Bluesky에 게시해주세요', ['bluesky'],
+        'a Korean bare Bluesky destination was missed'],
+      ['在X上阅读推文', [],
+        'a Chinese read command was wrongly treated as a publish destination'],
+      ['发布到xbox', [],
+        'a word containing x was wrongly treated as X platform'],
+      ['retweet this', [],
+        'retweet this was wrongly treated as a publish destination'],
+      ['retweet that', [],
+        'retweet that was wrongly treated as a publish destination'],
+      ['retweet it', [],
+        'retweet it was wrongly treated as a publish destination'],
+      ['Do not post this on X; submit it in the survey', [],
+        'negated publication command was wrongly treated as a publish destination'],
+      ['Never publish to Bluesky', [],
+        'negated Bluesky publication command was wrongly treated as a publish destination'],
+      ["Don't tweet this", [],
+        'negated tweet-this command was wrongly treated as a publish destination'],
+      ['Do not post on https://x.com/home; fill the survey instead', [],
+        'negated URL publication command was wrongly treated as a publish destination'],
+      ['You must not post on X', [],
+        'negated must-not command was wrongly treated as a publish destination'],
+      ['No publicar esto en X; envíalo en la encuesta', [],
+        'Spanish negated publication command was wrongly treated as a publish destination'],
+      ['Nicht auf X posten', [],
+        'German negated publication command was wrongly treated as a publish destination'],
+      ['Ne pas publier sur X', [],
+        'French negated publication command was wrongly treated as a publish destination'],
+      ['不要在X上发布这条消息', [],
+        'Chinese negated publication command was wrongly treated as a publish destination'],
+      ['Xに投稿しないでください', [],
+        'Japanese post-negated publication command was wrongly treated as a publish destination'],
+      ['Xに投稿してはいけない', [],
+        'Japanese post-negated command with してはいけない was wrongly treated as a publish destination'],
+      ['X에 게시하지 마세요', [],
+        'Korean post-negated publication command was wrongly treated as a publish destination'],
+      ['Post this on X with no attachments', ['twitter'],
+        'post with no-attachments phrase was wrongly rejected'],
+      ['Do not post or publish this on X; submit it in the survey', [],
+        'coordinated publish verbs under negation were wrongly treated as a publish destination'],
+      ['Never publish or post to Bluesky', [],
+        'coordinated publish verbs under never were wrongly treated as Bluesky publish destination'],
+      ['Do not post on X or publish on Bluesky', [],
+        'multiple publish destinations joined by or under negation were wrongly treated as a publish destination'],
+      ['Do not post on X, but publish on Bluesky', ['bluesky'],
+        'contrastive but clause after negated post was wrongly rejected for Bluesky'],
+      ['Post or publish this on X', ['twitter'],
+        'affirmative coordinated publish verbs were wrongly rejected for X'],
+      ['Post "Do not panic" on X', ['twitter'],
+        'quoted negation inside payload was treated as command negation'],
+      ['Post “Never give up” on Bluesky', ['bluesky'],
+        'smart-quoted negation inside payload was treated as command negation'],
+      ['Tweet \'Do not worry\' on X', ['twitter'],
+        'single-quoted negation inside payload was treated as command negation'],
+      ['Do not post "panic" on X', [],
+        'actual negation governing publish verb was missed'],
+      ['Do not submit the survey, post this on X', ['twitter'],
+        'independent affirmative clause after negated non-publish clause separated by comma was wrongly rejected'],
+      ['Do not post on Bluesky, post this on X', ['twitter'],
+        'independent affirmative publish clause separated by comma from negated publish clause was wrongly rejected'],
+      ['Publish on Bluesky; read https://x.com/home', ['bluesky'],
+        'unrelated publication command in prior clause was wrongly attributed to read-only social URL'],
+      ['Without posting anything on X, inspect the feed and submit a summary', [],
+        'without governing publish verb was not recognized as negation'],
+      ['Inspect the feed without posting anything on X, and submit a summary', [],
+        'without governing publish verb in second clause was not recognized as negation'],
+      ['Post on X without attachments', ['twitter'],
+        'without attachments in post metadata was wrongly treated as publish negation'],
+      ['Without delay, post on X', ['twitter'],
+        'without delay was wrongly treated as publish negation'],
+      ['Post "This is a very long announcement body that contains far more than fifty or sixty characters and explains everything clearly" on X', ['twitter'],
+        'long quoted body before on X was cut off by character window'],
+      ['Post "This is another long announcement body with more than sixty characters" to Bluesky', ['bluesky'],
+        'long quoted body before to Bluesky was cut off by character window'],
+      ['Post "Check our thoughts on X" to Bluesky', ['bluesky'],
+        'platform mentioned inside quoted body leaked into target detection'],
+      ['Post "This is a very long announcement body that contains far more than fifty or sixty characters and explains everything clearly" on https://x.com/home', ['twitter'],
+        'long quoted body before on https://x.com/home was cut off by character window'],
+      ['Post "This is a very long announcement body that contains far more than fifty or sixty characters and explains everything clearly" to https://bsky.app/', ['bluesky'],
+        'long quoted body before to https://bsky.app/ was cut off by character window'],
+      ['Publique no X: olá', ['twitter'],
+        'Portuguese no X destination preposition was not recognized'],
+      ['Publique na Bluesky: olá', ['bluesky'],
+        'Portuguese na Bluesky destination preposition was not recognized'],
+      ['Não publique no X: olá', [],
+        'negated Portuguese no X command was wrongly treated as a publish destination'],
+      ['Post “He said \\"hello; world\\" today” on X', ['twitter'],
+        'nested quotation styles mispaired opening curly quote with inner ASCII quote'],
+      ['Post “He said "hello; world" today” on X', ['twitter'],
+        'nested quotation styles mispaired opening curly quote with inner ASCII quote'],
+      ['Post «He said "hello; world" today» to https://bsky.app/', ['bluesky'],
+        'guillemet quotation containing inner ASCII quote mispaired delimiters'],
+      ['Post 「He said 『hello; world』 today」 on X', ['twitter'],
+        'nested CJK quotation marks mispaired delimiters'],
+      ['Post research and development news on X', ['twitter'],
+        'payload conjunction and before on X split command and destination into separate clauses'],
+      ['Post research and development news to https://x.com/home', ['twitter'],
+        'payload conjunction and before explicit social URL split command and destination into separate clauses'],
+      ['Post research, development, and marketing news on X', ['twitter'],
+        'multiple payload conjunctions and commas before on X split command and destination into separate clauses'],
+    ]) {
+      assert.deepEqual(
+        [...agent._trustedSocialPublishTargetAdapters({ taskText })],
+        expected,
+        AgentClass.name + ': ' + why,
+      );
+    }
+
+    const genericTabId = tabId + 300;
+    agent.conversations.set(genericTabId, [
+      { role: 'system', content: 'system' },
+      { role: 'user', content: 'Submit the approved form.' },
+    ]);
+    const genericGuard = agent._startPlanExecutionGuard(genericTabId, 'act', {
+      requestKind: 'execute',
+      requiresStateChange: true,
+      requiresSubmission: true,
+      approvedScratchpadText: [
+        '[Approved plan pinned by planner]',
+        '- Submit the approved form.',
+      ].join('\n'),
+    });
+    genericGuard.verifiedSubmissionEvidence = true;
+    assert.equal(await agent._adoptLiveSocialPublishWorkflow(genericTabId, provider), false);
+    assert.equal(genericGuard.siteWorkflow, null);
+    assert.equal(genericGuard.verifiedSubmissionEvidence, true);
+  }
+});
+
+test('X and Bluesky same-route publication accepts only one new permalink with the exact reviewed body', () => {
+  const fixtures = [
+    {
+      adapterName: 'twitter',
+      feedUrl: 'https://x.com/home',
+      existingUrl: 'https://twitter.com/webbrain/status/1111111111111111111',
+      publishedUrl: 'https://x.com/webbrain/status/2222222222222222222',
+      otherNewUrl: 'https://x.com/webbrain/status/3333333333333333333',
+      expectedIdentity: 'twitter:status:2222222222222222222',
+      accountIdentity: 'twitter:webbrain',
+      wrongAccountUrl: 'https://x.com/notwebbrain/status/4444444444444444444',
+      displayedRepoUrl: 'github.com/webbrain-one/…',
+      repoLink: {
+        href: 'https://t.co/abc123',
+        text: 'github.com/webbrain-one/…',
+        expandedUrl: 'https://github.com/webbrain-one/webbrain',
+      },
+    },
+    {
+      adapterName: 'bluesky',
+      feedUrl: 'https://bsky.app/',
+      existingUrl: 'https://bsky.app/profile/webbrain.one/post/3abc',
+      publishedUrl: 'https://bsky.app/profile/webbrain.one/post/4DEF',
+      otherNewUrl: 'https://bsky.app/profile/webbrain.one/post/5ghi',
+      expectedIdentity: 'bluesky:bsky.app/profile/webbrain.one/post/4def',
+      accountIdentity: 'bluesky:webbrain.one',
+      wrongAccountUrl: 'https://bsky.app/profile/notwebbrain.test/post/6jkl',
+      displayedRepoUrl: 'github.com/webbrain-one/webbrain',
+      repoLink: {
+        href: 'https://github.com/webbrain-one/webbrain',
+        text: 'github.com/webbrain-one/webbrain',
+      },
+    },
+  ];
+  const body = [
+    '🎉 Milestone Alert! 🎉',
+    '',
+    'We just passed 1,000 stars and 50 contributors on @GitHub!',
+    '',
+    'Huge thanks to everyone starring, contributing code, testing local models, and sharing feedback. WebBrain wouldn’t be here without you. 🤗',
+    '',
+    '🔗 https://github.com/webbrain-one/webbrain',
+    '#OpenSource #AI #LocalAI',
+  ].join('\n');
+  for (const [buildIndex, AgentClass] of [AgentCh, AgentFx].entries()) {
+    for (const [fixtureIndex, fixture] of fixtures.entries()) {
+      const agent = new AgentClass({});
+      agent.useSiteAdapters = true;
+      const tabId = 9010 + (buildIndex * 10) + fixtureIndex;
+      const workflow = agent._resolvePlannerSiteWorkflow(fixture.feedUrl, {
+        request_kind: 'execute',
+        site_job: 'publish-post',
+      });
+      assert.equal(workflow?.adapterName, fixture.adapterName);
+      assert.equal(
+        agent._workflowSocialPublicationAccountIdentity(workflow, fixture.publishedUrl),
+        fixture.accountIdentity,
+      );
+      assert.equal(agent._workflowMetadataFieldKey('Publishing account'), 'account');
+      for (const alias of ['attachment', 'attachments', 'media', 'image', 'photo', 'video', '添付', '附件', '사진']) {
+        assert.equal(agent._workflowMetadataFieldKey(alias), 'attachment',
+          `${AgentClass.name}: ${alias} was not recognized as attachment field`);
+      }
+      const firstLongUrl = 'https://github.com/webbrain-one/webbrain/issues/100';
+      const secondLongUrl = 'https://github.com/webbrain-one/webbrain/issues/200';
+      const repeatedDisplayUrl = 'github.com/webbrain-one/webbrain/…';
+      assert.equal(agent._workflowSocialPublishedBodyObserved(
+        {
+          field: 'body',
+          value: `First: ${firstLongUrl}\nSecond: ${secondLongUrl}`,
+        },
+        {
+          text: `First: ${repeatedDisplayUrl}\nSecond: ${repeatedDisplayUrl}`,
+          links: [
+            { href: 'https://t.co/first', text: repeatedDisplayUrl, expandedUrl: firstLongUrl },
+            { href: 'https://t.co/second', text: repeatedDisplayUrl, expandedUrl: secondLongUrl },
+          ],
+        },
+      ), true, AgentClass.name + ': repeated shortened URL labels were not consumed positionally');
+      assert.equal(agent._workflowSocialPublishedBodyObserved(
+        {
+          field: 'body',
+          value: `First: ${firstLongUrl}\nSecond: ${secondLongUrl}`,
+        },
+        {
+          text: `First: ${repeatedDisplayUrl}\nSecond: ${repeatedDisplayUrl}`,
+          links: [
+            { href: 'https://t.co/second', text: repeatedDisplayUrl, expandedUrl: secondLongUrl },
+            { href: 'https://t.co/first', text: repeatedDisplayUrl, expandedUrl: firstLongUrl },
+          ],
+        },
+      ), false, AgentClass.name + ': swapped link destinations were incorrectly accepted');
+      const guard = agent._startPlanExecutionGuard(tabId, 'act', {
+        requestKind: 'execute',
+        requiresStateChange: true,
+        requiresSubmission: true,
+        siteWorkflow: workflow,
+      });
+      guard.successfulConsequentialToolCalls = 1;
+      guard.workflowMetadataRequirements = [{ field: 'body', value: body }];
+      guard.workflowMetadataRequirementsResolved = true;
+      agent._beginCompletionInvariant(tabId);
+      agent._recordCompletionToolResult(
+        tabId,
+        'click_ax',
+        { ref_id: 'publish-post' },
+        { success: true, dispatched: true },
+      );
+      agent._recordCompletionSubmitAttempt(
+        tabId,
+        {
+          isSubmit: true,
+          publicationResourceUrls: [fixture.existingUrl],
+          publicationAccountIdentity: fixture.accountIdentity,
+          publicationAccountIdentityComplete: true,
+        },
+        'click_ax',
+        { ref_id: 'publish-post' },
+        fixture.feedUrl,
+        fixture.feedUrl,
+        { success: true, dispatched: true },
+      );
+      agent._recordCompletionToolResult(tabId, 'read_page', {}, {
+        success: true,
+        url: fixture.feedUrl,
+        content: 'Feed refreshed.',
+      });
+      const submit = agent._completionSubmitStates.get(tabId);
+      assert.equal(submit.workflowBinding?.preDispatchPublicationAccountIdentity, fixture.accountIdentity);
+      assert.equal(submit.workflowBinding?.preDispatchPublicationAccountIdentityComplete, true);
+      assert.equal(agent._completionSubmissionEvidence(
+        tabId,
+        { relevantFormCount: 0, successMessages: [] },
+        fixture.feedUrl,
+      ).verifiedFinalSubmit, false, AgentClass.name + ': same-route feed invented generic submit success');
+
+      const ambiguousPageState = {
+        workflowResourceUrls: [fixture.existingUrl, fixture.publishedUrl, fixture.otherNewUrl],
+        workflowResourceRecords: [
+          { url: fixture.publishedUrl, text: 'WebBrain\n' + body + '\n2m' },
+          { url: fixture.otherNewUrl, text: 'WebBrain\n' + body + '\n1m' },
+        ],
+      };
+      assert.equal(agent._workflowTerminalEvidenceFromDone(
+        tabId,
+        ambiguousPageState,
+        fixture.feedUrl,
+        { submit, verifiedFinalSubmit: false, relevantForms: 0 },
+      ), null, AgentClass.name + ': multiple new ' + fixture.adapterName + ' permalinks were bound ambiguously');
+      assert.equal(submit.workflowBinding?.publishedResourceIdentity, undefined);
+
+      const renderedBody = body.replace('https://github.com/webbrain-one/webbrain', fixture.displayedRepoUrl);
+      const productionNormalizedBody = renderedBody
+        .split('\n')
+        .map(line => line.replace(/[^\S\n]+/g, ' ').trim())
+        .filter(Boolean)
+        .join('\n');
+      const wrongBodyPageState = {
+        workflowResourceUrls: [fixture.existingUrl, fixture.publishedUrl],
+        workflowResourceRecords: [
+          { url: fixture.publishedUrl, text: 'WebBrain\nA different post body.\n2m' },
+        ],
+      };
+      assert.equal(agent._workflowTerminalEvidenceFromDone(
+        tabId,
+        wrongBodyPageState,
+        fixture.feedUrl,
+        { submit, verifiedFinalSubmit: false, relevantForms: 0 },
+      ), null, AgentClass.name + ': wrong-body ' + fixture.adapterName + ' post satisfied publication');
+      assert.equal(submit.workflowBinding?.publishedResourceIdentity, undefined);
+
+      const missingLinkEvidencePageState = {
+        workflowResourceUrls: [fixture.existingUrl, fixture.publishedUrl],
+        workflowResourceRecords: [
+          { url: fixture.publishedUrl, text: 'WebBrain\n' + renderedBody + '\n2m', links: [] },
+        ],
+      };
+      assert.equal(agent._workflowTerminalEvidenceFromDone(
+        tabId,
+        missingLinkEvidencePageState,
+        fixture.feedUrl,
+        { submit, verifiedFinalSubmit: false, relevantForms: 0 },
+      ), null, AgentClass.name + ': shortened URL text passed without card-bound link evidence');
+      assert.equal(submit.workflowBinding?.publishedResourceIdentity, undefined);
+
+      const wrongAccountPageState = {
+        workflowResourceUrls: [fixture.existingUrl, fixture.wrongAccountUrl],
+        workflowResourceRecords: [
+          {
+            url: fixture.wrongAccountUrl,
+            text: 'Not WebBrain\n' + productionNormalizedBody + '\n2m',
+            links: [fixture.repoLink],
+          },
+        ],
+      };
+      assert.equal(agent._workflowTerminalEvidenceFromDone(
+        tabId,
+        wrongAccountPageState,
+        fixture.feedUrl,
+        { submit, verifiedFinalSubmit: false, relevantForms: 0 },
+      ), null, AgentClass.name + ': matching body on the wrong publishing account satisfied publication');
+      assert.equal(submit.workflowBinding?.publishedResourceIdentity, undefined);
+
+      const exactPageState = {
+        workflowResourceUrls: [fixture.existingUrl, fixture.publishedUrl],
+        workflowResourceRecords: [
+          {
+            url: fixture.publishedUrl,
+            text: 'WebBrain\n' + productionNormalizedBody + '\n2m',
+            links: [fixture.repoLink],
+          },
+        ],
+      };
+      assert.equal(agent._workflowPublishedResourcePayloadMatch(
+        {
+          ...submit.workflowBinding,
+          publishedResourceIdentity: fixture.expectedIdentity,
+          preDispatchPublicationAccountIdentity: '',
+          preDispatchPublicationAccountIdentityComplete: false,
+        },
+        guard,
+        exactPageState,
+        fixture.feedUrl,
+        submit,
+      ), false, AgentClass.name + ': publication passed without an intended-account binding');
+      assert.equal(agent._workflowPublishedResourcePayloadMatch(
+        {
+          ...submit.workflowBinding,
+          metadataRequirements: [
+            ...submit.workflowBinding.metadataRequirements,
+            { field: 'account', value: fixture.accountIdentity },
+          ],
+          publishedResourceIdentity: fixture.expectedIdentity,
+          preDispatchPublicationAccountIdentity: fixture.adapterName === 'twitter'
+            ? 'twitter:notwebbrain'
+            : 'bluesky:notwebbrain.test',
+          preDispatchPublicationAccountIdentityComplete: true,
+        },
+        guard,
+        exactPageState,
+        fixture.feedUrl,
+        submit,
+      ), false, AgentClass.name + ': requested account hid a conflicting active account at dispatch');
+      assert.equal(agent._workflowPublishedResourcePayloadMatch(
+        {
+          ...submit.workflowBinding,
+          metadataRequirements: [
+            ...submit.workflowBinding.metadataRequirements,
+            { field: 'attachment', value: 'image' },
+          ],
+          publishedResourceIdentity: fixture.expectedIdentity,
+          preDispatchPublicationAccountIdentity: fixture.accountIdentity,
+          preDispatchPublicationAccountIdentityComplete: true,
+        },
+        guard,
+        exactPageState,
+        fixture.feedUrl,
+        submit,
+      ), false, AgentClass.name + ': post without attachments satisfied attachment requirement');
+
+      const pageStateWithImage = {
+        ...exactPageState,
+        workflowResourceRecords: [
+          {
+            ...exactPageState.workflowResourceRecords[0],
+            attachments: [
+              { type: 'image', src: 'https://pbs.twimg.com/media/xyz.jpg', alt: 'screenshot' },
+            ],
+          },
+        ],
+      };
+      assert.equal(agent._workflowPublishedResourcePayloadMatch(
+        {
+          ...submit.workflowBinding,
+          metadataRequirements: [
+            ...submit.workflowBinding.metadataRequirements,
+            { field: 'attachment', value: 'image' },
+          ],
+          publishedResourceIdentity: fixture.expectedIdentity,
+          preDispatchPublicationAccountIdentity: fixture.accountIdentity,
+          preDispatchPublicationAccountIdentityComplete: true,
+        },
+        guard,
+        pageStateWithImage,
+        fixture.feedUrl,
+        submit,
+      ), true, AgentClass.name + ': post with matching image attachment was rejected');
+
+      assert.equal(agent._workflowPublishedResourcePayloadMatch(
+        {
+          ...submit.workflowBinding,
+          metadataRequirements: [
+            ...submit.workflowBinding.metadataRequirements,
+            { field: 'attachment', value: 'video' },
+          ],
+          publishedResourceIdentity: fixture.expectedIdentity,
+          preDispatchPublicationAccountIdentity: fixture.accountIdentity,
+          preDispatchPublicationAccountIdentityComplete: true,
+        },
+        guard,
+        pageStateWithImage,
+        fixture.feedUrl,
+        submit,
+      ), false, AgentClass.name + ': image attachment satisfied video requirement');
+
+      const pageStateWithVideo = {
+        ...exactPageState,
+        workflowResourceRecords: [
+          {
+            ...exactPageState.workflowResourceRecords[0],
+            attachments: [
+              { type: 'video', src: 'https://video.twimg.com/media/clip.mp4', alt: 'demo clip' },
+            ],
+          },
+        ],
+      };
+      assert.equal(agent._workflowPublishedResourcePayloadMatch(
+        {
+          ...submit.workflowBinding,
+          metadataRequirements: [
+            ...submit.workflowBinding.metadataRequirements,
+            { field: 'attachment', value: 'video' },
+          ],
+          publishedResourceIdentity: fixture.expectedIdentity,
+          preDispatchPublicationAccountIdentity: fixture.accountIdentity,
+          preDispatchPublicationAccountIdentityComplete: true,
+        },
+        guard,
+        pageStateWithVideo,
+        fixture.feedUrl,
+        submit,
+      ), true, AgentClass.name + ': post with matching video attachment was rejected');
+
+      assert.equal(agent._workflowPublishedResourcePayloadMatch(
+        {
+          ...submit.workflowBinding,
+          metadataRequirements: [
+            ...submit.workflowBinding.metadataRequirements,
+            { field: 'attachment', value: 'quarterly-chart.png' },
+          ],
+          publishedResourceIdentity: fixture.expectedIdentity,
+          preDispatchPublicationAccountIdentity: fixture.accountIdentity,
+          preDispatchPublicationAccountIdentityComplete: true,
+        },
+        guard,
+        pageStateWithImage,
+        fixture.feedUrl,
+        submit,
+      ), false, AgentClass.name + ': wrong uploaded asset satisfied specific attachment requirement');
+
+      const pageStateWithSpecificImage = {
+        ...exactPageState,
+        workflowResourceRecords: [
+          {
+            ...exactPageState.workflowResourceRecords[0],
+            attachments: [
+              { type: 'image', src: 'https://pbs.twimg.com/media/quarterly-chart.png', alt: 'quarterly-chart.png' },
+            ],
+          },
+        ],
+      };
+      assert.equal(agent._workflowPublishedResourcePayloadMatch(
+        {
+          ...submit.workflowBinding,
+          metadataRequirements: [
+            ...submit.workflowBinding.metadataRequirements,
+            { field: 'attachment', value: 'quarterly-chart.png' },
+          ],
+          publishedResourceIdentity: fixture.expectedIdentity,
+          preDispatchPublicationAccountIdentity: fixture.accountIdentity,
+          preDispatchPublicationAccountIdentityComplete: true,
+        },
+        guard,
+        pageStateWithSpecificImage,
+        fixture.feedUrl,
+        submit,
+      ), true, AgentClass.name + ': post with matching specific attachment was rejected');
+
+      const pageStateWithTwoImages = {
+        ...exactPageState,
+        workflowResourceRecords: [
+          {
+            ...exactPageState.workflowResourceRecords[0],
+            attachments: [
+              { type: 'image', src: 'https://pbs.twimg.com/media/xyz1.jpg', alt: 'screenshot 1' },
+              { type: 'image', src: 'https://pbs.twimg.com/media/xyz2.jpg', alt: 'screenshot 2' },
+            ],
+          },
+        ],
+      };
+
+      assert.equal(agent._workflowPublishedResourcePayloadMatch(
+        {
+          ...submit.workflowBinding,
+          metadataRequirements: [
+            ...submit.workflowBinding.metadataRequirements,
+            { field: 'attachment', value: 'an image' },
+          ],
+          publishedResourceIdentity: fixture.expectedIdentity,
+          preDispatchPublicationAccountIdentity: fixture.accountIdentity,
+          preDispatchPublicationAccountIdentityComplete: true,
+        },
+        guard,
+        pageStateWithImage,
+        fixture.feedUrl,
+        submit,
+      ), true, AgentClass.name + ': generic attachment phrase "an image" was rejected');
+
+      assert.equal(agent._workflowPublishedResourcePayloadMatch(
+        {
+          ...submit.workflowBinding,
+          metadataRequirements: [
+            ...submit.workflowBinding.metadataRequirements,
+            { field: 'attachment', value: 'two images' },
+          ],
+          publishedResourceIdentity: fixture.expectedIdentity,
+          preDispatchPublicationAccountIdentity: fixture.accountIdentity,
+          preDispatchPublicationAccountIdentityComplete: true,
+        },
+        guard,
+        pageStateWithImage,
+        fixture.feedUrl,
+        submit,
+      ), false, AgentClass.name + ': single attachment satisfied requirement for two images');
+
+      assert.equal(agent._workflowPublishedResourcePayloadMatch(
+        {
+          ...submit.workflowBinding,
+          metadataRequirements: [
+            ...submit.workflowBinding.metadataRequirements,
+            { field: 'attachment', value: 'two images' },
+          ],
+          publishedResourceIdentity: fixture.expectedIdentity,
+          preDispatchPublicationAccountIdentity: fixture.accountIdentity,
+          preDispatchPublicationAccountIdentityComplete: true,
+        },
+        guard,
+        pageStateWithTwoImages,
+        fixture.feedUrl,
+        submit,
+      ), true, AgentClass.name + ': requirement for two images was rejected when two were published');
+
+      assert.equal(agent._workflowPublishedResourcePayloadMatch(
+        {
+          ...submit.workflowBinding,
+          metadataRequirements: [
+            ...submit.workflowBinding.metadataRequirements,
+            { field: 'attachment', value: 'an image of quarterly-chart.png' },
+          ],
+          publishedResourceIdentity: fixture.expectedIdentity,
+          preDispatchPublicationAccountIdentity: fixture.accountIdentity,
+          preDispatchPublicationAccountIdentityComplete: true,
+        },
+        guard,
+        pageStateWithSpecificImage,
+        fixture.feedUrl,
+        submit,
+      ), true, AgentClass.name + ': specific attachment phrase with generic wrapper was rejected');
+
+      assert.equal(agent._workflowPublishedResourcePayloadMatch(
+        {
+          ...submit.workflowBinding,
+          metadataRequirements: [
+            ...submit.workflowBinding.metadataRequirements,
+            { field: 'attachment', value: 'an image of quarterly-chart.png' },
+          ],
+          publishedResourceIdentity: fixture.expectedIdentity,
+          preDispatchPublicationAccountIdentity: fixture.accountIdentity,
+          preDispatchPublicationAccountIdentityComplete: true,
+        },
+        guard,
+        pageStateWithImage,
+        fixture.feedUrl,
+        submit,
+      ), false, AgentClass.name + ': wrong asset satisfied specific attachment phrase with generic wrapper');
+
+      const pageStateWithImageAndVideo = {
+        ...exactPageState,
+        workflowResourceRecords: [
+          {
+            ...exactPageState.workflowResourceRecords[0],
+            attachments: [
+              { type: 'image', src: 'https://pbs.twimg.com/media/xyz1.jpg', alt: 'screenshot 1' },
+              { type: 'video', src: 'https://video.twimg.com/media/clip.mp4', alt: 'demo clip' },
+            ],
+          },
+        ],
+      };
+
+      assert.equal(agent._workflowPublishedResourcePayloadMatch(
+        {
+          ...submit.workflowBinding,
+          metadataRequirements: [
+            ...submit.workflowBinding.metadataRequirements,
+            { field: 'attachment', value: '1 image, 1 video' },
+          ],
+          publishedResourceIdentity: fixture.expectedIdentity,
+          preDispatchPublicationAccountIdentity: fixture.accountIdentity,
+          preDispatchPublicationAccountIdentityComplete: true,
+        },
+        guard,
+        pageStateWithImage,
+        fixture.feedUrl,
+        submit,
+      ), false, AgentClass.name + ': single image satisfied requirement for 1 image, 1 video');
+
+      assert.equal(agent._workflowPublishedResourcePayloadMatch(
+        {
+          ...submit.workflowBinding,
+          metadataRequirements: [
+            ...submit.workflowBinding.metadataRequirements,
+            { field: 'attachment', value: '1 image, 1 video' },
+          ],
+          publishedResourceIdentity: fixture.expectedIdentity,
+          preDispatchPublicationAccountIdentity: fixture.accountIdentity,
+          preDispatchPublicationAccountIdentityComplete: true,
+        },
+        guard,
+        pageStateWithTwoImages,
+        fixture.feedUrl,
+        submit,
+      ), false, AgentClass.name + ': two images satisfied requirement for 1 image, 1 video');
+
+      assert.equal(agent._workflowPublishedResourcePayloadMatch(
+        {
+          ...submit.workflowBinding,
+          metadataRequirements: [
+            ...submit.workflowBinding.metadataRequirements,
+            { field: 'attachment', value: '1 image, 1 video' },
+          ],
+          publishedResourceIdentity: fixture.expectedIdentity,
+          preDispatchPublicationAccountIdentity: fixture.accountIdentity,
+          preDispatchPublicationAccountIdentityComplete: true,
+        },
+        guard,
+        pageStateWithImageAndVideo,
+        fixture.feedUrl,
+        submit,
+      ), true, AgentClass.name + ': requirement for 1 image, 1 video was rejected when both were published');
+
+      assert.equal(agent._workflowPublishedResourcePayloadMatch(
+        {
+          ...submit.workflowBinding,
+          metadataRequirements: [
+            ...submit.workflowBinding.metadataRequirements,
+            { field: 'attachment', value: 'a GIF' },
+          ],
+          publishedResourceIdentity: fixture.expectedIdentity,
+          preDispatchPublicationAccountIdentity: fixture.accountIdentity,
+          preDispatchPublicationAccountIdentityComplete: true,
+        },
+        guard,
+        pageStateWithImage,
+        fixture.feedUrl,
+        submit,
+      ), false, AgentClass.name + ': image satisfied requirement for a GIF');
+
+      assert.equal(agent._workflowPublishedResourcePayloadMatch(
+        {
+          ...submit.workflowBinding,
+          metadataRequirements: [
+            ...submit.workflowBinding.metadataRequirements,
+            { field: 'attachment', value: 'a GIF' },
+          ],
+          publishedResourceIdentity: fixture.expectedIdentity,
+          preDispatchPublicationAccountIdentity: fixture.accountIdentity,
+          preDispatchPublicationAccountIdentityComplete: true,
+        },
+        guard,
+        pageStateWithVideo,
+        fixture.feedUrl,
+        submit,
+      ), true, AgentClass.name + ': video attachment satisfying GIF requirement was rejected');
+
+      const pageStateWithSpecificGif = {
+        ...exactPageState,
+        workflowResourceRecords: [
+          {
+            ...exactPageState.workflowResourceRecords[0],
+            attachments: [
+              { type: 'video', src: 'https://video.twimg.com/tweet_video/animation.gif.mp4', alt: 'animation.gif' },
+            ],
+          },
+        ],
+      };
+
+      assert.equal(agent._workflowPublishedResourcePayloadMatch(
+        {
+          ...submit.workflowBinding,
+          metadataRequirements: [
+            ...submit.workflowBinding.metadataRequirements,
+            { field: 'attachment', value: 'animation.gif' },
+          ],
+          publishedResourceIdentity: fixture.expectedIdentity,
+          preDispatchPublicationAccountIdentity: fixture.accountIdentity,
+          preDispatchPublicationAccountIdentityComplete: true,
+        },
+        guard,
+        pageStateWithVideo,
+        fixture.feedUrl,
+        submit,
+      ), false, AgentClass.name + ': wrong video satisfied requirement for animation.gif');
+
+      assert.equal(agent._workflowPublishedResourcePayloadMatch(
+        {
+          ...submit.workflowBinding,
+          metadataRequirements: [
+            ...submit.workflowBinding.metadataRequirements,
+            { field: 'attachment', value: 'animation.gif' },
+          ],
+          publishedResourceIdentity: fixture.expectedIdentity,
+          preDispatchPublicationAccountIdentity: fixture.accountIdentity,
+          preDispatchPublicationAccountIdentityComplete: true,
+        },
+        guard,
+        pageStateWithSpecificGif,
+        fixture.feedUrl,
+        submit,
+      ), true, AgentClass.name + ': matching GIF video was rejected for animation.gif');
+
+      if (fixture.adapterName === 'twitter') {
+        const longBody1 = 'A'.repeat(10500) + ' first suffix';
+        const longBody2 = 'A'.repeat(10500) + ' second suffix';
+        const longBodyState = {
+          ...exactPageState,
+          workflowResourceRecords: [
+            {
+              ...exactPageState.workflowResourceRecords[0],
+              bodyText: longBody1,
+              text: 'WebBrain\n' + longBody1 + '\n2m',
+            },
+          ],
+        };
+        const longBodyMismatchState = {
+          ...exactPageState,
+          workflowResourceRecords: [
+            {
+              ...exactPageState.workflowResourceRecords[0],
+              bodyText: longBody2,
+              text: 'WebBrain\n' + longBody2 + '\n2m',
+            },
+          ],
+        };
+        const longBodyBinding = {
+          ...submit.workflowBinding,
+          metadataRequirements: [
+            { field: 'body', value: longBody1 },
+          ],
+          publishedResourceIdentity: fixture.expectedIdentity,
+          preDispatchPublicationAccountIdentity: fixture.accountIdentity,
+          preDispatchPublicationAccountIdentityComplete: true,
+        };
+        assert.equal(agent._workflowPublishedResourcePayloadMatch(
+          longBodyBinding,
+          guard,
+          longBodyState,
+          fixture.feedUrl,
+          submit,
+        ), true, AgentClass.name + ': full Premium body (>10k chars) was rejected');
+
+        assert.equal(agent._workflowPublishedResourcePayloadMatch(
+          longBodyBinding,
+          guard,
+          longBodyMismatchState,
+          fixture.feedUrl,
+          submit,
+        ), false, AgentClass.name + ': Premium body with mismatched suffix past 10k chars was accepted');
+      }
+
+      const staleFooterState = {
+        ...exactPageState,
+        workflowResourceRecords: [
+          {
+            ...exactPageState.workflowResourceRecords[0],
+            bodyText: productionNormalizedBody + '\nstale footer text',
+            text: 'WebBrain\n' + productionNormalizedBody + '\nstale footer text\n2m',
+          },
+        ],
+      };
+      assert.equal(agent._workflowPublishedResourcePayloadMatch(
+        {
+          ...submit.workflowBinding,
+          publishedResourceIdentity: fixture.expectedIdentity,
+          preDispatchPublicationAccountIdentity: fixture.accountIdentity,
+          preDispatchPublicationAccountIdentityComplete: true,
+        },
+        guard,
+        staleFooterState,
+        fixture.feedUrl,
+        submit,
+      ), false, AgentClass.name + ': bodyText with stale footer was accepted instead of requiring complete equality');
+
+      const exactBodyTextState = {
+        ...exactPageState,
+        workflowResourceRecords: [
+          {
+            ...exactPageState.workflowResourceRecords[0],
+            bodyText: productionNormalizedBody,
+            text: 'WebBrain\n' + productionNormalizedBody + '\n2m',
+          },
+        ],
+      };
+      assert.equal(agent._workflowPublishedResourcePayloadMatch(
+        {
+          ...submit.workflowBinding,
+          publishedResourceIdentity: fixture.expectedIdentity,
+          preDispatchPublicationAccountIdentity: fixture.accountIdentity,
+          preDispatchPublicationAccountIdentityComplete: true,
+        },
+        guard,
+        exactBodyTextState,
+        fixture.feedUrl,
+        submit,
+      ), true, AgentClass.name + ': exact bodyText was rejected');
+
+      if (fixture.adapterName === 'twitter') {
+        const ambiguousLinkPageState = {
+          ...exactPageState,
+          workflowResourceRecords: [
+            {
+              ...exactPageState.workflowResourceRecords[0],
+              links: [{ href: 'https://t.co/ambiguous', text: 'github.com/webbrain-one/…' }],
+            },
+          ],
+        };
+        assert.equal(agent._workflowPublishedResourcePayloadMatch(
+          {
+            ...submit.workflowBinding,
+            publishedResourceIdentity: fixture.expectedIdentity,
+            preDispatchPublicationAccountIdentity: fixture.accountIdentity,
+            preDispatchPublicationAccountIdentityComplete: true,
+          },
+          guard,
+          ambiguousLinkPageState,
+          fixture.feedUrl,
+          submit,
+        ), false, AgentClass.name + ': ambiguous truncated URL label without full URL proof was accepted');
+      }
+
+      assert.equal(agent._workflowTerminalEvidenceFromDone(
+        tabId,
+        exactPageState,
+        fixture.feedUrl,
+        { submit, verifiedFinalSubmit: false, relevantForms: 0 },
+      )?.source, 'dispatch_bound_published_resource');
+      assert.equal(submit.workflowBinding?.publishedResourceIdentity, fixture.expectedIdentity);
+    }
+  }
+});
+
+test('a requested URL keeps the closing delimiter it opened', () => {
+  for (const AgentClass of [AgentCh, AgentFx]) {
+    const agent = new AgentClass({});
+    const balanced = 'https://en.wikipedia.org/wiki/Function_(mathematics)';
+    assert.equal(agent._workflowTrimUrlPunctuation(balanced), balanced,
+      AgentClass.name + ': a balanced closing parenthesis was stripped from the requested URL');
+    assert.equal(agent._workflowTrimUrlPunctuation(balanced + '.'), balanced,
+      AgentClass.name + ': sentence punctuation after a balanced URL survived');
+    assert.equal(agent._workflowTrimUrlPunctuation('https://example.com/a),'), 'https://example.com/a',
+      AgentClass.name + ': an unopened closer was kept');
+    assert.equal(
+      agent._workflowTrimUrlPunctuation('https://example.com/x?y=(1)'),
+      'https://example.com/x?y=(1)',
+    );
+    // CJK sentence delimiters survive NFKC and the site keeps them as post
+    // text outside the link.
+    assert.equal(agent._workflowTrimUrlPunctuation('https://example.com/path\u3002'), 'https://example.com/path',
+      AgentClass.name + ': a CJK full stop stayed inside the requested URL');
+    assert.equal(agent._workflowTrimUrlPunctuation('https://example.com/path\u3001'), 'https://example.com/path');
+    assert.equal(agent._workflowTrimUrlPunctuation('https://example.com/path\u2026'), 'https://example.com/path');
+    assert.equal(
+      agent._workflowTrimUrlPunctuation('https://ja.wikipedia.org/wiki/\u95a2\u6570\uff08\u6570\u5b66\uff09\u3002'),
+      'https://ja.wikipedia.org/wiki/\u95a2\u6570\uff08\u6570\u5b66\uff09',
+      AgentClass.name + ': a balanced full-width closer was stripped with the sentence punctuation',
+    );
+
+    // Sentence delimiters are also valid path characters, so the raw URL wins
+    // whenever the page actually rendered it.
+    // CJK prose runs the delimiter straight into the next clause.
+    assert.equal(agent._workflowSocialPublishedBodyObserved(
+      { field: 'body', value: '\u8a73\u3057\u304f\u306fhttps://example.com/path\u3002\u7d9a\u5831\u3067\u3059' },
+      {
+        bodyText: '\u8a73\u3057\u304f\u306fexample.com/path\u3002\u7d9a\u5831\u3067\u3059',
+        links: [{ href: 'https://t.co/z', text: 'example.com/path', expandedUrl: 'https://example.com/path' }],
+      },
+    ), true, AgentClass.name + ': a URL ran into the CJK sentence that followed it');
+
+    const yahoo = 'https://en.wikipedia.org/wiki/Yahoo!';
+    assert.equal(agent._workflowSocialPublishedBodyObserved(
+      { field: 'body', value: `See ${yahoo} now` },
+      {
+        bodyText: `See ${yahoo} now`,
+        links: [{ href: 'https://t.co/z', text: 'en.wikipedia.org/wiki/Yahoo!', expandedUrl: yahoo }],
+      },
+    ), true, AgentClass.name + ': a URL ending in "!" was trimmed even though the post rendered it');
+    // With no evidence the site kept it, the delimiter is still sentence
+    // punctuation and comes off.
+    assert.equal(agent._workflowSocialPublishedBodyObserved(
+      { field: 'body', value: 'See https://example.com/path! now' },
+      {
+        // The site keeps the delimiter as post text, outside the link.
+        bodyText: 'See example.com/path! now',
+        links: [{ href: 'https://t.co/z', text: 'example.com/path', expandedUrl: 'https://example.com/path' }],
+      },
+    ), true, AgentClass.name + ': trailing sentence punctuation blocked the shortened-link match');
+
+    // The whole point is that exact-body verification still matches the link
+    // the site rendered for a URL shaped like that.
+    assert.equal(agent._workflowSocialPublishedBodyObserved(
+      { field: 'body', value: `Read ${balanced} today` },
+      {
+        text: 'Read en.wikipedia.org/wiki/Function_… today',
+        links: [{ href: 'https://t.co/abc', text: 'en.wikipedia.org/wiki/Function_…', expandedUrl: balanced }],
+      },
+    ), true, AgentClass.name + ': a URL ending in a balanced closer blocked exact-body verification');
+  }
+});
+
+test('social body verification reads the authored post text, not the card chrome', () => {
+  for (const AgentClass of [AgentCh, AgentFx]) {
+    const agent = new AgentClass({});
+    // The account is called WebBrain, so the card's byline equals the body the
+    // task asked for while the post itself says something else entirely.
+    const staleCard = {
+      url: 'https://x.com/webbrain/status/2222222222222222222',
+      text: 'WebBrain\n@webbrain\nA completely different post.\n2m',
+      bodyText: 'A completely different post.',
+      links: [],
+    };
+    assert.equal(
+      agent._workflowSocialPublishedBodyObserved({ field: 'body', value: 'WebBrain' }, staleCard),
+      false,
+      AgentClass.name + ': the author byline satisfied the requested body',
+    );
+    assert.equal(
+      agent._workflowSocialPublishedBodyObserved(
+        { field: 'body', value: 'A completely different post.' },
+        staleCard,
+      ),
+      true,
+      AgentClass.name + ': the authored post text did not satisfy its own body',
+    );
+    // Without the app's post-text element there is nothing better than the
+    // card, so the previous behavior has to stay available.
+    assert.equal(
+      agent._workflowSocialPublishedBodyObserved(
+        { field: 'body', value: 'A completely different post.' },
+        { ...staleCard, bodyText: '' },
+      ),
+      true,
+      AgentClass.name + ': a card without app-owned post text lost body verification',
+    );
+  }
+});
+
+test('social body verification prefers authored link over author-profile anchor when body links to own profile', () => {
+  for (const AgentClass of [AgentCh, AgentFx]) {
+    const agent = new AgentClass({});
+    const ownProfileUrl = 'https://x.com/myhandle';
+    const card = {
+      bodyText: 'Follow my profile x.com/myhandle for updates',
+      links: [
+        // Earlier anchor on the card (e.g. author avatar/name linking to profile)
+        { href: ownProfileUrl, text: 'My Author Name', authored: false },
+        // Authored anchor inside the tweet text
+        { href: ownProfileUrl, text: 'x.com/myhandle', expandedUrl: ownProfileUrl, authored: true },
+      ],
+    };
+    assert.equal(
+      agent._workflowSocialPublishedBodyObserved(
+        { field: 'body', value: `Follow my profile ${ownProfileUrl} for updates` },
+        card,
+      ),
+      true,
+      AgentClass.name + ': should bind to authored anchor when linking to own profile'
+    );
+  }
+});
+
+
+test('a Bluesky DID and handle name one account only on the card that proves it', () => {
+  for (const AgentClass of [AgentCh, AgentFx]) {
+    const agent = new AgentClass({});
+    const workflow = agent._resolvePlannerSiteWorkflow('https://bsky.app/', {
+      request_kind: 'execute',
+      site_job: 'publish-post',
+    });
+    const did = 'bluesky:did:plc:abc123';
+    const handle = 'bluesky:webbrain.one';
+    const cardWithDid = {
+      url: 'https://bsky.app/profile/webbrain.one/post/4def',
+      links: [{ href: 'https://bsky.app/profile/did:plc:abc123' }],
+    };
+    assert.equal(agent._workflowSocialAccountAliasProven(workflow, did, handle, cardWithDid), true,
+      AgentClass.name + ': the card proving the DID belongs to this post was ignored');
+
+    // A mention adds another handle, so a handle-form intent stays ambiguous.
+    assert.equal(agent._workflowSocialAccountAliasProven(
+      workflow,
+      handle,
+      did,
+      {
+        url: 'https://bsky.app/profile/did:plc:abc123/post/4def',
+        links: [
+          { href: 'https://bsky.app/profile/webbrain.one' },
+          { href: 'https://bsky.app/profile/someone.else' },
+        ],
+      },
+    ), false, AgentClass.name + ': an ambiguous card bridged two account identifiers');
+
+    // Two accounts of the same kind are a plain mismatch, never an alias.
+    assert.equal(agent._workflowSocialAccountAliasProven(
+      workflow,
+      'bluesky:notwebbrain.test',
+      handle,
+      cardWithDid,
+    ), false, AgentClass.name + ': a different handle was accepted as an alias');
+
+    // A link the author wrote in the post body is content, not proof of who
+    // wrote the post. A wrong-account post linking to the requested DID must
+    // not certify itself.
+    assert.equal(agent._workflowSocialAccountAliasProven(
+      workflow,
+      did,
+      'bluesky:attacker.one',
+      {
+        url: 'https://bsky.app/profile/attacker.one/post/9xyz',
+        links: [{ href: 'https://bsky.app/profile/did:plc:abc123', authored: true }],
+      },
+    ), false, AgentClass.name + ': a body link to the intended DID was accepted as alias proof');
+    assert.equal(agent._workflowSocialAccountAliasProven(
+      workflow,
+      did,
+      'bluesky:attacker.one',
+      {
+        url: 'https://bsky.app/profile/attacker.one/post/9xyz',
+        links: [
+          { href: 'https://bsky.app/profile/attacker.one' },
+          { href: 'https://bsky.app/profile/did:plc:abc123', authored: true },
+        ],
+      },
+    ), false, AgentClass.name + ': an authored DID link bridged two unrelated accounts');
+    assert.equal(
+      agent._workflowSocialAccountAliasProven(
+        agent._resolvePlannerSiteWorkflow('https://x.com/home', {
+          request_kind: 'execute',
+          site_job: 'publish-post',
+        }),
+        'twitter:webbrain',
+        'twitter:notwebbrain',
+        { links: [] },
+      ),
+      false,
+      AgentClass.name + ': X accounts were bridged by an alias rule that only Bluesky needs',
+    );
+  }
+});
+
+test('a thread published with Post all binds the post carrying the reviewed body', () => {
+  // One dispatch can create several permalinks at once. Requiring exactly one
+  // new identity would leave a published thread unverifiable forever and push
+  // the run toward publishing it a second time.
+  const feedUrl = 'https://x.com/home';
+  const existingUrl = 'https://x.com/webbrain/status/1111111111111111111';
+  const rootUrl = 'https://x.com/webbrain/status/2222222222222222222';
+  const continuationUrl = 'https://x.com/webbrain/status/3333333333333333333';
+  const accountIdentity = 'twitter:webbrain';
+  const body = 'Shipping the workflow kernel today.';
+  const continuation = 'And here is why the evidence contract matters.';
+
+  const armed = (agent, tabId) => {
+    const workflow = agent._resolvePlannerSiteWorkflow(feedUrl, {
+      request_kind: 'execute',
+      site_job: 'publish-post',
+    });
+    const guard = agent._startPlanExecutionGuard(tabId, 'act', {
+      requestKind: 'execute',
+      requiresStateChange: true,
+      requiresSubmission: true,
+      siteWorkflow: workflow,
+    });
+    guard.successfulConsequentialToolCalls = 1;
+    guard.workflowMetadataRequirements = [{ field: 'body', value: body }];
+    guard.workflowMetadataRequirementsResolved = true;
+    agent._beginCompletionInvariant(tabId);
+    agent._recordCompletionToolResult(tabId, 'click_ax', { ref_id: 'post-all' }, {
+      success: true, dispatched: true,
+    });
+    agent._recordCompletionSubmitAttempt(
+      tabId,
+      {
+        isSubmit: true,
+        publicationResourceUrls: [existingUrl],
+        publicationAccountIdentity: accountIdentity,
+        publicationAccountIdentityComplete: true,
+      },
+      'click_ax',
+      { ref_id: 'post-all' },
+      feedUrl,
+      feedUrl,
+      { success: true, dispatched: true },
+    );
+    agent._recordCompletionToolResult(tabId, 'read_page', {}, {
+      success: true, url: feedUrl, content: 'Feed refreshed.',
+    });
+    return agent._completionSubmitStates.get(tabId);
+  };
+
+  for (const [index, AgentClass] of [AgentCh, AgentFx].entries()) {
+    const agent = new AgentClass({});
+    agent.useSiteAdapters = true;
+    const tabId = 9210 + index;
+    const submit = armed(agent, tabId);
+
+    const threadPageState = {
+      workflowResourceUrls: [existingUrl, rootUrl, continuationUrl],
+      workflowResourceRecords: [
+        { url: rootUrl, text: 'WebBrain\n' + body + '\n2m', links: [] },
+        { url: continuationUrl, text: 'WebBrain\n' + continuation + '\n2m', links: [] },
+      ],
+    };
+    assert.equal(agent._workflowTerminalEvidenceFromDone(
+      tabId,
+      threadPageState,
+      feedUrl,
+      { submit, verifiedFinalSubmit: false, relevantForms: 0 },
+    )?.source, 'dispatch_bound_published_resource',
+    AgentClass.name + ': a published thread could not produce terminal evidence');
+    assert.equal(submit.workflowBinding?.publishedResourceIdentity, 'twitter:status:2222222222222222222',
+      AgentClass.name + ': the thread bound a post other than the reviewed body');
+
+    // Two new permalinks that both carry the reviewed body stay ambiguous.
+    const ambiguousAgent = new AgentClass({});
+    ambiguousAgent.useSiteAdapters = true;
+    const ambiguousTabId = 9212 + index;
+    const ambiguousSubmit = armed(ambiguousAgent, ambiguousTabId);
+    assert.equal(ambiguousAgent._workflowTerminalEvidenceFromDone(
+      ambiguousTabId,
+      {
+        workflowResourceUrls: [existingUrl, rootUrl, continuationUrl],
+        workflowResourceRecords: [
+          { url: rootUrl, text: 'WebBrain\n' + body + '\n2m', links: [] },
+          { url: continuationUrl, text: 'WebBrain\n' + body + '\n1m', links: [] },
+        ],
+      },
+      feedUrl,
+      { submit: ambiguousSubmit, verifiedFinalSubmit: false, relevantForms: 0 },
+    ), null, AgentClass.name + ': two matching new permalinks were bound ambiguously');
+    assert.equal(ambiguousSubmit.workflowBinding?.publishedResourceIdentity, undefined);
+  }
+});
+
+test('article-qualified mixed media requirements are counted and typed correctly', () => {
+  for (const AgentClass of [AgentCh, AgentFx]) {
+    const agent = new AgentClass({});
+    const req1 = agent._parseWorkflowAttachmentRequirement('an image and a video');
+    assert.equal(req1.expectedCount, 2, AgentClass.name + ': expectedCount should be 2 for an image and a video');
+    assert.equal(req1.expectedImageCount, 1, AgentClass.name + ': expectedImageCount should be 1');
+    assert.equal(req1.expectedVideoCount, 1, AgentClass.name + ': expectedVideoCount should be 1');
+    assert.equal(req1.wantsImage, true, AgentClass.name + ': wantsImage should be true');
+    assert.equal(req1.wantsVideo, true, AgentClass.name + ': wantsVideo should be true');
+
+    const req2 = agent._parseWorkflowAttachmentRequirement('an image, a video');
+    assert.equal(req2.expectedCount, 2, AgentClass.name + ': expectedCount should be 2 for an image, a video');
+    assert.equal(req2.expectedImageCount, 1, AgentClass.name + ': expectedImageCount should be 1');
+    assert.equal(req2.expectedVideoCount, 1, AgentClass.name + ': expectedVideoCount should be 1');
+
+    const req3 = agent._parseWorkflowAttachmentRequirement('a photo and a clip');
+    assert.equal(req3.expectedCount, 2, AgentClass.name + ': expectedCount should be 2 for a photo and a clip');
+    assert.equal(req3.expectedImageCount, 1);
+    assert.equal(req3.expectedVideoCount, 1);
+  }
+});
+
+test('extracting post body skips URL scheme colons', () => {
+  for (const AgentClass of [AgentCh, AgentFx]) {
+    const agent = new AgentClass({});
+    assert.equal(
+      agent._extractWorkflowTaskBody('Publish this on https://x.com/home: Hello world'),
+      'Hello world',
+      AgentClass.name + ': URL scheme colon halted body extraction',
+    );
+    assert.equal(
+      agent._extractWorkflowTaskBody('Post to https://x.com: Hello world'),
+      'Hello world',
+      AgentClass.name + ': URL scheme colon before domain colon halted body extraction',
+    );
+    assert.equal(
+      agent._extractWorkflowTaskBody('Post the following on https://bluesky.app/: Announcing v2!'),
+      'Announcing v2!',
+      AgentClass.name + ': Bluesky URL scheme colon halted body extraction',
+    );
+  }
+});
+
+test('extracting post body supports multilingual commands with colons and quotes', () => {
+  for (const AgentClass of [AgentCh, AgentFx]) {
+    const agent = new AgentClass({});
+    assert.equal(
+      agent._extractWorkflowTaskBody('Publica en X: Este es un texto largo para publicar'),
+      'Este es un texto largo para publicar',
+      AgentClass.name + ': Spanish colon extraction failed',
+    );
+    assert.equal(
+      agent._extractWorkflowTaskBody('Publícalo en Bluesky: «Bonjour tout le monde»'),
+      'Bonjour tout le monde',
+      AgentClass.name + ': French colon and guillemets extraction failed',
+    );
+    assert.equal(
+      agent._extractWorkflowTaskBody('Veröffentliche auf X: Dies ist ein langer Text'),
+      'Dies ist ein langer Text',
+      AgentClass.name + ': German colon extraction failed',
+    );
+    assert.equal(
+      agent._extractWorkflowTaskBody('Опубликуй в X: Длинный текст поста'),
+      'Длинный текст поста',
+      AgentClass.name + ': Russian colon extraction failed',
+    );
+    assert.equal(
+      agent._extractWorkflowTaskBody('Xに投稿：これはテスト投稿です'),
+      'これはテスト投稿です',
+      AgentClass.name + ': Japanese full-width colon extraction failed',
+    );
+    assert.equal(
+      agent._extractWorkflowTaskBody('在X发布：这是长文本内容'),
+      '这是长文本内容',
+      AgentClass.name + ': Chinese full-width colon extraction failed',
+    );
+    assert.equal(
+      agent._extractWorkflowTaskBody('X에 게시: 이것은 게시물 내용입니다'),
+      '이것은 게시물 내용입니다',
+      AgentClass.name + ': Korean colon extraction failed',
+    );
+    assert.equal(
+      agent._extractWorkflowTaskBody('Publica en X "texto largo aquí"'),
+      'texto largo aquí',
+      AgentClass.name + ': Spanish quoted extraction failed',
+    );
+  }
+});
+
+test('classifier fallback leaves metadata requirements incomplete and unresolved', async () => {
+  for (const [index, AgentClass] of [AgentCh, AgentFx].entries()) {
+    const agent = new AgentClass({});
+    const tabId = 9870 + index;
+    const siteWorkflow = agent._resolvePlannerSiteWorkflow('https://x.com/home', {
+      request_kind: 'execute',
+      site_job: 'publish-post',
+    });
+    const guard = agent._startPlanExecutionGuard(tabId, 'act', {
+      requestKind: 'execute',
+      requiresStateChange: true,
+      requiresSubmission: true,
+      siteWorkflow,
+    });
+    const failingProvider = {
+      chat: async () => {
+        throw new Error('Classifier network error');
+      },
+    };
+    await agent._classifyProgressIntentWithProvider(tabId, {
+      provider: failingProvider,
+      taskText: 'Publish this on X: Hello from fallback',
+      pageScope: 'https://x.com/home',
+    });
+    assert.equal(guard.workflowMetadataRequirementsIncomplete, true,
+      AgentClass.name + ': fallback should mark workflowMetadataRequirementsIncomplete as true');
+    assert.notEqual(guard.workflowMetadataRequirementsResolved, true,
+      AgentClass.name + ': fallback should not mark workflowMetadataRequirementsResolved as true');
+    assert.deepEqual(guard.workflowMetadataRequirements, [{
+      field: 'body',
+      value: 'Hello from fallback',
+    }], AgentClass.name + ': fallback should extract body requirement');
+  }
+});
+
+test('attachment requirement parser ignores numbers in specific attachment filenames', () => {
+  for (const AgentClass of [AgentCh, AgentFx]) {
+    const agent = new AgentClass({});
+    const req1 = agent._parseWorkflowAttachmentRequirement('quarterly-chart-2.png');
+    assert.equal(req1.expectedCount, 1, AgentClass.name + ': quarterly-chart-2.png should expect 1 attachment');
+    assert.equal(req1.isGeneric, false, AgentClass.name + ': quarterly-chart-2.png should not be generic');
+
+    const req2 = agent._parseWorkflowAttachmentRequirement('photo-2024-12.jpg');
+    assert.equal(req2.expectedCount, 1, AgentClass.name + ': photo-2024-12.jpg should expect 1 attachment');
+    assert.equal(req2.isGeneric, false, AgentClass.name + ': photo-2024-12.jpg should not be generic');
+
+    const req3 = agent._parseWorkflowAttachmentRequirement('2 attachments');
+    assert.equal(req3.expectedCount, 2, AgentClass.name + ': 2 attachments should expect 2 attachments');
+    assert.equal(req3.isGeneric, true, AgentClass.name + ': 2 attachments should be generic');
+
+    const req4 = agent._parseWorkflowAttachmentRequirement('2枚');
+    assert.equal(req4.expectedCount, 2, AgentClass.name + ': 2枚 should expect 2 attachments');
+    assert.equal(req4.isGeneric, true, AgentClass.name + ': 2枚 should be generic');
+
+    const reqBrand = agent._parseWorkflowAttachmentRequirement('brand2images.png');
+    assert.equal(reqBrand.expectedCount, 1, AgentClass.name + ': brand2images.png should expect 1 attachment');
+    assert.equal(reqBrand.expectedImageCount, 0, AgentClass.name + ': brand2images.png should have 0 expectedImageCount');
+    assert.equal(reqBrand.hasExplicitImageCount, false, AgentClass.name + ': brand2images.png should not have explicit image count');
+    assert.equal(reqBrand.hasExplicitCardinality, false, AgentClass.name + ': brand2images.png should not have explicit cardinality');
+    assert.equal(reqBrand.isGeneric, false, AgentClass.name + ': brand2images.png should not be generic');
+    assert.equal(reqBrand.wantsImage, true, AgentClass.name + ': brand2images.png should want image');
+    assert.equal(reqBrand.wantsVideo, false, AgentClass.name + ': brand2images.png should not want video');
+
+    const brandVerified = agent._workflowSocialPublishedAttachmentObserved(
+      { value: 'brand2images.png' },
+      { attachments: [{ type: 'image', src: 'https://pbs.twimg.com/media/brand2images.png' }] },
+    );
+    assert.equal(brandVerified, true, AgentClass.name + ': single matching brand2images.png should pass');
+
+    const brandWrongFile = agent._workflowSocialPublishedAttachmentObserved(
+      { value: 'brand2images.png' },
+      { attachments: [{ type: 'image', src: 'https://pbs.twimg.com/media/other.png' }] },
+    );
+    assert.equal(brandWrongFile, false, AgentClass.name + ': non-matching file for brand2images.png should fail');
+
+    const reqBrandVid = agent._parseWorkflowAttachmentRequirement('brand2videos.mp4');
+    assert.equal(reqBrandVid.expectedCount, 1, AgentClass.name + ': brand2videos.mp4 should expect 1 attachment');
+    assert.equal(reqBrandVid.expectedVideoCount, 0, AgentClass.name + ': brand2videos.mp4 should have 0 expectedVideoCount');
+    assert.equal(reqBrandVid.hasExplicitVideoCount, false, AgentClass.name + ': brand2videos.mp4 should not have explicit video count');
+    assert.equal(reqBrandVid.isGeneric, false, AgentClass.name + ': brand2videos.mp4 should not be generic');
+    assert.equal(reqBrandVid.wantsVideo, true, AgentClass.name + ': brand2videos.mp4 should want video');
+    assert.equal(reqBrandVid.wantsImage, false, AgentClass.name + ': brand2videos.mp4 should not want image');
+
+    const brandVidVerified = agent._workflowSocialPublishedAttachmentObserved(
+      { value: 'brand2videos.mp4' },
+      { attachments: [{ type: 'video', src: 'https://video.twimg.com/media/brand2videos.mp4' }] },
+    );
+    assert.equal(brandVidVerified, true, AgentClass.name + ': single matching brand2videos.mp4 should pass');
+  }
+});
+
+test('attachment requirement parser treats conjunction-based requirements as generic', () => {
+  for (const AgentClass of [AgentCh, AgentFx]) {
+    const agent = new AgentClass({});
+    const req = agent._parseWorkflowAttachmentRequirement('an image and a video');
+    assert.equal(req.isGeneric, true, AgentClass.name + ': an image and a video should be generic');
+    assert.equal(req.expectedCount, 2, AgentClass.name + ': should expect 2 attachments');
+    assert.equal(req.expectedImageCount, 1, AgentClass.name + ': should expect 1 image');
+    assert.equal(req.expectedVideoCount, 1, AgentClass.name + ': should expect 1 video');
+
+    const verified = agent._workflowSocialPublishedAttachmentObserved(
+      { value: 'an image and a video' },
+      { attachments: [{ type: 'image', src: 'pic.png' }, { type: 'video', src: 'vid.mp4' }] }
+    );
+    assert.equal(verified, true, AgentClass.name + ': image plus video should satisfy generic conjunction requirement');
+  }
+});
+
+test('attachment requirement parser recognizes Korean generic media nouns and counts', () => {
+  for (const AgentClass of [AgentCh, AgentFx]) {
+    const agent = new AgentClass({});
+    const reqImg = agent._parseWorkflowAttachmentRequirement('사진');
+    assert.equal(reqImg.isGeneric, true, AgentClass.name + ': 사진 should be generic');
+    assert.equal(reqImg.wantsImage, true, AgentClass.name + ': 사진 should want image');
+    assert.equal(reqImg.expectedCount, 1, AgentClass.name + ': 사진 should expect 1 attachment');
+
+    const reqVid = agent._parseWorkflowAttachmentRequirement('동영상');
+    assert.equal(reqVid.isGeneric, true, AgentClass.name + ': 동영상 should be generic');
+    assert.equal(reqVid.wantsVideo, true, AgentClass.name + ': 동영상 should want video');
+    assert.equal(reqVid.expectedCount, 1, AgentClass.name + ': 동영상 should expect 1 attachment');
+
+    const reqImg2 = agent._parseWorkflowAttachmentRequirement('사진 2장');
+    assert.equal(reqImg2.isGeneric, true, AgentClass.name + ': 사진 2장 should be generic');
+    assert.equal(reqImg2.expectedCount, 2, AgentClass.name + ': 사진 2장 should expect 2 attachments');
+    assert.equal(reqImg2.expectedImageCount, 2, AgentClass.name + ': 사진 2장 should expect 2 images');
+
+    const reqBoth = agent._parseWorkflowAttachmentRequirement('이미지와 동영상');
+    assert.equal(reqBoth.isGeneric, true, AgentClass.name + ': 이미지와 동영상 should be generic');
+    assert.equal(reqBoth.wantsImage, true, AgentClass.name + ': 이미지와 동영상 should want image');
+    assert.equal(reqBoth.wantsVideo, true, AgentClass.name + ': 이미지와 동영상 should want video');
+    assert.equal(reqBoth.expectedCount, 2, AgentClass.name + ': 이미지와 동영상 should expect 2 attachments');
+
+    const verifiedImg = agent._workflowSocialPublishedAttachmentObserved(
+      { value: '사진' },
+      { attachments: [{ type: 'image', src: 'https://pbs.twimg.com/media/pic.jpg' }] }
+    );
+    assert.equal(verifiedImg, true, AgentClass.name + ': valid image should satisfy 사진 requirement');
+
+    const rejectedImg = agent._workflowSocialPublishedAttachmentObserved(
+      { value: '사진' },
+      { attachments: [{ type: 'video', src: 'https://video.twimg.com/media/clip.mp4' }] }
+    );
+    assert.equal(rejectedImg, false, AgentClass.name + ': video attachment should not satisfy 사진 requirement');
+
+    const verifiedVid = agent._workflowSocialPublishedAttachmentObserved(
+      { value: '동영상' },
+      { attachments: [{ type: 'video', src: 'https://video.twimg.com/media/clip.mp4' }] }
+    );
+    assert.equal(verifiedVid, true, AgentClass.name + ': valid video should satisfy 동영상 requirement');
+
+    const rejectedVid = agent._workflowSocialPublishedAttachmentObserved(
+      { value: '동영상' },
+      { attachments: [{ type: 'image', src: 'https://pbs.twimg.com/media/pic.jpg' }] }
+    );
+    assert.equal(rejectedVid, false, AgentClass.name + ': image attachment should not satisfy 동영상 requirement');
+  }
+});
+
+test('attachment verification requires each media type in unquantified mixed-media requests', () => {
+  for (const AgentClass of [AgentCh, AgentFx]) {
+    const agent = new AgentClass({});
+    const req = agent._parseWorkflowAttachmentRequirement('image and video');
+    assert.equal(req.isGeneric, true, AgentClass.name + ': image and video should be generic');
+    assert.equal(req.wantsImage, true, AgentClass.name + ': should want image');
+    assert.equal(req.wantsVideo, true, AgentClass.name + ': should want video');
+    assert.equal(req.expectedCount, 2, AgentClass.name + ': should expect at least 2 attachments');
+
+    const twoImages = agent._workflowSocialPublishedAttachmentObserved(
+      { value: 'image and video' },
+      { attachments: [{ type: 'image', src: 'pic1.png' }, { type: 'image', src: 'pic2.png' }] }
+    );
+    assert.equal(twoImages, false, AgentClass.name + ': two images without video should be rejected for image and video');
+
+    const twoVideos = agent._workflowSocialPublishedAttachmentObserved(
+      { value: 'image and video' },
+      { attachments: [{ type: 'video', src: 'clip1.mp4' }, { type: 'video', src: 'clip2.mp4' }] }
+    );
+    assert.equal(twoVideos, false, AgentClass.name + ': two videos without image should be rejected for image and video');
+
+    const imageAndVideo = agent._workflowSocialPublishedAttachmentObserved(
+      { value: 'image and video' },
+      { attachments: [{ type: 'image', src: 'pic.png' }, { type: 'video', src: 'clip.mp4' }] }
+    );
+    assert.equal(imageAndVideo, true, AgentClass.name + ': image plus video should satisfy image and video');
+
+    const twoImagesAndVideo = agent._workflowSocialPublishedAttachmentObserved(
+      { value: 'image and video' },
+      { attachments: [{ type: 'image', src: 'pic1.png' }, { type: 'image', src: 'pic2.png' }, { type: 'video', src: 'clip.mp4' }] }
+    );
+    assert.equal(twoImagesAndVideo, true, AgentClass.name + ': 2 images plus video should satisfy image and video');
+  }
+});
+
+test('attachment verification rejects extra media beyond explicitly requested counts and types', () => {
+  for (const AgentClass of [AgentCh, AgentFx]) {
+    const agent = new AgentClass({});
+
+    const reqOneImg = agent._parseWorkflowAttachmentRequirement('one image');
+    assert.equal(reqOneImg.hasExplicitCardinality, true, AgentClass.name + ': one image should have explicit cardinality');
+    assert.equal(reqOneImg.hasExplicitImageCount, true, AgentClass.name + ': one image should have explicit image count');
+    assert.equal(reqOneImg.expectedCount, 1, AgentClass.name + ': one image should expect 1');
+
+    // one image exact match
+    assert.equal(
+      agent._workflowSocialPublishedAttachmentObserved(
+        { value: 'one image' },
+        { attachments: [{ type: 'image', src: 'pic1.png' }] }
+      ),
+      true,
+      AgentClass.name + ': exact one image should pass'
+    );
+
+    // one image with extra image
+    assert.equal(
+      agent._workflowSocialPublishedAttachmentObserved(
+        { value: 'one image' },
+        { attachments: [{ type: 'image', src: 'pic1.png' }, { type: 'image', src: 'pic2.png' }] }
+      ),
+      false,
+      AgentClass.name + ': extra image beyond one image should be rejected'
+    );
+
+    // one image with unintended video
+    assert.equal(
+      agent._workflowSocialPublishedAttachmentObserved(
+        { value: 'one image' },
+        { attachments: [{ type: 'image', src: 'pic1.png' }, { type: 'video', src: 'vid.mp4' }] }
+      ),
+      false,
+      AgentClass.name + ': unintended video with one image should be rejected'
+    );
+
+    // two videos
+    const reqTwoVid = agent._parseWorkflowAttachmentRequirement('two videos');
+    assert.equal(reqTwoVid.hasExplicitCardinality, true, AgentClass.name + ': two videos should have explicit cardinality');
+    assert.equal(reqTwoVid.hasExplicitVideoCount, true, AgentClass.name + ': two videos should have explicit video count');
+    assert.equal(reqTwoVid.expectedCount, 2, AgentClass.name + ': two videos should expect 2');
+
+    // two videos exact match
+    assert.equal(
+      agent._workflowSocialPublishedAttachmentObserved(
+        { value: 'two videos' },
+        { attachments: [{ type: 'video', src: 'vid1.mp4' }, { type: 'video', src: 'vid2.mp4' }] }
+      ),
+      true,
+      AgentClass.name + ': exact two videos should pass'
+    );
+
+    // two videos with extra video
+    assert.equal(
+      agent._workflowSocialPublishedAttachmentObserved(
+        { value: 'two videos' },
+        { attachments: [{ type: 'video', src: 'vid1.mp4' }, { type: 'video', src: 'vid2.mp4' }, { type: 'video', src: 'vid3.mp4' }] }
+      ),
+      false,
+      AgentClass.name + ': extra video beyond two videos should be rejected'
+    );
+
+    // two videos with unintended image
+    assert.equal(
+      agent._workflowSocialPublishedAttachmentObserved(
+        { value: 'two videos' },
+        { attachments: [{ type: 'video', src: 'vid1.mp4' }, { type: 'video', src: 'vid2.mp4' }, { type: 'image', src: 'pic.png' }] }
+      ),
+      false,
+      AgentClass.name + ': unintended image with two videos should be rejected'
+    );
+
+    // one image and two videos
+    const reqMixed = agent._parseWorkflowAttachmentRequirement('one image and two videos');
+    assert.equal(reqMixed.hasExplicitCardinality, true, AgentClass.name + ': one image and two videos should have explicit cardinality');
+    assert.equal(reqMixed.hasExplicitImageCount, true, AgentClass.name + ': should have explicit image count');
+    assert.equal(reqMixed.hasExplicitVideoCount, true, AgentClass.name + ': should have explicit video count');
+    assert.equal(reqMixed.expectedCount, 3, AgentClass.name + ': should expect 3 attachments');
+
+    assert.equal(
+      agent._workflowSocialPublishedAttachmentObserved(
+        { value: 'one image and two videos' },
+        { attachments: [{ type: 'image', src: 'pic.png' }, { type: 'video', src: 'vid1.mp4' }, { type: 'video', src: 'vid2.mp4' }] }
+      ),
+      true,
+      AgentClass.name + ': exact 1 image + 2 videos should pass'
+    );
+
+    assert.equal(
+      agent._workflowSocialPublishedAttachmentObserved(
+        { value: 'one image and two videos' },
+        { attachments: [{ type: 'image', src: 'pic1.png' }, { type: 'image', src: 'pic2.png' }, { type: 'video', src: 'vid1.mp4' }, { type: 'video', src: 'vid2.mp4' }] }
+      ),
+      false,
+      AgentClass.name + ': 2 images + 2 videos should be rejected for 1 image and 2 videos'
+    );
+
+    // two attachments
+    const reqTwoAtt = agent._parseWorkflowAttachmentRequirement('two attachments');
+    assert.equal(reqTwoAtt.hasExplicitCardinality, true, AgentClass.name + ': two attachments should have explicit cardinality');
+    assert.equal(reqTwoAtt.expectedCount, 2, AgentClass.name + ': two attachments should expect 2');
+
+    assert.equal(
+      agent._workflowSocialPublishedAttachmentObserved(
+        { value: 'two attachments' },
+        { attachments: [{ type: 'image', src: 'pic1.png' }, { type: 'video', src: 'vid1.mp4' }] }
+      ),
+      true,
+      AgentClass.name + ': 2 attachments should pass'
+    );
+
+    assert.equal(
+      agent._workflowSocialPublishedAttachmentObserved(
+        { value: 'two attachments' },
+        { attachments: [{ type: 'image', src: 'pic1.png' }, { type: 'video', src: 'vid1.mp4' }, { type: 'image', src: 'pic2.png' }] }
+      ),
+      false,
+      AgentClass.name + ': 3 attachments should be rejected for two attachments'
+    );
+
+    // Korean 사진 2장
+    assert.equal(
+      agent._workflowSocialPublishedAttachmentObserved(
+        { value: '사진 2장' },
+        { attachments: [{ type: 'image', src: 'pic1.png' }, { type: 'image', src: 'pic2.png' }] }
+      ),
+      true,
+      AgentClass.name + ': 2 images should satisfy 사진 2장'
+    );
+
+    assert.equal(
+      agent._workflowSocialPublishedAttachmentObserved(
+        { value: '사진 2장' },
+        { attachments: [{ type: 'image', src: 'pic1.png' }, { type: 'image', src: 'pic2.png' }, { type: 'image', src: 'pic3.png' }] }
+      ),
+      false,
+      AgentClass.name + ': 3 images should be rejected for 사진 2장'
+    );
+
+    assert.equal(
+      agent._workflowSocialPublishedAttachmentObserved(
+        { value: '사진 2장' },
+        { attachments: [{ type: 'image', src: 'pic1.png' }, { type: 'image', src: 'pic2.png' }, { type: 'video', src: 'vid.mp4' }] }
+      ),
+      false,
+      AgentClass.name + ': 2 images + 1 video should be rejected for 사진 2장'
+    );
+  }
+});
+
+
+test('attachment verification matches specific attachment names without substring collisions', () => {
+  for (const AgentClass of [AgentCh, AgentFx]) {
+    const agent = new AgentClass({});
+
+    const oldChartUrl = agent._workflowSocialPublishedAttachmentObserved(
+      { value: 'chart.png' },
+      { attachments: [{ type: 'image', src: 'https://pbs.twimg.com/media/old-chart.png', alt: 'old-chart.png' }] }
+    );
+    assert.equal(oldChartUrl, false, AgentClass.name + ': old-chart.png should not satisfy chart.png');
+
+    const notChartUrl = agent._workflowSocialPublishedAttachmentObserved(
+      { value: 'chart.png' },
+      { attachments: [{ type: 'image', src: 'https://pbs.twimg.com/media/not-chart.png', alt: 'not-chart.png' }] }
+    );
+    assert.equal(notChartUrl, false, AgentClass.name + ': not-chart.png should not satisfy chart.png');
+
+    const oldChartAlt = agent._workflowSocialPublishedAttachmentObserved(
+      { value: 'chart.png' },
+      { attachments: [{ type: 'image', src: 'https://pbs.twimg.com/media/random-id.jpg', alt: 'Uploaded old-chart.png' }] }
+    );
+    assert.equal(oldChartAlt, false, AgentClass.name + ': alt with old-chart.png should not satisfy chart.png');
+
+    const exactChartUrl = agent._workflowSocialPublishedAttachmentObserved(
+      { value: 'chart.png' },
+      { attachments: [{ type: 'image', src: 'https://pbs.twimg.com/media/chart.png' }] }
+    );
+    assert.equal(exactChartUrl, true, AgentClass.name + ': chart.png in URL should satisfy chart.png');
+
+    const exactChartAlt = agent._workflowSocialPublishedAttachmentObserved(
+      { value: 'chart.png' },
+      { attachments: [{ type: 'image', src: 'https://pbs.twimg.com/media/random-id.jpg', alt: 'Uploaded chart.png' }] }
+    );
+    assert.equal(exactChartAlt, true, AgentClass.name + ': alt with chart.png should satisfy chart.png');
+
+    const cleanedPrefixAccepted = agent._workflowSocialPublishedAttachmentObserved(
+      { value: 'an image of chart.png' },
+      { attachments: [{ type: 'image', src: 'https://pbs.twimg.com/media/chart.png' }] }
+    );
+    assert.equal(cleanedPrefixAccepted, true, AgentClass.name + ': an image of chart.png should accept chart.png');
+
+    const cleanedPrefixRejected = agent._workflowSocialPublishedAttachmentObserved(
+      { value: 'an image of chart.png' },
+      { attachments: [{ type: 'image', src: 'https://pbs.twimg.com/media/old-chart.png' }] }
+    );
+    assert.equal(cleanedPrefixRejected, false, AgentClass.name + ': an image of chart.png should reject old-chart.png');
+  }
+});
+
+test('post body extraction prefers colon-introduced body when colon precedes incidental quotes', () => {
+  for (const AgentClass of [AgentCh, AgentFx]) {
+    const agent = new AgentClass({});
+    const longBodyWithQuotes = 'Post on X: Here is a long announcement containing "important news" and more updates today';
+    assert.equal(
+      agent._extractWorkflowTaskBody(longBodyWithQuotes),
+      'Here is a long announcement containing "important news" and more updates today',
+      AgentClass.name + ': colon-introduced body should preserve text containing incidental quotes'
+    );
+
+    const quotedBeforeColon = 'Post "breaking news" on X: see updates now';
+    assert.equal(
+      agent._extractWorkflowTaskBody(quotedBeforeColon),
+      'breaking news',
+      AgentClass.name + ': quote before colon should take precedence'
+    );
+
+    const colonWrappedInQuotes = 'Post on X: "Hello world with updates"';
+    assert.equal(
+      agent._extractWorkflowTaskBody(colonWrappedInQuotes),
+      'Hello world with updates',
+      AgentClass.name + ': colon body completely wrapped in quotes should be unwrapped'
+    );
+  }
+});
+
+test('post body extraction skips incidental command colons and parenthesized metadata', () => {
+  for (const AgentClass of [AgentCh, AgentFx]) {
+    const agent = new AgentClass({});
+    assert.equal(
+      agent._extractWorkflowTaskBody('Post on X (account: @acme): Hello world'),
+      'Hello world',
+      AgentClass.name + ': parenthesized account metadata with colon should not be captured as body'
+    );
+    assert.equal(
+      agent._extractWorkflowTaskBody('Post on X [account: @acme]: Hello world'),
+      'Hello world',
+      AgentClass.name + ': bracketed account metadata with colon should not be captured as body'
+    );
+    assert.equal(
+      agent._extractWorkflowTaskBody('Post on X (account: @acme): Here is a long announcement containing "important news" and more updates today'),
+      'Here is a long announcement containing "important news" and more updates today',
+      AgentClass.name + ': parenthesized metadata with colon preceding inner quotes should extract full body'
+    );
+    assert.equal(
+      agent._extractWorkflowTaskBody('Post on X, account: @acme: Hello world'),
+      'Hello world',
+      AgentClass.name + ': metadata key prefix with colon should be skipped in favor of payload colon'
+    );
+    assert.equal(
+      agent._extractWorkflowTaskBody('Xに投稿（アカウント：@acme）：こんにちは世界'),
+      'こんにちは世界',
+      AgentClass.name + ': Japanese full-width parenthesized account with colon should not be captured as body'
+    );
+    assert.equal(
+      agent._extractWorkflowTaskBody('Post on X (account: @acme): Breaking: Version 2 is released'),
+      'Breaking: Version 2 is released',
+      AgentClass.name + ': body containing colon should preserve colon after payload delimiter'
+    );
+    assert.equal(
+      agent._extractWorkflowTaskBody('Post on X at 3:00: Hello world'),
+      'Hello world',
+      AgentClass.name + ': clock colon in at 3:00 should not be captured as body delimiter'
+    );
+    assert.equal(
+      agent._extractWorkflowTaskBody('Post on X at 14:30: Hello world'),
+      'Hello world',
+      AgentClass.name + ': 24-hour clock colon in at 14:30 should not be captured as body delimiter'
+    );
+    assert.equal(
+      agent._extractWorkflowTaskBody('Post on X at 3:00 PM: Hello world'),
+      'Hello world',
+      AgentClass.name + ': clock colon with AM/PM should not be captured as body delimiter'
+    );
+  }
+});
+
+test('post body extraction preserves nested quotation marks and does not overwrite full body with prefix', async () => {
+  for (const [index, AgentClass] of [AgentCh, AgentFx].entries()) {
+    const agent = new AgentClass({});
+    const taskText = 'Post “He said "hello" today” on X';
+    const extracted = agent._extractWorkflowTaskBody(taskText);
+    assert.equal(extracted, 'He said "hello" today', AgentClass.name + ': should extract body containing nested quotes');
+
+    const tabId = 9890 + index;
+    const siteWorkflow = agent._resolvePlannerSiteWorkflow('https://x.com/home', {
+      request_kind: 'execute',
+      site_job: 'publish-post',
+    });
+    const guard = agent._startPlanExecutionGuard(tabId, 'act', {
+      requestKind: 'execute',
+      requiresStateChange: true,
+      requiresSubmission: true,
+      siteWorkflow,
+    });
+    const provider = {
+      chat: async () => ({
+        content: JSON.stringify({
+          workflowFields: [
+            { field: 'body', value: 'He said "hello" today' },
+          ],
+        }),
+      }),
+    };
+    await agent._classifyProgressIntentWithProvider(tabId, {
+      provider,
+      taskText,
+      pageScope: 'https://x.com/home',
+    });
+    assert.equal(guard.workflowMetadataRequirements?.[0]?.value, 'He said "hello" today',
+      AgentClass.name + ': should retain complete classified body without prefix truncation');
+  }
+});
+
+test('partially classified metadata retains incomplete state despite extracted body', async () => {
+  for (const [index, AgentClass] of [AgentCh, AgentFx].entries()) {
+    const agent = new AgentClass({});
+    const tabId = 9880 + index;
+    const siteWorkflow = agent._resolvePlannerSiteWorkflow('https://x.com/home', {
+      request_kind: 'execute',
+      site_job: 'publish-post',
+    });
+    const guard = agent._startPlanExecutionGuard(tabId, 'act', {
+      requestKind: 'execute',
+      requiresStateChange: true,
+      requiresSubmission: true,
+      siteWorkflow,
+    });
+    const partialProvider = {
+      chat: async () => ({
+        content: JSON.stringify({
+          workflowFields: [
+            { field: 'body', value: 'Hello world' },
+            { field: 'attachment' }, // omitted value -> discarded
+          ],
+        }),
+      }),
+    };
+    await agent._classifyProgressIntentWithProvider(tabId, {
+      provider: partialProvider,
+      taskText: 'Publish this on X: Hello world with quarterly-chart-2.png',
+      pageScope: 'https://x.com/home',
+    });
+    assert.equal(guard.workflowMetadataRequirementsIncomplete, true,
+      AgentClass.name + ': partial classifier output should mark workflowMetadataRequirementsIncomplete as true');
+    assert.notEqual(guard.workflowMetadataRequirementsResolved, true,
+      AgentClass.name + ': partial classifier output should not mark workflowMetadataRequirementsResolved as true');
+    assert.equal(guard.workflowMetadataRequirements?.length, 1,
+      AgentClass.name + ': valid body field should be preserved');
   }
 });
 
@@ -87014,7 +89376,10 @@ test('completion page text keeps the line boundaries publication payloads match 
     assert.ok(start >= 0, `${label}: completion page text probe not found`);
     const end = source.indexOf('.slice(0, 20000),', start);
     assert.ok(end > start, `${label}: completion page text probe is unbounded`);
-    const expression = source.slice(start + 'workflowPageText: '.length, end)
+    // The probe is injected through a template literal, so the file text is
+    // one unescaping away from the source the page actually runs. Testing the
+    // file text directly would pass on escapes the template silently eats.
+    const expression = vm.runInNewContext('`' + source.slice(start + 'workflowPageText: '.length, end) + '`')
       .replace("String(document.body?.innerText || '')", 'String(innerText)');
     const normalize = vm.runInNewContext(`(innerText) => (${expression})`);
     const pageText = normalize('Release v9\n\n  Fixed   the parser\nShipped the CLI  \n');
@@ -87034,6 +89399,35 @@ test('completion page text keeps the line boundaries publication payloads match 
       false,
       `${label}: a value absent from the published page was accepted`,
     );
+  }
+});
+
+test('the injected completion probe survives its own template literal', () => {
+  // A lone backslash in the probe is eaten by the template literal that
+  // injects it, and the call site swallows the resulting SyntaxError, so the
+  // probe silently returns nothing and every completion check loses its page
+  // state. Parse what the page actually receives, not what the file contains.
+  for (const [label, rel, invariant] of [
+    ['chrome', 'src/chrome/src/agent/agent.js', CompletionInvariantCh],
+    ['firefox', 'src/firefox/src/agent/agent.js', CompletionInvariantFx],
+  ]) {
+    const source = fs.readFileSync(path.join(ROOT, rel), 'utf8');
+    const anchor = source.indexOf('const publicationRecordRoot = ${publicationResourceRecordRoot.toString()};');
+    assert.ok(anchor > 0, `${label}: completion probe not found`);
+    const open = source.lastIndexOf('`', anchor);
+    const close = source.indexOf('`', anchor + 1);
+    assert.ok(open > 0 && close > anchor, `${label}: completion probe template is not delimited`);
+    const raw = source.slice(open + 1, close);
+    const injected = vm.runInNewContext('`' + raw + '`', {
+      classifyCompletionForm: invariant.classifyCompletionForm,
+      publicationResourceRecordRoot: invariant.publicationResourceRecordRoot,
+    });
+    assert.doesNotThrow(
+      () => new vm.Script(`(${injected})`),
+      `${label}: the injected completion probe is not valid JavaScript`,
+    );
+    assert.match(injected, /\/\\r\\n\?\/g/,
+      `${label}: the probe lost the CRLF normalization its line matching needs`);
   }
 });
 
@@ -88888,6 +91282,35 @@ test('required submission evidence needs dispatch plus a post-submit success obs
       relevantFormCount: 0,
       successMessages: ['Successfully submitted'],
     }, 'https://example.com/form').verifiedFinalSubmit, true);
+  }
+});
+
+test('generic submission evidence failure does not claim that a site workflow job was selected', () => {
+  for (const [index, AgentClass] of [AgentCh, AgentFx].entries()) {
+    const tabId = 8965 + index;
+    const agent = new AgentClass({});
+    const guard = agent._startPlanExecutionGuard(tabId, 'act', {
+      requestKind: 'execute',
+      requiresStateChange: true,
+      requiresSubmission: true,
+    });
+    guard.successfulConsequentialToolCalls = 1;
+    guard.evidenceTaskKey = guard.taskKey;
+    const retry = agent._planOnlyTerminalDecision(
+      tabId,
+      'Published.',
+      { viaDone: true, outcome: 'success' },
+    );
+    assert.equal(retry?.retry, true);
+    assert.match(retry?.nudge || '', /no structured site workflow is bound/i);
+    assert.doesNotMatch(retry?.nudge || '', /selected workflow job/i);
+    const failure = agent._planOnlyTerminalDecision(
+      tabId,
+      'Published.',
+      { viaDone: true, outcome: 'success' },
+    );
+    assert.match(failure?.failure || '', /no structured site workflow was bound/i);
+    assert.doesNotMatch(failure?.failure || '', /selected workflow job/i);
   }
 });
 
