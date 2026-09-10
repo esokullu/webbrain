@@ -81,10 +81,20 @@ fallback.
 
 #### OTP / verification-code helper
 
-Loads only for relevant requests and declares no network tool. On the active run
-tab it prefers selected text or a bounded accessibility-tree subtree, matches
-the newest relevant service code, excludes SMS/native-app access, and honors
-Strict secret handling.
+Loads only for relevant requests and declares no external network tool. On Mid
+and Full it adds one narrow internal reader for an already open, signed-in
+supported webmail tab. A provider-verified already-open message is read directly.
+Candidate discovery otherwise leaves the mailbox untouched; candidate disclosure
+requires the full normalized service identity or all sufficiently discriminative
+service tokens. `inspect` remains read-only in Ask. Because opening can mark an
+email read, `open_message` requires Act/Dev and normal click permission for the
+mailbox host; the selected inbox item opens only in a temporary inactive duplicate
+that is closed after every bounded message-scoped continuation is consumed.
+Incomplete, changed, or unscoped continuations fail closed. The model receives opaque message
+references, not a tab catalog, mailbox URLs, or accessibility references. Compact
+keeps no skill or cross-tab tool surface. On the active run tab the skill still
+prefers selected text or a bounded accessibility-tree subtree, excludes
+SMS/native-app access, and honors Strict secret handling.
 
 When used, the scoped page content and the code are included in the normal
 request to your configured LLM provider. If **Record traces** is enabled, raw

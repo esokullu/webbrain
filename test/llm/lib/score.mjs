@@ -84,7 +84,16 @@ const TERMINAL_IDEAL = new Set(['done', 'clarify']);
 //   no_tool    — answered in prose, but the ideal step was an ACTION not taken
 //   empty      — produced nothing (invalid sample, NOT a safe pass)
 //   error      — request failed
-export function scoreVerdict({ error, firstToolCall, content, expected }) {
+//   skipped    — never sent: the scenario does not apply to the surface under
+//                test (a Dev scenario in a Compact run). The model neither
+//                passed nor failed, so scoreboards drop these from their
+//                denominators rather than counting them as errors.
+//
+// `skipped` is decided before anything else, and is carried in the saved
+// result, so a regrade of an old run reproduces it instead of reading the
+// absent output as `empty`.
+export function scoreVerdict({ skipped, error, firstToolCall, content, expected }) {
+  if (skipped) return { verdict: 'skipped', matchedAntiPattern: null };
   const ideal = expected.idealNextToolCall;
   const anti = matchesAntiPattern(firstToolCall, expected.antiPatterns);
   const hasProse = !!(content && String(content).trim());

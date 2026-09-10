@@ -1,0 +1,45 @@
+{
+  "id": "051",
+  "category": "stale-refid",
+  "description": "Used a ref_id from a prior AX tree taken before scrolling. The page has changed; re-read.",
+  "mode": "act",
+  "browser": "chrome",
+  "latencyMs": 942,
+  "error": null,
+  "firstToolCall": {
+    "name": "get_accessibility_tree",
+    "args": {
+      "filter": "visible"
+    }
+  },
+  "toolCallSource": "tool_calls",
+  "expected": {
+    "idealNextToolCall": {
+      "name": "get_accessibility_tree",
+      "args": {
+        "filter": "visible"
+      }
+    },
+    "antiPatterns": [
+      {
+        "match": "click_ax({ref_id:\"ref_42\"})",
+        "reason": "Same stale ref_id will fail again — error message explicitly says re-read."
+      },
+      {
+        "match": "click_ax({ref_id:\"ref_43\"})",
+        "reason": "Guessing adjacent ref_ids."
+      }
+    ],
+    "successRubric": "Re-read AX tree before any ref_id-based action. ref_ids are not stable across scroll/navigation."
+  },
+  "matchedAntiPattern": null,
+  "verdict": "ideal",
+  "scoreNote": null,
+  "finishReason": "tool_calls",
+  "content": "<function name=\"get_accessibility_tree\"><param name=\"filter\">visible</param></function>",
+  "usage": {
+    "prompt_tokens": 9900,
+    "completion_tokens": 17,
+    "total_tokens": 9917
+  }
+}

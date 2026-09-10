@@ -149,13 +149,6 @@ export class OpenAICompatibleProvider extends BaseLLMProvider {
     return options.signal ? { signal: options.signal } : {};
   }
 
-  _rethrowAbortedChat(error, options = {}) {
-    if (options.signal?.aborted) {
-      throw options.signal.reason instanceof Error ? options.signal.reason : error;
-    }
-    if (error?.name === 'AbortError') throw error;
-  }
-
   _headers() {
     const headers = { 'Content-Type': 'application/json' };
     const providerName = (this.config.providerName || '').toLowerCase();
@@ -806,11 +799,12 @@ export class OpenAICompatibleProvider extends BaseLLMProvider {
     }
     if (!res.ok) {
       let err = '';
-      try { err = (await res.text()).slice(0, 500); } catch {}
+      try { err = await this._readErrorResponse(res, 500, options); } catch (error) { this._rethrowAbortedChat(error, options); }
       throw this._httpError(res.status, err, `${this.name} error ${res.status}`);
     }
     let data;
-    try { data = await res.json(); } catch {
+    try { data = await res.json(); } catch (error) {
+      this._rethrowAbortedChat(error, options);
       throw new Error(`${this.name} returned invalid JSON in Responses response.`);
     }
     return this._responsesResult(data);
@@ -824,14 +818,16 @@ export class OpenAICompatibleProvider extends BaseLLMProvider {
         method: 'POST',
         headers: this._headers(),
         body: JSON.stringify(this._responsesBody(messages, options, true)),
+        signal: options.signal,
       });
     } catch (e) {
+      this._rethrowAbortedChat(e, options);
       throw this._responsesStreamTransportError(
         `${this.name} network error — could not reach ${url} (${e.message}). Is the server running?`,
       );
     }
     if (!res.ok) {
-      const err = await res.text();
+      const err = await this._readErrorResponse(res, 1200, options);
       const streamError = this._httpError(res.status, err, `${this.name} stream error ${res.status}`);
       streamError.isResponsesStreamError = true;
       throw streamError;
@@ -843,117 +839,123 @@ export class OpenAICompatibleProvider extends BaseLLMProvider {
 
     let reader;
     try {
-      reader = res.body.getReader();
+      reader = await this._openStreamReader(res, options);
     } catch (error) {
+      this._rethrowAbortedChat(error, options);
       throw this._responsesStreamTransportError(
         `${this.name} Responses stream could not open its response body (${error?.message || 'reader unavailable'}).`,
       );
     }
-    const decoder = new TextDecoder();
-    const toolItems = new Map();
-    const emittedToolIndexes = new Set();
-    let buffer = '';
+    try {
+      const decoder = new TextDecoder();
+      const toolItems = new Map();
+      const emittedToolIndexes = new Set();
+      let buffer = '';
 
-    const finalToolCalls = (response) => {
-      const calls = [];
-      for (const [index, item] of (response?.output || []).entries()) {
-        if (emittedToolIndexes.has(index)) continue;
-        const call = this._responseToolCall(item, index);
-        if (call) {
-          emittedToolIndexes.add(index);
-          calls.push(call);
-        }
-      }
-      return calls;
-    };
-
-    while (true) {
-      let chunk;
-      try {
-        chunk = await reader.read();
-      } catch (error) {
-        throw this._responsesStreamTransportError(
-          `${this.name} Responses stream transport error (${error?.message || 'read failed'}).`,
-        );
-      }
-      const { done, value } = chunk;
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split('\n');
-      buffer = lines.pop() || '';
-
-      for (const line of lines) {
-        const payload = sseDataPayload(line);
-        if (payload == null) continue;
-        if (payload.trim() === '[DONE]') {
-          // Responses must finish with response.completed so we can retain
-          // the complete output Items used for encrypted reasoning replay.
-          // A bare legacy sentinel is therefore an incomplete stream, not a
-          // successful empty response.
-          throw this._responsesIncompleteError({
-            incomplete_details: { reason: 'missing_response_completed' },
-          }, { stream: true });
-        }
-        try {
-          const event = JSON.parse(payload);
-          if ((event.type === 'response.output_text.delta' || event.type === 'response.refusal.delta') && event.delta) {
-            yield { type: 'text', content: event.delta };
-          } else if (event.type === 'response.output_item.added' && event.item?.type === 'function_call') {
-            toolItems.set(event.output_index, { ...event.item });
-          } else if (event.type === 'response.function_call_arguments.delta') {
-            const item = toolItems.get(event.output_index);
-            if (item) item.arguments = `${item.arguments || ''}${event.delta || ''}`;
-          } else if (event.type === 'response.function_call_arguments.done') {
-            const item = toolItems.get(event.output_index);
-            if (item && typeof event.arguments === 'string') item.arguments = event.arguments;
-          } else if (event.type === 'response.output_item.done' && event.item?.type === 'function_call') {
-            const index = event.output_index ?? 0;
-            if (!emittedToolIndexes.has(index)) {
-              emittedToolIndexes.add(index);
-              const call = this._responseToolCall(event.item, index);
-              if (call) yield { type: 'tool_call', content: [call] };
-            }
-          } else if (event.type === 'response.completed') {
-            const response = event.response || {};
-            const remaining = finalToolCalls(response);
-            if (remaining.length) yield { type: 'tool_call', content: remaining };
-            if (response.usage) {
-              yield { type: 'usage', usage: this._normalizeResponsesUsage(response.usage) };
-            }
-            const finishReason = response.finish_reason ?? response.stop_reason;
-            yield {
-              type: 'done',
-              content: '',
-              responseItems: response.output || [],
-              ...(finishReason != null ? { finishReason: String(finishReason) } : {}),
-            };
-            return;
-          } else if (event.type === 'response.incomplete') {
-            // Incomplete is terminal (token limit / filter / etc.). Surface it
-            // instead of yielding a normal done that the agent treats as success.
-            const response = event.response || {};
-            if (response.usage) {
-              yield { type: 'usage', usage: this._normalizeResponsesUsage(response.usage) };
-            }
-            throw this._responsesIncompleteError(response, { stream: true });
-          } else if (event.type === 'response.failed' || event.type === 'error') {
-            const message = event.response?.error?.message || event.error?.message || event.message || 'Responses stream failed.';
-            const streamError = this._askStreamTerminalError(message);
-            streamError.isResponsesStreamError = true;
-            throw streamError;
+      const finalToolCalls = (response) => {
+        const calls = [];
+        for (const [index, item] of (response?.output || []).entries()) {
+          if (emittedToolIndexes.has(index)) continue;
+          const call = this._responseToolCall(item, index);
+          if (call) {
+            emittedToolIndexes.add(index);
+            calls.push(call);
           }
-        } catch (e) {
-          if (e?.isResponsesStreamError) throw e;
-          console.warn(`[${this.name}] malformed Responses SSE chunk skipped:`, payload?.slice(0, 120), e?.message);
+        }
+        return calls;
+      };
+
+      while (true) {
+        let chunk;
+        try {
+          chunk = await reader.read();
+        } catch (error) {
+          this._rethrowAbortedChat(error, options);
+          throw this._responsesStreamTransportError(
+            `${this.name} Responses stream transport error (${error?.message || 'read failed'}).`,
+          );
+        }
+        const { done, value } = chunk;
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+
+        for (const line of lines) {
+          const payload = sseDataPayload(line);
+          if (payload == null) continue;
+          if (payload.trim() === '[DONE]') {
+            // Responses must finish with response.completed so we can retain
+            // the complete output Items used for encrypted reasoning replay.
+            // A bare legacy sentinel is therefore an incomplete stream, not a
+            // successful empty response.
+            throw this._responsesIncompleteError({
+              incomplete_details: { reason: 'missing_response_completed' },
+            }, { stream: true });
+          }
+          try {
+            const event = JSON.parse(payload);
+            if ((event.type === 'response.output_text.delta' || event.type === 'response.refusal.delta') && event.delta) {
+              yield { type: 'text', content: event.delta };
+            } else if (event.type === 'response.output_item.added' && event.item?.type === 'function_call') {
+              toolItems.set(event.output_index, { ...event.item });
+            } else if (event.type === 'response.function_call_arguments.delta') {
+              const item = toolItems.get(event.output_index);
+              if (item) item.arguments = `${item.arguments || ''}${event.delta || ''}`;
+            } else if (event.type === 'response.function_call_arguments.done') {
+              const item = toolItems.get(event.output_index);
+              if (item && typeof event.arguments === 'string') item.arguments = event.arguments;
+            } else if (event.type === 'response.output_item.done' && event.item?.type === 'function_call') {
+              const index = event.output_index ?? 0;
+              if (!emittedToolIndexes.has(index)) {
+                emittedToolIndexes.add(index);
+                const call = this._responseToolCall(event.item, index);
+                if (call) yield { type: 'tool_call', content: [call] };
+              }
+            } else if (event.type === 'response.completed') {
+              const response = event.response || {};
+              const remaining = finalToolCalls(response);
+              if (remaining.length) yield { type: 'tool_call', content: remaining };
+              if (response.usage) {
+                yield { type: 'usage', usage: this._normalizeResponsesUsage(response.usage) };
+              }
+              const finishReason = response.finish_reason ?? response.stop_reason;
+              yield {
+                type: 'done',
+                content: '',
+                responseItems: response.output || [],
+                ...(finishReason != null ? { finishReason: String(finishReason) } : {}),
+              };
+              return;
+            } else if (event.type === 'response.incomplete') {
+              // Incomplete is terminal (token limit / filter / etc.). Surface it
+              // instead of yielding a normal done that the agent treats as success.
+              const response = event.response || {};
+              if (response.usage) {
+                yield { type: 'usage', usage: this._normalizeResponsesUsage(response.usage) };
+              }
+              throw this._responsesIncompleteError(response, { stream: true });
+            } else if (event.type === 'response.failed' || event.type === 'error') {
+              const message = event.response?.error?.message || event.error?.message || event.message || 'Responses stream failed.';
+              const streamError = this._askStreamTerminalError(message);
+              streamError.isResponsesStreamError = true;
+              throw streamError;
+            }
+          } catch (e) {
+            if (e?.isResponsesStreamError) throw e;
+            console.warn(`[${this.name}] malformed Responses SSE chunk skipped:`, payload?.slice(0, 120), e?.message);
+          }
         }
       }
+      // A clean transport EOF is still a failure when no terminal Responses
+      // event arrived. Treating it as done would persist partial text and lose
+      // any function-call/reasoning Items that only arrive on completion.
+      throw this._responsesIncompleteError({
+        incomplete_details: { reason: 'missing_response_completed' },
+      }, { stream: true });
+    } finally {
+      reader.close();
     }
-    // A clean transport EOF is still a failure when no terminal Responses
-    // event arrived. Treating it as done would persist partial text and lose
-    // any function-call/reasoning Items that only arrive on completion.
-    throw this._responsesIncompleteError({
-      incomplete_details: { reason: 'missing_response_completed' },
-    }, { stream: true });
   }
 
   async chat(messages, options = {}) {
@@ -977,12 +979,13 @@ export class OpenAICompatibleProvider extends BaseLLMProvider {
 
     if (!res.ok) {
       let err = '';
-      try { err = (await res.text()).slice(0, 500); } catch {}
+      try { err = await this._readErrorResponse(res, 500, options); } catch (error) { this._rethrowAbortedChat(error, options); }
       throw this._httpError(res.status, err, `${this.name} error ${res.status}`);
     }
 
     let data;
-    try { data = await res.json(); } catch {
+    try { data = await res.json(); } catch (error) {
+      this._rethrowAbortedChat(error, options);
       throw new Error(`${this.name} returned invalid JSON in chat response.`);
     }
     const message = this._chatCompletionMessage(data);
@@ -1010,15 +1013,17 @@ export class OpenAICompatibleProvider extends BaseLLMProvider {
         method: 'POST',
         headers: this._headers(),
         body: JSON.stringify(body),
+        signal: options.signal,
       });
     } catch (e) {
+      this._rethrowAbortedChat(e, options);
       throw this._chatCompletionsStreamTransportError(
         `${this.name} network error — could not reach ${streamUrl} (${e.message}). Is the server running?`,
       );
     }
 
     if (!res.ok) {
-      const err = await res.text();
+      const err = await this._readErrorResponse(res, 1200, options);
       throw this._httpError(res.status, err, `${this.name} stream error ${res.status}`);
     }
 
@@ -1030,108 +1035,114 @@ export class OpenAICompatibleProvider extends BaseLLMProvider {
 
     let reader;
     try {
-      reader = res.body.getReader();
+      reader = await this._openStreamReader(res, options);
     } catch (error) {
+      this._rethrowAbortedChat(error, options);
       throw this._chatCompletionsStreamTransportError(
         `${this.name} Chat Completions stream could not open its response body (${error?.message || 'reader unavailable'}).`,
       );
     }
-    const decoder = new TextDecoder();
-    let buffer = '';
-    let finalUsage = null;
-    let sawTerminalFinish = false;
-    let terminalFinishReason = '';
+    try {
+      const decoder = new TextDecoder();
+      let buffer = '';
+      let finalUsage = null;
+      let sawTerminalFinish = false;
+      let terminalFinishReason = '';
 
-    while (true) {
-      let chunk;
-      try {
-        chunk = await reader.read();
-      } catch (error) {
-        if (finalUsage) yield { type: 'usage', usage: finalUsage };
-        throw this._chatCompletionsStreamTransportError(
-          `${this.name} Chat Completions stream transport error (${error?.message || 'read failed'}).`,
-        );
-      }
-      const { done, value } = chunk;
-      if (done) break;
-
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split('\n');
-      buffer = lines.pop() || '';
-
-      for (const line of lines) {
-        const payload = sseDataPayload(line);
-        if (payload == null) continue;
-        if (payload.trim() === '[DONE]') {
-          if (finalUsage) yield { type: 'usage', usage: finalUsage };
-          yield {
-            type: 'done',
-            content: '',
-            ...(terminalFinishReason ? { finishReason: terminalFinishReason } : {}),
-          };
-          return;
-        }
-        let json;
+      while (true) {
+        let chunk;
         try {
-          json = JSON.parse(payload);
+          chunk = await reader.read();
         } catch (error) {
-          if (this._supportsInteractiveAskStreaming()) {
-            throw this._chatCompletionsStreamTransportError(
-              `${this.name} Chat Completions stream returned malformed JSON (${error?.message || 'parse failed'}).`,
+          this._rethrowAbortedChat(error, options);
+          if (finalUsage) yield { type: 'usage', usage: finalUsage };
+          throw this._chatCompletionsStreamTransportError(
+            `${this.name} Chat Completions stream transport error (${error?.message || 'read failed'}).`,
+          );
+        }
+        const { done, value } = chunk;
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+
+        for (const line of lines) {
+          const payload = sseDataPayload(line);
+          if (payload == null) continue;
+          if (payload.trim() === '[DONE]') {
+            if (finalUsage) yield { type: 'usage', usage: finalUsage };
+            yield {
+              type: 'done',
+              content: '',
+              ...(terminalFinishReason ? { finishReason: terminalFinishReason } : {}),
+            };
+            return;
+          }
+          let json;
+          try {
+            json = JSON.parse(payload);
+          } catch (error) {
+            if (this._supportsInteractiveAskStreaming()) {
+              throw this._chatCompletionsStreamTransportError(
+                `${this.name} Chat Completions stream returned malformed JSON (${error?.message || 'parse failed'}).`,
+              );
+            }
+            console.warn(`[${this.name}] malformed SSE chunk skipped:`, payload?.slice(0, 120), error?.message);
+            continue;
+          }
+          if (json?.error) {
+            throw this._chatCompletionsStreamApiError(json);
+          }
+          const streamUsage = json.usage || json.x_groq?.usage;
+          if (streamUsage) {
+            finalUsage = streamUsage;
+          }
+          const choice = json.choices?.[0];
+          if (choice?.finish_reason === 'content_filter') {
+            throw this._chatCompletionsStreamTerminalError(
+              `${this.name} Chat Completions stream was blocked by the provider content filter.`,
             );
           }
-          console.warn(`[${this.name}] malformed SSE chunk skipped:`, payload?.slice(0, 120), error?.message);
-          continue;
-        }
-        if (json?.error) {
-          throw this._chatCompletionsStreamApiError(json);
-        }
-        const streamUsage = json.usage || json.x_groq?.usage;
-        if (streamUsage) {
-          finalUsage = streamUsage;
-        }
-        const choice = json.choices?.[0];
-        if (choice?.finish_reason === 'content_filter') {
-          throw this._chatCompletionsStreamTerminalError(
-            `${this.name} Chat Completions stream was blocked by the provider content filter.`,
-          );
-        }
-        const finishReason = choice?.finish_reason;
-        if (
-          String(this.config.providerName || '').toLowerCase() === 'z_ai'
-          && Z_AI_STREAM_TERMINAL_FINISH_REASONS.has(finishReason)
-        ) {
-          throw this._chatCompletionsStreamTerminalError(
-            `${this.name} Chat Completions stream failed with terminal finish reason "${finishReason}".`,
-          );
-        }
-        if (finishReason != null) {
-          sawTerminalFinish = true;
-          terminalFinishReason = String(finishReason);
-        }
-        const delta = choice?.delta;
-        const reasoningDelta = delta?.reasoning_content || delta?.reasoning;
-        if (typeof reasoningDelta === 'string' && reasoningDelta) {
-          yield { type: 'reasoning', content: reasoningDelta };
-        }
-        if (delta?.content) {
-          yield { type: 'text', content: delta.content };
-        }
-        if (delta?.tool_calls) {
-          yield { type: 'tool_call', content: delta.tool_calls };
+          const finishReason = choice?.finish_reason;
+          if (
+            String(this.config.providerName || '').toLowerCase() === 'z_ai'
+            && Z_AI_STREAM_TERMINAL_FINISH_REASONS.has(finishReason)
+          ) {
+            throw this._chatCompletionsStreamTerminalError(
+              `${this.name} Chat Completions stream failed with terminal finish reason "${finishReason}".`,
+            );
+          }
+          if (finishReason != null) {
+            sawTerminalFinish = true;
+            terminalFinishReason = String(finishReason);
+          }
+          const delta = choice?.delta;
+          const reasoningDelta = delta?.reasoning_content || delta?.reasoning;
+          if (typeof reasoningDelta === 'string' && reasoningDelta) {
+            yield { type: 'reasoning', content: reasoningDelta };
+          }
+          if (delta?.content) {
+            yield { type: 'text', content: delta.content };
+          }
+          if (delta?.tool_calls) {
+            yield { type: 'tool_call', content: delta.tool_calls };
+          }
         }
       }
+      if (finalUsage) yield { type: 'usage', usage: finalUsage };
+      if (sawTerminalFinish) {
+        yield { type: 'done', content: '', finishReason: terminalFinishReason };
+        return;
+      }
+      if (this._supportsInteractiveAskStreaming()) {
+        throw this._chatCompletionsStreamTransportError(
+          `${this.name} Chat Completions stream ended before the [DONE] sentinel.`,
+        );
+      }
+      yield { type: 'done', content: '' };
+    } finally {
+      reader.close();
     }
-    if (finalUsage) yield { type: 'usage', usage: finalUsage };
-    if (sawTerminalFinish) {
-      yield { type: 'done', content: '', finishReason: terminalFinishReason };
-      return;
-    }
-    if (this._supportsInteractiveAskStreaming()) {
-      throw this._chatCompletionsStreamTransportError(
-        `${this.name} Chat Completions stream ended before the [DONE] sentinel.`,
-      );
-    }
-    yield { type: 'done', content: '' };
   }
 }

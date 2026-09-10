@@ -186,8 +186,8 @@ Lorsqu'une application ou un formulaire intégré reste difficile à inspecter o
 courant** vers l'URL autonome de cette frame enfant. Les outils suivants agissent
 sur la page autonome, et l'historique Retour normal du navigateur est conservé :
 `go_back` ou le bouton Retour permet de revenir à la page qui contenait
-l'iframe. Il s'agit d'un transfert dans le même onglet, et non d'un `new_tab` en
-arrière-plan.
+l'iframe. Il s'agit d'un transfert dans le même onglet, et non de la création
+d'un onglet en arrière-plan.
 
 Utilisez ce flux de travail **avant toute modification** dans l'iframe :
 

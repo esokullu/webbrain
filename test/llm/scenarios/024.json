@@ -1,7 +1,7 @@
 {
   "id": "024",
   "category": "csp-blocked-eval",
-  "mode": "act",
+  "mode": "dev",
   "browser": "chrome",
   "tab": {
     "url": "https://www.nytimes.com/2026/01/world/example.html",

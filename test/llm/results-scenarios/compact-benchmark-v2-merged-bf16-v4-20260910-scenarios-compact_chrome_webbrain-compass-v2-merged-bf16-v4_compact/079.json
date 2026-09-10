@@ -1,0 +1,46 @@
+{
+  "id": "079",
+  "category": "cross-lingual",
+  "description": "French form, English instructions including mixed English+French data.",
+  "mode": "act",
+  "browser": "chrome",
+  "latencyMs": 1199,
+  "error": null,
+  "firstToolCall": {
+    "name": "set_field",
+    "args": {
+      "ref_id": "ref_0",
+      "text": "Marie Dupont"
+    }
+  },
+  "toolCallSource": "tool_calls",
+  "expected": {
+    "idealNextToolCall": {
+      "name": "click",
+      "args": {
+        "index": 0
+      }
+    },
+    "antiPatterns": [
+      {
+        "match": "type_text({text:\"Marie Dupont\"})",
+        "reason": "No field focused yet; type would land in wrong field."
+      },
+      {
+        "match": "click({text:\"Name\"})",
+        "reason": "Field is labeled \"Nom complet\" not \"Name\"."
+      }
+    ],
+    "successRubric": "Click name field first (by index), then type. Use the French label \"Envoyer\" for final submit."
+  },
+  "matchedAntiPattern": null,
+  "verdict": "other",
+  "scoreNote": null,
+  "finishReason": "tool_calls",
+  "content": "<function name=\"set_field\"><param name=\"ref_id\">ref_0</param><param name=\"text\">Marie Dupont</param></function>",
+  "usage": {
+    "prompt_tokens": 9794,
+    "completion_tokens": 26,
+    "total_tokens": 9820
+  }
+}

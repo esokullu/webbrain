@@ -114,18 +114,20 @@ export class AzureOpenAIProvider extends BaseLLMProvider {
     const url = this._chatUrl();
     let res;
     try {
-      res = await fetchWithTimeout(url, { method: 'POST', headers: this._headers(), body: JSON.stringify(body) });
+      res = await fetchWithTimeout(url, { method: 'POST', headers: this._headers(), body: JSON.stringify(body), signal: options.signal });
     } catch (e) {
+      this._rethrowAbortedChat(e, options);
       throw new Error(`${this.name} network error — could not reach ${url} (${e.message}). Is the server running?`);
     }
     if (!res.ok) {
       let err = '';
-      try { err = (await res.text()).slice(0, 800); } catch {}
+      try { err = await this._readErrorResponse(res, 800, options); } catch (error) { this._rethrowAbortedChat(error, options); }
       throw new Error(`${this.name} error ${res.status}: ${err || res.statusText}`);
     }
 
     let data;
-    try { data = await res.json(); } catch {
+    try { data = await res.json(); } catch (error) {
+      this._rethrowAbortedChat(error, options);
       throw new Error(`${this.name} returned invalid JSON in chat response.`);
     }
     const message = this._chatCompletionMessage(data);
@@ -144,15 +146,16 @@ export class AzureOpenAIProvider extends BaseLLMProvider {
     const url = this._chatUrl();
     let res;
     try {
-      res = await fetchWithTimeout(url, { method: 'POST', headers: this._headers(), body: JSON.stringify(body) });
+      res = await fetchWithTimeout(url, { method: 'POST', headers: this._headers(), body: JSON.stringify(body), signal: options.signal });
     } catch (e) {
+      this._rethrowAbortedChat(e, options);
       throw this._askStreamTransportError(
         `${this.name} network error — could not reach ${url} (${e.message}). Is the server running?`,
       );
     }
     if (!res.ok) {
       let err = '';
-      try { err = (await res.text()).slice(0, 800); } catch {}
+      try { err = await this._readErrorResponse(res, 800, options); } catch (error) { this._rethrowAbortedChat(error, options); }
       throw new Error(`${this.name} stream error ${res.status}: ${err || res.statusText}`);
     }
 
@@ -161,78 +164,84 @@ export class AzureOpenAIProvider extends BaseLLMProvider {
     }
     let reader;
     try {
-      reader = res.body.getReader();
+      reader = await this._openStreamReader(res, options);
     } catch (error) {
+      this._rethrowAbortedChat(error, options);
       throw this._askStreamTransportError(
         `${this.name} stream could not open its response body (${error?.message || 'reader unavailable'}).`,
       );
     }
-    const decoder = new TextDecoder();
-    let buffer = '';
-    let finalUsage = null;
-    let terminalFinishReason = '';
-    while (true) {
-      let chunk;
-      try {
-        chunk = await reader.read();
-      } catch (error) {
-        if (finalUsage) yield { type: 'usage', usage: finalUsage };
-        throw this._askStreamTransportError(
-          `${this.name} stream transport error (${error?.message || 'read failed'}).`,
-        );
-      }
-      const { done, value } = chunk;
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split('\n');
-      buffer = lines.pop() || '';
-      for (const line of lines) {
-        const trimmed = line.trim();
-        if (!trimmed || !trimmed.startsWith('data: ')) continue;
-        const payload = trimmed.slice(6);
-        if (payload === '[DONE]') {
-          if (finalUsage) yield { type: 'usage', usage: finalUsage };
-          yield {
-            type: 'done',
-            content: '',
-            ...(terminalFinishReason ? { finishReason: terminalFinishReason } : {}),
-          };
-          return;
-        }
-        let json;
+    try {
+      const decoder = new TextDecoder();
+      let buffer = '';
+      let finalUsage = null;
+      let terminalFinishReason = '';
+      while (true) {
+        let chunk;
         try {
-          json = JSON.parse(payload);
+          chunk = await reader.read();
         } catch (error) {
-          if (this._supportsInteractiveAskStreaming()) {
-            throw this._askStreamTransportError(
-              `${this.name} stream returned malformed JSON (${error?.message || 'parse failed'}).`,
-            );
-          }
-          console.warn(`[${this.name}] malformed SSE chunk skipped:`, payload?.slice(0, 120), error?.message);
-          continue;
-        }
-        if (json?.error) {
-          const detail = json.error?.message || json.error?.code || 'The provider reported a streaming error.';
-          throw this._askStreamTerminalError(`${this.name} stream error: ${detail}`);
-        }
-        if (json.usage) finalUsage = json.usage;
-        const choice = json.choices?.[0];
-        if (choice?.finish_reason === 'content_filter') {
-          throw this._askStreamTerminalError(
-            `${this.name} stream was blocked by the Azure content filter.`,
+          this._rethrowAbortedChat(error, options);
+          if (finalUsage) yield { type: 'usage', usage: finalUsage };
+          throw this._askStreamTransportError(
+            `${this.name} stream transport error (${error?.message || 'read failed'}).`,
           );
         }
-        if (choice?.finish_reason != null) terminalFinishReason = String(choice.finish_reason);
-        const delta = choice?.delta;
-        const reasoningDelta = delta?.reasoning_content || delta?.reasoning;
-        if (typeof reasoningDelta === 'string' && reasoningDelta) {
-          yield { type: 'reasoning', content: reasoningDelta };
+        const { done, value } = chunk;
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed || !trimmed.startsWith('data: ')) continue;
+          const payload = trimmed.slice(6);
+          if (payload === '[DONE]') {
+            if (finalUsage) yield { type: 'usage', usage: finalUsage };
+            yield {
+              type: 'done',
+              content: '',
+              ...(terminalFinishReason ? { finishReason: terminalFinishReason } : {}),
+            };
+            return;
+          }
+          let json;
+          try {
+            json = JSON.parse(payload);
+          } catch (error) {
+            if (this._supportsInteractiveAskStreaming()) {
+              throw this._askStreamTransportError(
+                `${this.name} stream returned malformed JSON (${error?.message || 'parse failed'}).`,
+              );
+            }
+            console.warn(`[${this.name}] malformed SSE chunk skipped:`, payload?.slice(0, 120), error?.message);
+            continue;
+          }
+          if (json?.error) {
+            const detail = json.error?.message || json.error?.code || 'The provider reported a streaming error.';
+            throw this._askStreamTerminalError(`${this.name} stream error: ${detail}`);
+          }
+          if (json.usage) finalUsage = json.usage;
+          const choice = json.choices?.[0];
+          if (choice?.finish_reason === 'content_filter') {
+            throw this._askStreamTerminalError(
+              `${this.name} stream was blocked by the Azure content filter.`,
+            );
+          }
+          if (choice?.finish_reason != null) terminalFinishReason = String(choice.finish_reason);
+          const delta = choice?.delta;
+          const reasoningDelta = delta?.reasoning_content || delta?.reasoning;
+          if (typeof reasoningDelta === 'string' && reasoningDelta) {
+            yield { type: 'reasoning', content: reasoningDelta };
+          }
+          if (delta?.content) yield { type: 'text', content: delta.content };
+          if (delta?.tool_calls) yield { type: 'tool_call', content: delta.tool_calls };
         }
-        if (delta?.content) yield { type: 'text', content: delta.content };
-        if (delta?.tool_calls) yield { type: 'tool_call', content: delta.tool_calls };
       }
+      if (finalUsage) yield { type: 'usage', usage: finalUsage };
+      throw this._askStreamTransportError(`${this.name} stream ended before the [DONE] sentinel.`);
+    } finally {
+      reader.close();
     }
-    if (finalUsage) yield { type: 'usage', usage: finalUsage };
-    throw this._askStreamTransportError(`${this.name} stream ended before the [DONE] sentinel.`);
   }
 }

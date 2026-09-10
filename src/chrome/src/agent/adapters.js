@@ -15734,6 +15734,34 @@ function isDirectBaiduSearchUrl(url) {
   return host === 'news.baidu.com' && /^\/ns(?:\/|$)/.test(path);
 }
 
+function isDirectBaiduTiebaUrl(url) {
+  let parts;
+  try {
+    parts = adapterUrlParts(url);
+  } catch (e) {
+    return false;
+  }
+  return Boolean(parts) && normalizedHostname(parts.parsed.hostname) === 'tieba.baidu.com';
+}
+
+function isBaiduTiebaUrl(url) {
+  if (isDirectBaiduTiebaUrl(url)) return true;
+  let parts;
+  try {
+    parts = adapterUrlParts(url);
+  } catch (e) {
+    return false;
+  }
+  if (!parts) return false;
+  const host = parts.parsed.hostname.toLowerCase();
+  if (host !== 'passport.baidu.com' && host !== 'wappass.baidu.com') return false;
+  const targets = [];
+  for (const param of ['backurl', 'u']) {
+    targets.push(...parts.parsed.searchParams.getAll(param));
+  }
+  return targets.length > 0 && targets.every(isDirectBaiduTiebaUrl);
+}
+
 function isBaiduSearchUrl(url) {
   if (isDirectBaiduSearchUrl(url)) return true;
   let parts;
@@ -15791,12 +15819,22 @@ const ADAPTERS = [
   {
     name: 'github',
     category: 'general',
-    revision: 3,
+    revision: 4,
     regions: ['global'],
-    jobs: ['publish-release', 'upload-release-assets', 'review-pull-request', 'resolve-review-threads'],
+    jobs: ['edit-file-and-commit', 'publish-release', 'upload-release-assets', 'review-pull-request', 'resolve-review-threads'],
     workflow: {
       schema: ADAPTER_WORKFLOW_SCHEMA,
       jobs: {
+        'edit-file-and-commit': {
+          description: 'Edit one repository file, commit it, and verify the committed blob exactly.',
+          template: 'publish',
+          stateChange: true,
+          requiresSubmission: true,
+          requiresLedger: false,
+          stages: ['access_gate', 'fill', 'review', 'commit', 'verify', 'deliver'],
+          successEvidence: ['A new commit in the intended repository contains the intended path with the exact verified editor content.'],
+          partialEvidence: ['The edited path, commit state, and exact content or submission verification blocker are reported without claiming success.'],
+        },
         'publish-release': {
           description: 'Prepare, publish, and verify a GitHub release.',
           template: 'publish',
@@ -15847,7 +15885,7 @@ const ADAPTERS = [
 - EDITING an existing release (URL pattern /<owner>/<repo>/releases/edit/<tag>): the file upload input is \`input#releases-upload\` (NOT a generic input[type="file"] — there are several on the page). Use \`upload_file({selector: "input#releases-upload", filePath: "..."})\` for each binary. After each upload, GitHub renders a small chip listing the filename in the "Attach binaries" area below the body editor — verify the chip appears with the correct filename before moving on. The commit button is green and says "Update release"; navigating away from the edit page WITHOUT clicking it discards the uploads. If you can't see "Update release" without scrolling, scroll down before clicking — don't navigate back to the dist folder thinking you need to re-fetch.
 - Files in a /tree/.../<folder> view (e.g. /tree/main/dist) can be downloaded via raw URLs of the form https://github.com/<owner>/<repo>/raw/<branch>/<path>. Once downloaded, the file is on local disk; do not re-download to "verify".
 - Creating a pull request: when no exact title was supplied, prefer the title field's Copilot button; for a blank description, prefer Copilot > "Summary". Review both suggestions and add missing rationale/testing context. Summary ignores existing description text, so preserve repository templates and user content; if Copilot is unavailable, draft normally. PR descriptions/comments use CodeMirror with a separate Markdown preview.
-- File browser: pressing "t" opens the fuzzy file finder (faster than navigating folders).
+- File browser: pressing "t" opens the fuzzy file finder (faster than navigating folders). When editing a repository file, verify the complete editor value before clicking "Commit changes"; then open or observe the new /commit/<sha> link so WebBrain can verify the raw file at that exact commit and reject duplicated or partial content.
 - Settings/admin actions often require re-entering the repo name as a confirmation — read the modal carefully.`,
   },
   {
@@ -16131,6 +16169,18 @@ const ADAPTERS = [
 - If wappass.baidu.com/static/captcha shows "百度安全验证", stop and ask the user to complete it manually. After completion, continue the encoded backurl and re-read the results; do not bypass the challenge, discard the query, or loop on the search URL.`,
   },
   {
+    name: 'baidu-tieba',
+    category: 'general',
+    matches: isBaiduTiebaUrl,
+    notes: `
+- Tieba thread pages use a custom Vue action bar. The first-floor转发、点赞、收藏和更多 controls are icon-based custom elements; the comment count remains a native link. Use the accessibility tree or interactive-element list and prefer semantic controls over screenshot coordinates.
+- Reply rows expose separate "赞", "回复", and "更多" controls. Re-read the active post or comment container after scrolling, switching "只看楼主", or changing 热门/正序/倒序; indices and visible rows can change.
+- The reply prompt and visible "关注楼主"/"关注本吧" controls may be custom wrappers; treat them as state-changing or login-gated actions and verify the resulting UI.
+- "点赞", "关注", "回复", and "发帖" change account or public state. Perform them only when explicitly requested, then verify the icon/count or resulting state; a successful mouse dispatch alone is not proof.
+- The first-floor action bar may be below the initial viewport, while images open a viewer when clicked. Do not click nearby image coordinates or repeat a coordinate after an unexpected viewer opens; close or go back, then re-read the page.
+- Public pages may require Baidu sign-in. If "登录", QR verification, or "百度安全验证" appears, stop for the user and do not bypass, retry, or claim that the requested action succeeded.`,
+  },
+  {
     name: 'slack',
     category: 'general',
     matches: (url) => /^https?:\/\/app\.slack\.com\//.test(url) || /\.slack\.com\//.test(url),
@@ -16165,6 +16215,24 @@ const ADAPTERS = [
   {
     name: 'twitter',
     category: 'general',
+    revision: 1,
+    regions: ['global'],
+    jobs: ['publish-post'],
+    workflow: {
+      schema: ADAPTER_WORKFLOW_SCHEMA,
+      jobs: {
+        'publish-post': {
+          description: 'Prepare, publish, and verify an X post.',
+          template: 'publish',
+          stateChange: true,
+          requiresSubmission: true,
+          requiresLedger: false,
+          stages: ['access_gate', 'fill', 'review', 'commit', 'verify', 'deliver'],
+          successEvidence: ['The reviewed post appears on the intended account with matching text and a stable status URL.'],
+          partialEvidence: ['The verified composer content and exact account, validation, publication, or verification blocker are reported.'],
+        },
+      },
+    },
     matches: (url) => /^https?:\/\/(www\.)?(twitter\.com|x\.com)\//.test(url),
     fullPageCapture: { infiniteScroll: isTwitterInfiniteScrollUrl },
     notes: `
@@ -16232,6 +16300,38 @@ const ADAPTERS = [
 - In Messaging, after filling the composer, the reliable send path is usually Enter. If the composer footer says "Press Enter to Send" or the send-options popover shows "Press Enter to Send", call press_keys({key:"Enter"}) from the composer. Do NOT keep scrolling to find a Send button that is already visible/implicit.
 - The three-dot / send-options control near the composer opens send preferences ("Press Enter to Send" vs "Click Send"); it is not the Send action. If you opened that popover by mistake, choose/keep "Press Enter to Send", close it if needed, then press Enter to send the focused composer.
 - Search has filters (People, Posts, Jobs, Companies) as tabs at the top.`,
+  },
+  {
+    name: 'bluesky',
+    category: 'general',
+    revision: 1,
+    regions: ['global'],
+    jobs: ['publish-post'],
+    workflow: {
+      schema: ADAPTER_WORKFLOW_SCHEMA,
+      jobs: {
+        'publish-post': {
+          description: 'Prepare, publish, and verify a Bluesky post.',
+          template: 'publish',
+          stateChange: true,
+          requiresSubmission: true,
+          requiresLedger: false,
+          stages: ['access_gate', 'fill', 'review', 'commit', 'verify', 'deliver'],
+          successEvidence: ['The reviewed post appears on the intended account with matching text and a stable post URL.'],
+          partialEvidence: ['The verified composer content and exact account, validation, publication, or verification blocker are reported.'],
+        },
+      },
+    },
+    matches: (url) => /^https?:\/\/(www\.)?bsky\.app\//.test(url),
+    notes: `
+- The composer opens from "Compose new post" (also the "New Post" button on wider layouts) and renders as a dialog over the current feed; the URL does not change while it is open.
+- The post body is a contenteditable rich-text editor, not a textarea. Use set_field / type_ax against the composer textbox ref rather than clicking into it by coordinates. Re-read it after filling and verify the complete text, mentions, link card, media, language, and account before publishing.
+- Images attach through a hidden <input type=file> behind "Add media to post" / "Add images". Do NOT click that control to open an OS file dialog — call upload_file with the file input's selector and the downloadId or absolute path, which attaches the file without any dialog.
+- Bluesky enforces a 300-character graphene limit and shows a live counter; a post over the limit leaves "Post" disabled rather than reporting an error.
+- Alt text is a separate per-image control. Add it only when the user asked for it.
+- "Post" (labelled "Publish post") commits. There is no <form> submit: the composer closes and the new post is inserted into the feed via XHR, so a closed composer alone is not proof.
+- Treat a cleared or closed composer as an intermediate signal only. Require one new bsky.app/profile/<account>/post/<id> link whose post card contains the complete reviewed text.
+- Report publication only after the post is reachable at its own /profile/<handle>/post/<id> URL under the intended handle, with the requested text and any attached image visible there.`,
   },
   {
     name: 'reddit',

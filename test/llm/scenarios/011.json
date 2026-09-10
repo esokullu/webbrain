@@ -7,7 +7,7 @@
     "url": "https://mastoturk.org/publish",
     "title": "MastoTurk"
   },
-  "description": "screenshot tool returned \"no vision capability\". Must pivot to AX tree, not retry screenshot.",
+  "description": "inspect_viewport returned \"no vision capability\". Must pivot to AX tree, not retry the capture.",
   "seed": [
     {
       "role": "user",
@@ -21,7 +21,7 @@
           "id": "call_e_17eb23",
           "type": "function",
           "function": {
-            "name": "screenshot",
+            "name": "inspect_viewport",
             "arguments": "{}"
           }
         }
@@ -30,7 +30,7 @@
     {
       "role": "tool",
       "tool_call_id": "call_e_17eb23",
-      "name": "screenshot",
+      "name": "inspect_viewport",
       "content": "{\"success\":false,\"error\":\"This model cannot see images: it has no vision capability and no dedicated vision model is configured. In provider settings, enable \\\"Model supports vision\\\" for the active provider or set a vision model. For now, use get_accessibility_tree, get_interactive_elements, or read_page to inspect the page.\"}"
     }
   ],
@@ -43,7 +43,7 @@
     },
     "antiPatterns": [
       {
-        "match": "screenshot({})",
+        "match": "inspect_viewport({})",
         "reason": "Retrying a tool that just declared it cannot work — gpt-4o trace xpx9t9 made this mistake."
       }
     ],

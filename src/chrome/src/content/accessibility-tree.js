@@ -155,6 +155,21 @@
       ['.publish-btn', '发布'],
       ['.publish-button', '发布'],
     ],
+    baiduTieba: [
+      // Match the stable action wrapper, then inspect SVG href/xlink:href via
+      // the DOM API because namespaced attribute selectors vary by engine.
+      ['.pc-pb-first-floor-interactive .action-item', '转发', '#share_pb'],
+      ['.pc-pb-first-floor-interactive .action-item', '点赞', '#agree_pb'],
+      ['.pc-pb-first-floor-interactive .action-item', '收藏', '#collect'],
+      ['.pc-pb-first-floor-interactive .more-action', '更多', '#ellipsis'],
+      ['.pc-pb-comments-desc .zan-container-dark', '赞', '#agree_comment'],
+      ['.pc-pb-comments-desc .reply-container', '回复', '#comment_comment'],
+      ['.pc-pb-comments-desc .more-action', '更多', '#ellipsis_comment'],
+      ['.follow-person-btn', '关注楼主'],
+      ['.follow-forum-btn', '关注本吧'],
+      ['.pc-pb-reply-box', '回复'],
+      ['.pc-pb-reply-box .publish-btn', '发布'],
+    ],
   };
 
   function currentSiteInteractionConfig() {
@@ -162,6 +177,7 @@
     const onHost = (domain) => hostname === domain || hostname.endsWith(`.${domain}`);
     if (onHost('bilibili.com')) return { key: 'bilibili', rules: SITE_INTERACTION_RULES.bilibili };
     if (onHost('xiaohongshu.com')) return { key: 'xiaohongshu', rules: SITE_INTERACTION_RULES.xiaohongshu };
+    if (onHost('tieba.baidu.com')) return { key: 'baiduTieba', rules: SITE_INTERACTION_RULES.baiduTieba };
     // LinkedIn's interop shell renders major surfaces (the post composer
     // dialog among them) inside the open #interop-outlet shadow root. No
     // custom interaction rules needed — piercing alone makes the dialog's
@@ -172,11 +188,18 @@
 
   function getSiteInteractionDescriptor(el) {
     if (!el || typeof el.matches !== 'function') return null;
-    for (const [selector, label] of currentSiteInteractionConfig().rules) {
+    for (const [selector, label, iconHref] of currentSiteInteractionConfig().rules) {
       try {
         if (!el.matches(selector)) continue;
       } catch {
         continue;
+      }
+      if (iconHref) {
+        const hasIcon = Array.from(el.querySelectorAll?.('use') || []).some(use => (
+          use.getAttribute('href') === iconHref
+          || use.getAttribute('xlink:href') === iconHref
+        ));
+        if (!hasIcon) continue;
       }
       const explicit = String(
         el.getAttribute('aria-label') || el.getAttribute('title') || ''
@@ -1282,9 +1305,31 @@
     return null;
   }
 
+  function isSingleMessageGmailThread(conversationRoot) {
+    if (!conversationRoot || typeof conversationRoot.querySelectorAll !== 'function') return false;
+    try {
+      const gmailMessages = Array.from(conversationRoot.querySelectorAll('.adn,.ads,[data-message-id]'));
+      if (gmailMessages.length) {
+        const topLevelGmailMessages = gmailMessages.filter(msg => (
+          !msg.closest?.('.a3s,.ii') && (!msg.parentElement || !msg.parentElement.closest?.('.adn,.ads,[data-message-id]'))
+        ));
+        return topLevelGmailMessages.length === 1;
+      }
+      const semanticMessages = Array.from(conversationRoot.querySelectorAll('[role="article"]'));
+      if (semanticMessages.length) {
+        const topLevelSemantic = semanticMessages.filter(msg => (
+          !msg.closest?.('.a3s,.ii') && (!msg.parentElement || !msg.parentElement.closest?.('[role="article"]'))
+        ));
+        return topLevelSemantic.length === 1;
+      }
+    } catch (e) {}
+    return false;
+  }
+
   function detectGmailConversationExpansionState(conversationRoot) {
     if (!isGmailConversationRoute() || !conversationRoot) return null;
     let collapsed = false;
+    let scanned = false;
     try {
       for (const control of conversationRoot.querySelectorAll('button,[role="button"]')) {
         if (!isVisible(control)) continue;
@@ -1296,8 +1341,16 @@
         if (state === 'expanded') return state;
         if (state === 'collapsed') collapsed = true;
       }
+      scanned = true;
     } catch (e) {}
-    return collapsed ? 'collapsed' : null;
+    if (collapsed) return 'collapsed';
+    // A thread with a single message exposes neither Expand all nor Collapse
+    // all. Report that as its own state so the read-completeness guard can tell
+    // "nothing to expand" apart from "not checked yet"; conflating the two left
+    // `done` permanently blocked on threads that were already fully readable.
+    // Only a scan that ran to completion on a verified single-message thread
+    // may report it; a multi-message thread missing controls must stay unconfirmed.
+    return (scanned && isSingleMessageGmailThread(conversationRoot)) ? 'not_applicable' : null;
   }
 
   function findGmailConversationExpandAll(conversationRoot) {

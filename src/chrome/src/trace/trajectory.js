@@ -87,6 +87,9 @@ function markEnd(row, data) {
   const failed = data?.ok === false || FAILED_END_STATUSES.includes(data?.status);
   if (failed) row.status = 'error';
   else if (row.status !== 'error') row.status = 'done';
+  if (typeof data?.handoffOutcome === 'string' && data.handoffOutcome) {
+    row.handoffOutcome = data.handoffOutcome;
+  }
   if (data?.code && failed) addUnique(row.errorCodes, data.code, MAX_ERRORS);
   if (data?.repaired === true) row.repaired = true;
 }

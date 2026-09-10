@@ -6,6 +6,21 @@
 
 import { combineImages } from './image-utils.js';
 
+function readProseMirrorText(el) {
+  if (!el?.isContentEditable || !el.classList?.contains('ProseMirror')) return null;
+  // Paragraphs are document line breaks, not innerText's visual spacing.
+  // ProseMirror's final BR is a caret placeholder, not another hard break.
+  const read = node => {
+    if (node.nodeType === 3) return node.nodeValue || '';
+    if (node.nodeType !== 1) return '';
+    if (node.tagName === 'BR') return node.classList?.contains('ProseMirror-trailingBreak') ? '' : '\n';
+    return Array.from(node.childNodes).map(read).join('');
+  };
+  const children = Array.from(el.childNodes);
+  if (!children.every(node => node.nodeType === 1 && node.tagName === 'P')) return null;
+  return children.map(read).join('\n');
+}
+
 const FULL_PAGE_SCROLL_SETTLE_MS = 100;
 const FULL_PAGE_STABLE_PASSES = 2;
 const FULL_PAGE_MAX_DISCOVERY_STEPS = 100;
@@ -2920,20 +2935,66 @@ export class CDPClient {
           ['.follow-wrapper', '关注'], ['.follow-btn', '关注'],
           ['.follow-button', '关注'], ['.send-btn', '发布评论'],
           ['.publish-btn', '发布'], ['.publish-button', '发布'],
+        ] : onHost('tieba.baidu.com') ? [
+          ['.pc-pb-first-floor-interactive .action-item', '转发', '#share_pb'],
+          ['.pc-pb-first-floor-interactive .action-item', '点赞', '#agree_pb'],
+          ['.pc-pb-first-floor-interactive .action-item', '收藏', '#collect'],
+          ['.pc-pb-first-floor-interactive .more-action', '更多', '#ellipsis'],
+          ['.pc-pb-comments-desc .zan-container-dark', '赞', '#agree_comment'],
+          ['.pc-pb-comments-desc .reply-container', '回复', '#comment_comment'],
+          ['.pc-pb-comments-desc .more-action', '更多', '#ellipsis_comment'],
+          ['.follow-person-btn', '关注楼主'],
+          ['.follow-forum-btn', '关注本吧'],
+          ['.pc-pb-reply-box', '回复'],
+          ['.pc-pb-reply-box .publish-btn', '发布'],
         ] : [];
-        const SELECTORS = [
+        const NATIVE_SELECTORS = [
           'a[href]', 'button', 'input:not([type="hidden"])', 'textarea', 'select',
           '[role="button"]', '[role="link"]', '[role="tab"]', '[role="menuitem"]',
           '[role="textbox"]', '[role="combobox"]', '[role="searchbox"]',
           '[contenteditable=""]', '[contenteditable="true"]', '[contenteditable="plaintext-only"]',
-          '[onclick]', '[data-action]', 'summary', 'label',
-          ...SITE_RULES.map(([selector]) => selector)
+          '[onclick]', '[data-action]', 'summary', 'label'
         ];
+        const SELECTORS = [...NATIVE_SELECTORS, ...SITE_RULES.map(([selector]) => selector)];
+
+        function matchesSiteRule(el, [selector, , iconHref]) {
+          try {
+            if (!el.matches(selector)) return false;
+          } catch (e) {
+            return false;
+          }
+          if (!iconHref) return true;
+          return Array.from(el.querySelectorAll('use')).some((use) => (
+            use.getAttribute('href') === iconHref
+            || use.getAttribute('xlink:href') === iconHref
+          ));
+        }
+
+        function matchesAnySiteSelector(el) {
+          return SITE_RULES.some(([selector]) => {
+            try {
+              return el.matches(selector);
+            } catch (e) {
+              return false;
+            }
+          });
+        }
+
+        function matchesNativeInteractive(el) {
+          return NATIVE_SELECTORS.some((selector) => {
+            try {
+              return el.matches(selector);
+            } catch (e) {
+              return false;
+            }
+          });
+        }
 
         function interactiveText(el) {
-          for (const [selector, label] of SITE_RULES) {
+          for (const rule of SITE_RULES) {
+            const [selector, label] = rule;
             try {
-              if (!el.matches(selector)) continue;
+              if (!matchesSiteRule(el, rule)) continue;
             } catch (e) {
               continue;
             }
@@ -2977,6 +3038,7 @@ export class CDPClient {
         let index = 0;
         all.forEach((el) => {
           if (!isVisiblyInteractive(el)) return;
+          if (!matchesNativeInteractive(el) && matchesAnySiteSelector(el) && !SITE_RULES.some(rule => matchesSiteRule(el, rule))) return;
           const rect = el.getBoundingClientRect();
           elements.push({
             index: index++,
@@ -4211,7 +4273,8 @@ export class CDPClient {
       if (!el || el.nodeType !== 1 || !el.isConnected) return null;
       const tag = String(el.tagName || '').toUpperCase();
       if (!(el.isContentEditable || ['INPUT', 'TEXTAREA'].includes(tag))) return null;
-      const value = String(el.isContentEditable ? (el.textContent || '') : (el.value || ''));
+      const semantic = (${readProseMirrorText.toString()})(el);
+      const value = semantic !== null ? semantic : String(el.isContentEditable ? (el.textContent || '') : (el.value || ''));
       return (${TEXT_ENTRY_SIGNATURE_SOURCE})(value);
     }`;
     if (Number.isInteger(nodeId) && nodeId > 0) {
@@ -4261,11 +4324,25 @@ export class CDPClient {
         if (!el || !el.isConnected) return null;
         const tag = String(el.tagName || '').toUpperCase();
         if (!(el.isContentEditable || ['INPUT', 'TEXTAREA'].includes(tag))) return null;
-        const value = String(el.isContentEditable ? (el.textContent || '') : (el.value || ''));
+        const semantic = (${readProseMirrorText.toString()})(el);
+        const value = semantic !== null ? semantic : String(el.isContentEditable ? (el.textContent || '') : (el.value || ''));
         return (${TEXT_ENTRY_SIGNATURE_SOURCE})(value);
       })()
     `).catch(() => null);
     return typeof result?.result?.value === 'string' ? result.result.value : null;
+  }
+
+  async selectAllModifier(tabId) {
+    let platform = '';
+    try {
+      const result = await this.evaluate(tabId, `(() => navigator.userAgentData?.platform || navigator.platform || '')()`);
+      platform = String(result?.result?.value || '');
+    } catch {}
+    if (!platform) {
+      try { platform = String(globalThis.navigator?.userAgentData?.platform || globalThis.navigator?.platform || ''); } catch {}
+    }
+    // CDP modifier bits: Alt=1, Control=2, Meta=4, Shift=8.
+    return /mac/i.test(platform) ? 4 : 2;
   }
 
   /**
@@ -4291,7 +4368,9 @@ export class CDPClient {
       const tag = String(el.tagName || '').toUpperCase();
       const typeable = el.isContentEditable || ['INPUT', 'TEXTAREA'].includes(tag);
       if (!typeable) return { found: true, verified: false };
-      const value = String(el.isContentEditable ? (el.textContent || '') : (el.value || ''));
+      const semantic = (${readProseMirrorText.toString()})(el);
+      if (semantic !== null) expected = expected.replace(/\\r\\n?/g, '\\n');
+      const value = semantic !== null ? semantic : String(el.isContentEditable ? (el.textContent || '') : (el.value || ''));
       const signatureOf = ${TEXT_ENTRY_SIGNATURE_SOURCE};
       const exactInsertion = () => {
         if (value.length > ${TEXT_ENTRY_PROOF_MAX_CHARS}) return false;
@@ -4345,7 +4424,7 @@ export class CDPClient {
     const result = await this.evaluate(tabId, `
       (() => {
         const selector = ${selectorJSON};
-        const expected = ${expectedJSON};
+        let expected = ${expectedJSON};
         const shouldClear = ${clear === true};
         const beforeSignature = ${JSON.stringify(typeof beforeSignature === 'string' ? beforeSignature : '')};
         const queryDeep = (root) => {
@@ -4371,7 +4450,9 @@ export class CDPClient {
         const tag = String(el.tagName || '').toUpperCase();
         const typeable = el.isContentEditable || ['INPUT', 'TEXTAREA'].includes(tag);
         if (!typeable) return { found: true, verified: false };
-        const value = String(el.isContentEditable ? (el.textContent || '') : (el.value || ''));
+        const semantic = (${readProseMirrorText.toString()})(el);
+        if (semantic !== null) expected = expected.replace(/\\r\\n?/g, '\\n');
+        const value = semantic !== null ? semantic : String(el.isContentEditable ? (el.textContent || '') : (el.value || ''));
         const signatureOf = ${TEXT_ENTRY_SIGNATURE_SOURCE};
         const exactInsertion = () => {
           if (value.length > ${TEXT_ENTRY_PROOF_MAX_CHARS}) return false;
@@ -4630,6 +4711,23 @@ export class CDPClient {
     if (!info) return { success: false, dispatched: false, noDispatch: true, error: 'Element not found' };
     if (info.error) return { success: false, dispatched: false, noDispatch: true, error: info.error };
     const dispatchBindingToken = String(resolveOptions?.dispatchBindingToken || '');
+
+    // Empty appends mutate nothing on text-entry controls: inserting zero
+    // characters cannot change any value, so report a proven no-op without
+    // dispatching. Native <select> elements are excluded: choosing their
+    // empty-valued option below IS the requested mutation. (A clear:true
+    // call still empties the field and takes the verified path.) Without
+    // this, the append proof — which rejects an empty expected string —
+    // reports uncertainty debt that blocks later legitimate typing.
+    if (String(text ?? '') === '' && clear !== true && info?.tag !== 'SELECT') {
+      return {
+        success: true,
+        dispatched: false,
+        noDispatch: true,
+        noop: true,
+        method: 'cdp-insert-text',
+      };
+    }
 
     // ── <select> fast-path ──────────────────────────────────────────────
     // Native <select> elements CANNOT be typed into via Input.insertText.
@@ -4924,9 +5022,11 @@ export class CDPClient {
     if (clear) {
       try {
         // Select all
+        const selectAllModifiers = await this.selectAllModifier(tabId);
+        throwIfAborted();
         dispatched = true;
         await dispatchKeyPress({
-          key: 'a', code: 'KeyA', modifiers: 2 /* Ctrl */, windowsVirtualKeyCode: 65,
+          key: 'a', code: 'KeyA', modifiers: selectAllModifiers, windowsVirtualKeyCode: 65,
         });
         // Delete selection
         await dispatchKeyPress({
@@ -4934,103 +5034,48 @@ export class CDPClient {
         });
       } catch (e) {
         if (actionExpired()) throwIfAborted();
-        // best effort
+        return {
+          success: false,
+          dispatched,
+          ...(dispatched ? {} : { noDispatch: true }),
+          verified: false,
+          mutationMayHaveOccurred: dispatched,
+          error: `Could not safely clear the text field: ${e?.message || String(e)}`,
+        };
+      }
+      const cleared = await this.verifyTextEntry(tabId, {
+        selector,
+        nodeId: info.nodeId,
+        text: '',
+        clear: true,
+      });
+      throwIfAborted();
+      if (cleared !== true) {
+        return {
+          success: false,
+          dispatched: true,
+          verified: false,
+          mutationMayHaveOccurred: true,
+          error: 'The existing field value could not be proven empty, so no replacement text was inserted.',
+        };
       }
     }
 
     // Type via Input.insertText — atomic, fires beforeinput/input correctly.
-    let typed = false;
     try {
       dispatched = true;
       markDispatch();
       await this.sendCommand(tabId, 'Input.insertText', { text });
       throwIfAborted();
-      typed = true;
     } catch (e) {
       if (actionExpired()) throwIfAborted();
-      // fall through to JS setter
-    }
-
-    if (!typed) {
-      // JS fallback using native setter. Properly escape via JSON.
-      const selectorJSON = JSON.stringify(selector);
-      const textJSON = JSON.stringify(text);
-      const targetTokenJSON = JSON.stringify(dispatchBindingToken);
-      dispatched = true;
-      markDispatch();
-      const result = await this.evaluate(tabId, `
-        (() => {
-          const actionDeadlineAt = ${deadlineAt};
-          const deadlineExpired = () => actionDeadlineAt > 0 && Date.now() >= actionDeadlineAt;
-          if (deadlineExpired()) return { success: false, deadlineExpired: true, error: 'Text action deadline expired' };
-          const sel = ${selectorJSON};
-          const txt = ${textJSON};
-          const targetToken = ${targetTokenJSON};
-          const queryDeep = (root) => {
-            try { const h = root.querySelector(sel); if (h) return h; } catch (e) { return null; }
-            const w = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT);
-            let n = w.currentNode;
-            while (n) { if (n.shadowRoot) { const i = queryDeep(n.shadowRoot); if (i) return i; } n = w.nextNode(); }
-            return null;
-          };
-          const el = queryDeep(document);
-          if (!el) return { success: false, error: 'Element not found (fallback)' };
-          if (targetToken && el[Symbol.for('webbrain.dispatchBinding')] !== targetToken) {
-            return { success: false, dispatched: false, noDispatch: true, retryable: true, error: 'The selector target changed after safety preflight' };
-          }
-          if (deadlineExpired()) return { success: false, deadlineExpired: true, error: 'Text action deadline expired' };
-          try { el.focus(); } catch (e) {}
-
-          if (el.isContentEditable) {
-            if (deadlineExpired()) return { success: false, deadlineExpired: true, error: 'Text action deadline expired' };
-            if (${clear}) el.textContent = '';
-            el.textContent += txt;
-            el.dispatchEvent(new InputEvent('input', { bubbles: true, data: txt }));
-            const r = el.getBoundingClientRect();
-            return {
-              success: true,
-              method: 'js-contenteditable',
-              value: el.textContent.slice(0, 100),
-              rect: { x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height) },
-            };
-          }
-
-          const proto = el instanceof HTMLTextAreaElement
-            ? HTMLTextAreaElement.prototype
-            : HTMLInputElement.prototype;
-          const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set;
-          const newVal = (${clear} ? '' : (el.value || '')) + txt;
-          if (deadlineExpired()) return { success: false, deadlineExpired: true, error: 'Text action deadline expired' };
-          if (setter) setter.call(el, newVal); else el.value = newVal;
-
-          el.dispatchEvent(new Event('input', { bubbles: true }));
-          el.dispatchEvent(new Event('change', { bubbles: true }));
-          const r = el.getBoundingClientRect();
-          return {
-            success: true,
-            method: 'js-setter',
-            value: (el.value || '').slice(0, 100),
-            rect: { x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height) },
-          };
-        })()
-      `);
-      throwIfAborted();
-      const fallbackResult = result?.result?.value || { success: false, error: 'Type failed' };
-      if (fallbackResult.success === false && fallbackResult.dispatched == null) {
-        fallbackResult.dispatched = dispatched;
-      }
-      if (fallbackResult.success === true) {
-        // Only ever assert a positive proof — see verifyTextEntry.
-        const fallbackVerified = await this.verifyTextEntry(tabId, {
-          selector,
-          nodeId: info.nodeId,
-          text,
-          clear,
-          beforeSignature,
-        });
-        if (fallbackVerified === true) fallbackResult.verified = true;
-      }
-      return fallbackResult;
+      return {
+        success: false,
+        dispatched: true,
+        verified: false,
+        mutationMayHaveOccurred: true,
+        error: `Text insertion outcome became uncertain: ${e?.message || String(e)}`,
+      };
     }
 
     const verified = await this.verifyTextEntry(tabId, {
@@ -5040,9 +5085,18 @@ export class CDPClient {
       clear,
       beforeSignature,
     });
+    if (verified !== true) {
+      return {
+        success: false,
+        dispatched: true,
+        verified: false,
+        mutationMayHaveOccurred: true,
+        error: 'Text was inserted, but the complete settled field value could not be verified exactly.',
+      };
+    }
     return {
       success: true,
-      ...(verified === true ? { verified: true } : {}),
+      verified: true,
       method: 'cdp-insert-text',
       tag: info.tag,
       rect: {

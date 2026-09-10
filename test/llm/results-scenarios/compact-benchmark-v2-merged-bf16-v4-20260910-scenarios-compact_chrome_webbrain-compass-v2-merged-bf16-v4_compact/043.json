@@ -1,0 +1,41 @@
+{
+  "id": "043",
+  "category": "counter-polarity",
+  "description": "X counter shows \"0\" — text is exactly at the 280 limit. Safe (but barely).",
+  "mode": "act",
+  "browser": "chrome",
+  "latencyMs": 830,
+  "error": null,
+  "firstToolCall": {
+    "name": "get_accessibility_tree",
+    "args": {
+      "filter": "visible"
+    }
+  },
+  "toolCallSource": "tool_calls",
+  "expected": {
+    "idealNextToolCall": {
+      "name": "click",
+      "args": {
+        "text": "Post"
+      }
+    },
+    "antiPatterns": [
+      {
+        "match": "set_field({ref_id:\"...\", clear:true, text:\"...\"})",
+        "reason": "0 means exactly at limit, which is allowed."
+      }
+    ],
+    "successRubric": "X allows posts at exactly the limit (counter shows 0 chars remaining). Submit."
+  },
+  "matchedAntiPattern": null,
+  "verdict": "other",
+  "scoreNote": null,
+  "finishReason": "tool_calls",
+  "content": "<function name=\"get_accessibility_tree\"><param name=\"filter\">visible</param></function>",
+  "usage": {
+    "prompt_tokens": 9779,
+    "completion_tokens": 17,
+    "total_tokens": 9796
+  }
+}

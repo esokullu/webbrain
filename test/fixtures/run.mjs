@@ -24,6 +24,7 @@ import {
   getSelectionShortcutLocalization,
 } from '../../src/chrome/src/selection-shortcut-i18n.js';
 import { registerRichTextToolbarFixtures } from './rich-text-toolbar.mjs';
+import { registerMessageRecipientNavigationFixtures } from './message-recipient-navigation.mjs';
 
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -4655,6 +4656,8 @@ test('Firefox: type_text rejects disabled indexed text input fallback', async (p
   if (value !== 'Locked') throw new Error(`expected disabled value to remain unchanged, got: ${value}`);
 });
 
+
+registerMessageRecipientNavigationFixtures({ test, firefoxTest, setupContentHtml, call, Agent, FirefoxAgent });
 
 registerRichTextToolbarFixtures({
   test,

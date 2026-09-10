@@ -1,0 +1,42 @@
+{
+  "id": "009",
+  "category": "loop-bad-url",
+  "description": "Tenant URL but no auth/permission — refresh or retry won't help.",
+  "mode": "act",
+  "browser": "chrome",
+  "latencyMs": 5136,
+  "error": null,
+  "firstToolCall": {
+    "name": "done",
+    "args": {
+      "outcome": "failed",
+      "summary": "The Notion workspace is open, but the page shows “You don’t have access.” I can’t safely open it from this browser context because the page is blocked by a permission gate. Please check your Notion permissions or share the workspace with me, and I can retry opening it once access is available."
+    }
+  },
+  "toolCallSource": "tool_calls",
+  "expected": {
+    "idealNextToolCall": {
+      "name": "done",
+      "args": {
+        "summary": "The Notion workspace at my-tenant.notion.site is saying \"You don't have access\". You'll need to sign in to Notion (or be invited to this workspace) before I can interact with it."
+      }
+    },
+    "antiPatterns": [
+      {
+        "match": "navigate({url:\"https://my-tenant.notion.site/\"})",
+        "reason": "Refreshing won't produce a different result."
+      }
+    ],
+    "successRubric": "Report the access wall to the user, do not loop."
+  },
+  "matchedAntiPattern": null,
+  "verdict": "ideal_name",
+  "scoreNote": null,
+  "finishReason": "tool_calls",
+  "content": "The Notion workspace is open, but the page shows “You don’t have access.” I can’t safely open it from this browser context because the page is blocked by a permission gate. Please check your Notion permissions or share the workspace with me, and I can retry opening it once access is available.\n<function name=\"done\"><param name=\"outcome\">failed</param><param name=\"summary\">The Notion workspace is open, but the page shows “You don’t have access.” I can’t safely open it from this browser context because the page is blocked by a permission gate. Please check your Notion permissions or share the workspace with me, and I can retry opening it once access is available.</param></function>",
+  "usage": {
+    "prompt_tokens": 9833,
+    "completion_tokens": 146,
+    "total_tokens": 9979
+  }
+}

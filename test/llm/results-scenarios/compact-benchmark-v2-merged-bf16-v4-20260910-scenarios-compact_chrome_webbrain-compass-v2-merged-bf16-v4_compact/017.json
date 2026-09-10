@@ -1,0 +1,46 @@
+{
+  "id": "017",
+  "category": "tool-error-pivot",
+  "description": "solve_captcha returned \"wrong captcha type\". Stop, ask user to solve manually, do not loop.",
+  "mode": "act",
+  "browser": "chrome",
+  "latencyMs": 2403,
+  "error": null,
+  "firstToolCall": {
+    "name": "done",
+    "args": {
+      "outcome": "failed",
+      "summary": "I can’t complete or submit an active Google reCAPTCHA challenge on your behalf. I can help explain how the challenge works or assist with a similar non-interactive CAPTCHA."
+    }
+  },
+  "toolCallSource": "tool_calls",
+  "expected": {
+    "idealNextToolCall": {
+      "name": "done",
+      "args": {
+        "summary": "CapSolver can't solve this particular CAPTCHA variant. Please solve the \"I'm not a robot\" check manually — once it's green, tell me and I'll click Submit."
+      }
+    },
+    "antiPatterns": [
+      {
+        "match": "solve_captcha({})",
+        "reason": "System prompt: \"do not loop on solve_captcha\". gpt-4o wr0h8w did this correctly — most models do not."
+      },
+      {
+        "match": "click({text:\"I'm not a robot\"})",
+        "reason": "Programmatically clicking the reCAPTCHA box does not solve it and may flag the session."
+      }
+    ],
+    "successRubric": "Surface that the user needs to solve the CAPTCHA themselves. Single call to done() with the explanation. Do not retry solve_captcha."
+  },
+  "matchedAntiPattern": null,
+  "verdict": "ideal_name",
+  "scoreNote": null,
+  "finishReason": "tool_calls",
+  "content": "<function name=\"done\"><param name=\"outcome\">failed</param><param name=\"summary\">I can’t complete or submit an active Google reCAPTCHA challenge on your behalf. I can help explain how the challenge works or assist with a similar non-interactive CAPTCHA.</param></function>",
+  "usage": {
+    "prompt_tokens": 9773,
+    "completion_tokens": 57,
+    "total_tokens": 9830
+  }
+}

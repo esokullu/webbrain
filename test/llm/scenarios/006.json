@@ -61,7 +61,7 @@
           "id": "call_9_3c0cb3",
           "type": "function",
           "function": {
-            "name": "new_tab",
+            "name": "fetch_url",
             "arguments": "{\"url\":\"https://mastodon.turk\"}"
           }
         }
@@ -70,8 +70,8 @@
     {
       "role": "tool",
       "tool_call_id": "call_9_3c0cb3",
-      "name": "new_tab",
-      "content": "{\"success\":true,\"tabId\":999,\"url\":\"https://mastodon.turk\",\"groupId\":null}"
+      "name": "fetch_url",
+      "content": "{\"success\":false,\"error\":\"fetch_url: DNS lookup failed for mastodon.turk (NXDOMAIN).\"}"
     },
     {
       "role": "user",
@@ -91,8 +91,8 @@
         "reason": "4th retry — exact gpt-4o failure pattern."
       },
       {
-        "match": "new_tab({url:\"https://mastodon.turk\"})",
-        "reason": "Same URL in another tab — still a retry."
+        "match": "fetch_url({url:\"https://mastodon.turk\"})",
+        "reason": "Same URL via another tool — still a retry."
       }
     ],
     "successRubric": "After 3 failed attempts on the same URL, abandon it. Clarify with user OR search for the real URL."

@@ -173,7 +173,7 @@ export class AwsBedrockProvider extends BaseLLMProvider {
     return payload;
   }
 
-  async _signAndFetch({ url, host, path }, body) {
+  async _signAndFetch({ url, host, path }, body, options = {}) {
     const method = 'POST';
     const service = 'bedrock';
 
@@ -231,6 +231,7 @@ export class AwsBedrockProvider extends BaseLLMProvider {
       method,
       headers: finalHeaders,
       body: payload,
+      signal: options.signal,
     });
   }
 
@@ -288,19 +289,21 @@ export class AwsBedrockProvider extends BaseLLMProvider {
 
     let res;
     try {
-      res = await this._signAndFetch(endpoint, payload);
+      res = await this._signAndFetch(endpoint, payload, options);
     } catch (e) {
+      this._rethrowAbortedChat(e, options);
       throw new Error(`${this.name} network error — could not reach ${endpoint.url} (${e.message}).`);
     }
 
     if (!res.ok) {
       let err = '';
-      try { err = (await res.text()).slice(0, 1200); } catch {}
+      try { err = await this._readErrorResponse(res, 1200, options); } catch (error) { this._rethrowAbortedChat(error, options); }
       throw new Error(`${this.name} error ${res.status}: ${err || res.statusText}`);
     }
 
     let data;
-    try { data = await res.json(); } catch {
+    try { data = await res.json(); } catch (error) {
+      this._rethrowAbortedChat(error, options);
       throw new Error(`${this.name} returned invalid JSON.`);
     }
 

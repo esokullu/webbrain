@@ -185,7 +185,7 @@ while (steps < maxSteps) {
 |---|---|---|
 | `get_accessibility_tree`, `click_ax`, `type_ax`, `set_field`, `hover` | message de script de contenu | Contexte de page injecté |
 | `click`, `type_text`, `press_keys`, `scroll`, `read_page`, etc. | message de script de contenu | Contexte de page injecté |
-| `navigate`, `new_tab`, `go_back`, `go_forward` | API `chrome.tabs` / `browser.tabs` | Script d'arrière-plan |
+| `navigate`, `go_back`, `go_forward` | API `chrome.tabs` / `browser.tabs` | Script d'arrière-plan |
 | `fetch_url`, `research_url`, `list_downloads`, etc. | `network-tools.js` | Service worker |
 | Outils de compétence activés | Registre `skills.js` + `executeHttpSkillTool()` | Service worker |
 | `done` | agent.js — capture une capture d'écran de vérification + sonde d'état de page | Service worker + CDP |

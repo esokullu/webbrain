@@ -1,4 +1,6 @@
+import { getRequestTimeoutMs } from './fetch-timeout.js';
 import { inferContextWindow, resolveMaxOutputTokens } from './context-windows.js';
+import { createResponseReader, readResponseText, responseAbortError } from '../network/response-body.js';
 import {
   addConfiguredMaxTokens,
   mapProviderMessages,
@@ -36,6 +38,27 @@ export class BaseLLMProvider {
    */
   async *chatStream(messages, options = {}) {
     throw new Error('chatStream() not implemented');
+  }
+
+  _rethrowAbortedChat(error, options = {}) {
+    if (options.signal?.aborted) throw responseAbortError(options.signal);
+    if (error?.name === 'AbortError' || error?.code === 'response_body_timeout') throw error;
+  }
+
+  async _openStreamReader(response, options = {}) {
+    return createResponseReader(response, {
+      signal: options.signal,
+      idleTimeoutMs: options.streamIdleTimeoutMs ?? await getRequestTimeoutMs(),
+    });
+  }
+
+  async _readErrorResponse(response, maxBytes = 1200, options = {}) {
+    const read = await readResponseText(response, {
+      maxBytes,
+      signal: options.signal,
+      idleTimeoutMs: options.streamIdleTimeoutMs ?? await getRequestTimeoutMs(),
+    });
+    return read.text;
   }
 
   /**
@@ -153,6 +176,7 @@ export class BaseLLMProvider {
         !Object.hasOwn(message, 'webbrainPlannerClarification')
         && !Object.hasOwn(message, 'webbrainAppOwned')
         && !Object.hasOwn(message, 'webbrainAppOwnedKind')
+        && !Object.hasOwn(message, 'webbrainSelectionScopeRestored')
       )) {
         return message;
       }
@@ -160,6 +184,7 @@ export class BaseLLMProvider {
         webbrainPlannerClarification: _plannerClarification,
         webbrainAppOwned: _appOwned,
         webbrainAppOwnedKind: _appOwnedKind,
+        webbrainSelectionScopeRestored: _selectionScopeRestored,
         ...providerMessage
       } = message;
       return providerMessage;

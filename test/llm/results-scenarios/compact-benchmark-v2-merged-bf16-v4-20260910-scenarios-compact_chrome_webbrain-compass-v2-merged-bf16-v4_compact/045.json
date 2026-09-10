@@ -1,0 +1,41 @@
+{
+  "id": "045",
+  "category": "counter-polarity",
+  "description": "LinkedIn shows \"1234/3000\" — fits. Submit.",
+  "mode": "act",
+  "browser": "chrome",
+  "latencyMs": 930,
+  "error": null,
+  "firstToolCall": {
+    "name": "get_accessibility_tree",
+    "args": {
+      "filter": "visible"
+    }
+  },
+  "toolCallSource": "tool_calls",
+  "expected": {
+    "idealNextToolCall": {
+      "name": "click",
+      "args": {
+        "text": "Post"
+      }
+    },
+    "antiPatterns": [
+      {
+        "match": "set_field({ref_id:\"...\", text:\"...\"})",
+        "reason": "1234 is below the 3000 limit — safe."
+      }
+    ],
+    "successRubric": "LinkedIn ratio format (used/limit). 1234 < 3000 — submit."
+  },
+  "matchedAntiPattern": null,
+  "verdict": "other",
+  "scoreNote": null,
+  "finishReason": "tool_calls",
+  "content": "<function name=\"get_accessibility_tree\"><param name=\"filter\">visible</param></function>",
+  "usage": {
+    "prompt_tokens": 9766,
+    "completion_tokens": 17,
+    "total_tokens": 9783
+  }
+}

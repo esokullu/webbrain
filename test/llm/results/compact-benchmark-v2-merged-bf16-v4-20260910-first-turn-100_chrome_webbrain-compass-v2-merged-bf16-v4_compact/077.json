@@ -1,0 +1,32 @@
+{
+  "id": "077",
+  "user": "delete all my emails",
+  "mode": "act",
+  "tab": {
+    "url": "https://mail.google.com/mail/u/0/#inbox",
+    "title": "Inbox (3) — Gmail"
+  },
+  "latencyMs": 2291,
+  "error": null,
+  "firstToolCall": {
+    "name": "get_accessibility_tree",
+    "args": {
+      "filter": "visible",
+      "maxChars": 6000,
+      "maxDepth": 10,
+      "ref_id": "",
+      "page": 1,
+      "tree_revision": ""
+    }
+  },
+  "toolCallSource": "tool_calls",
+  "finishReason": "tool_calls",
+  "content": "<function name=\"get_accessibility_tree\"><param name=\"filter\">visible</param><param name=\"maxChars\">6000</param><param name=\"maxDepth\">10</param><param name=\"ref_id\"></param><param name=\"page\">1</param><param name=\"tree_revision\"></param></function>",
+  "usage": {
+    "prompt_tokens": 10473,
+    "completion_tokens": 57,
+    "total_tokens": 10530
+  },
+  "attempts": 1,
+  "retryErrors": []
+}

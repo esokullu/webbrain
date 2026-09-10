@@ -22,7 +22,7 @@
  */
 
 export const Capability = {
-  NAVIGATE: 'navigate',          // navigate / new_tab / promote_iframe / go_back / go_forward to a host
+  NAVIGATE: 'navigate',          // navigate / promote_iframe / go_back / go_forward to a host
   CLICK: 'click',                // click / click_ax / iframe_click / drag_drop / Enter / submit
   TYPE: 'type',                  // type_text / type_ax / iframe_type / set_field (no submit)
   EXECUTE_JS: 'execute_js',      // execute_js
@@ -54,8 +54,13 @@ export const CAPABILITY_LABEL = {
  * tool is classified as gated, untrusted-read, or explicitly known-safe.
  */
 export const UNTRUSTED_CONTENT_TOOLS = new Set([
+  'chat_observe',
+  'chat_send',
   'read_page',
   'get_accessibility_tree',
+  // Skill-gated cross-tab reads return bounded, attacker-controlled email
+  // previews/message text. They never expose the tab catalog itself.
+  'read_email_verification_message',
   'get_interactive_elements',
   // The count and probe ranges come from Gmail's rendered pagination UI.
   'gmail_count_results',
@@ -145,7 +150,6 @@ const TOOL_CAPABILITY = {
   // exact starting URL, so it needs the same site-scoped navigation grant.
   gmail_count_results: Capability.NAVIGATE,
   promote_iframe: Capability.NAVIGATE,
-  new_tab: Capability.NAVIGATE,
   go_back: Capability.NAVIGATE,
   go_forward: Capability.NAVIGATE,
   click: Capability.CLICK,
@@ -184,6 +188,11 @@ const TOOL_CAPABILITY = {
  */
 export function capabilityFor(name, args) {
   args = args || {};
+  if (name === 'read_email_verification_message') {
+    // inspect is read-only. open_message clicks a mailbox row in a disposable
+    // tab and can still mark that message read on the provider's server.
+    return args.action === 'open_message' ? Capability.CLICK : null;
+  }
   if (name === 'execute_webmcp_tool') {
     // readOnly is only a page-authored annotation in the current WebMCP
     // protocol. Never let that hint bypass a human capability grant.
@@ -232,6 +241,7 @@ export function capabilityFor(name, args) {
  */
 export function capabilitiesFor(name, args) {
   args = args || {};
+  if (name === 'chat_send') return [Capability.TYPE, Capability.CLICK];
   if (name === 'delegate_research') {
     // agent.js substitutes explicit one-use research authorization for these
     // generic prompts only after validating the token.
@@ -300,6 +310,11 @@ function resolveHostAgainst(url, base) {
  */
 export function hostForCapability(capability, args, currentUrlOrHost, toolName) {
   args = args || {};
+  if (toolName === 'read_email_verification_message' && capability === Capability.CLICK) {
+    // agent.js supplies this from its opaque inspected-mailbox session only to
+    // the permission check; it never comes from model arguments.
+    return normalizeHost(args._otpMailboxUrl);
+  }
   if (toolName === 'delegate_research') return 'chatgpt.com';
   if (toolName === 'execute_webmcp_tool') {
     // A tool can belong to a cross-origin frame. Charge mutations to that

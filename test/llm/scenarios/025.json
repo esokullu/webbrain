@@ -1,7 +1,7 @@
 {
   "id": "025",
   "category": "csp-blocked-eval",
-  "mode": "act",
+  "mode": "dev",
   "browser": "chrome",
   "tab": {
     "url": "https://stripe.com/billing",

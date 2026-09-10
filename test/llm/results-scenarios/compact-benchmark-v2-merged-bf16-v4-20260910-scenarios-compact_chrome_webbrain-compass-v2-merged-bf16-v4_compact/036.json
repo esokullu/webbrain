@@ -1,0 +1,41 @@
+{
+  "id": "036",
+  "category": "truncation-cascade",
+  "description": "Listing page items captured; deliver via done rather than paginate.",
+  "mode": "act",
+  "browser": "chrome",
+  "latencyMs": 1109,
+  "error": null,
+  "firstToolCall": {
+    "name": "click_ax",
+    "args": {
+      "ref_id": "ref_0"
+    }
+  },
+  "toolCallSource": "tool_calls",
+  "expected": {
+    "idealNextToolCall": {
+      "name": "done",
+      "args": {
+        "summary": "3 wireless earbuds under $100: Acme Mini ($34) — link, Acme Buds ($49) — link, Acme Lite ($59) — link."
+      }
+    },
+    "antiPatterns": [
+      {
+        "match": "navigate({url:\"https://www.amazon.com/s?k=earbuds&p=2\"})",
+        "reason": "Paginating before delivering the 3 already-visible matches."
+      }
+    ],
+    "successRubric": "We already have at least 3 sub-$100 results on this page. Deliver them via done(). The user asked for 3, not 30."
+  },
+  "matchedAntiPattern": null,
+  "verdict": "other",
+  "scoreNote": null,
+  "finishReason": "tool_calls",
+  "content": "<function name=\"click_ax\"><param name=\"ref_id\">ref_0</param></function>",
+  "usage": {
+    "prompt_tokens": 9825,
+    "completion_tokens": 19,
+    "total_tokens": 9844
+  }
+}

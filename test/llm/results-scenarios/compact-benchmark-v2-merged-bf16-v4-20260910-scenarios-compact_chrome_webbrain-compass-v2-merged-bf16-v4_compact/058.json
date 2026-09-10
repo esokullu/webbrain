@@ -1,0 +1,41 @@
+{
+  "id": "058",
+  "category": "stale-refid",
+  "description": "Used a ref_id from a filtered tree on an unfiltered turn (or vice versa).",
+  "mode": "act",
+  "browser": "chrome",
+  "latencyMs": 893,
+  "error": null,
+  "firstToolCall": {
+    "name": "get_accessibility_tree",
+    "args": {
+      "filter": "all"
+    }
+  },
+  "toolCallSource": "tool_calls",
+  "expected": {
+    "idealNextToolCall": {
+      "name": "click_ax",
+      "args": {
+        "ref_id": "ref_7"
+      }
+    },
+    "antiPatterns": [
+      {
+        "match": "click_ax({ref_id:\"ref_5\"})",
+        "reason": "ref_5 was from the filtered tree; we last requested filter:\"all\"."
+      }
+    ],
+    "successRubric": "Use the ref_id from the MOST RECENT tree call. Different filters produce different ref_id allocations."
+  },
+  "matchedAntiPattern": null,
+  "verdict": "other",
+  "scoreNote": null,
+  "finishReason": "tool_calls",
+  "content": "<function name=\"get_accessibility_tree\"><param name=\"filter\">all</param></function>",
+  "usage": {
+    "prompt_tokens": 9884,
+    "completion_tokens": 17,
+    "total_tokens": 9901
+  }
+}

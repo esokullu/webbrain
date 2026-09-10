@@ -50,6 +50,11 @@ async function _ensureTimeoutInitialized() {
   } catch { /* keep the hardcoded default */ }
 }
 
+export async function getRequestTimeoutMs() {
+  await _ensureTimeoutInitialized();
+  return _cachedTimeoutMs;
+}
+
 /**
  * fetch() with a connection-phase abort timer wired to the user's
  * `requestTimeoutMs` setting. On abort, throws a descriptive Error

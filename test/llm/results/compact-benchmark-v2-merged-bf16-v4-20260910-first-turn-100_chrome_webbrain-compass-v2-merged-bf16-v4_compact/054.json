@@ -1,0 +1,28 @@
+{
+  "id": "054",
+  "user": "download this image",
+  "mode": "act",
+  "tab": {
+    "url": "https://example.com/photo.jpg",
+    "title": "photo.jpg"
+  },
+  "latencyMs": 2021,
+  "error": null,
+  "firstToolCall": {
+    "name": "done",
+    "args": {
+      "outcome": "failed",
+      "summary": "I can’t download or host an image from an external URL. I can help you find a free image source or create a similar image using a text-to-image tool."
+    }
+  },
+  "toolCallSource": "tool_calls",
+  "finishReason": "tool_calls",
+  "content": "<function name=\"done\"><param name=\"outcome\">failed</param><param name=\"summary\">I can’t download or host an image from an external URL. I can help you find a free image source or create a similar image using a text-to-image tool.</param></function>",
+  "usage": {
+    "prompt_tokens": 9710,
+    "completion_tokens": 54,
+    "total_tokens": 9764
+  },
+  "attempts": 1,
+  "retryErrors": []
+}

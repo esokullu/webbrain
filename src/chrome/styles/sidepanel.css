@@ -1175,8 +1175,8 @@ html[data-ui-scale-ready="false"] body { visibility: hidden; }
   flex-shrink: 0;
 }
 
-/* Compact language picker: the closed trigger uses only the representative
-   flag; language codes and native/English names stay in the open menu. */
+/* Compact language picker: the closed trigger is a plain header icon, matching
+   the other header buttons; flags, codes and names live in the open menu. */
 .language-picker {
   position: relative;
   display: flex;
@@ -1184,38 +1184,24 @@ html[data-ui-scale-ready="false"] body { visibility: hidden; }
   flex: 0 0 auto;
 }
 
-.language-picker-btn {
-  min-width: 48px;
-  padding: 3px 4px 3px 6px;
-  gap: 4px;
-  color: var(--text-secondary);
-  direction: ltr;
-}
-
-.language-picker-btn:hover,
-.language-picker-btn[aria-expanded="true"] {
+/* Two selectors deep: the generic `#header .header-right button:not(...)` rule
+   below outranks a bare class selector, and this trigger lives in .header-right. */
+#header .header-right button.language-picker-btn[aria-expanded="true"] {
   color: var(--text-primary);
+  background: var(--accent-dim);
 }
 
-.language-picker-flag,
+.language-picker-btn:focus-visible {
+  outline: 2px solid var(--accent, #6c63ff);
+  outline-offset: 1px;
+}
+
 .language-picker-option-flag {
   display: block;
   flex: 0 0 auto;
   object-fit: cover;
   border: 1px solid color-mix(in srgb, var(--border) 82%, transparent);
   background: var(--bg-input);
-}
-
-.language-picker-flag {
-  width: 20px;
-  height: 15px;
-  border-radius: 3px;
-}
-
-.language-picker-caret {
-  width: 12px;
-  height: 16px;
-  margin-left: 0;
 }
 
 .language-picker-menu {
@@ -1296,9 +1282,9 @@ html[data-ui-scale-ready="false"] body { visibility: hidden; }
   background: var(--border);
 }
 
-/* Icon buttons in the header-right cluster only. Custom picker controls keep
-   their select chrome even though the language picker also lives here. */
-#header .header-right button:not(.language-picker-btn):not(.language-picker-option) {
+/* Icon buttons in the header-right cluster only. The language trigger is one
+   of them; its menu options keep their own option styling. */
+#header .header-right button:not(.language-picker-option) {
   background: none;
   border: none;
   color: var(--text-secondary);
@@ -1310,21 +1296,20 @@ html[data-ui-scale-ready="false"] body { visibility: hidden; }
   transition: color 0.2s, background 0.2s;
 }
 
-#header .header-right button:not(.language-picker-btn):not(.language-picker-option):hover {
+#header .header-right button:not(.language-picker-option):hover {
   color: var(--text-primary);
   background: var(--accent-dim);
 }
 
-#header .header-right button:not(.language-picker-btn):not(.language-picker-option).active {
+#header .header-right button:not(.language-picker-option).active {
   color: var(--accent);
   background: var(--accent-dim);
 }
 
-/* Narrow panels: reduce only the outer chrome. The three remaining header
-   icons keep their normal gap and padding instead of collapsing together. */
+/* Narrow panels: reduce only the outer chrome. The header icons keep their
+   normal gap and padding instead of collapsing together. */
 @media (max-width: 380px) {
   #header { padding-inline: 8px; }
-  .language-picker-btn { padding-inline: 2px; }
 }
 
 .composer-toast {
@@ -3043,7 +3028,23 @@ html[data-ui-scale-ready="false"] body { visibility: hidden; }
    ASK / ACT MODE TOGGLE
    ========================================================================== */
 
-html[data-standalone="true"] #mode-toggle {
+html[data-standalone="true"] .composer-control-row {
+  display: none;
+}
+
+html[data-standalone="true"] #header #btn-expand {
+  display: none;
+}
+
+html[data-standalone="true"] #header #btn-clear {
+  width: 26px;
+  min-width: 26px;
+  height: 26px;
+  padding: 0;
+  justify-content: center;
+}
+
+html[data-standalone="true"] #header #btn-clear .conversation-action-label {
   display: none;
 }
 

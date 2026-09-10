@@ -1,0 +1,41 @@
+{
+  "id": "053",
+  "category": "stale-refid",
+  "description": "A dialog opened after a click; ref_ids from before the dialog are stale within the dialog scope.",
+  "mode": "act",
+  "browser": "chrome",
+  "latencyMs": 935,
+  "error": null,
+  "firstToolCall": {
+    "name": "get_accessibility_tree",
+    "args": {
+      "filter": "visible"
+    }
+  },
+  "toolCallSource": "tool_calls",
+  "expected": {
+    "idealNextToolCall": {
+      "name": "get_accessibility_tree",
+      "args": {
+        "filter": "visible"
+      }
+    },
+    "antiPatterns": [
+      {
+        "match": "type_ax({ref_id:\"ref_30\", text:\"hi alice\"})",
+        "reason": "Compose dialog opened; previous tree didn't include it. Re-read."
+      }
+    ],
+    "successRubric": "After opening a dialog/modal, re-read AX tree. The compose dialog has its own ref_id space."
+  },
+  "matchedAntiPattern": null,
+  "verdict": "ideal",
+  "scoreNote": null,
+  "finishReason": "tool_calls",
+  "content": "<function name=\"get_accessibility_tree\"><param name=\"filter\">visible</param></function>",
+  "usage": {
+    "prompt_tokens": 9880,
+    "completion_tokens": 17,
+    "total_tokens": 9897
+  }
+}

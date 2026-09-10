@@ -1,3 +1,4 @@
+import { createRequestDeadline, readResponseText, responseAbortError } from './response-body.js';
 import { firefoxRestrictedDomainFailure } from '../firefox-restricted-domains.js';
 import { filenameInConfiguredDownloadDirectory } from '../download-directory.js';
 
@@ -46,6 +47,8 @@ function htmlToText(html) {
 // agent's generic result truncation. This keeps continuation metadata aligned
 // with the text the model actually received and gives large source files a
 // deterministic search/pagination path.
+const FETCH_BODY_MAX_BYTES = 8 * 1024 * 1024;
+const FETCH_REQUEST_TIMEOUT_MS = 30000;
 const FETCH_TEXT_DEFAULT_LIMIT = 7000;
 const FETCH_TEXT_MIN_LIMIT = 1000;
 const FETCH_TEXT_MAX_LIMIT = 7000;
@@ -1395,6 +1398,83 @@ function formatTextFetchResult({ status, contentType, finalUrl, text, replayCont
   }, 'text');
 }
 
+// Both functions are serialized into the extension's isolated page world.
+// Keep them closure-free so Chrome and Firefox execute the same request policy.
+function cancelPageReplay(requestId) {
+  const registry = globalThis.__webbrainNetworkReplays ||= new Map();
+  const active = registry.get(requestId);
+  if (active?.abort) active.abort();
+  else {
+    const cancelled = { cancelled: true };
+    registry.set(requestId, cancelled);
+    setTimeout(() => {
+      if (registry.get(requestId) === cancelled) registry.delete(requestId);
+    }, 30000);
+  }
+}
+
+async function performPageReplay(rawUrl, replayInit, { requestId, maxBytes, timeoutMs }) {
+  const registry = globalThis.__webbrainNetworkReplays ||= new Map();
+  const controller = new AbortController();
+  if (registry.get(requestId)?.cancelled) controller.abort();
+  registry.set(requestId, controller);
+  const timer = setTimeout(() => controller.abort(new Error('Page-context replay request timed out.')), timeoutMs);
+  let reader;
+  let response;
+  try {
+    if (controller.signal.aborted) throw new Error('Page-context replay was cancelled.');
+    const targetUrl = new URL(rawUrl, location.href);
+    if (targetUrl.origin !== location.origin) {
+      return { ok: false, error: 'Page-context replay target does not match page origin.', finalUrl: targetUrl.href };
+    }
+    const headers = {};
+    for (const [name, value] of Object.entries(replayInit.headers || {})) {
+      if (value != null) headers[name] = String(value);
+    }
+    response = await fetch(targetUrl.href, {
+      method: replayInit.method || 'GET',
+      headers,
+      body: replayInit.body == null ? undefined : replayInit.body,
+      credentials: 'include',
+      redirect: 'manual',
+      signal: controller.signal,
+    });
+    if (response.type === 'opaqueredirect' || [301, 302, 303, 307, 308].includes(response.status)) {
+      return { ok: false, error: 'Page-context replay redirect was not followed; use an explicit destination URL.', status: response.status, finalUrl: targetUrl.href };
+    }
+    const finalUrl = response.url || targetUrl.href;
+    if (new URL(finalUrl).origin !== location.origin) {
+      return { ok: false, error: 'Page-context replay redirected outside the page origin; response body was discarded.', status: response.status, finalUrl };
+    }
+    let text = '';
+    let bytesRead = 0;
+    const decoder = new TextDecoder();
+    if (response.body) {
+      reader = response.body.getReader();
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        bytesRead += value.byteLength;
+        if (bytesRead > maxBytes) throw new Error('Page-context replay response exceeds ' + maxBytes + ' bytes.');
+        text += decoder.decode(value, { stream: true });
+      }
+      text += decoder.decode();
+    } else {
+      text = await response.text();
+      if (new TextEncoder().encode(text).length > maxBytes) throw new Error('Page-context replay response is too large.');
+    }
+    return { ok: true, status: response.status, url: finalUrl, contentType: response.headers.get('content-type') || '', text };
+  } catch (error) {
+    return { ok: false, error: controller.signal.reason?.message || error?.message || String(error), cancelled: controller.signal.aborted };
+  } finally {
+    clearTimeout(timer);
+    registry.delete(requestId);
+    controller.abort();
+    try { Promise.resolve(reader ? reader.cancel() : response?.body?.cancel()).catch(() => {}); } catch {}
+    try { reader?.releaseLock(); } catch {}
+  }
+}
+
 async function fetchReplayInPageContext(url, opts = {}, ctx = {}, allowLocal = false) {
   const replayRequestId = opts.replayRequestId || opts.apiReplayRequestId;
   const api = globalThis.browser;
@@ -1417,69 +1497,38 @@ async function fetchReplayInPageContext(url, opts = {}, ctx = {}, allowLocal = f
     };
   }
 
+  const requestId = crypto.randomUUID();
+  const replayBounds = { requestId, maxBytes: FETCH_BODY_MAX_BYTES, timeoutMs: FETCH_REQUEST_TIMEOUT_MS };
+  const onAbort = () => {
+    api.tabs.executeScript(ctx.tabId, {
+      code: `(${cancelPageReplay.toString()})(${JSON.stringify(requestId)})`, allFrames: false,
+    }).catch(() => {});
+  };
+
   const init = {
     method: opts.method || 'GET',
     headers: opts.headers || {},
     body: opts.body ?? null,
   };
-  const pageReplayScript = `
-    (async () => {
-      const rawUrl = ${JSON.stringify(url)};
-      const replayInit = ${JSON.stringify(init)};
-      try {
-        const targetUrl = new URL(rawUrl, location.href);
-        if (targetUrl.origin !== location.origin) {
-          return {
-            ok: false,
-            error: 'Page-context replay target ' + targetUrl.origin + ' does not match page origin ' + location.origin + '.',
-            finalUrl: targetUrl.href,
-          };
-        }
-        const headers = {};
-        for (const [name, value] of Object.entries(replayInit.headers || {})) {
-          if (value != null) headers[name] = String(value);
-        }
-        const response = await fetch(targetUrl.href, {
-          method: replayInit.method || 'GET',
-          headers,
-          body: replayInit.body == null ? undefined : replayInit.body,
-          credentials: 'include',
-          redirect: 'follow',
-        });
-        const finalUrl = response.url || targetUrl.href;
-        try {
-          if (new URL(finalUrl).origin !== location.origin) {
-            return {
-              ok: false,
-              error: 'Page-context replay redirected outside the page origin; response body was discarded.',
-              status: response.status,
-              finalUrl,
-            };
-          }
-        } catch (_) {}
-        return {
-          ok: true,
-          status: response.status,
-          url: finalUrl,
-          contentType: response.headers.get('content-type') || '',
-          text: await response.text(),
-        };
-      } catch (e) {
-        return { ok: false, error: e && e.message ? e.message : String(e) };
-      }
-    })()
-  `;
+  const pageReplayScript = `(${performPageReplay.toString()})(${JSON.stringify(url)}, ${JSON.stringify(init)}, ${JSON.stringify(replayBounds)})`;
+
 
   let payload;
   try {
+    if (ctx.signal?.aborted) throw responseAbortError(ctx.signal);
+    ctx.signal?.addEventListener('abort', onAbort, { once: true });
     const results = await api.tabs.executeScript(ctx.tabId, { code: pageReplayScript, allFrames: false });
     payload = results?.[0];
+    if (ctx.signal?.aborted) throw responseAbortError(ctx.signal);
   } catch (e) {
     return {
       success: false,
-      error: `Page-context API replay failed before fetch: ${e.message}`,
+      error: `Page-context API replay failed: ${e.message}`,
       replayContext: 'page',
+      ...(ctx.signal?.aborted ? { cancelled: true } : {}),
     };
+  } finally {
+    ctx.signal?.removeEventListener('abort', onAbort);
   }
 
   if (!payload) {
@@ -1625,34 +1674,30 @@ export function validatePageSourceResponseHeaders(headers, maxBytes = PAGE_SOURC
   return { ok: true, contentType, sizeBytes };
 }
 
-export async function readPageSourceResponseText(res, maxBytes = PAGE_SOURCE_BODY_MAX_BYTES) {
-  const limit = Math.max(0, Math.floor(Number(maxBytes) || 0));
-  if (!res?.body || typeof res.body.getReader !== 'function') {
-    const text = await res.text();
-    const bytesRead = new TextEncoder().encode(text).length;
-    return { text, bytesRead, exceeded: !!(limit && bytesRead > limit) };
-  }
+export async function readPageSourceResponseText(res, maxBytes = PAGE_SOURCE_BODY_MAX_BYTES, options = {}) {
+  return readResponseText(res, { ...options, maxBytes });
+}
 
-  const reader = res.body.getReader();
-  const decoder = new TextDecoder();
-  let text = '';
-  let bytesRead = 0;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    const chunk = value instanceof Uint8Array ? value : new Uint8Array(value);
-    if (limit && bytesRead + chunk.byteLength > limit) {
-      const allowed = Math.max(0, limit - bytesRead);
-      if (allowed > 0) {
-        text += decoder.decode(chunk.slice(0, allowed), { stream: true });
-      }
-      try { await reader.cancel(); } catch {}
-      return { text: text + decoder.decode(), bytesRead: limit, exceeded: true };
-    }
-    bytesRead += chunk.byteLength;
-    text += decoder.decode(chunk, { stream: true });
+async function readFetchResponseText(res, signal) {
+  const read = await readResponseText(res, { signal, maxBytes: FETCH_BODY_MAX_BYTES });
+  if (read.exceeded) {
+    throw new Error(`fetch_url response exceeds ${FETCH_BODY_MAX_BYTES} bytes. Download the resource or request a smaller server-side result.`);
   }
-  return { text: text + decoder.decode(), bytesRead, exceeded: false };
+  return read.text;
+}
+
+function networkRequestDeadline(ctx = {}) {
+  // Only extension-owned context controls deadlines, never model-supplied options.
+  const timeoutMs = Number.isFinite(ctx.timeoutMs) && ctx.timeoutMs > 0
+    ? Math.min(ctx.timeoutMs, 120000)
+    : FETCH_REQUEST_TIMEOUT_MS;
+  return createRequestDeadline({ signal: ctx.signal, timeoutMs });
+}
+
+function rejectNetworkRedirect(res) {
+  if (res?.type === 'opaqueredirect' || isHttpRedirectStatus(res?.status)) {
+    throw new Error('Redirect was not followed because its target cannot be validated before sending the request. Use an explicit destination URL.');
+  }
 }
 
 function parseContentLength(value) {
@@ -1771,12 +1816,17 @@ export async function readPageSource(url, opts = {}, ctx = {}) {
     } catch {}
   }
 
+  const deadline = networkRequestDeadline(ctx);
+  let res;
   try {
-    const res = await fetch(targetUrl, {
+    if (deadline.signal.aborted) throw responseAbortError(deadline.signal);
+    res = await fetch(targetUrl, {
       method: 'GET',
       credentials: attachCookies ? 'include' : 'omit',
-      redirect: 'follow',
+      redirect: 'manual',
+      signal: deadline.signal,
     });
+    rejectNetworkRedirect(res);
 
     if (res.url && res.url !== targetUrl) {
       const v2 = validateFetchUrl(res.url, { allowLocalNetwork: allowLocal });
@@ -1813,7 +1863,7 @@ export async function readPageSource(url, opts = {}, ctx = {}) {
       };
     }
 
-    const read = await readPageSourceResponseText(res);
+    const read = await readPageSourceResponseText(res, PAGE_SOURCE_BODY_MAX_BYTES, { signal: deadline.signal });
     if (read.exceeded) {
       return {
         success: false,
@@ -1847,6 +1897,9 @@ export async function readPageSource(url, opts = {}, ctx = {}) {
     }, source.length);
   } catch (e) {
     return { success: false, error: `read_page_source failed: ${e.message}` };
+  } finally {
+    deadline.dispose();
+    try { Promise.resolve(res?.body?.cancel()).catch(() => {}); } catch {}
   }
 }
 
@@ -1886,14 +1939,19 @@ export async function fetchUrl(url, opts = {}, ctx = {}) {
     } catch (_) {}
   }
 
+  const deadline = networkRequestDeadline(ctx);
+  let res;
   try {
-    const res = await fetch(url, {
+    if (deadline.signal.aborted) throw responseAbortError(deadline.signal);
+    res = await fetch(url, {
       method: opts.method || 'GET',
       headers: opts.headers || {},
       body: opts.body || undefined,
       credentials: attachCookies ? 'include' : 'omit',
-      redirect: 'follow',
+      redirect: 'manual',
+      signal: deadline.signal,
     });
+    rejectNetworkRedirect(res);
 
     if (res.url && res.url !== url) {
       const v2 = validateFetchUrl(res.url, { allowLocalNetwork: allowLocal });
@@ -1921,7 +1979,7 @@ export async function fetchUrl(url, opts = {}, ctx = {}) {
     const responseMetadata = safeFetchResponseMetadata(res.headers);
 
     if (contentType.includes('json')) {
-      const text = await res.text();
+      const text = await readFetchResponseText(res, deadline.signal);
       let pretty = text;
       try { pretty = JSON.stringify(JSON.parse(text), null, 2); } catch (e) {}
       return constrainFetchTextResult({
@@ -1932,7 +1990,7 @@ export async function fetchUrl(url, opts = {}, ctx = {}) {
     }
 
     if (contentType.includes('html') || contentType.includes('xhtml')) {
-      const html = await res.text();
+      const html = await readFetchResponseText(res, deadline.signal);
       const { title, text } = htmlToText(html);
       return constrainFetchTextResult({
         success, ...(error ? { error } : {}), status, contentType, url: finalUrl,
@@ -1948,7 +2006,7 @@ export async function fetchUrl(url, opts = {}, ctx = {}) {
         contentType.includes('csv') ||
         contentType.includes('markdown') ||
         contentType === '') {
-      const text = await res.text();
+      const text = await readFetchResponseText(res, deadline.signal);
       return constrainFetchTextResult({
         success, ...(error ? { error } : {}), status, contentType, url: finalUrl,
         ...responseMetadata,
@@ -1965,6 +2023,9 @@ export async function fetchUrl(url, opts = {}, ctx = {}) {
     };
   } catch (e) {
     return { success: false, error: `Fetch failed: ${e.message}` };
+  } finally {
+    deadline.dispose();
+    try { Promise.resolve(res?.body?.cancel()).catch(() => {}); } catch {}
   }
 }
 

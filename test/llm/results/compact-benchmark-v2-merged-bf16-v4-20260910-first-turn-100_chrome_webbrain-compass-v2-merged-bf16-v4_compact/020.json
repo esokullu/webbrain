@@ -1,0 +1,27 @@
+{
+  "id": "020",
+  "user": "look up \"javascript closures\" on stackoverflow",
+  "mode": "act",
+  "tab": {
+    "url": "about:home",
+    "title": "New Tab"
+  },
+  "latencyMs": 1843,
+  "error": null,
+  "firstToolCall": {
+    "name": "navigate",
+    "args": {
+      "url": "https://stackoverflow.com/questions/1074231/javascript-closures"
+    }
+  },
+  "toolCallSource": "tool_calls",
+  "finishReason": "tool_calls",
+  "content": "<function name=\"navigate\"><param name=\"url\">https://stackoverflow.com/questions/1074231/javascript-closures</param></function>",
+  "usage": {
+    "prompt_tokens": 9713,
+    "completion_tokens": 28,
+    "total_tokens": 9741
+  },
+  "attempts": 1,
+  "retryErrors": []
+}

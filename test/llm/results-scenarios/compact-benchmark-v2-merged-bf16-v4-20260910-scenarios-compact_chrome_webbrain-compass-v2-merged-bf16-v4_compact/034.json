@@ -1,0 +1,45 @@
+{
+  "id": "034",
+  "category": "truncation-cascade",
+  "description": "After getting first page of HN listing, agent tried to paginate without delivering first-page results. Anti-pattern.",
+  "mode": "act",
+  "browser": "chrome",
+  "latencyMs": 1181,
+  "error": null,
+  "firstToolCall": {
+    "name": "get_accessibility_tree",
+    "args": {
+      "filter": "visible",
+      "maxDepth": 10
+    }
+  },
+  "toolCallSource": "tool_calls",
+  "expected": {
+    "idealNextToolCall": {
+      "name": "done",
+      "args": {
+        "summary": "Top 30 HN stories: [list with titles + points + comments from page 1]"
+      }
+    },
+    "antiPatterns": [
+      {
+        "match": "get_accessibility_tree({filter:\"visible\"})",
+        "reason": "Reading page 2 before delivering page 1 — system prompt says EXTRACT first, paginate second."
+      }
+    ],
+    "successRubric": "Per LISTINGS guidance: deliver page 1's 30 stories now, then optionally continue. Even though we just navigated to p=2, we should back-deliver and stop."
+  },
+  "matchedAntiPattern": {
+    "match": "get_accessibility_tree({filter:\"visible\"})",
+    "reason": "Reading page 2 before delivering page 1 — system prompt says EXTRACT first, paginate second."
+  },
+  "verdict": "anti",
+  "scoreNote": null,
+  "finishReason": "tool_calls",
+  "content": "<function name=\"get_accessibility_tree\"><param name=\"filter\">visible</param><param name=\"maxDepth\">10</param></function>",
+  "usage": {
+    "prompt_tokens": 9868,
+    "completion_tokens": 25,
+    "total_tokens": 9893
+  }
+}

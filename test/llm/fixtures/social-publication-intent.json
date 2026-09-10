@@ -1,0 +1,1189 @@
+{
+  "description": "Historical PR 340 destination intent regression cases. Expected platforms describe intent only; incomplete payloads or unresolved reply targets may correctly yield clarify. These are semantic evaluation data, not keyword rules.",
+  "cases": [
+    {
+      "request": "Read https://x.com/home, then submit a summary in the survey.",
+      "expectedPlatforms": []
+    },
+    {
+      "request": "Open https://bsky.app/ and read the feed",
+      "expectedPlatforms": []
+    },
+    {
+      "request": "Read the publication at https://x.com/home and submit it",
+      "expectedPlatforms": []
+    },
+    {
+      "request": "Publícalo en https://x.com/home",
+      "expectedPlatforms": [
+        "twitter"
+      ]
+    },
+    {
+      "request": "Yayınla: https://x.com/home",
+      "expectedPlatforms": [
+        "twitter"
+      ]
+    },
+    {
+      "request": "投稿してください https://x.com/home",
+      "expectedPlatforms": [
+        "twitter"
+      ]
+    },
+    {
+      "request": "在 https://x.com/compose/post 上发布这条消息",
+      "expectedPlatforms": [
+        "twitter"
+      ]
+    },
+    {
+      "request": "Just open https://x.com/compose/post",
+      "expectedPlatforms": [
+        "twitter"
+      ]
+    },
+    {
+      "request": "Use https://x.com/compose to send this update",
+      "expectedPlatforms": [
+        "twitter"
+      ]
+    },
+    {
+      "request": "On https://x.com/home, publish this update",
+      "expectedPlatforms": [
+        "twitter"
+      ]
+    },
+    {
+      "request": "Опубликуй это на https://x.com/home",
+      "expectedPlatforms": [
+        "twitter"
+      ]
+    },
+    {
+      "request": "阅读推文 https://x.com/home 然后把摘要提交到表单",
+      "expectedPlatforms": []
+    },
+    {
+      "request": "阅读投稿 https://x.com/home 然后把摘要提交到表单",
+      "expectedPlatforms": []
+    },
+    {
+      "request": "Read posts on https://x.com/home, then submit a summary in the survey",
+      "expectedPlatforms": []
+    },
+    {
+      "request": "Posts to read on X, then submit a summary in the survey",
+      "expectedPlatforms": []
+    },
+    {
+      "request": "Tweets to read on X, then summarize them",
+      "expectedPlatforms": []
+    },
+    {
+      "request": "Read the post on https://x.com/home and submit a summary in the survey",
+      "expectedPlatforms": []
+    },
+    {
+      "request": "Check the latest posts on https://x.com/home then fill the form",
+      "expectedPlatforms": []
+    },
+    {
+      "request": "Read the summary and publish it on https://x.com/home",
+      "expectedPlatforms": [
+        "twitter"
+      ]
+    },
+    {
+      "request": "Inspect https://x.com/compose/post but do not publish anything; submit findings in the survey",
+      "expectedPlatforms": []
+    },
+    {
+      "request": "Find market share on X, then submit it in the survey",
+      "expectedPlatforms": []
+    },
+    {
+      "request": "Share our update on X, then submit it in the survey",
+      "expectedPlatforms": [
+        "twitter"
+      ]
+    },
+    {
+      "request": "Publícalo en X",
+      "expectedPlatforms": [
+        "twitter"
+      ]
+    },
+    {
+      "request": "Publicar en Bluesky",
+      "expectedPlatforms": [
+        "bluesky"
+      ]
+    },
+    {
+      "request": "Publiez ceci sur Bluesky",
+      "expectedPlatforms": [
+        "bluesky"
+      ]
+    },
+    {
+      "request": "Reply \"Thanks\" on X",
+      "expectedPlatforms": [
+        "twitter"
+      ]
+    },
+    {
+      "request": "Respond on Bluesky",
+      "expectedPlatforms": [
+        "bluesky"
+      ]
+    },
+    {
+      "request": "Responde en X con \"gracias\"",
+      "expectedPlatforms": [
+        "twitter"
+      ]
+    },
+    {
+      "request": "Répondez sur Bluesky",
+      "expectedPlatforms": [
+        "bluesky"
+      ]
+    },
+    {
+      "request": "Antworte auf X",
+      "expectedPlatforms": [
+        "twitter"
+      ]
+    },
+    {
+      "request": "Ответь в X",
+      "expectedPlatforms": [
+        "twitter"
+      ]
+    },
+    {
+      "request": "Xで返信して",
+      "expectedPlatforms": [
+        "twitter"
+      ]
+    },
+    {
+      "request": "在X上回复",
+      "expectedPlatforms": [
+        "twitter"
+      ]
+    },
+    {
+      "request": "Read the replies on X",
+      "expectedPlatforms": []
+    },
+    {
+      "request": "Summarize responses on Bluesky",
+      "expectedPlatforms": []
+    },
+    {
+      "request": "Collect all replies on X",
+      "expectedPlatforms": []
+    },
+    {
+      "request": "Do not reply on X",
+      "expectedPlatforms": []
+    },
+    {
+      "request": "发布到X",
+      "expectedPlatforms": [
+        "twitter"
+      ]
+    },
+    {
+      "request": "发布至X",
+      "expectedPlatforms": [
+        "twitter"
+      ]
+    },
+    {
+      "request": "发布在X",
+      "expectedPlatforms": [
+        "twitter"
+      ]
+    },
+    {
+      "request": "发布到X并在完成后通知我",
+      "expectedPlatforms": [
+        "twitter"
+      ]
+    },
+    {
+      "request": "发布到Bluesky",
+      "expectedPlatforms": [
+        "bluesky"
+      ]
+    },
+    {
+      "request": "发布在Bluesky",
+      "expectedPlatforms": [
+        "bluesky"
+      ]
+    },
+    {
+      "request": "在X上发布这条消息",
+      "expectedPlatforms": [
+        "twitter"
+      ]
+    },
+    {
+      "request": "在X发布这条消息",
+      "expectedPlatforms": [
+        "twitter"
+      ]
+    },
+    {
+      "request": "Xに投稿してください",
+      "expectedPlatforms": [
+        "twitter"
+      ]
+    },
+    {
+      "request": "Xへ投稿してください",
+      "expectedPlatforms": [
+        "twitter"
+      ]
+    },
+    {
+      "request": "Xで投稿してください",
+      "expectedPlatforms": [
+        "twitter"
+      ]
+    },
+    {
+      "request": "X에 게시해주세요",
+      "expectedPlatforms": [
+        "twitter"
+      ]
+    },
+    {
+      "request": "Blueskyに投稿してください",
+      "expectedPlatforms": [
+        "bluesky"
+      ]
+    },
+    {
+      "request": "Bluesky에 게시해주세요",
+      "expectedPlatforms": [
+        "bluesky"
+      ]
+    },
+    {
+      "request": "在X上阅读推文",
+      "expectedPlatforms": []
+    },
+    {
+      "request": "发布到xbox",
+      "expectedPlatforms": []
+    },
+    {
+      "request": "retweet this",
+      "expectedPlatforms": []
+    },
+    {
+      "request": "retweet that",
+      "expectedPlatforms": []
+    },
+    {
+      "request": "retweet it",
+      "expectedPlatforms": []
+    },
+    {
+      "request": "Do not post this on X; submit it in the survey",
+      "expectedPlatforms": []
+    },
+    {
+      "request": "Never publish to Bluesky",
+      "expectedPlatforms": []
+    },
+    {
+      "request": "Don't forget to post this on X",
+      "expectedPlatforms": [
+        "twitter"
+      ]
+    },
+    {
+      "request": "Do not forget to publish this on Bluesky",
+      "expectedPlatforms": [
+        "bluesky"
+      ]
+    },
+    {
+      "request": "Never hesitate to post this on X",
+      "expectedPlatforms": [
+        "twitter"
+      ]
+    },
+    {
+      "request": "Don't forget not to post this on X",
+      "expectedPlatforms": []
+    },
+    {
+      "request": "Don't tweet this",
+      "expectedPlatforms": []
+    },
+    {
+      "request": "Do not post on https://x.com/home; fill the survey instead",
+      "expectedPlatforms": []
+    },
+    {
+      "request": "You must not post on X",
+      "expectedPlatforms": []
+    },
+    {
+      "request": "No publicar esto en X; envíalo en la encuesta",
+      "expectedPlatforms": []
+    },
+    {
+      "request": "Nicht auf X posten",
+      "expectedPlatforms": []
+    },
+    {
+      "request": "Ne pas publier sur X",
+      "expectedPlatforms": []
+    },
+    {
+      "request": "不要在X上发布这条消息",
+      "expectedPlatforms": []
+    },
+    {
+      "request": "Xに投稿しないでください",
+      "expectedPlatforms": []
+    },
+    {
+      "request": "Xに投稿してはいけない",
+      "expectedPlatforms": []
+    },
+    {
+      "request": "X에 게시하지 마세요",
+      "expectedPlatforms": []
+    },
+    {
+      "request": "Post this on X with no attachments",
+      "expectedPlatforms": [
+        "twitter"
+      ]
+    },
+    {
+      "request": "Do not post or publish this on X; submit it in the survey",
+      "expectedPlatforms": []
+    },
+    {
+      "request": "Never publish or post to Bluesky",
+      "expectedPlatforms": []
+    },
+    {
+      "request": "Do not post on X or publish on Bluesky",
+      "expectedPlatforms": []
+    },
+    {
+      "request": "Do not post on X, but publish on Bluesky",
+      "expectedPlatforms": [
+        "bluesky"
+      ]
+    },
+    {
+      "request": "Do not post on X and do post on Bluesky",
+      "expectedPlatforms": [
+        "bluesky"
+      ]
+    },
+    {
+      "request": "Post this not on X but on Bluesky",
+      "expectedPlatforms": [
+        "bluesky"
+      ]
+    },
+    {
+      "request": "Post on neither X nor Bluesky",
+      "expectedPlatforms": []
+    },
+    {
+      "request": "Post neither on X nor on Bluesky",
+      "expectedPlatforms": []
+    },
+    {
+      "request": "Post on Bluesky and not on X",
+      "expectedPlatforms": [
+        "bluesky"
+      ]
+    },
+    {
+      "request": "Post on X and not on Bluesky",
+      "expectedPlatforms": [
+        "twitter"
+      ]
+    },
+    {
+      "request": "Post on Bluesky, excluding X",
+      "expectedPlatforms": [
+        "bluesky"
+      ]
+    },
+    {
+      "request": "Post on Bluesky, exclude X",
+      "expectedPlatforms": [
+        "bluesky"
+      ]
+    },
+    {
+      "request": "Post only on Bluesky, no X",
+      "expectedPlatforms": [
+        "bluesky"
+      ]
+    },
+    {
+      "request": "Post only on X, no Bluesky",
+      "expectedPlatforms": [
+        "twitter"
+      ]
+    },
+    {
+      "request": "Post on Bluesky, avoiding X",
+      "expectedPlatforms": [
+        "bluesky"
+      ]
+    },
+    {
+      "request": "Post on X, avoid Bluesky",
+      "expectedPlatforms": [
+        "twitter"
+      ]
+    },
+    {
+      "request": "Post on Bluesky, skip X",
+      "expectedPlatforms": [
+        "bluesky"
+      ]
+    },
+    {
+      "request": "Post on X, skipping Bluesky",
+      "expectedPlatforms": [
+        "twitter"
+      ]
+    },
+    {
+      "request": "Post on Bluesky, omit X",
+      "expectedPlatforms": [
+        "bluesky"
+      ]
+    },
+    {
+      "request": "Post on X, omitting Bluesky",
+      "expectedPlatforms": [
+        "twitter"
+      ]
+    },
+    {
+      "request": "Post on Bluesky, except X",
+      "expectedPlatforms": [
+        "bluesky"
+      ]
+    },
+    {
+      "request": "Post on X, except Bluesky",
+      "expectedPlatforms": [
+        "twitter"
+      ]
+    },
+    {
+      "request": "Post on X, except for Bluesky",
+      "expectedPlatforms": [
+        "twitter"
+      ]
+    },
+    {
+      "request": "Post on Bluesky, except for X",
+      "expectedPlatforms": [
+        "bluesky"
+      ]
+    },
+    {
+      "request": "Post on X, except for posting on Bluesky",
+      "expectedPlatforms": [
+        "twitter"
+      ]
+    },
+    {
+      "request": "Post on Bluesky, excluding publishing on X",
+      "expectedPlatforms": [
+        "bluesky"
+      ]
+    },
+    {
+      "request": "Post on Bluesky rather than posting on X",
+      "expectedPlatforms": [
+        "bluesky"
+      ]
+    },
+    {
+      "request": "Post on Bluesky rather than on X",
+      "expectedPlatforms": [
+        "bluesky"
+      ]
+    },
+    {
+      "request": "Post on https://bsky.app/ rather than posting on https://x.com/home",
+      "expectedPlatforms": [
+        "bluesky"
+      ]
+    },
+    {
+      "request": "Post on X without posting on Bluesky",
+      "expectedPlatforms": [
+        "twitter"
+      ]
+    },
+    {
+      "request": "Post this on Bluesky with no X links",
+      "expectedPlatforms": [
+        "bluesky"
+      ]
+    },
+    {
+      "request": "Post this on Bluesky with X links",
+      "expectedPlatforms": [
+        "bluesky"
+      ]
+    },
+    {
+      "request": "Don’t post on X or Bluesky",
+      "expectedPlatforms": []
+    },
+    {
+      "request": "Can’t post on X",
+      "expectedPlatforms": []
+    },
+    {
+      "request": "Shouldn’t post on X",
+      "expectedPlatforms": []
+    },
+    {
+      "request": "Mustn’t post on X",
+      "expectedPlatforms": []
+    },
+    {
+      "request": "Won’t post on X",
+      "expectedPlatforms": []
+    },
+    {
+      "request": "Post or publish this on X",
+      "expectedPlatforms": [
+        "twitter"
+      ]
+    },
+    {
+      "request": "Post \"Do not panic\" on X",
+      "expectedPlatforms": [
+        "twitter"
+      ]
+    },
+    {
+      "request": "Post “Never give up” on Bluesky",
+      "expectedPlatforms": [
+        "bluesky"
+      ]
+    },
+    {
+      "request": "Tweet 'Do not worry' on X",
+      "expectedPlatforms": [
+        "twitter"
+      ]
+    },
+    {
+      "request": "Do not post \"panic\" on X",
+      "expectedPlatforms": []
+    },
+    {
+      "request": "Do not submit the survey, post this on X",
+      "expectedPlatforms": [
+        "twitter"
+      ]
+    },
+    {
+      "request": "Do not post on Bluesky, post this on X",
+      "expectedPlatforms": [
+        "twitter"
+      ]
+    },
+    {
+      "request": "Publish on Bluesky; read https://x.com/home",
+      "expectedPlatforms": [
+        "bluesky"
+      ]
+    },
+    {
+      "request": "Without posting anything on X, inspect the feed and submit a summary",
+      "expectedPlatforms": []
+    },
+    {
+      "request": "Inspect the feed without posting anything on X, and submit a summary",
+      "expectedPlatforms": []
+    },
+    {
+      "request": "Post on X without attachments",
+      "expectedPlatforms": [
+        "twitter"
+      ]
+    },
+    {
+      "request": "Without delay, post on X",
+      "expectedPlatforms": [
+        "twitter"
+      ]
+    },
+    {
+      "request": "Post \"This is a very long announcement body that contains far more than fifty or sixty characters and explains everything clearly\" on X",
+      "expectedPlatforms": [
+        "twitter"
+      ]
+    },
+    {
+      "request": "Post \"This is another long announcement body with more than sixty characters\" to Bluesky",
+      "expectedPlatforms": [
+        "bluesky"
+      ]
+    },
+    {
+      "request": "Post \"Check our thoughts on X\" to Bluesky",
+      "expectedPlatforms": [
+        "bluesky"
+      ]
+    },
+    {
+      "request": "Post \"This is a very long announcement body that contains far more than fifty or sixty characters and explains everything clearly\" on https://x.com/home",
+      "expectedPlatforms": [
+        "twitter"
+      ]
+    },
+    {
+      "request": "Post \"This is a very long announcement body that contains far more than fifty or sixty characters and explains everything clearly\" to https://bsky.app/",
+      "expectedPlatforms": [
+        "bluesky"
+      ]
+    },
+    {
+      "request": "Publique no X: olá",
+      "expectedPlatforms": [
+        "twitter"
+      ]
+    },
+    {
+      "request": "Publique na Bluesky: olá",
+      "expectedPlatforms": [
+        "bluesky"
+      ]
+    },
+    {
+      "request": "Não publique no X: olá",
+      "expectedPlatforms": []
+    },
+    {
+      "request": "Post “He said \\\"hello; world\\\" today” on X",
+      "expectedPlatforms": [
+        "twitter"
+      ]
+    },
+    {
+      "request": "Post “He said \"hello; world\" today” on X",
+      "expectedPlatforms": [
+        "twitter"
+      ]
+    },
+    {
+      "request": "Post «He said \"hello; world\" today» to https://bsky.app/",
+      "expectedPlatforms": [
+        "bluesky"
+      ]
+    },
+    {
+      "request": "Post 「He said 『hello; world』 today」 on X",
+      "expectedPlatforms": [
+        "twitter"
+      ]
+    },
+    {
+      "request": "Post research and development news on X",
+      "expectedPlatforms": [
+        "twitter"
+      ]
+    },
+    {
+      "request": "Post research and development news to https://x.com/home",
+      "expectedPlatforms": [
+        "twitter"
+      ]
+    },
+    {
+      "request": "Post research, development, and marketing news on X",
+      "expectedPlatforms": [
+        "twitter"
+      ]
+    },
+    {
+      "request": "Publica noticias de investigación y desarrollo en X",
+      "expectedPlatforms": [
+        "twitter"
+      ]
+    },
+    {
+      "request": "Publica noticias de investigación e innovación en X",
+      "expectedPlatforms": [
+        "twitter"
+      ]
+    },
+    {
+      "request": "Publica noticias de investigación y desarrollo en https://x.com/home",
+      "expectedPlatforms": [
+        "twitter"
+      ]
+    },
+    {
+      "request": "Publie des nouvelles de recherche et développement sur X",
+      "expectedPlatforms": [
+        "twitter"
+      ]
+    },
+    {
+      "request": "Publie des nouvelles de recherche et développement sur https://x.com/home",
+      "expectedPlatforms": [
+        "twitter"
+      ]
+    },
+    {
+      "request": "Veröffentliche Neuigkeiten zu Forschung und Entwicklung auf X",
+      "expectedPlatforms": [
+        "twitter"
+      ]
+    },
+    {
+      "request": "Veröffentliche Neuigkeiten zu Forschung und Entwicklung auf https://x.com/home",
+      "expectedPlatforms": [
+        "twitter"
+      ]
+    },
+    {
+      "request": "Publique notícias de pesquisa e desenvolvimento no X",
+      "expectedPlatforms": [
+        "twitter"
+      ]
+    },
+    {
+      "request": "Publique notícias de pesquisa e desenvolvimento em https://x.com/home",
+      "expectedPlatforms": [
+        "twitter"
+      ]
+    },
+    {
+      "request": "Não publique notícias de pesquisa e desenvolvimento no X",
+      "expectedPlatforms": []
+    },
+    {
+      "request": "Опубликуй новости о научных исследованиях и разработках в X",
+      "expectedPlatforms": [
+        "twitter"
+      ]
+    },
+    {
+      "request": "Опубликуй новости о научных исследованиях и разработках на https://x.com/home",
+      "expectedPlatforms": [
+        "twitter"
+      ]
+    },
+    {
+      "request": "Publish a summary of the news available on X in the survey",
+      "expectedPlatforms": []
+    },
+    {
+      "request": "Publish a summary of the news found on X in the survey",
+      "expectedPlatforms": []
+    },
+    {
+      "request": "Publish a summary of the news seen on X in the survey",
+      "expectedPlatforms": []
+    },
+    {
+      "request": "Publish a summary of the news reported on X in the survey",
+      "expectedPlatforms": []
+    },
+    {
+      "request": "Publish a summary of the news available on X",
+      "expectedPlatforms": []
+    },
+    {
+      "request": "Publish a summary of the news on X in the survey",
+      "expectedPlatforms": []
+    },
+    {
+      "request": "Publica un resumen de las noticias disponibles en X en la encuesta",
+      "expectedPlatforms": []
+    },
+    {
+      "request": "Publie un résumé des actualités disponibles sur X dans le formulaire",
+      "expectedPlatforms": []
+    },
+    {
+      "request": "On X, after reviewing the draft, publish it",
+      "expectedPlatforms": [
+        "twitter"
+      ]
+    },
+    {
+      "request": "On X, before noon, publish this update",
+      "expectedPlatforms": [
+        "twitter"
+      ]
+    },
+    {
+      "request": "On X, once approved, publish the draft",
+      "expectedPlatforms": [
+        "twitter"
+      ]
+    },
+    {
+      "request": "On X, today, after reviewing the draft, publish it",
+      "expectedPlatforms": [
+        "twitter"
+      ]
+    },
+    {
+      "request": "On Bluesky, after reviewing the draft, publish it",
+      "expectedPlatforms": [
+        "bluesky"
+      ]
+    },
+    {
+      "request": "En X, tras revisar el borrador, publícalo",
+      "expectedPlatforms": [
+        "twitter"
+      ]
+    },
+    {
+      "request": "Sur X, après avoir vérifié le brouillon, publiez-le",
+      "expectedPlatforms": [
+        "twitter"
+      ]
+    },
+    {
+      "request": "On X, after reviewing the draft, publish it in the survey",
+      "expectedPlatforms": []
+    },
+    {
+      "request": "Read posts on X. After reviewing the draft, publish it.",
+      "expectedPlatforms": []
+    },
+    {
+      "request": "Publish a report on X adoption in the survey",
+      "expectedPlatforms": []
+    },
+    {
+      "request": "Publish a report on X in the survey",
+      "expectedPlatforms": []
+    },
+    {
+      "request": "Publish a study on Bluesky usage in the spreadsheet",
+      "expectedPlatforms": []
+    },
+    {
+      "request": "Publish research on X trends into the form",
+      "expectedPlatforms": []
+    },
+    {
+      "request": "Publica un informe sobre la adopción de X en la encuesta",
+      "expectedPlatforms": []
+    },
+    {
+      "request": "Publie un rapport sur l'adoption de X dans le formulaire",
+      "expectedPlatforms": []
+    },
+    {
+      "request": "Publish a report on X adoption",
+      "expectedPlatforms": [
+        "twitter"
+      ]
+    },
+    {
+      "request": "Publish on X and in the survey: Update",
+      "expectedPlatforms": [
+        "twitter"
+      ]
+    },
+    {
+      "request": "Publish in the survey a summary of posts on X",
+      "expectedPlatforms": []
+    },
+    {
+      "request": "Publish into the form a collection of updates on Bluesky",
+      "expectedPlatforms": []
+    },
+    {
+      "request": "Publica en la encuesta un resumen de publicaciones en X",
+      "expectedPlatforms": []
+    },
+    {
+      "request": "Publie dans le formulaire un résumé des posts sur X",
+      "expectedPlatforms": []
+    },
+    {
+      "request": "Veröffentliche in der Umfrage eine Zusammenfassung von Beiträgen auf X",
+      "expectedPlatforms": []
+    },
+    {
+      "request": "Publish in the survey and on X: Update",
+      "expectedPlatforms": [
+        "twitter"
+      ]
+    },
+    {
+      "request": "Publish into the form and to Bluesky: Update",
+      "expectedPlatforms": [
+        "bluesky"
+      ]
+    },
+    {
+      "request": "Post on X and Bluesky",
+      "expectedPlatforms": [
+        "twitter",
+        "bluesky"
+      ]
+    },
+    {
+      "request": "Post on X plus Bluesky",
+      "expectedPlatforms": [
+        "twitter",
+        "bluesky"
+      ]
+    },
+    {
+      "request": "Post on X: hello; and on Bluesky: goodbye",
+      "expectedPlatforms": [
+        "twitter",
+        "bluesky"
+      ]
+    },
+    {
+      "request": "Post on X: I posted on Bluesky yesterday.",
+      "expectedPlatforms": [
+        "twitter"
+      ]
+    },
+    {
+      "request": "Post on X: Hello. Post Malone is on Bluesky.",
+      "expectedPlatforms": [
+        "twitter"
+      ]
+    },
+    {
+      "request": "Post on X: Hello. Post-processing happens on Bluesky.",
+      "expectedPlatforms": [
+        "twitter"
+      ]
+    },
+    {
+      "request": "Post on X: Hello. Please post this on Bluesky.",
+      "expectedPlatforms": [
+        "twitter",
+        "bluesky"
+      ]
+    },
+    {
+      "request": "Post on X: Hello. Could you post this on Bluesky?",
+      "expectedPlatforms": [
+        "twitter",
+        "bluesky"
+      ]
+    },
+    {
+      "request": "Post on X: Hello. Could you also post this on Bluesky?",
+      "expectedPlatforms": [
+        "twitter",
+        "bluesky"
+      ]
+    },
+    {
+      "request": "Post on X: Hello. I can post updates on Bluesky.",
+      "expectedPlatforms": [
+        "twitter"
+      ]
+    },
+    {
+      "request": "Post on X: Hello. Malone posts on Bluesky.",
+      "expectedPlatforms": [
+        "twitter"
+      ]
+    },
+    {
+      "request": "Do not publish anything; open https://x.com/compose/post to inspect it, then submit findings in the form",
+      "expectedPlatforms": []
+    },
+    {
+      "request": "Post on X: hello. Post on Bluesky: world",
+      "expectedPlatforms": [
+        "twitter",
+        "bluesky"
+      ]
+    },
+    {
+      "request": "Post on X along with Bluesky",
+      "expectedPlatforms": [
+        "twitter",
+        "bluesky"
+      ]
+    },
+    {
+      "request": "Post on X, then on Bluesky",
+      "expectedPlatforms": [
+        "twitter",
+        "bluesky"
+      ]
+    },
+    {
+      "request": "Post on https://x.com/home, then on https://bsky.app/",
+      "expectedPlatforms": [
+        "twitter",
+        "bluesky"
+      ]
+    },
+    {
+      "request": "Do not post on X, then post on Bluesky",
+      "expectedPlatforms": [
+        "bluesky"
+      ]
+    },
+    {
+      "request": "Post to X or Bluesky: Launch announcement",
+      "expectedPlatforms": [
+        "twitter",
+        "bluesky"
+      ]
+    },
+    {
+      "request": "Publish on X, Threads, and Bluesky",
+      "expectedPlatforms": [
+        "twitter",
+        "bluesky"
+      ]
+    },
+    {
+      "request": "Publica en X y Bluesky",
+      "expectedPlatforms": [
+        "twitter",
+        "bluesky"
+      ]
+    },
+    {
+      "request": "Publie sur X et Bluesky",
+      "expectedPlatforms": [
+        "twitter",
+        "bluesky"
+      ]
+    },
+    {
+      "request": "Veröffentliche auf X und Bluesky",
+      "expectedPlatforms": [
+        "twitter",
+        "bluesky"
+      ]
+    },
+    {
+      "request": "Posta su X e Bluesky",
+      "expectedPlatforms": [
+        "twitter",
+        "bluesky"
+      ]
+    },
+    {
+      "request": "Post on both X and Bluesky",
+      "expectedPlatforms": [
+        "twitter",
+        "bluesky"
+      ]
+    },
+    {
+      "request": "Post to either X or Bluesky: Launch announcement",
+      "expectedPlatforms": [
+        "twitter",
+        "bluesky"
+      ]
+    },
+    {
+      "request": "Post a link to the survey on X",
+      "expectedPlatforms": [
+        "twitter"
+      ]
+    },
+    {
+      "request": "Publish a link to the form on Bluesky",
+      "expectedPlatforms": [
+        "bluesky"
+      ]
+    },
+    {
+      "request": "Share the URL to the spreadsheet on X",
+      "expectedPlatforms": [
+        "twitter"
+      ]
+    },
+    {
+      "request": "Post an invite to the survey on Bluesky",
+      "expectedPlatforms": [
+        "bluesky"
+      ]
+    },
+    {
+      "request": "Publica un enlace a la encuesta en X",
+      "expectedPlatforms": [
+        "twitter"
+      ]
+    },
+    {
+      "request": "Publie un lien vers le formulaire sur Bluesky",
+      "expectedPlatforms": [
+        "bluesky"
+      ]
+    },
+    {
+      "request": "Veröffentliche einen Link zur Umfrage auf X",
+      "expectedPlatforms": [
+        "twitter"
+      ]
+    },
+    {
+      "request": "Use the post published on X to fill the form.",
+      "expectedPlatforms": []
+    },
+    {
+      "request": "A post shared on Bluesky should be entered into the form.",
+      "expectedPlatforms": []
+    },
+    {
+      "request": "Utilisez le message publié sur X pour remplir le formulaire.",
+      "expectedPlatforms": []
+    },
+    {
+      "request": "Publiez le message sur X.",
+      "expectedPlatforms": [
+        "twitter"
+      ]
+    },
+    {
+      "request": "Explain how brands publish on X effectively",
+      "expectedPlatforms": []
+    },
+    {
+      "request": "The team will post on X tomorrow",
+      "expectedPlatforms": []
+    },
+    {
+      "request": "Explain how brands publish on X effectively, then submit the explanation in the survey",
+      "expectedPlatforms": []
+    }
+  ]
+}

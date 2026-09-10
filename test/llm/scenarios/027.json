@@ -1,7 +1,7 @@
 {
   "id": "027",
   "category": "csp-blocked-eval",
-  "mode": "act",
+  "mode": "dev",
   "browser": "chrome",
   "tab": {
     "url": "https://discord.com/channels/123/456",

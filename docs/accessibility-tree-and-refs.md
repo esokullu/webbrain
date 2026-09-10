@@ -233,8 +233,8 @@ When an embedded app or form remains difficult to inspect or target reliably,
 `promote_iframe` navigates the **current run tab** to that child frame's own
 standalone URL. Subsequent tools operate on the standalone page, and normal
 browser Back history is preserved so `go_back` or the browser Back button can
-return to the embedding page. This is a same-tab handoff, not a background
-`new_tab`.
+return to the embedding page. This is a same-tab handoff, not background-tab
+creation.
 
 Use this workflow **before editing** the iframe:
 

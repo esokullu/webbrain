@@ -1,0 +1,27 @@
+{
+  "id": "010",
+  "user": "go to amazon",
+  "mode": "act",
+  "tab": {
+    "url": "about:home",
+    "title": "New Tab"
+  },
+  "latencyMs": 1082,
+  "error": null,
+  "firstToolCall": {
+    "name": "navigate",
+    "args": {
+      "url": "https://www.amazon.com/"
+    }
+  },
+  "toolCallSource": "tool_calls",
+  "finishReason": "tool_calls",
+  "content": "<function name=\"navigate\"><param name=\"url\">https://www.amazon.com/</param></function>",
+  "usage": {
+    "prompt_tokens": 9707,
+    "completion_tokens": 20,
+    "total_tokens": 9727
+  },
+  "attempts": 1,
+  "retryErrors": []
+}

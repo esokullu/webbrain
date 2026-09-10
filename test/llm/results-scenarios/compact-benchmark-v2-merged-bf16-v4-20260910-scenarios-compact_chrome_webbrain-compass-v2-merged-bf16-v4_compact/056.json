@@ -1,0 +1,37 @@
+{
+  "id": "056",
+  "category": "stale-refid",
+  "description": "Used index from get_interactive_elements after a navigation. Indices are tied to the call that produced them.",
+  "mode": "act",
+  "browser": "chrome",
+  "latencyMs": 718,
+  "error": null,
+  "firstToolCall": {
+    "name": "get_interactive_elements",
+    "args": {}
+  },
+  "toolCallSource": "tool_calls",
+  "expected": {
+    "idealNextToolCall": {
+      "name": "get_interactive_elements",
+      "args": {}
+    },
+    "antiPatterns": [
+      {
+        "match": "click({index:1})",
+        "reason": "Reuse of stale index — system prompt explicitly forbids this."
+      }
+    ],
+    "successRubric": "After navigation, indices reset. Call get_interactive_elements again before using an index."
+  },
+  "matchedAntiPattern": null,
+  "verdict": "ideal",
+  "scoreNote": null,
+  "finishReason": "tool_calls",
+  "content": "<function name=\"get_interactive_elements\"></function>",
+  "usage": {
+    "prompt_tokens": 9885,
+    "completion_tokens": 11,
+    "total_tokens": 9896
+  }
+}

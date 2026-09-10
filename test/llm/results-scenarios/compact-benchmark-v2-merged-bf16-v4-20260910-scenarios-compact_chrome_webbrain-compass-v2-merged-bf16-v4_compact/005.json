@@ -1,0 +1,42 @@
+{
+  "id": "005",
+  "category": "loop-bad-url",
+  "description": "Guessed documentation URL based on tool name failed. Should search docs index, not guess again.",
+  "mode": "act",
+  "browser": "chrome",
+  "latencyMs": 3997,
+  "error": null,
+  "firstToolCall": {
+    "name": "clarify",
+    "args": {
+      "question": "The API reference URL returned a 404, so I can’t locate the documentation from the current page. Please provide the correct API reference URL or confirm the correct base URL for example-tool.",
+      "reason": "The requested API reference URL is invalid and the page shows a 404, so I cannot proceed without the correct URL."
+    }
+  },
+  "toolCallSource": "tool_calls",
+  "expected": {
+    "idealNextToolCall": {
+      "name": "navigate",
+      "args": {
+        "url": "https://docs.example-tool.io/"
+      }
+    },
+    "antiPatterns": [
+      {
+        "match": "navigate({url:\"https://docs.example-tool.io/api/v1\"})",
+        "reason": "Guess-and-check on docs path is a loop pattern."
+      }
+    ],
+    "successRubric": "Go to the docs root and let the site's nav lead to the API reference. Acceptable: web search for \"example-tool api reference\"."
+  },
+  "matchedAntiPattern": null,
+  "verdict": "other",
+  "scoreNote": null,
+  "finishReason": "tool_calls",
+  "content": "The API reference URL returned a 404, so I can’t locate the documentation from the current page. Please provide the correct API reference URL or confirm the correct base URL for example-tool.\n<function name=\"clarify\"><param name=\"question\">The API reference URL returned a 404, so I can’t locate the documentation from the current page. Please provide the correct API reference URL or confirm the correct base URL for example-tool.</param><param name=\"reason\">The requested API reference URL is invalid and the page shows a 404, so I cannot proceed without the correct URL.</param></function>",
+  "usage": {
+    "prompt_tokens": 9833,
+    "completion_tokens": 120,
+    "total_tokens": 9953
+  }
+}

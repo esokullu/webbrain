@@ -42,5 +42,13 @@ const clickIdeal = { idealNextToolCall: { name: 'click', args: { text: 'Subscrib
 t('prose when ideal is an ACTION -> no_tool (did not act)', () =>
   assert.equal(scoreVerdict({ firstToolCall: null, content: 'I see a Subscribe button.', expected: clickIdeal }).verdict, 'no_tool'));
 
+// ── skipped: not sent, so neither a pass nor a failure ────────────────────
+t('a skipped scenario is skipped, not empty', () =>
+  assert.equal(scoreVerdict({ skipped: 'dev mode has no compact-tier payload', firstToolCall: null, content: '', expected: clickIdeal }).verdict, 'skipped'));
+t('skipped wins over error so a regrade cannot demote it', () =>
+  assert.equal(scoreVerdict({ skipped: 'unrunnable here', error: 'HTTP 500', expected: clickIdeal }).verdict, 'skipped'));
+t('a skipped scenario never matches an antiPattern', () =>
+  assert.equal(scoreVerdict({ skipped: 'unrunnable here', firstToolCall: { name: 'navigate', args: { url: 'https://evil.example/x' } }, expected: summarize }).matchedAntiPattern, null));
+
 console.log(`\n  ${pass}/${pass + fail} grader checks passed`);
 process.exit(fail ? 1 : 0);

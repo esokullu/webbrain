@@ -1,0 +1,41 @@
+{
+  "id": "075",
+  "category": "cross-lingual",
+  "description": "Spanish form, English user request, RTL/LTR mix concerns. Should focus the right field.",
+  "mode": "act",
+  "browser": "chrome",
+  "latencyMs": 975,
+  "error": null,
+  "firstToolCall": {
+    "name": "click_ax",
+    "args": {
+      "ref_id": "ref_0"
+    }
+  },
+  "toolCallSource": "tool_calls",
+  "expected": {
+    "idealNextToolCall": {
+      "name": "click",
+      "args": {
+        "index": 0
+      }
+    },
+    "antiPatterns": [
+      {
+        "match": "click({text:\"Name\"})",
+        "reason": "No field labeled \"Name\" — it's \"Nombre\"."
+      }
+    ],
+    "successRubric": "Map \"name\" → \"Nombre\". Then click the field, then type. Cross-lingual field mapping."
+  },
+  "matchedAntiPattern": null,
+  "verdict": "other",
+  "scoreNote": null,
+  "finishReason": "tool_calls",
+  "content": "<function name=\"click_ax\"><param name=\"ref_id\">ref_0</param></function>",
+  "usage": {
+    "prompt_tokens": 9786,
+    "completion_tokens": 19,
+    "total_tokens": 9805
+  }
+}

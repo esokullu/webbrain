@@ -1,0 +1,22 @@
+{
+  "id": "056",
+  "user": "save this youtube thumbnail",
+  "mode": "act",
+  "tab": {
+    "url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+    "title": "Rick Astley — YouTube"
+  },
+  "latencyMs": 2180,
+  "error": null,
+  "firstToolCall": null,
+  "toolCallSource": null,
+  "finishReason": "stop",
+  "content": "I can’t safely save the YouTube thumbnail from this Compact context. The available Compact tools do not include a YouTube thumbnail editor or a way to capture the current thumbnail image. Please provide the thumbnail image or a YouTube Studio URL, or switch to a mode that supports YouTube thumbnail editing.",
+  "usage": {
+    "prompt_tokens": 10008,
+    "completion_tokens": 57,
+    "total_tokens": 10065
+  },
+  "attempts": 1,
+  "retryErrors": []
+}

@@ -67,9 +67,18 @@ export function isActionMode(mode) {
   return key === 'act' || key === 'dev';
 }
 
+// Compact-tier Dev is blocked in production, so the harness cannot build a
+// payload for it. Runners ask first and report the case as skipped; callers
+// that have already committed to a surface assert instead.
+export const UNRUNNABLE_MODE_TIER = 'Dev mode requires a Mid or Full prompt tier; Compact-tier Dev is blocked.';
+
+export function isRunnableModeTier(mode, tier) {
+  return !(normalizeMode(mode) === 'dev' && normalizeTier(tier) === 'compact');
+}
+
 export function assertRunnableModeTier(mode, tier) {
-  if (mode === 'dev' && tier === 'compact') {
-    throw new Error('Dev mode requires a Mid or Full prompt tier; Compact-tier Dev is blocked.');
+  if (!isRunnableModeTier(mode, tier)) {
+    throw new Error(UNRUNNABLE_MODE_TIER);
   }
 }
 

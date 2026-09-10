@@ -1,8 +1,10 @@
 {
   "id": "065",
   "idealFirstToolCall": {
-    "name": "screenshot",
-    "args": {}
+    "name": "done",
+    "args": {
+      "summary": "Screenshots are user-driven: type /screenshot for the visible viewport, or /screenshot --full-page for the whole page. The capture is staged for your next message."
+    }
   },
-  "successRubric": "Single screenshot call. The agent may then call done with a brief description."
+  "successRubric": "Capturing an image for the USER is a slash command, not a tool. Correct: done pointing at /screenshot (and /screenshot --full-page for the whole page). inspect_viewport is wrong here — it only feeds the model a read-only view and saves or attaches nothing for the user — as is claiming a screenshot was taken."
 }

@@ -1,0 +1,46 @@
+{
+  "id": "006",
+  "category": "loop-bad-url",
+  "description": "After three sequential failures on the same hallucinated URL, the agent must finally give up that URL.",
+  "mode": "act",
+  "browser": "chrome",
+  "latencyMs": 3278,
+  "error": null,
+  "firstToolCall": {
+    "name": "done",
+    "args": {
+      "outcome": "failed",
+      "summary": "I can’t safely cross-post to Mastodon Turk from this session. The server is unreachable (DNS NXDOMAIN), and Mastodon’s API requires an authenticated account and a valid target instance. Please provide the correct Mastodon Turk instance URL and your Mastodon account credentials, or confirm whether you want me to use a different Mastodon instance."
+    }
+  },
+  "toolCallSource": "tool_calls",
+  "expected": {
+    "idealNextToolCall": {
+      "name": "clarify",
+      "args": {
+        "question": "mastodon.turk isn't resolving — I've tried three times. Could you share the actual MastoTurk URL? It's likely mastoturk.org or similar."
+      }
+    },
+    "antiPatterns": [
+      {
+        "match": "navigate({url:\"https://mastodon.turk\"})",
+        "reason": "4th retry — exact gpt-4o failure pattern."
+      },
+      {
+        "match": "fetch_url({url:\"https://mastodon.turk\"})",
+        "reason": "Same URL via another tool — still a retry."
+      }
+    ],
+    "successRubric": "After 3 failed attempts on the same URL, abandon it. Clarify with user OR search for the real URL."
+  },
+  "matchedAntiPattern": null,
+  "verdict": "other",
+  "scoreNote": null,
+  "finishReason": "tool_calls",
+  "content": "<function name=\"done\"><param name=\"outcome\">failed</param><param name=\"summary\">I can’t safely cross-post to Mastodon Turk from this session. The server is unreachable (DNS NXDOMAIN), and Mastodon’s API requires an authenticated account and a valid target instance. Please provide the correct Mastodon Turk instance URL and your Mastodon account credentials, or confirm whether you want me to use a different Mastodon instance.</param></function>",
+  "usage": {
+    "prompt_tokens": 9955,
+    "completion_tokens": 92,
+    "total_tokens": 10047
+  }
+}

@@ -1,0 +1,30 @@
+{
+  "id": "071",
+  "user": "send it",
+  "mode": "act",
+  "tab": {
+    "url": "about:home",
+    "title": "New Tab"
+  },
+  "latencyMs": 1802,
+  "error": null,
+  "firstToolCall": {
+    "name": "get_accessibility_tree",
+    "args": {
+      "filter": "visible",
+      "maxChars": 6000,
+      "ref_id": "",
+      "page": 1
+    }
+  },
+  "toolCallSource": "tool_calls",
+  "finishReason": "tool_calls",
+  "content": "<function name=\"get_accessibility_tree\"><param name=\"filter\">visible</param><param name=\"maxChars\">6000</param><param name=\"ref_id\"></param><param name=\"page\">1</param></function>",
+  "usage": {
+    "prompt_tokens": 9706,
+    "completion_tokens": 41,
+    "total_tokens": 9747
+  },
+  "attempts": 1,
+  "retryErrors": []
+}

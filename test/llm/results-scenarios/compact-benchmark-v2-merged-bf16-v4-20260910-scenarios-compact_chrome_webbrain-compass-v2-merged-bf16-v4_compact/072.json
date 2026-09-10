@@ -1,0 +1,41 @@
+{
+  "id": "072",
+  "category": "cross-lingual",
+  "description": "German UI, English user request. Use the German button label.",
+  "mode": "act",
+  "browser": "chrome",
+  "latencyMs": 823,
+  "error": null,
+  "firstToolCall": {
+    "name": "get_accessibility_tree",
+    "args": {
+      "filter": "visible"
+    }
+  },
+  "toolCallSource": "tool_calls",
+  "expected": {
+    "idealNextToolCall": {
+      "name": "click",
+      "args": {
+        "text": "Search"
+      }
+    },
+    "antiPatterns": [
+      {
+        "match": "click({text:\"Google Suche\"})",
+        "reason": "Acceptable too, but the search-input pattern works with the visible search field, not a button."
+      }
+    ],
+    "successRubric": "Focus the search input (an input has aria-label \"Search\" or similar — click(text) on inputs is supported per click tool docs), type query. The German labels Suche/Suchen also work."
+  },
+  "matchedAntiPattern": null,
+  "verdict": "other",
+  "scoreNote": null,
+  "finishReason": "tool_calls",
+  "content": "<function name=\"get_accessibility_tree\"><param name=\"filter\">visible</param></function>",
+  "usage": {
+    "prompt_tokens": 9754,
+    "completion_tokens": 17,
+    "total_tokens": 9771
+  }
+}

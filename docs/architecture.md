@@ -241,6 +241,15 @@ while (steps < maxSteps) {
 }
 ```
 
+When an interactive, tool-capable run exhausts its configured agent steps
+without a terminal answer, the browser loop stays closed and WebBrain performs
+one context-only handoff with only `done` available. That terminal schema permits
+`partial` or `failed`, never `success`; invalid output falls back to the
+deterministic step-limit summary. This also applies to the selected WebBrain
+Compass provider without changing its advisory in-loop observation checkpoints.
+Structured Cloud API runs keep their separate `done_json` output contract and do
+not enter this handoff.
+
 ### Ask-only provider streaming
 
 `chatMainTurn()` normally delegates to the established cost-aware
@@ -331,7 +340,7 @@ trace and diagnostic exports as privacy-sensitive data.
 |---|---|---|
 | `get_accessibility_tree`, `click_ax`, `type_ax`, `set_field`, `hover` | content script message | Injected page context |
 | `click`, `type_text`, `press_keys`, `scroll`, `read_page`, etc. | content script message | Injected page context |
-| `navigate`, `new_tab`, `go_back`, `go_forward` | `chrome.tabs` / `browser.tabs` API | Background script |
+| `navigate`, `go_back`, `go_forward` | `chrome.tabs` / `browser.tabs` API | Background script |
 | `fetch_url`, `research_url`, `list_downloads`, etc. | `network-tools.js` | Service worker |
 | Enabled skill tools | `skills.js` registry + `executeHttpSkillTool()` | Service worker |
 | `list_webmcp_tools`, `execute_webmcp_tool` | experimental CDP `WebMCP` domain | Chrome service worker + page-registered callback |
@@ -347,7 +356,10 @@ trace and diagnostic exports as privacy-sensitive data.
 | `execute_js` | bounded CDP `Runtime.evaluate` (Chrome) / content script (Firefox) | Dev-only page JavaScript |
 | `read_console`, `inspect_network_requests` | mode-scoped bounded CDP Runtime/Log/Network buffers | Chrome Dev-only diagnostics |
 | `inspect_event_listeners` | permission-gated content target marker + CDP `DOMDebugger.getEventListeners` | Chrome Dev-only listener diagnosis |
+| `read_email_verification_message` | service worker + bounded accessibility reads | Mid/Full only after the OTP skill is active; directly scopes verified already-open message routes, requires Act/Dev plus mailbox-host click permission to open an inbox item, and completes or rejects bounded message continuations |
 | `get_shadow_dom`, `shadow_dom_query`, `get_frames` | content/CDP helpers | Full Act advanced fallbacks; also added to Mid in Dev mode |
+
+Browser-tab creation, enumeration, activation, and run retargeting are not general model-callable capabilities. To inspect another URL, the agent uses an available URL reader; to interact with it, it navigates the current run tab. Explicit separate-tab requests are surfaced as a limitation rather than silently converted into current-tab navigation. The only private-tab exception is the single OTP-skill-gated reader above: the runtime chooses an already-open supported mailbox without exposing the tab catalog, and any message-opening helper is inactive and disposable. Internal research/helper tabs and normal page-authored `target=_blank` behavior remain separate infrastructure.
 
 Chrome CSS patch records include the top-level `documentId` and a patch-specific CSS marker. Full navigation clears persisted records, and `remove_injected_css` checks the live document before calling `removeCSS`, preventing an old patch ID from removing equivalent CSS on a replacement page. If navigation races either identity check during injection, WebBrain removes that patch's exact uniquely marked CSS from the replacement document before discarding its record. Chrome `execute_js` passes a 15-second timeout to CDP. Dev diagnostic event handlers are registered before either agent-loop variant starts and own their debugger session across turns, so ordinary run cleanup preserves their bounded buffers. Leaving the panel-wide Dev mode drains every tab in the CDP client's active-diagnostics registry, removes the handlers and buffers, and sends `Runtime.disable`, `Log.disable`, and `Network.disable` so Chrome also stops domain-level diagnostic work; conversation and tab cleanup additionally detach the debugger.
 
@@ -356,7 +368,7 @@ Chrome CSS patch records include the top-level `documentId` and a patch-specific
 Settings -> Skills stores enabled skills in `customSkills` (`chrome.storage.local`
 or `browser.storage.local`). On startup, `background.js` loads packaged default
 skills from `skills/*`, adds any missing default (currently FreeSkillz.xyz, the
-prompt-only email verification-code helper, and Humanizer), and refreshes an
+email verification-code helper, and Humanizer), and refreshes an
 existing
 built-in skill record when the packaged copy changes. If the user removes a
 default skill, its removal tombstone prevents it from being silently re-added;
@@ -394,6 +406,10 @@ new default IDs can still be migrated into existing installations.
   compatible schemas to `getToolsForMode(...)` at LLM-call time, respecting
   mode, tier, and site adapter. Download-job tools remain
   hidden in Ask and require their normal permission gate in action modes.
+  The bundled OTP helper is a narrower built-in exception rather than a declared
+  network tool: once that exact skill is active on Mid/Full, the runtime appends
+  one fixed browser-neutral schema. Compact never receives it, and imported
+  skills cannot claim its reserved name.
 
 Loading is idempotent and multiple relevant skills can be active in one run.
 The loader's trusted instruction permits activation only for the user's request
@@ -452,7 +468,7 @@ tracks as a successful video or hand ffmpeg work to the user.
 
 | User intent | Expected skill | Catalog modes | Notes |
 | --- | --- | --- | --- |
-| Find, read, copy, or enter a code visible in browser email/message content | OTP / verification-code helper | Ask, Act, Dev | Prompt-only; after loading it guides existing page tools. |
+| Find, read, copy, or enter a code visible in browser email/message content | OTP / verification-code helper | Ask, Act, Dev | Guides narrow current-page reads; on Mid/Full, loading it also exposes one fixed reader for an already-open signed-in supported webmail tab. |
 | Create and use a temporary mailbox for an unimportant signup | Disposable email (Mail.tm) | Act, Dev | Not shown to Ask. It may overlap with OTP during a verification flow, so both can be loaded. |
 | Read a YouTube transcript, fetch a blocked NYTimes article, or resolve/download supported public media | FreeSkillz.xyz | Ask, Act, Dev | Ask can load the skill but still cannot see its Act-only `download_public_media` tool. |
 | Draft or rewrite an email reply, message, or post the user will send | Humanizer | Ask, Act, Dev | Prompt-only; preactivated on webmail adapters and on the explicit Humanize selected-text shortcut, otherwise routed by catalog. Returns final text only. |

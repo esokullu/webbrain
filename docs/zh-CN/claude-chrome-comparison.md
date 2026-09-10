@@ -72,7 +72,7 @@ get_interactive_elements, click, type_text, press_keys, scroll, navigate,
 go_back, go_forward, extract_data, inspect_element_styles, wait_for_element,
 inject_css, remove_injected_css, patch_element, revert_patch, execute_js,
 read_console, inspect_network_requests, inspect_event_listeners,
-highlight_element, wait_for_stable, schedule_resume, schedule_task, get_selection, find_text, new_tab,
+highlight_element, wait_for_stable, schedule_resume, schedule_task, get_selection, find_text,
 promote_iframe,
 done, clarify, get_shadow_dom, shadow_dom_query, get_frames, iframe_read,
 iframe_click, iframe_type, fetch_url, research_url, list_downloads,
@@ -90,7 +90,7 @@ Firefox 不包含 Chrome 独有的 Dev 工具和 `shadow_dom_query`；其余核�
 |---|---|
 | AX 优先的 DOM 控制 | `get_accessibility_tree`、`click_ax`、`type_ax`、`set_field`、`set_checked`、`hover`、`drag_drop` |
 | 传统的 DOM 回退 | `get_interactive_elements`、`click`、`type_text`、`press_keys`、`scroll`、`wait_for_element`、`wait_for_stable` |
-| 导航和标签页 | `navigate`、`go_back`、`go_forward`、`new_tab`、`promote_iframe` |
+| 导航 | `navigate`、`go_back`、`go_forward`、`promote_iframe` |
 | 读取/提取 | `read_page`、`read_pdf`、`read_page_source`、`extract_data`、`inspect_element_styles`、`get_selection`、`find_text` |
 | Dev 编辑与诊断 | `inject_css`、`remove_injected_css`、`patch_element`、`revert_patch`、`execute_js`、`read_console`、`inspect_network_requests`、`inspect_event_listeners`、`highlight_element` |
 | Shadow DOM 和框架 | `get_shadow_dom`、`shadow_dom_query`（Chrome）、`get_frames`、`iframe_read`、`iframe_click`、`iframe_type`、`promote_iframe` |

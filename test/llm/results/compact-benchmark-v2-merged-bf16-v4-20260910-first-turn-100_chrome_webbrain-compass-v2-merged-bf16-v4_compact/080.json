@@ -1,0 +1,28 @@
+{
+  "id": "080",
+  "user": "close all my tabs except this one",
+  "mode": "act",
+  "tab": {
+    "url": "about:home",
+    "title": "New Tab"
+  },
+  "latencyMs": 1104,
+  "error": null,
+  "firstToolCall": {
+    "name": "get_accessibility_tree",
+    "args": {
+      "filter": "visible",
+      "maxDepth": 10
+    }
+  },
+  "toolCallSource": "tool_calls",
+  "finishReason": "tool_calls",
+  "content": "<function name=\"get_accessibility_tree\"><param name=\"filter\">visible</param><param name=\"maxDepth\">10</param></function>",
+  "usage": {
+    "prompt_tokens": 9711,
+    "completion_tokens": 25,
+    "total_tokens": 9736
+  },
+  "attempts": 1,
+  "retryErrors": []
+}

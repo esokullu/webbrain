@@ -329,15 +329,6 @@ tools keep working on Firefox.
 
 Source: [`lmstudio-plugin/`](lmstudio-plugin/).
 
-## Star History
-
-<a href="https://www.star-history.com/?repos=webbrain-one%2Fwebbrain&type=date&legend=top-left">
- <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=webbrain-one/webbrain&type=date&theme=dark&legend=top-left&sealed_token=pEVOa2e14jxSLxQdCH2zPHJpjdCUYgWImET-_h_dgTuQYqEzR3f5pOzIyYGKN_gFHT-oZqKTM_yZfWHwwMtmM0Jb5YZvGgyuF6cF-w4vHVDdkJoUirCJjQ" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=webbrain-one/webbrain&type=date&legend=top-left&sealed_token=pEVOa2e14jxSLxQdCH2zPHJpjdCUYgWImET-_h_dgTuQYqEzR3f5pOzIyYGKN_gFHT-oZqKTM_yZfWHwwMtmM0Jb5YZvGgyuF6cF-w4vHVDdkJoUirCJjQ" />
-   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=webbrain-one/webbrain&type=date&legend=top-left&sealed_token=pEVOa2e14jxSLxQdCH2zPHJpjdCUYgWImET-_h_dgTuQYqEzR3f5pOzIyYGKN_gFHT-oZqKTM_yZfWHwwMtmM0Jb5YZvGgyuF6cF-w4vHVDdkJoUirCJjQ" />
- </picture>
-</a>
 
 ## Contributors
 
@@ -365,4 +356,4 @@ and integrates the GPL-licensed Xapian/libzim WebAssembly runtime. Releases
 before 33.0.0 remain MIT-licensed under the license that applied when they were
 published; that historical text is preserved in [LICENSES/MIT.txt](LICENSES/MIT.txt).
 
-Built by [Emre Sokullu](https://emresokullu.com).
+Built with ❤️ by [Emre Sokullu](https://emresokullu.com) and [open-source contributors](https://github.com/webbrain-one/webbrain/graphs/contributors).

@@ -47,8 +47,8 @@
         "reason": "Same tool that just rejected the PDF tab."
       },
       {
-        "match": "screenshot({})",
-        "reason": "PDF viewer screenshot won't produce extractable text."
+        "match": "inspect_viewport({})",
+        "reason": "PDF viewer capture won't produce extractable text."
       }
     ],
     "successRubric": "Use read_pdf with the tab URL. The error message names the right tool — follow it."

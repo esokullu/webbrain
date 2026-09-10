@@ -1,0 +1,43 @@
+{
+  "id": "076",
+  "category": "cross-lingual",
+  "description": "Chinese site. The agent must use 搜索 (search) not English.",
+  "mode": "act",
+  "browser": "chrome",
+  "latencyMs": 1443,
+  "error": null,
+  "firstToolCall": {
+    "name": "set_field",
+    "args": {
+      "ref_id": "ref_5",
+      "text": "lo-fi study",
+      "submit": true
+    }
+  },
+  "toolCallSource": "tool_calls",
+  "expected": {
+    "idealNextToolCall": {
+      "name": "click_ax",
+      "args": {
+        "ref_id": "ref_5"
+      }
+    },
+    "antiPatterns": [
+      {
+        "match": "click({text:\"Search\"})",
+        "reason": "Chinese UI — search input has placeholder 搜索, not \"Search\"."
+      }
+    ],
+    "successRubric": "Click the Chinese searchbox via ref_id. Then type the query."
+  },
+  "matchedAntiPattern": null,
+  "verdict": "other",
+  "scoreNote": null,
+  "finishReason": "tool_calls",
+  "content": "<function name=\"set_field\"><param name=\"ref_id\">ref_5</param><param name=\"text\">lo-fi study</param><param name=\"submit\">True</param></function>",
+  "usage": {
+    "prompt_tokens": 9765,
+    "completion_tokens": 34,
+    "total_tokens": 9799
+  }
+}

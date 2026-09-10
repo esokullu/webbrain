@@ -1,0 +1,22 @@
+{
+  "runTag": "compact-benchmark-v2-merged-bf16-v4-20260910-smoke",
+  "model": "webbrain-compass-v2-merged-bf16-v4",
+  "browser": "chrome",
+  "base": "http://127.0.0.1:8327/v1",
+  "saveRequest": false,
+  "tier": "compact",
+  "modeOverride": null,
+  "chatTemplateCompat": "off",
+  "structuredToolsSent": true,
+  "reasoningEffort": null,
+  "freeze": null,
+  "cases": 5,
+  "totalLatencyMs": 12647,
+  "errors": 0,
+  "withToolCall": 5,
+  "withToolCallFromContent": 0,
+  "byTool": {
+    "navigate": 1,
+    "get_accessibility_tree": 4
+  }
+}

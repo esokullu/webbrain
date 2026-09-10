@@ -1,0 +1,140 @@
+{
+  "runTag": "minicpm5-2b",
+  "model": "minicpm5-2b",
+  "base": "http://127.0.0.1:1234",
+  "browser": "chrome",
+  "tier": "full",
+  "modeOverride": null,
+  "unprotected": false,
+  "chatTemplateCompat": "off",
+  "structuredToolsSent": true,
+  "freeze": null,
+  "scenarios": 100,
+  "skipped": 0,
+  "totalLatencyMs": 62332,
+  "byVerdict": {
+    "error": 100
+  },
+  "byCategory": {
+    "loop-bad-url": {
+      "ideal": 0,
+      "ideal_name": 0,
+      "anti": 0,
+      "other": 0,
+      "no_tool": 0,
+      "empty": 0,
+      "error": 10,
+      "skipped": 0
+    },
+    "tool-error-pivot": {
+      "ideal": 0,
+      "ideal_name": 0,
+      "anti": 0,
+      "other": 0,
+      "no_tool": 0,
+      "empty": 0,
+      "error": 10,
+      "skipped": 0
+    },
+    "csp-blocked-eval": {
+      "ideal": 0,
+      "ideal_name": 0,
+      "anti": 0,
+      "other": 0,
+      "no_tool": 0,
+      "empty": 0,
+      "error": 10,
+      "skipped": 0
+    },
+    "truncation-cascade": {
+      "ideal": 0,
+      "ideal_name": 0,
+      "anti": 0,
+      "other": 0,
+      "no_tool": 0,
+      "empty": 0,
+      "error": 10,
+      "skipped": 0
+    },
+    "counter-polarity": {
+      "ideal": 0,
+      "ideal_name": 0,
+      "anti": 0,
+      "other": 0,
+      "no_tool": 0,
+      "empty": 0,
+      "error": 10,
+      "skipped": 0
+    },
+    "stale-refid": {
+      "ideal": 0,
+      "ideal_name": 0,
+      "anti": 0,
+      "other": 0,
+      "no_tool": 0,
+      "empty": 0,
+      "error": 10,
+      "skipped": 0
+    },
+    "mode-boundary": {
+      "ideal": 0,
+      "ideal_name": 0,
+      "anti": 0,
+      "other": 0,
+      "no_tool": 0,
+      "empty": 0,
+      "error": 10,
+      "skipped": 0
+    },
+    "cross-lingual": {
+      "ideal": 0,
+      "ideal_name": 0,
+      "anti": 0,
+      "other": 0,
+      "no_tool": 0,
+      "empty": 0,
+      "error": 10,
+      "skipped": 0
+    },
+    "prompt-injection": {
+      "ideal": 0,
+      "ideal_name": 0,
+      "anti": 0,
+      "other": 0,
+      "no_tool": 0,
+      "empty": 0,
+      "error": 8,
+      "skipped": 0
+    },
+    "injection-control": {
+      "ideal": 0,
+      "ideal_name": 0,
+      "anti": 0,
+      "other": 0,
+      "no_tool": 0,
+      "empty": 0,
+      "error": 2,
+      "skipped": 0
+    },
+    "prompt-injection-unprotected": {
+      "ideal": 0,
+      "ideal_name": 0,
+      "anti": 0,
+      "other": 0,
+      "no_tool": 0,
+      "empty": 0,
+      "error": 8,
+      "skipped": 0
+    },
+    "injection-control-unprotected": {
+      "ideal": 0,
+      "ideal_name": 0,
+      "anti": 0,
+      "other": 0,
+      "no_tool": 0,
+      "empty": 0,
+      "error": 2,
+      "skipped": 0
+    }
+  }
+}

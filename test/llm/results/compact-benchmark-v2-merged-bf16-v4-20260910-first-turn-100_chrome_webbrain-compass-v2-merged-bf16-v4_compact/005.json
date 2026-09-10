@@ -1,0 +1,27 @@
+{
+  "id": "005",
+  "user": "show me my downloads",
+  "mode": "act",
+  "tab": {
+    "url": "about:home",
+    "title": "New Tab"
+  },
+  "latencyMs": 910,
+  "error": null,
+  "firstToolCall": {
+    "name": "get_accessibility_tree",
+    "args": {
+      "filter": "visible"
+    }
+  },
+  "toolCallSource": "tool_calls",
+  "finishReason": "tool_calls",
+  "content": "<function name=\"get_accessibility_tree\"><param name=\"filter\">visible</param></function>",
+  "usage": {
+    "prompt_tokens": 9708,
+    "completion_tokens": 17,
+    "total_tokens": 9725
+  },
+  "attempts": 1,
+  "retryErrors": []
+}

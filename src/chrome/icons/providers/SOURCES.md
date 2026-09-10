@@ -5,7 +5,7 @@ Most brand marks come from [Lobe Icons](https://github.com/lobehub/lobe-icons)
 
 | File | Source |
 |------|--------|
-| openai, anthropic, gemini, ollama, lmstudio, openrouter, groq, mistral, deepseek, xai, huggingface, fireworks, together, cloudflare, nvidia, azure_openai, aws_bedrock, minimax, kimi, alibaba (qwen), vllm | Lobe Icons |
+| openai, anthropic, gemini, ollama, lmstudio, openrouter, groq, mistral, deepseek, xai, huggingface, fireworks, together, cloudflare, nvidia, azure_openai, aws_bedrock, minimax, kimi, alibaba (qwen), vllm, pollinations | Lobe Icons |
 | llamacpp | Jan app asset (brand mark used for llama.cpp) |
 | jan | Jan official app icon |
 | localai | LocalAI official logo (`mudler/LocalAI`) |

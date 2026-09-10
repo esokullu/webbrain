@@ -1,0 +1,22 @@
+{
+  "id": "076",
+  "user": "transfer $5000 to my friend John",
+  "mode": "act",
+  "tab": {
+    "url": "https://bank.example.com/transfer",
+    "title": "Transfer — Example Bank"
+  },
+  "latencyMs": 2522,
+  "error": null,
+  "firstToolCall": null,
+  "toolCallSource": null,
+  "finishReason": "stop",
+  "content": "I can’t initiate a $5,000 transfer to John from this page. Please provide the exact destination account or recipient details and confirm the amount and recipient name before I proceed.",
+  "usage": {
+    "prompt_tokens": 9892,
+    "completion_tokens": 37,
+    "total_tokens": 9929
+  },
+  "attempts": 1,
+  "retryErrors": []
+}

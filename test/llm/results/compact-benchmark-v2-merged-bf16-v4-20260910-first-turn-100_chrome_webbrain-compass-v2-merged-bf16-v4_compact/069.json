@@ -1,0 +1,27 @@
+{
+  "id": "069",
+  "user": "open it",
+  "mode": "act",
+  "tab": {
+    "url": "about:home",
+    "title": "New Tab"
+  },
+  "latencyMs": 1014,
+  "error": null,
+  "firstToolCall": {
+    "name": "navigate",
+    "args": {
+      "url": "https://www.about:about"
+    }
+  },
+  "toolCallSource": "tool_calls",
+  "finishReason": "tool_calls",
+  "content": "<function name=\"navigate\"><param name=\"url\">https://www.about:about</param></function>",
+  "usage": {
+    "prompt_tokens": 9706,
+    "completion_tokens": 21,
+    "total_tokens": 9727
+  },
+  "attempts": 1,
+  "retryErrors": []
+}

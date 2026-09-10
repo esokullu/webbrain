@@ -6,5 +6,5 @@
       "url": "https://mail.google.com/"
     }
   },
-  "successRubric": "Navigates to mail.google.com (with or without trailing slash, with or without /mail/u/0/). new_tab is also acceptable."
+  "successRubric": "Navigates to mail.google.com (with or without trailing slash, with or without /mail/u/0/)."
 }

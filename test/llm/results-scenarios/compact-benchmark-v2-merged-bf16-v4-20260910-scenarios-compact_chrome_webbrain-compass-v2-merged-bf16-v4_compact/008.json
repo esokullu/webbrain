@@ -1,0 +1,41 @@
+{
+  "id": "008",
+  "category": "loop-bad-url",
+  "description": "Subreddit is private; Reddit redirected to login. Don't retry the sub URL.",
+  "mode": "act",
+  "browser": "chrome",
+  "latencyMs": 946,
+  "error": null,
+  "firstToolCall": {
+    "name": "get_accessibility_tree",
+    "args": {
+      "filter": "visible"
+    }
+  },
+  "toolCallSource": "tool_calls",
+  "expected": {
+    "idealNextToolCall": {
+      "name": "done",
+      "args": {
+        "summary": "r/private-sub appears to be private or requires login — Reddit redirected me to the sign-in page. Sign in (or check the sub name) and try again."
+      }
+    },
+    "antiPatterns": [
+      {
+        "match": "navigate({url:\"https://www.reddit.com/r/private-sub\"})",
+        "reason": "Will redirect to login again."
+      }
+    ],
+    "successRubric": "Recognize the private-sub redirect, report it to the user. Don't fight the auth wall."
+  },
+  "matchedAntiPattern": null,
+  "verdict": "other",
+  "scoreNote": null,
+  "finishReason": "tool_calls",
+  "content": "<function name=\"get_accessibility_tree\"><param name=\"filter\">visible</param></function>",
+  "usage": {
+    "prompt_tokens": 9877,
+    "completion_tokens": 17,
+    "total_tokens": 9894
+  }
+}

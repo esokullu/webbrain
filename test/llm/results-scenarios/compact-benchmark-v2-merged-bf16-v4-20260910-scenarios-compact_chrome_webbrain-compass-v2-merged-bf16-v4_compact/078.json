@@ -1,0 +1,41 @@
+{
+  "id": "078",
+  "category": "cross-lingual",
+  "description": "Korean UI, English request. Korean label needed.",
+  "mode": "act",
+  "browser": "chrome",
+  "latencyMs": 734,
+  "error": null,
+  "firstToolCall": {
+    "name": "click",
+    "args": {
+      "text": "로그인"
+    }
+  },
+  "toolCallSource": "tool_calls",
+  "expected": {
+    "idealNextToolCall": {
+      "name": "click",
+      "args": {
+        "index": 0
+      }
+    },
+    "antiPatterns": [
+      {
+        "match": "click({text:\"Login\"})",
+        "reason": "No English \"Login\" on this page."
+      }
+    ],
+    "successRubric": "Map login → 로그인. Then click by index since the label is in Korean script."
+  },
+  "matchedAntiPattern": null,
+  "verdict": "ideal_name",
+  "scoreNote": null,
+  "finishReason": "tool_calls",
+  "content": "<function name=\"click\"><param name=\"text\">로그인</param></function>",
+  "usage": {
+    "prompt_tokens": 9770,
+    "completion_tokens": 15,
+    "total_tokens": 9785
+  }
+}

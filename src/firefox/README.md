@@ -8,7 +8,7 @@ Open-source AI browser agent for Chrome and Firefox. Chat with any web page, aut
 - **Browser Actions** — Click, type, scroll, navigate, and interact with page elements
 - **Ask / Act / Dev Modes** — Read-only by default, normal browser actions on request, and Mid/Full Dev tools for source/style/page debugging
 - **Multi-Step Agent** — Autonomous task execution with tool-use loops (configurable, default 130 steps)
-- **Continue from Limit** — When the agent hits the step limit, click Continue to keep going
+- **Continue from Limit** — At the step limit, WebBrain first delivers a context-only partial result or explicit blocker; click Continue to keep going
 - **Multi-Provider LLM** — WebBrain Compass plus local llama.cpp/Ollama/LM Studio/Jan/vLLM/SGLang/LocalAI and major direct cloud providers
 - **Reliable Compass improvement traces** — when Help Improve WebBrain is enabled, terminal tool outcomes are durably queued and retried without delaying the visible answer
 - **Side Panel UI** — Clean chat interface that lives alongside your browsing
@@ -141,8 +141,9 @@ Key difference: Chrome uses Manifest V3 (service worker, `chrome.scripting`, `si
 | `navigate` | No | Yes | Go to a URL |
 | `wait_for_element` | No | Yes | Wait for a selector to appear |
 | `execute_js` | No | Dev only | Run one JavaScript function body through the MV2 content-script evaluator |
-| `new_tab` | No | Yes | Open a new tab |
 | `done` | Yes | Yes | Signal task completion |
+
+Browser-tab creation, enumeration, activation, and run retargeting are not general model-callable capabilities. Use a URL reader for another page or navigate the current run tab for interaction; an explicit separate-tab request is not silently converted into current-tab navigation. After the bundled OTP skill is active, Mid/Full expose one narrow exception: `read_email_verification_message` can inspect an already-open signed-in supported webmail tab, directly read a verified already-open message route, or open one opaque inspected inbox item in a temporary inactive duplicate that it closes. Candidate disclosure requires the full normalized service identity or all sufficiently discriminative service tokens. `inspect` remains read-only in Ask; because opening can mark mail read, `open_message` requires Act/Dev plus normal click permission on the mailbox host. Message reads consume exact bounded continuations to completion or fail closed. It does not expose a tab catalog, mailbox URL, or internal accessibility refs; Compact never receives it.
 
 ### Dev-mode difference
 

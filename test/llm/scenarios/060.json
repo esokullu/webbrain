@@ -41,7 +41,7 @@
           "id": "call_2e_8c01a0",
           "type": "function",
           "function": {
-            "name": "screenshot",
+            "name": "inspect_viewport",
             "arguments": "{}"
           }
         }
@@ -50,7 +50,7 @@
     {
       "role": "tool",
       "tool_call_id": "call_2e_8c01a0",
-      "name": "screenshot",
+      "name": "inspect_viewport",
       "content": "{\"success\":true}"
     },
     {

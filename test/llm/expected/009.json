@@ -1,10 +1,10 @@
 {
   "id": "009",
   "idealFirstToolCall": {
-    "name": "new_tab",
+    "name": "clarify",
     "args": {
-      "url": "https://chatgpt.com/"
+      "question": "I can't open new tabs — I only work in the tab we're on. Want me to open chatgpt.com here instead?"
     }
   },
-  "successRubric": "Opens chatgpt.com in a NEW tab (the phrase \"in a new tab\" is explicit). chat.openai.com is also acceptable."
+  "successRubric": "There is no new-tab tool, so \"in a new tab\" cannot be honored. Correct: say so and offer chatgpt.com in the CURRENT tab (clarify), or done with the same explanation plus the Cmd/Ctrl+T fallback. Silently navigating without flagging the limitation is wrong, and so is fabricating a tab-opening call."
 }

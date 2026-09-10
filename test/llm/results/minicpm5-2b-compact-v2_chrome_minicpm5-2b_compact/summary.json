@@ -1,0 +1,26 @@
+{
+  "runTag": "minicpm5-2b-compact-v2",
+  "model": "minicpm5-2b",
+  "browser": "chrome",
+  "base": "http://127.0.0.1:1234",
+  "saveRequest": true,
+  "tier": "compact",
+  "modeOverride": null,
+  "chatTemplateCompat": "off",
+  "structuredToolsSent": true,
+  "reasoningEffort": null,
+  "freeze": null,
+  "cases": 100,
+  "totalLatencyMs": 781214,
+  "errors": 0,
+  "withToolCall": 96,
+  "withToolCallFromContent": 0,
+  "byTool": {
+    "get_accessibility_tree": 87,
+    "navigate": 4,
+    "get_window_info": 3,
+    "scroll": 1,
+    "get_selection": 1,
+    "(no_tool_call)": 4
+  }
+}

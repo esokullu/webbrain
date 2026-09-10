@@ -80,7 +80,6 @@ Legend: **Yes** = available · **-** = not available · **C** = Chrome only ·
 | `press_keys` | No | Yes | Yes | Yes | - |
 | `navigate` | No | Yes | Yes | Yes | - |
 | `wait_for_element` | No | Yes | Yes | Yes | - |
-| `new_tab` | No | Yes | Yes | Yes | - |
 | `promote_iframe` | No | No | Yes | Yes | - |
 | `scratchpad_write` | No | Yes | Yes | Yes | - |
 | `progress_update` | No | Yes | Yes | Yes | - |

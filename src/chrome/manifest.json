@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "WebBrain",
-  "version": "34.1.0",
+  "version": "36.0.4",
   "description": "Open-source AI browser agent — chat with pages, automate tasks, multi-provider LLM support.",
   "permissions": [
     "sidePanel",
@@ -30,6 +30,12 @@
     "http://127.0.0.1/*",
     "http://*/*"
   ],
+  "mime_types_handler": {
+    "application/pdf": {
+      "handler_url": "src/ui/pdf-handler.html",
+      "can_embed": true
+    }
+  },
   "content_security_policy": {
     "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'; connect-src * data: blob:;"
   },
@@ -50,6 +56,7 @@
         "src/content/rich-text-toolbar-heuristic.js",
         "src/content/accessibility-tree.js",
         "src/content/teacher-capture.js",
+        "src/content/chat-observation.js",
         "src/content/content.js",
         "src/content/agent-visual-indicator.js",
         "src/content/ollama-launch-handoff.js"

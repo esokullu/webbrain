@@ -63,7 +63,6 @@ Gmail 会话的第一个无障碍结果会提供活动会话可信的
 | `press_keys` | 否 | 是 | 是 | 是 | - |
 | `navigate` | 否 | 是 | 是 | 是 | - |
 | `wait_for_element` | 否 | 是 | 是 | 是 | - |
-| `new_tab` | 否 | 是 | 是 | 是 | - |
 | `promote_iframe` | 否 | 否 | 是 | 是 | - |
 | `scratchpad_write` | 否 | 是 | 是 | 是 | - |
 | `progress_update` | 否 | 是 | 是 | 是 | - |

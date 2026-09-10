@@ -1,0 +1,46 @@
+{
+  "id": "014",
+  "category": "tool-error-pivot",
+  "description": "read_page returned PDF-tab notice. Pivot to read_pdf.",
+  "mode": "act",
+  "browser": "chrome",
+  "latencyMs": 1633,
+  "error": null,
+  "firstToolCall": {
+    "name": "fetch_url",
+    "args": {
+      "url": "https://arxiv.org/pdf/2401.00001.pdf",
+      "method": "GET"
+    }
+  },
+  "toolCallSource": "tool_calls",
+  "expected": {
+    "idealNextToolCall": {
+      "name": "read_pdf",
+      "args": {
+        "url": "https://arxiv.org/pdf/2401.00001.pdf"
+      }
+    },
+    "antiPatterns": [
+      {
+        "match": "read_page({})",
+        "reason": "Same tool that just rejected the PDF tab."
+      },
+      {
+        "match": "inspect_viewport({})",
+        "reason": "PDF viewer capture won't produce extractable text."
+      }
+    ],
+    "successRubric": "Use read_pdf with the tab URL. The error message names the right tool — follow it."
+  },
+  "matchedAntiPattern": null,
+  "verdict": "other",
+  "scoreNote": null,
+  "finishReason": "tool_calls",
+  "content": "<function name=\"fetch_url\"><param name=\"url\">https://arxiv.org/pdf/2401.00001.pdf</param><param name=\"method\">GET</param></function>",
+  "usage": {
+    "prompt_tokens": 9793,
+    "completion_tokens": 33,
+    "total_tokens": 9826
+  }
+}

@@ -1,0 +1,43 @@
+{
+  "id": "044",
+  "category": "counter-polarity",
+  "description": "X counter shows \"-5\" — over by 5. Shorten before posting.",
+  "mode": "act",
+  "browser": "chrome",
+  "latencyMs": 970,
+  "error": null,
+  "firstToolCall": {
+    "name": "get_accessibility_tree",
+    "args": {
+      "filter": "visible"
+    }
+  },
+  "toolCallSource": "tool_calls",
+  "expected": {
+    "idealNextToolCall": {
+      "name": "set_field",
+      "args": {
+        "ref_id": "ref_textarea",
+        "clear": true,
+        "text": "<shortened text>"
+      }
+    },
+    "antiPatterns": [
+      {
+        "match": "click({text:\"Post\"})",
+        "reason": "Will be rejected — text is 5 over."
+      }
+    ],
+    "successRubric": "Negative on X's counter = over by N chars. Shorten before submit."
+  },
+  "matchedAntiPattern": null,
+  "verdict": "other",
+  "scoreNote": null,
+  "finishReason": "tool_calls",
+  "content": "<function name=\"get_accessibility_tree\"><param name=\"filter\">visible</param></function>",
+  "usage": {
+    "prompt_tokens": 9779,
+    "completion_tokens": 17,
+    "total_tokens": 9796
+  }
+}

@@ -264,15 +264,6 @@ lms clone webbrain/web-tools
 
 Source : [`lmstudio-plugin/`](lmstudio-plugin/).
 
-## Historique des étoiles
-
-<a href="https://www.star-history.com/?repos=webbrain-one%2Fwebbrain&type=date&legend=top-left">
- <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=webbrain-one/webbrain&type=date&theme=dark&legend=top-left" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=webbrain-one/webbrain&type=date&legend=top-left" />
-   <img alt="Graphique d'historique des étoiles" src="https://api.star-history.com/chart?repos=webbrain-one/webbrain&type=date&legend=top-left" />
- </picture>
-</a>
 
 ## Contributeurs
 

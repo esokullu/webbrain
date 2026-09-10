@@ -66,7 +66,6 @@ uniquement · **Dev** = module Dev (fournisseurs Mid/Full ; pas Compact).
 | `press_keys` | Non | Oui | Oui | Oui | - |
 | `navigate` | Non | Oui | Oui | Oui | - |
 | `wait_for_element` | Non | Oui | Oui | Oui | - |
-| `new_tab` | Non | Oui | Oui | Oui | - |
 | `promote_iframe` | Non | Non | Oui | Oui | - |
 | `scratchpad_write` | Non | Oui | Oui | Oui | - |
 | `progress_update` | Non | Oui | Oui | Oui | - |

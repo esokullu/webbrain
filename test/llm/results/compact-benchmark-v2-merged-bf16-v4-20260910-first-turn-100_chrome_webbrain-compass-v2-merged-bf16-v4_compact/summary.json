@@ -1,0 +1,27 @@
+{
+  "runTag": "compact-benchmark-v2-merged-bf16-v4-20260910-first-turn-100",
+  "model": "webbrain-compass-v2-merged-bf16-v4",
+  "browser": "chrome",
+  "base": "http://127.0.0.1:8327/v1",
+  "saveRequest": false,
+  "tier": "compact",
+  "modeOverride": null,
+  "chatTemplateCompat": "off",
+  "structuredToolsSent": true,
+  "reasoningEffort": null,
+  "freeze": null,
+  "cases": 100,
+  "totalLatencyMs": 148464,
+  "errors": 0,
+  "withToolCall": 94,
+  "withToolCallFromContent": 0,
+  "byTool": {
+    "navigate": 13,
+    "get_accessibility_tree": 76,
+    "clarify": 1,
+    "(no_tool_call)": 6,
+    "done": 1,
+    "scroll": 1,
+    "inspect_viewport": 2
+  }
+}

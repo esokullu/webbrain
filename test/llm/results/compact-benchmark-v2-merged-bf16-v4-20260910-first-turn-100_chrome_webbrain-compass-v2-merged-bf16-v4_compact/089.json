@@ -1,0 +1,27 @@
+{
+  "id": "089",
+  "user": "open youtube, twitter, and gmail in new tabs",
+  "mode": "act",
+  "tab": {
+    "url": "about:home",
+    "title": "New Tab"
+  },
+  "latencyMs": 923,
+  "error": null,
+  "firstToolCall": {
+    "name": "navigate",
+    "args": {
+      "url": "https://www.youtube.com/"
+    }
+  },
+  "toolCallSource": "tool_calls",
+  "finishReason": "tool_calls",
+  "content": "<function name=\"navigate\"><param name=\"url\">https://www.youtube.com/</param></function>",
+  "usage": {
+    "prompt_tokens": 9715,
+    "completion_tokens": 20,
+    "total_tokens": 9735
+  },
+  "attempts": 1,
+  "retryErrors": []
+}

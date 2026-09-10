@@ -1,0 +1,47 @@
+{
+  "id": "015",
+  "category": "tool-error-pivot",
+  "description": "get_accessibility_tree(filter:\"all\") overflowed maxChars on a listing page. Switch filter, not increase the limit.",
+  "mode": "act",
+  "browser": "chrome",
+  "latencyMs": 1159,
+  "error": null,
+  "firstToolCall": {
+    "name": "get_accessibility_tree",
+    "args": {
+      "filter": "visible",
+      "maxDepth": 10
+    }
+  },
+  "toolCallSource": "tool_calls",
+  "expected": {
+    "idealNextToolCall": {
+      "name": "get_accessibility_tree",
+      "args": {
+        "filter": "visible",
+        "maxDepth": 10
+      }
+    },
+    "antiPatterns": [
+      {
+        "match": "get_accessibility_tree({filter:\"all\", maxChars:200000})",
+        "reason": "Raising maxChars is the failure called out in the system prompt — switch tool/filter instead."
+      },
+      {
+        "match": "get_accessibility_tree({filter:\"all\"})",
+        "reason": "Identical retry."
+      }
+    ],
+    "successRubric": "Switch to filter:\"visible\" or read_page or extract_data. Do not raise maxChars. The system prompt specifically warns against the latter."
+  },
+  "matchedAntiPattern": null,
+  "verdict": "ideal",
+  "scoreNote": null,
+  "finishReason": "tool_calls",
+  "content": "<function name=\"get_accessibility_tree\"><param name=\"filter\">visible</param><param name=\"maxDepth\">10</param></function>",
+  "usage": {
+    "prompt_tokens": 9785,
+    "completion_tokens": 25,
+    "total_tokens": 9810
+  }
+}

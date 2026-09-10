@@ -1,7 +1,7 @@
 {
   "id": "026",
   "category": "csp-blocked-eval",
-  "mode": "act",
+  "mode": "dev",
   "browser": "chrome",
   "tab": {
     "url": "https://example.com/page",

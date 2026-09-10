@@ -1,0 +1,27 @@
+{
+  "id": "007",
+  "user": "open linkedin in this tab",
+  "mode": "act",
+  "tab": {
+    "url": "about:home",
+    "title": "New Tab"
+  },
+  "latencyMs": 1128,
+  "error": null,
+  "firstToolCall": {
+    "name": "navigate",
+    "args": {
+      "url": "https://www.linkedin.com/"
+    }
+  },
+  "toolCallSource": "tool_calls",
+  "finishReason": "tool_calls",
+  "content": "<function name=\"navigate\"><param name=\"url\">https://www.linkedin.com/</param></function>",
+  "usage": {
+    "prompt_tokens": 9710,
+    "completion_tokens": 22,
+    "total_tokens": 9732
+  },
+  "attempts": 1,
+  "retryErrors": []
+}

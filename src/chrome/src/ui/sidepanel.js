@@ -42,7 +42,7 @@ import { buildMessageInfoPills } from '../message-info.js';
 import { escapeHtml } from './utils.js';
 import { createOfflineRagReadinessController, offlineRagRunPayload } from './offline-rag-readiness.js';
 import {
-  buildSelectionComposerDraft,
+  buildSelectionTextAttachment,
   selectionIsQuoteable,
   selectionRangeIsVisible,
   selectionRangeRect,
@@ -618,7 +618,6 @@ const standaloneWebgpuBtn = document.getElementById('btn-webgpu-standalone');
 const languageSelect = document.getElementById('language-select');
 const languagePickerBtn = document.getElementById('language-picker-btn');
 const languagePickerMenu = document.getElementById('language-picker-menu');
-const languagePickerFlag = document.getElementById('language-picker-flag');
 const MORE_PROVIDERS_OPTION_VALUE = '__more_providers__';
 const statusDot = document.getElementById('status-dot');
 // Short labels for the closed picker button (menu rows keep the longer status text).
@@ -2913,7 +2912,6 @@ const TOOL_KEYS = {
   highlight_element: 'tool.highlight_element',
   wait_for_element: 'tool.wait_for_element',
   get_selection: 'tool.get_selection',
-  new_tab: 'tool.new_tab',
   delegate_research: 'tool.delegate_research',
   promote_iframe: 'tool.navigate',
   schedule_resume: 'tool.schedule_resume',
@@ -2927,7 +2925,6 @@ function friendlyToolLabel(name, args) {
   if (name === 'click' && args?.index != null) return t('tool.click.index', { index: args.index });
   if (name === 'type_text' && args?.text) return t('tool.type_text.text', { text: truncate(args.text, 25) });
   if (name === 'navigate' && args?.url) return t('tool.navigate.url', { url: truncate(args.url, 35) });
-  if (name === 'new_tab' && args?.url) return t('tool.new_tab.url', { url: truncate(args.url, 35) });
   if (name === 'promote_iframe' && args?.urlFilter) return t('tool.navigate.url', { url: truncate(args.urlFilter, 35) });
   if (name === 'scroll') return t('tool.scroll.direction', { direction: args?.direction || 'down' });
   if (name === 'extract_data') return t('tool.extract_data.type', { type: args?.type || 'data' });
@@ -4659,34 +4656,53 @@ if (verboseBtn) {
 activityProgressToggle?.addEventListener('click', toggleCompactProgressVisibility);
 
 async function switchToTab(newTabId) {
-  if (newTabId === currentTabId && renderedTabId === newTabId) { return; }
+  // Reserve the user's latest tab intent before any lookup can yield. Returning
+  // to the already-rendered tab must also invalidate an older pending switch.
+  const switchGeneration = ++tabSwitchGeneration;
+  const interruptedTransition = tabSwitchTransitionId != null;
+  tabSwitchTransitionId = newTabId;
+  queuedTabSwitchMessages = queuedTabSwitchMessages.filter(msg => msg?.tabId === newTabId);
+  syncSendButtonState();
   try {
-    const state = await sendToBackground('agent_run_state', { tabId: newTabId });
+    if (newTabId === currentTabId && renderedTabId === newTabId) {
+      if (interruptedTransition) await restoreActiveRunState(newTabId);
+      return;
+    }
+    let state = null;
+    try {
+      state = await sendToBackground('agent_run_state', { tabId: newTabId });
+    } catch {}
+    if (switchGeneration !== tabSwitchGeneration) return;
     const sourceTabId = researchEscalationSourceTabIdFromState(state);
     if (sourceTabId != null
         && (sameTabId(currentTabId, sourceTabId)
           || sameTabId(renderedTabId, sourceTabId)
           || isTabProcessing(sourceTabId)
           || isTabProcessing(currentTabId))) {
+      // The research helper keeps the visible source conversation. Queue its
+      // new events while restoring the snapshot, including events that arrive
+      // after that snapshot was captured but before reconciliation finishes.
+      const retainedTabId = renderedTabId ?? currentTabId;
+      currentTabId = retainedTabId;
+      tabSwitchTransitionId = retainedTabId;
+      queuedTabSwitchMessages = queuedTabSwitchMessages.filter(msg => msg?.tabId === retainedTabId);
+      syncCurrentTabRunFlags();
+      syncApiMutationsAllowedForCurrentTab();
+      syncSelectionScopeUi();
+      await restoreActiveRunState(retainedTabId);
       return;
     }
-  } catch {}
-  dismissSelectionAskAction();
-  if (newConversationConfirmationState
-      && !sameTabId(newConversationConfirmationState.tabId, newTabId)) {
-    settleNewConversationConfirmation(false, { restoreFocus: false });
-  }
-  const switchGeneration = ++tabSwitchGeneration;
-  tabSwitchTransitionId = newTabId;
-  queuedTabSwitchMessages = [];
-  syncSendButtonState();
-  // The activity strip is a single panel-wide DOM node, unlike the tab-scoped
-  // chat and run journals. Clear the outgoing tab's transient status before
-  // any async restore work can yield; restoreActiveRunState (or a queued target
-  // update) will show it again if the destination tab is actually running.
-  hideActivity();
+    dismissSelectionAskAction();
+    if (newConversationConfirmationState
+        && !sameTabId(newConversationConfirmationState.tabId, newTabId)) {
+      settleNewConversationConfirmation(false, { restoreFocus: false });
+    }
+    // The activity strip is a single panel-wide DOM node, unlike the tab-scoped
+    // chat and run journals. Clear the outgoing tab's transient status before
+    // any async restore work can yield; restoreActiveRunState (or a queued target
+    // update) will show it again if the destination tab is actually running.
+    hideActivity();
 
-  try {
     // Save the tab currently represented by the DOM. During an async restore,
     // currentTabId may already point at the target while the DOM is still older.
     if (renderedTabId != null) {
@@ -4733,7 +4749,11 @@ async function switchToTab(newTabId) {
     refreshScheduledJobs({ tabId: newTabId });
     refreshRecommendedActions();
   } finally {
-    if (switchGeneration === tabSwitchGeneration && tabSwitchTransitionId === newTabId) tabSwitchTransitionId = null;
+    if (switchGeneration === tabSwitchGeneration) {
+      tabSwitchTransitionId = null;
+      if (currentTabId === renderedTabId) drainQueuedAgentUpdatesForTab(currentTabId);
+      if (visibleStateRefreshPending) requestVisibleSidePanelStateRefresh();
+    }
     syncSendButtonState();
   }
   drainQueuedAgentUpdatesForTab(newTabId);
@@ -4971,6 +4991,8 @@ async function adoptRestoredRunState(tabId, state) {
       || runUi.status === 'awaiting_plan'
       || isConversationClearInProgress(tabId)
       || clearedConversationRunRequestIds.has(requestId)
+      || cancelledRunRecoveryRequestIds.has(requestId)
+      || isTabAbortRequested(tabId)
       || !sameTabId(currentTabId, tabId)
       || !sameTabId(renderedTabId, tabId)
       || localRunRequestIds.has(Number(tabId))
@@ -5201,9 +5223,13 @@ async function applyActiveRunState(numericTabId, state, { shouldContinue = () =>
   invalidatePlanReviewCards({ tabId: numericTabId });
   if (state?.running || state?.starting) {
     setTabProcessing(numericTabId, true);
-    setTabAbortRequested(numericTabId, false);
     hideRecommendedActions();
-    startThinkingActivity();
+    const stopping = requestId
+      ? cancelledRunRecoveryRequestIds.has(requestId)
+      : isTabAbortRequested(numericTabId);
+    setTabAbortRequested(numericTabId, stopping);
+    if (stopping) showActivity(t('sp.activity.stopping'));
+    else startThinkingActivity();
     syncSendButtonState();
   } else {
     setPlanReviewAwaiting(numericTabId, false);
@@ -7074,7 +7100,6 @@ function syncLanguagePicker() {
   if (!languageSelect) return;
   const code = languageSelect.value || getLocale();
   const language = LANGUAGES.find((item) => item.code === code);
-  if (languagePickerFlag && language?.flagCode) languagePickerFlag.src = languageFlagSrc(language.flagCode);
   if (languagePickerBtn) {
     const controlLabel = `${t('sp.btn.language')}: ${language?.label || code}`;
     languagePickerBtn.title = controlLabel;
@@ -8628,6 +8653,11 @@ async function sendMessage(extraChatParams = {}) {
     if (contextMenuClaimOwned) {
       await releaseOwnedContextMenuClaim({ reason: 'preflight-empty', retryAfterMs: 1_000 });
       return false;
+    }
+    // Attachments alone cannot start a run and Send stays enabled while idle, so
+    // a staged chip with an empty composer would otherwise fail silently.
+    if (getPendingAttachmentsForTab(undefined, { create: false }).length) {
+      showComposerToast(t('sp.attach.needs_prompt'));
     }
     return;
   }
@@ -11738,12 +11768,37 @@ function askAboutSelectedAnswer() {
     dismissSelectionAskAction();
     return;
   }
-  const nextDraft = buildSelectionComposerDraft(selection.text, inputEl.value);
-  if (nextDraft === inputEl.value) {
+  const attachment = buildSelectionTextAttachment(selection.text);
+  if (!attachment || attachment.size > MAX_TEXT_ATTACHMENT_BYTES) {
     dismissSelectionAskAction();
+    if (attachment) {
+      addMessage('system', systemHtml(tSystemHtml('sp.attach.too_large', {
+        name: attachment.name,
+        max: '5MB',
+      })));
+    }
     return;
   }
-  inputEl.value = nextDraft;
+  const tabId = normalizeAttachmentTabId(renderedTabId ?? currentTabId);
+  if (tabId == null) {
+    dismissSelectionAskAction();
+    showComposerToast(t('sp.attach.no_tab'));
+    return;
+  }
+  const pending = getPendingAttachmentsForTab(tabId);
+  // Re-adding the same snippet is a no-op, so repeated clicks cannot pile up
+  // identical chips. A *different* snippet gets its own chip instead of
+  // overwriting the previous one: replacing by filename would silently drop an
+  // earlier selection the user still expects to send, and would clobber an
+  // uploaded file that happens to share the name.
+  const alreadyStaged = pending.some(att => att?.kind === 'text' && att?.textContent === attachment.textContent);
+  if (!alreadyStaged) {
+    const takenNames = new Set(pending.map(att => att?.name));
+    let name = attachment.name;
+    for (let suffix = 2; takenNames.has(name); suffix += 1) name = `selected-text-${suffix}.txt`;
+    pending.push({ ...attachment, name });
+  }
+  renderAttachmentPreviews();
   dismissSelectionAskAction();
   window.getSelection?.()?.removeAllRanges();
   handleInput();

@@ -93,11 +93,19 @@ d'article sans identifiants.
 
 #### Assistant OTP / code de vérification
 
-Ne se charge que pour les demandes pertinentes et ne déclare aucun outil réseau.
-Sur l'onglet de l'exécution active, il privilégie le texte sélectionné ou un
-sous-arbre borné de l'arbre d'accessibilité, retient le code de service pertinent
-le plus récent, exclut l'accès aux SMS et aux applications natives, et respecte
-la gestion stricte des secrets.
+Ne se charge que pour les demandes pertinentes et ne déclare aucun outil réseau
+externe. En Mid et Full, il ajoute un lecteur interne limité pour un onglet de
+webmail compatible, déjà ouvert et connecté. `inspect` ne modifie pas la boîte
+et reste disponible dans Ask. Comme l'ouverture peut marquer le message comme
+lu, `open_message` exige Act/Dev ainsi que l'autorisation de clic pour l'hôte de
+la boîte ; une copie temporaire inactive est alors créée, toutes les
+continuations bornées du message sont lues (sinon l'opération échoue de manière
+fermée), puis la copie est fermée. Le modèle reçoit des références de message opaques, jamais le
+catalogue des onglets, l'URL de la boîte ni les références d'accessibilité.
+Compact ne reçoit aucun outil de compétence ou inter-onglets. Sur l'onglet de
+l'exécution active, il privilégie toujours le texte sélectionné ou un sous-arbre
+borné, exclut l'accès aux SMS et aux applications natives, et respecte la
+gestion stricte des secrets.
 
 Lorsqu'il est utilisé, le contenu de page délimité et le code sont inclus dans la
 requête normale envoyée au fournisseur LLM que vous avez configuré. Si

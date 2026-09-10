@@ -1,0 +1,45 @@
+{
+  "id": "013",
+  "category": "tool-error-pivot",
+  "description": "click returned overlay-blocked. Dismiss the overlay, don't force the click.",
+  "mode": "act",
+  "browser": "chrome",
+  "latencyMs": 861,
+  "error": null,
+  "firstToolCall": {
+    "name": "press_keys",
+    "args": {
+      "key": "Escape"
+    }
+  },
+  "toolCallSource": "tool_calls",
+  "expected": {
+    "idealNextToolCall": {
+      "name": "press_keys",
+      "args": {
+        "key": "Escape"
+      }
+    },
+    "antiPatterns": [
+      {
+        "match": "click({text:\"Add to Cart\"})",
+        "reason": "Will hit the overlay again."
+      },
+      {
+        "match": "click({x:_,y:_})",
+        "reason": "Force-clicking with coords hits the overlay per the error message."
+      }
+    ],
+    "successRubric": "Dismiss the overlay first — Escape, click the close button, or complete the modal. THEN retry the cart click."
+  },
+  "matchedAntiPattern": null,
+  "verdict": "ideal",
+  "scoreNote": null,
+  "finishReason": "tool_calls",
+  "content": "<function name=\"press_keys\"><param name=\"key\">Escape</param></function>",
+  "usage": {
+    "prompt_tokens": 9801,
+    "completion_tokens": 16,
+    "total_tokens": 9817
+  }
+}

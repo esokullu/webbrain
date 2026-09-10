@@ -1,0 +1,43 @@
+{
+  "id": "046",
+  "category": "counter-polarity",
+  "description": "Reddit title field — 320 chars typed, 300 char limit. Shorten.",
+  "mode": "act",
+  "browser": "chrome",
+  "latencyMs": 1058,
+  "error": null,
+  "firstToolCall": {
+    "name": "get_accessibility_tree",
+    "args": {
+      "filter": "visible"
+    }
+  },
+  "toolCallSource": "tool_calls",
+  "expected": {
+    "idealNextToolCall": {
+      "name": "set_field",
+      "args": {
+        "ref_id": "ref_title",
+        "clear": true,
+        "text": "<300-char-or-less title>"
+      }
+    },
+    "antiPatterns": [
+      {
+        "match": "click({text:\"Submit\"})",
+        "reason": "Title is over 300 — will be rejected."
+      }
+    ],
+    "successRubric": "320/300 means over by 20. Shorten title before submitting."
+  },
+  "matchedAntiPattern": null,
+  "verdict": "other",
+  "scoreNote": null,
+  "finishReason": "tool_calls",
+  "content": "<function name=\"get_accessibility_tree\"><param name=\"filter\">visible</param></function>",
+  "usage": {
+    "prompt_tokens": 9797,
+    "completion_tokens": 17,
+    "total_tokens": 9814
+  }
+}

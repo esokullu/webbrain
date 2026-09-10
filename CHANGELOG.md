@@ -4,6 +4,802 @@ All notable changes to WebBrain are documented in this file.
 
 This changelog was generated from the repository Git history and release tags. Versions without a Git tag are inferred from version-bump commits and the current `package.json` / browser manifest versions.
 
+## [36.0.4] - 2026-09-10
+
+### Changed
+- fix: bind Bluesky detail cards when the route names the author by DID
+- 36.0.3
+- fixes
+- 36.0.2
+- fix: verify Bluesky publication details safely
+
+## [36.0.1] - 2026-09-09
+
+### Changed
+- Install Playwright Chromium in workflow
+- fix: harden run recovery and cancellation for v36.0.0
+- 35.0.2
+- fix: recover Bluesky composer verification and editing
+- bugfix with chat watch
+- test: add live social publication benchmark
+- fix: recover social publication clicks after clarification
+- chore: release v35.0.0
+- test(docs): fix extended catalog fixtures and built-in table after adding pollinations
+- fix(pollinations): use resolvable vision-capable suggestions, drop zeroed cost rates
+- Fix social submission preflight and activation key matching
+- Update README to acknowledge contributors
+- Handle social link previews and repeated publication payloads
+- Scope social publication guards and defer intent compilation
+- fix(social-publish): verify reply parents from observed threads
+- fix: allow verified LinkedIn navigation through recipient guard
+- fix(social-publish): canonicalize reply resource identity
+- fix(social-publish): bind inline replies to the active thread
+- Add Pollinations AI provider
+- refactor(social-publish): use selected-provider intent contracts
+- fix(social-publish): verify permalinks opened after XHR publish
+- fix(social-publish): preserve join controls in exact bodies
+- fix(social-publish): multilingual past verbs, narrative then-continuation
+- fix(social-publish): exact NFC bodies through link verification
+- fix(social-publish): past-tense verbs never bind destinations
+- fix(social-publish): checkpoint verified post on rebind, rawValue exact body
+- fix(social-publish): govern scope exit by verb command, not prefixes
+- fix(social-publish): modal command prefix, and-if fallback
+- fix(social-publish): polite command prefix exits body scope
+- fix(social-publish): with-conjunctions, but-if fallback
+- fix(social-publish): NFC exact body, alongside, sentence fallback, modal narrative, hyphen verbs
+- chore(deps): bump hono
+- fix(content): preserve native Tieba controls
+- fix(social-publish): proper-name scope, polite requests, plus ellipsis
+- fix(social-publish): scope alternatives to commands, unless-then fallback
+- fix(social-publish): excerpt restore, imperative metadata, does-not-work fallback
+- fix: expose Tieba reply publish control
+- feat: expand Baidu Tieba interaction adapter
+- fix(social-publish): colon scope, metadata shape, standalone fallbacks
+- fix(social-publish): colon scope, metadata shape, standalone fallbacks
+- fix(social-publish): metadata body stops and pronoun fallbacks
+- fix(agent): match Tieba account handoffs
+- fix(social-publish): paired bounds, colon discovery, leading fallbacks
+- fix(social-publish): absolute format maxima and oxford-comma bodies
+- fix(social-publish): per-destination bodies and punctuated alternatives
+- fix(social-publish): keep numeric-alt images out of emoji filter
+- fix(social-publish): untargeted alt text scoped to images
+- 审查：加固百度贴吧点赞控件识别
+- fix(social-publish): governed body breaks, and-ellipsis counts, fallback punctuation
+- fix(social-publish): publish-verb body scope and in-addition-to grammar
+- fix(social-publish): contrastive scope split and failing-that fallback
+- 适配：补充百度贴吧点赞控件识别
+- fix(social-publish): punctuated bodies, along-with grammar and destinations
+- fix(social-publish): multiline bodies, together-with grammar, plus destinations
+- fix(social-publish): verb-bearing exclusions and per-clause format negation
+- fix(social-publish): sole-target mismatch, max-qualifier negation, repeated format counts
+- fix(social-publish): exclude negated format nouns from media intent
+- fix(social-publish): carry destination-first bodies and fallback alternatives
+- fix(social-publish): accept except-for exclusions and scope format maxima
+- fix(social-publish): retain positive and forbidden media
+- fix(social-publish): cover alternative and postfix qualifiers
+- fix(social-publish): scope live and enumerated choices
+- fix(social-publish): preserve scoped media conjuncts
+- fix(social-publish): allocate unrestricted media slots
+- fix(social-publish): retain per-format media bounds
+- fix(social-publish): preserve scoped publication clauses
+- fix(social-publish): preserve conjunctive format counts
+- fix(social-publish): preserve ranged media choices
+- fix(social-publish): harden media constraint verification
+- fix(social-publish): enforce exclusions and GIF typing
+- fix(adapters): consolidate Bluesky workflow
+- fix(social-publish): preserve exclusions and URL choices
+- fix(social-publish): enforce typed media branches
+- fix(social-publish): support alternative bridges and bare ranges
+- fix(social-publish): retain sequence and one-of choices
+- fix(social-publish): reject neither destinations
+- fix(social-publish): preserve ranged target intent
+- fix(social-publish): preserve complete media branches
+- fix(social-publish): scope media count alternatives
+- fix(social-publish): evaluate typed media alternatives
+- fix(social-publish): bind nested media intent
+- fix(social-publish): scope negation and range alternatives
+- fix(social-publish): tighten media alternative evidence
+- fix(social-publish): preserve polarity and bounded media
+- fix(social-publish): scope destination and file alternatives
+- fix(social-publish): retain named attachment alternatives
+- fix(social-publish): preserve destination and alt alternatives
+- fix(social-publish): scope bodies and count alternatives
+- fix(social-publish): enforce attachment set metadata
+- fix(social-publish): make alt parsing linear
+- fix(social-publish): verify optional media and alt text
+- fix(social-publish): tighten destination and media evidence
+- test: publish compact model benchmark artifacts
+- fix(social-publish): placeholder x, stale upload provenance, upper-bound attachments
+- web: remove Qwen3.5-9B from compact comparison
+- fix(agent): decode branch entities once
+- web: remove Chrome/Firefox rows from Browser AI Plugins comparison
+- fix(agent): bind social evidence per destination
+- test(llm): publish compact routing benchmark comparison
+- fix(agent): require complete social publication evidence
+- fix(agent): shared commit-field identity, kind-consistent refresh
+- fix(agent): multi-line commit messages via summary plus body
+- fix(agent): retain AX scope across conversation clears
+- fix(agent): select-aware no-ops, cookie-authenticated branch attribution
+- fix(agent): BOM-preserving blob hash, commit branch attribution
+- fix(agent): cross-locator distinctness, exact-scope file verification
+- fix(agent): verify GIF subtype and read singular articles as exact counts
+- fix(agent): read reply commands as publication intent
+- refactor(agent): hoist attachment-parsing regexes to module scope
+- fix(agent): proven no-ops for empty appends
+- fix(agent): split target lists around finished quoted attachment names
+- fix(agent): keep filename conjunctions whole and honor minimum attachment counts
+- test: cover PDF handler tab routing in the Chrome e2e
+- fix: recognize our own PDF handler tabs without a HEAD probe
+- test(vision): add WebBrain VL-2 and VL-3 benchmark outputs
+- fix(agent): accept list modifiers in platform coordination, support media disjunctions, and treat media-only phrases as generic
+- fix: bound the data URL metadata walk in tab-chat persistence
+- fix(agent): verify distinct attachment targets, exempt content links, and coordinate multi-platform publish
+- fix(agent): reject source platforms after leading non-social destinations
+- fix(agent): honor negated media types in mixed constraints and reject platforms as report topics
+- 测试：覆盖 PDF handler 的 HEAD 探测路由
+- 修复：补齐 PDF handler 的 read_page 自动路由
+- fix(agent): reject source-only platforms, preserve leading destinations across clauses, and honor negative attachments
+- fix(agent): include multilingual conjunctions in coordinated publication target scans
+- fix: harden large tab-chat image persistence
+- fix(agent): support coordinated payload clauses and skip clock colons in body extraction
+- fix(agent): pair quotation delimiters and support nested quotation styles in _maskQuotedPayload
+- fix(agent): recognize Portuguese 'no' destination preposition
+- fix(agent): restrict per-type attachment counts to generic phrases and fix delimiter character class
+- fix(agent): scan full clause before explicit social URLs and fix multi-embed exclusion predicate
+- fix(agent): match social destination across full masked clause and skip incidental command colons
+- fix(agent): prefer authored body anchors and prioritize colon-introduced task bodies
+- fix(agent): enforce exact media counts and types for explicit attachment requirements
+- fix(agent): recognize 'without' as publication negation when governing publish verbs
+- fix(agent): match specific attachment names without substring collisions and require each media type for mixed requests
+- fix(agent): bind published URLs to occurrence order and support multilingual task body extraction
+- fix(agent): keep authored post permalinks and recognize Korean generic attachments
+- fix(agent): capture selector identity for uncertain writes
+- fix(agent): parse conjunction attachments, preserve nested quote bodies, and guard noun shares and negated composer routes
+- fix(agent): preserve incomplete publication metadata, ignore embedded numbers in attachment names, and scope URL publication clauses
+- fix(chat): unwedge the support-chat workflow after a failed or proven-undelivered send
+- fix(agent): scope coordinating negation, support article media counts, and refine body parsing
+- fix(agent): support rich attachment counts, GIF video compatibility, and un-truncated plan payloads
+- fix(agent): carry negation across coordinated publish verbs and resolve CodeQL alert
+- fix(agent): preserve mutation debt across conversation clears
+- fix(agent): reject negated publication commands and parse quantified generic attachments
+- fix(agent): enforce full authored post equality, unambiguous links, and read-intent noun guards
+- fix(agent): tighten social attachment evidence, premium body comparison, and retweet routing
+- fix(agent): bfcache debt retention, shared refresh identity
+- fix(agent): revalidate refreshed element identity
+- fix(agent): exact focused readback recovery with field identity
+- fix(chat): land review fixes on top of the Copilot workflow review
+- fix(agent): verbatim message digest, terminal path rawValue
+- fix(agent): byte-exact Git paths from ingestion
+- fix(agent): pass resolved navigation links in commit gate
+- fix(chat): address Copilot workflow review
+- test(webmcp): isolate tool execution error page-error expectation to Chrome < 152
+- fix(agent): align generic submit nudge with merged recovery assertions
+- fix(agent): verify post media attachments and support unspaced CJK destinations
+- fix(agent): live scope on minted proofs, canonical URL on token agreement
+- fix(chrome): retry PDF.js import, derive viewer path, guard double response
+- Withdraw the same-origin completion fallback entirely
+- fix(agent): shared editor identity, locale-independent structure
+- fix(guard): validate recipient semantics on displayed question regardless of declared purpose
+- fix(guard): require messaging authorization for recipient consent and preserve role negation
+- fix(guard): preserve negation across comma-delimited parentheticals
+- fix(guard): reject conflicting role authorizations for the same recipient
+- fix(guard): bound English delimiters with word boundaries before parsing recipient roles
+- fix(gmail): match replacements to compatible observed slots and count only top-level thread containers
+- fix(recipient-guard): reject negated delivery-role phrases in user clarification answers
+- fix(recipient-guard): apply grouped role labels across coordinate recipient lists
+- fix(recipient-guard): scope role labels to intended recipients and preserve roles on identity replacement
+- Require a submit-correlated destination, and drop the Bluesky workflow job
+- fix(recipient-guard): authorize recipient role changes strictly from user answer
+- fix(gmail-guard): preserve Gmail display aliases for recipient clarification matching
+- fix(gmail-guard): return independently observed Gmail candidates on expected recipient mismatch
+- fix(recipient-guard): preserve authorized recipient roles when rebinding message recipients
+- fix(planner): preserve complete_thread for singular email wording when summary or full exchange is required
+- fix(agent): avoid truncating multi-recipient clarification answers
+- fix(agent): support CJK word segmentation and expose recipient clarify purposes
+- fix(agent): enforce distinct recipient clarification matching and scope
+- Address review: restrict recipient clarify to messaging plans and verify single-message threads
+- Accept single-page-app publish evidence and stop leaving a file chooser open
+- Address PR #343 review findings on message recipient guard
+- Fix Gmail draft-reply deadlock between the send and read guards
+- chore: add mobile/ to .gitignore
+- fix(chat): disclose bounded workflow deltas
+- fix(chat): close workflow design review gaps
+- humanized
+- Add Compact benchmark result artifacts and correct baseline delta
+- Add Compass Tiny benchmark and blog post
+- fix(agent): editor-specific commit identity, selector distinctness escape
+- Address Codex review: IPv6 URL bracketing, Range support, localize HF label
+- fix(agent): element-derived refresh locator for focused proofs
+- fix(agent): forward contentEditable in bound focused typing
+- hf footer link added
+- fix(agent): live scope before mutation debt, first-token bootstrap
+- fix(chrome): harden PDF host readiness, sender gate, and handler URLs
+- docs(chrome): explain PDF base64 overhead
+- fix(agent): collision-resistant commit message check, evidence-first slash scope
+- fix(chat): correct message ordering, thread binding, and send guards
+- fix(agent): revalidate focused proofs via stable selectors pre-submit
+- fix(agent): exclude authored links from alias proof and localize bare destinations
+- fix(agent): focused commit proofs, continued task tokens, focused live scope
+- fix(agent): require publish words to command, not name content
+- fix(chrome): harden offscreen PDF extraction
+- fix(chrome): parse PDFs in offscreen document
+- test(webmcp): accept protocol-only tool errors
+- fix(chat): restore state with resident conversations
+- feat(chat): make resume scheduling durable
+- feat(chat): persist support workflow state
+- feat(chat): expose guarded observe and send tools
+- feat(chat): add active conversation observation
+- feat(chat): add durable support chat state kernel
+- fix(agent): make publication intent work in the scripts tasks are written in
+- fix(agent): gate feed destinations on publication language in any tongue
+- fix(agent): pass clicks on resolved editable fields
+- fix(agent): scope social body evidence to authored text and widen URL trimming
+- fix(agent): evidence-gated scope, live document debt check
+- fix(agent): tie social destinations to intent and keep balanced URLs intact
+- fix(agent): mint task token before tracing, require nonempty match
+- fix: honor native PDF handler opt-in
+- fix(agent): repair the injected completion probe and social publish evidence
+- fix(agent): verified writes exempt from mutation debt
+- fix(agent): task-bound proofs without tracing, verify changed files
+- fix(agent): verify form-less social publish and destination-only rebinds
+- fix: correct PDF page rotation, text-layer scaling, and page tracking
+- fix(agent): scope proofs to run, recover firefox selector debt
+- fix(agent): handle social publish edge cases
+- fix: complete PDF viewer review remediation
+- fix(agent): gate compound submits, localize commit-dialog detection
+- fix(agent): resolve commit scope by content, record readback exactness
+- fix(agent): bind social proof to publisher
+- fix(agent): preserve mutation debt across route changes, bind recovery to same field
+- fix(agent): verify social publication completion
+- fix: address PDF viewer review nits
+- fix(agent): fail closed on inconclusive GitHub commit detection
+- fix(agent): harden text mutation verification
+- fix: harden PDF selection gesture, tab scope, and large-PDF rendering
+- fix: harden PDF OCR trust and Firefox fetching
+- fix: harden PDF fallback and OCR lifecycle
+- feat: gate the PDF viewer behind an opt-in setting
+- feat: add cross-browser PDF viewer fallback
+- feat: add OCR fallback for scanned PDF pages
+- fix(trace): preserve max_steps in traces after step-limit handoff
+- feat: support embedded PDFs in the WebBrain viewer
+- feat: add navigation controls to the PDF viewer
+- feat: route top-level PDFs through a selectable WebBrain viewer
+- fix: preserve selection restoration across early exits
+- fix: infer prompt kind from payload shape when the discriminator is absent
+- Keep Stop during the step-limit handoff a cancellation
+- Address step-limit recovery review findings
+- Finalize runs at the agent step limit
+- Add explicit prompt kinds to browser bridges
+- Initial plan
+- fix(mcp): cover submit and workflow-healing gates, not just permission
+- fix: strip the restoration marker and unbreak page-scope matching
+- fix: clarify MCP permission decisions
+- fix: restore page context after selection scope
+
+## [36.0.0] - 2026-09-09
+
+### Fixed
+- Required a durable recovery checkpoint before sending consequential browser actions. Storage failures stop the run before dispatch; uncertain action results retain their checkpoint instead of being treated as safely replayable.
+- Made cancellation persist for the lifetime of a run and propagate through provider requests and page-action deadlines. Stop during setup, nested publication checks, or streaming no longer disappears before the owning run can observe it; scheduled cancellation, pause, and deletion also invalidate in-flight startup.
+- Completed outstanding tool results before saving cancellation, preserving completed responses and distinguishing uncertain actions from calls that were never dispatched. Subsequent model requests now retain valid tool-call history in both normal and streaming runs.
+- Preserved uncertain text-write evidence when Stop or a closed response channel interrupts page messaging, including saved workflows. Late replies cannot erase the readback requirement or repeat the write.
+- Rearmed resumed scheduled-task alarms that fired while a cancelled previous attempt was still releasing the job, without reviving paused, cancelled, or deleted jobs.
+- Stopped automatic replay of interrupted scheduled tasks that may already have changed external state. These jobs retain their action evidence and require reconciliation before another attempt; interrupted read-only work can still retry.
+- Fixed rapid tab switching so stale background responses cannot replace the latest selected conversation or route its next message to the wrong tab.
+- Preserved rich-text editor structure when inserting text in Firefox and Chrome content-script fallbacks. Editing now honors cancellation before changing the document, uses native insertion, and verifies settled content without flattening links, formatting, or mentions.
+- Blocked unverified network redirects before following them, including page-source and API replay paths, so final-URL validation cannot occur after a disallowed destination has already been contacted.
+- Added cancellation, idle deadlines, and reader cleanup to provider streams. Bounded fetched text by bytes and time before JSON/HTML processing.
+- Preserved successful, cancelled, and failed terminal outcomes on the final allowed agent step instead of replacing them with a step-limit event and an incorrect Continue button.
+
+### Tests
+- Added Chrome/Firefox regressions for cancellation, durable action checkpoints, scheduled recovery, tab-switch races, streaming cleanup, network response limits, and final-step outcomes, plus native Chromium/Firefox rich-text editing checks.
+
+## [35.0.0] - 2026-09-09
+
+### Added
+- Added a cross-browser WebBrain PDF viewer fallback. Top-level and embedded PDFs can be routed through a selectable WebBrain viewer with page-navigation controls; scanned pages get an OCR fallback, and the feature is gated behind an opt-in setting (native PDF-handler opt-in is honored). Chrome parses PDFs in an offscreen document, retries the PDF.js import, and recognizes the extension's own handler tabs without a HEAD probe; Firefox adds hardened OCR trust and fallback/lifecycle handling. PDF `read_page` requests are auto-routed to the viewer, with page rotation, text-layer scaling, and page tracking corrected.
+- Added a durable, safe support-chat workflow. A state kernel persists support workflow state, exposes guarded observe and send tools for active conversations, makes resume scheduling durable, and discloses bounded workflow deltas; a failed or proven-undelivered send no longer wedges the workflow, and resident conversations restore state.
+- Added the Pollinations AI provider, with resolvable, vision-capable model suggestions.
+- Expanded the Baidu Tieba interaction adapter with reply publish controls and native first-floor and reply-level like, favorite, follow, share, and `more` actions.
+- Added explicit prompt kinds to the browser bridges (MCP server and LM Studio plugin), inferred from payload shape when the discriminator is absent.
+- Published a WebBrain Compass Tiny comparison benchmark and blog post with routing benchmark artifacts, plus WebBrain VL-2 and VL-3 vision benchmark outputs (web).
+
+### Changed
+- Updated the README to acknowledge contributors.
+- Removed Qwen3.5-9B from the compact-model comparison and the Chrome/Firefox rows from the Browser AI Plugins comparison (web).
+- Bumped the MCP server's `hono` dependency.
+
+### Fixed
+- Hardened social publication across the board: publication intent parsing (multilingual conjunctions and prepositions, per-clause and per-destination bodies, exact NFC bodies through link verification, proper-name and colon scope), media intent (typed, negative, and alternative attachments; per-format bounds; exclusions; GIF typing), destination handling (source-only platform rejection, coordinated multi-platform publish, reply-resource canonicalization and thread binding), and terminal evidence (verified posts, permalink verification after XHR publish, single-page-app publish evidence, shared commit-field identity, byte-exact Git paths, multi-line commit messages). Scope exit is governed by verb commands rather than prefixes.
+- Fixed message recipient-guard roles: authorized recipient role changes come strictly from user clarification, negation and conflicting role authorizations are rejected, grouped role labels apply across coordinate recipient lists, Gmail display aliases are preserved for clarification matching, and verified LinkedIn navigation is allowed through the recipient guard.
+- Fixed a Gmail draft-reply deadlock between the send and read guards, limited result counting to top-level thread containers, matched replacements to compatible observed slots, and fell back to independently observed candidates on expected-recipient mismatch.
+- Finalized the run at the agent step limit with a context-only terminal handoff exposing `done(outcome: "partial" | "failed")`; Stop during the handoff is a cancellation; traces preserve `max_steps` as the end status and carry the delivered outcome separately; the same-origin completion fallback was withdrawn entirely.
+- Fixed MCP permission decisions to cover submit and workflow-healing gates rather than permission alone.
+- Preserved selection scope and page-context restoration across early exits and stripped the restoration marker from page-scope matching.
+- Hardened tab-chat persistence for large images (bounded data-URL metadata walk).
+- Hardened PDF handler host readiness, sender gate, handler URLs, double-response guard, large-PDF rendering and selection gesture scope, OCR trust, and fallback viewer lifecycle.
+
+### Tests
+- Added `test:pdf-read`, `test:pdf-selection`, and `test:social-contract` (plus a DOM variant) suites; covered PDF handler tab routing in the Chrome e2e and isolated the tool-execution error-page expectation to Chrome < 152.
+- Updated extended-catalog fixtures and the built-in model table after adding Pollinations, and published compact benchmark comparison artifacts plus VL-2/VL-3 vision outputs.
+- Expanded selection-scope-restoration coverage across early exits and accept protocol-only tool errors in webmcp tests.
+
+## [34.1.6] - 2026-09-04
+
+### Changed
+- Packaged the current extension fixes for browser stores.
+
+## [34.1.4] - 2026-09-03
+
+### Changed
+- ui: use a globe for the language switcher and group the header prefs
+- ui: make the sidepanel language switcher a plain header icon
+- version up
+- build(deps): bump the npm_and_yarn group across 1 directory with 2 updates
+
+## [34.1.2] - 2026-09-02
+
+### Changed
+- Return only known fields from a failed OTP open
+- Fail closed on ungated OTP opens and Gmail list routes
+- fix: abort source-bound helper tabs when sidebar Stop is pressed
+- Gate OTP message opens and complete reads
+- Reject Gmail search listings as messages
+- Harden OTP mailbox message matching
+- Add skill-gated OTP mailbox reader
+- fix: give Ask mode a read-only fallback for tab requests
+- test/llm: report inapplicable scenarios as skipped, not errors
+- test/llm: validate goldens per declared surface, not a union
+- fix: reserve retired tab-tool names; score /screenshot for case 065
+- docs(test/llm): stop hardcoding a tool count that rots
+- test/llm: update benchmark goldens for removed tab tools
+- Remove browser tab management tools
+- dist: rebuild submission zips for v34.1.1
+- chore: release v34.1.1
+- docs: added
+
+## [34.1.1] - 2026-09-02
+
+### Changed
+- docs: added
+- dist: rebuild submission zips for v34.1.0
+- chore: release v34.1.0
+- 34.0.0
+- fix: migrate stored Compass provider label
+- fix: keep Compass name unlocalized
+- feat: rename managed provider to WebBrain Compass
+- feat(sidepanel): refine empty conversation state
+- feat(sidepanel): consolidate conversation controls
+- fix(opencode): scope Zen migrations and model normalization
+- Improve selected-text localization and run details
+- fix(ui): correct zoom compensation in sidepanel scale
+- fix(opencode): Zen muse-spark-1.2-contributor-free Responses routing
+- fix(ui): address review findings on sidepanel scale controls
+- Verify the booking that was paid for, and the values a form was given
+- Group custom ARIA radios, and stop counting readonly controls
+- Settle window-based evidence after the window is recorded
+- Carry a consumed form upload across Continue, and require a real activator
+- Reread a form after an upload, and name the video on every YouTube route
+- Bind every transcript window to its video, and resolve requested labels first
+- Let the last diff window close coverage, and keep in-place wizard rows
+- Close the diff from a root read only, and stop counting disabled controls
+- fix(ui): render scale only after persist and compensate zoom width
+- Close the diff only from an exhaustive reader, in its own coordinates
+- Treat an unanswered field classifier as inconclusive, and read the whole diff
+- Carry transcript and release-asset evidence across Continue
+- Scope thread coverage and drafts, state native optionality, archive iframe steps
+- fix(i18n): translate sidepanel scale labels
+- fix(ui): harden sidepanel scale behavior
+- Keep visually replaced native controls in the form inventory
+- Bind deferred replies to their thread, tighten label matching, keep ids stable
+- Chain transcript windows, prove empty comments, bound collections
+- feat(ui): add configurable scale shortcuts
+- feat(ui): add sidepanel scale controls
+- feat(ui): persist sidepanel scale preference
+- feat(ui): add sidepanel scale model
+- Bind each job's evidence to its own resource and stop trusting bare rows
+- Read the count tool's real fields, check transcript coverage, allow empty sets
+- Invalidate the mutated iframe, and give every non-submit job a contract
+- Fail prepare-only jobs that submit, and hold read jobs to their contract
+- Keep hidden file inputs and match requested fields on content words
+- Keep page-text lines and let iframe-only inventories verify their submit
+- Keep finished wizard steps, thread replies, and hidden iframe fields honest
+- Pin open-thread drafts, read localized resolve controls, drop hidden fields
+- Bind form confirmations to their form and keep requested optional rows
+- Rebuild paginated inventories on page one and keep body line structure
+- Match requested send bodies and bind release assets to their release
+- Hand draft addressees to the guard and rebuild branched form inventories
+- Bind draft addressees and let an empty thread inventory finish
+- Keep short-frame iframe rows and bind drafts to authorized field values
+- Verify Gmail drafts and subjects, and page large iframe inventories
+- Re-route the site workflow after substantive plan steps edits
+- Preserve form inventory on submit, exact publish payload, and 16 Gmail recipients
+- Refresh form inventories after value mutations in workflow tests.
+- Stale form inventories after successful value-driven mutations.
+- Resolve Gmail inline-reply recipients from the enclosing reply container.
+- Bind simulated workflow evidence to the current task key in tests.
+- Bind publish success to requested payload and allow empty thread inventories.
+- Keep live workflow contracts after plan wording edits.
+- Escape AX inventory values before quoting them.
+- fix: restore Ask-streaming copy in 10 locales after mojibake
+- Stop inferring optional fields and keep lone failed frames incomplete.
+- Clamp card-wide max output tokens to the selected model's ceiling.
+- test: guard zh Ask-streaming copy against mojibake regression
+- fix: restore Chinese Ask streaming copy
+- Localize max output tokens setting label
+- Use cost-aware OpenAI context default
+- Configure OpenAI and Anthropic model limits
+- Make provider model limits configurable
+- Tighten metadata readback and iframe completeness after review.
+- Tighten Compact workflow contract under the brief-length budget.
+- Shrink Compact workflow prompts and stop evidence false positives.
+- Bound form-workflow inventory to a v1 evidence kernel.
+- Keep runtime notices out of the execution task binding
+- fix: require exhaustive workflow evidence
+- fix: bind fulfillment to dispatched records
+- fix: verify consumed uploads after observation
+- Bind recipient clarifications to send tasks
+- fix: retain post-action workflow evidence
+- Preserve clarified tasks across restart
+- Distinguish runtime blockers from task results
+- fix: bind workflow evidence to live controls
+- Preserve repeated clarification context
+- Keep clarification answers bound to tasks
+- fix: close iframe inventory gaps
+- fix: bind workflow completion to exact outcomes
+- Keep WebBrain Cloud observation checkpoints advisory
+- Harden execution task authority
+- fix: enforce complete workflow reconciliation
+- fix: bind workflow targets to exact evidence
+- fix: preserve workflow inventory coverage
+- fix: bind exact messaging and publish targets
+- fix: defer scoped workflow evidence
+- fix: enforce reachable workflow evidence
+- fix: handle asynchronous workflow evidence
+- fix: bind terminal workflow evidence
+- fix: stabilize workflow reconciliation
+- fix: complete adapter form inventories
+- dist: rebuild submission zips for v33.6.0
+- chore: release v33.6.0
+- Restore default compact activity history
+- Encode Exacto as an OpenRouter model variant
+- fix: address adapter workflow review findings
+- Preserve OpenRouter model variants when routing
+- Sync routing after loaded model selection
+- Add OpenRouter routing variant controls
+- p1 fixes
+- feat: add DeepSeek provider support and update compatibility handling
+- feat: add report-driven adapter workflows
+- Allow honest exit after failed verification
+- Preserve honest completion when verification is unavailable
+- Harden scoped completion observations
+- Coordinate completion recovery with runtime gates
+- Keep forced completion active through validation
+- Keep completion recovery scope across retries
+- Fix background-tab completion verification
+- Fix post-navigation completion recovery
+- Add DeepSeek V4 Flash Vision benchmark post
+- version 33.5.0
+- Localize activity status messages
+- Improve agent activity status display
+- dist: rebuild submission zips for v33.4.1
+- chore: release v33.4.1
+- Fix selected-text chat actions
+- Update social proof artwork
+- Fix attention favicon flashing on dynamic sites
+- dist: rebuild submission zips for v33.4.0
+- chore: release v33.4.0
+- Bind recurring planner notices to latest run
+- Fix scheduled planner fallback notice race
+- Fix planner fallback notice placement
+- Keep MCP naming consistent across docs
+- version up
+- fix: keep shadow_dom_query selector guard on the real code
+- fix: preserve selector no-click proof
+- fix: make iframe marker cleanup nonblocking
+- fix: defer iframe dispatch marking
+- fix: keep focus-only iframe expiry retryable
+- fix: release expired fallback gestures
+- fix: stop late fallback page mutations
+- fix: release fallback keys after deadline
+- fix: guard fallback input dispatch deadlines
+- fix: recheck deadlines after click validation
+- fix: stop expired accessibility clicks
+- fix: carry deadlines into page mutations
+- fix: prevent actions after page deadlines
+- Add Qwen3.8 and GLM-5.3 Flash benchmarks
+- fix: reject late page mutations
+- fix: guard queued selector focus
+- fix: prevent late selector focus
+- fix: link coordinate reconciliation deadlines
+- fix: release timed-out CDP key presses
+- fix: bound Firefox file upload injection
+- fix: bound Chrome file upload actions
+- fix: close preflight review gaps
+- fix: bound pre-dispatch page probes
+- Fix top-edge selection shortcut fallback
+- fix: bound pending toolbar probes
+- fix(ui): reflow selected-text scope banner
+- fix: bound preflight and validation pipeline
+- Refine selected-text chat shortcut
+- fix: bound primary Chrome click pipeline
+- fix: cancel late dispatch pipelines
+- fix: stop late clear and classify click timeouts
+- fix: bound early CDP action pipelines
+- fix: bound action observation pipelines
+- fix: bound click progress snapshots
+- fix(agent): secure Gmail result counting
+- fix: cancel expired trusted mouse press
+- fix: cancel timed-out action recovery
+- fix: bound trusted field recovery
+- fix(agent): narrow search-field unsaved exemption
+- fix: bound coordinate click reconciliation
+- fix(agent): distinguish Gmail probe failures from page bounds
+- ui: compact sidebar header actions
+- fix: bound post-dispatch action completion
+- fix(agent): harden Gmail result counting and coordinate clicks
+- fix: cover accessibility clicks with action deadlines
+- fix: recover stalled page actions
+- dist: rebuild submission zips for v33.3.0
+- chore: release v33.3.0
+- feat(selection): add immediate broader context option
+- docs: remove Product Hunt link from readme
+- refactor(selection): simplify grounding controls
+- fix(ui): refine scope and provider guidance
+- Add EasyCLIProxy subscription guide
+- fix(ui): add Unsloth provider icon
+- version up
+- version up
+- fix(trace): preserve private workflow compilation
+- docs(chat): scope trace privacy claims precisely
+- fix(chat): reject busy scope restore races
+- fix(chat): disable scope restore while busy
+- fix(chat): describe selection scope recovery accurately
+- fix(chat): disclose full selection scope restore
+- fix(chat): describe selection scope recovery accurately
+- fix(chat): disclose full selection scope restore
+- fix(chat): disclose full selection scope restore
+- docs(trace): clarify metadata-only retention
+- fix(chat): bound safe selection dialogue context
+- fix(unsloth): list only resident models
+- fix(chat): bound safe selection dialogue context
+- fix(chat): bound safe selection dialogue context
+- fix(chat): bound safe selection dialogue context
+- docs(chat): clarify selection trace privacy and verification
+- docs(chat): wrap scope trace note
+- docs(chat): verify selection context contract
+- fix(chat): offer scope recovery for strict selections
+- fix(chat): explain selection reference recovery
+- feat(chat): expose selection context controls
+- fix(chat): preserve safe dialogue across selections
+- fix(trace): preserve redacted outcome metadata
+- feat(providers): add Unsloth Studio integration
+- Migrate stored catalog vision flags when the default model did not change.
+- Enable vision on catalog defaults whose models already match the detector.
+- Avoid rewriting unchanged provider snapshots on every load.
+- Persist migrated provider snapshots when Settings is not saved.
+- Migrate stored context windows with untouched default models.
+- Migrate untouched stored provider defaults and enable StepFun vision.
+- Update router and local open-source model lists to current API IDs.
+- Update cloud provider model lists to current API IDs.
+- fix: avoid 64 MiB sendResponse limit in /record slashcommand
+- Add step-limit edge case test for completion recovery
+- Fix step-limit edge case: emit partial when recovery exhausts budget
+- Relax completion recovery: 2 retry turns and 12k output cap
+- feat(trace): enforce metadata-only default privacy
+- Add Muse Glimmer benchmarks and blog post
+- fix(trace): preserve stats when repairing interrupted runs
+- Bound structured completion recovery
+- Rename Chromium bridge setting to MCP
+- Version up
+- fix: scope YouTube loop recommendation
+- feat: add YouTube video loop suggestion
+- docs: expand MCP client integrations
+- test(trace): close OTLP contract coverage gaps
+- test(trace): cover OTLP collector contract
+- fix(trace): complete session export compatibility
+- feat(trace): export conversation trace bundles
+- fix(trace): harden OTLP compatibility normalization
+- feat(trace): add session-aware OTLP export compatibility
+- dist: rebuild submission zips for v33.2.1
+- chore: release v33.2.1
+- fix: keep ordinary clarification independent of research
+- fix: diagnose empty model responses
+- dist: rebuild submission zips for v33.2.0
+- chore: release v33.2.0
+- fix: read release context via jq --rawfile in AI changelog step
+- dist: rebuild submission zips for v33.1.7
+- chore: release v33.1.7
+- fix(settings): treat seeded local API key sentinels as empty
+- dist: rebuild submission zips for v33.1.6
+- chore: release v33.1.6
+- feat(trace): add session lineage navigation
+- feat(providers): support optional local API keys
+- mark tech post
+- Version up
+- feat(web): use real brand icons on homepage
+- Version up
+- fix: survive background throttling in completion attention flash
+- fix(progress): require identity agreement for hydration batch merges
+- fix: blink favicon itself on completion attention flash
+- fix(progress): preserve canonical collected fields during hydration repair
+- feat(trace): add session statistics aggregation
+- Preserve capped trace request metadata
+- Keep trace markers past lossless cap
+- Retry unaccepted claimed prompts
+- Retry prompts after cleanup failures
+- Count escaped trace result bytes
+- Clamp lossless traces by UTF-8 bytes
+- Preserve newer lossless byte totals
+- Persist lossless event totals atomically
+- Skip migrated lossless rescans
+- Serialize trace run finalization
+- Rotate failed-clear recovery tokens
+- Guard failed-clear scope recovery
+- Migrate trace totals before cap checks
+- Refresh migrated active trace totals
+- Serialize aggregate lossless scans
+- Serialize lossless byte migration
+- Migrate lossless trace byte totals
+- Requeue attachments after failed clears
+- Suppress recovered follower cancellation errors
+- Settle failed-clear recovery queues
+- Restore cache before durable rollback
+- Cancel only active run followers
+- Wait for followers before plan recovery
+- Drain prompts after reset clears
+- Preserve lossless cache on clear failure
+- Preserve prompts created during conversation clears
+- Revalidate queued prompt drain targets
+- fix(progress): strip action prefixes before colon delimiters
+- Preserve screenshots when clears fail
+- Honor clear cancellation after state replay
+- fix: persist explicit success verdicts for scheduled Ask runs
+- Recover active runs after failed clears
+- fix: classify successful scheduled Ask runs for badge styling
+- fix: pair badge fallback with a system notification
+- Rollback conversation clears on scheduler failure
+- fix: flash scheduled runs that require clarification
+- fix(progress): harden auto identity checks in ledger reconciliation
+- fix: reject billing terminals in Ask badge classification
+- Make conversation clear storage atomic
+- more test vision results
+- fix: use exact done predicate for Act badges and cover all run paths
+- test: track vision benchmark results and stop ignoring test/vision/results
+- blog: compare six budget Qwen vision models on OpenRouter
+- blog: compare six budget Qwen vision models on OpenRouter
+- Make failed conversation clears recoverable
+- fix: preserve run outcome in background flashes and export flash setting
+- Clear durable prompts within conversation reset
+- fix: own all attention flashes in the background lifecycle
+- Reconcile repeated-item progress placeholders
+- Keep reset queues stopped after partial clear
+- fix: trigger scheduled flashes from the background
+- Prevent stale run adoption after clear
+- fix: clean cancelled screenshot recovery
+- fix: clear focused-window badges without volatile tracking
+- fix: scope queue drains and SSE heartbeats
+- fix: address sixth review round on completion tab flash
+- fix: preserve prompt and route identity
+- fix: address fifth review round on completion tab flash
+- fix: close conversation clear state races
+- fix: address fourth review round on completion tab flash
+- fix: resume queues after failed conversation clear
+- fix: address third review round on completion tab flash
+- fix: guard restored-run clear races
+- fix: address second review round on completion tab flash
+- fix: preserve typing identity through load completion
+- fix(trace): close trajectory rows for unlisted terminal end statuses
+- fix: harden issue 300 edge cases
+- fix: address review notes on completion tab flash
+- feat: flash finished tab when user switched away
+- Fix Gmail complete-thread read loops
+- feat(trace): add step trajectory table
+- highlights
+- google featured
+- dist: rebuild submission zips for v33.1.1
+- chore: release v33.1.1
+- 33.1.0
+- Add WebBrain VL 2 benchmark blog posts
+- webbrain-vl-2-450m
+- fix(trace): gate lossless eviction on a cached total and scan all runs
+- fix(trace): redact recovery_code in JSON exports and refresh lossless tier pins
+- fix(trace): close repair races and bound the stale-run scan
+- fix(trace): protect runs with recent durable activity
+- fix(trace): scan stale runs once when traces opens
+- fix(trace): repair runs interrupted by service-worker eviction
+- fix(trace): evict oldest lossless runs within budget
+- fix(trace): redact lossless JSON exports and serialize recovery
+- Count the Emergency Box among the Apocalypse Mode essentials
+- Sign the Apocalypse Mode pages with the WebBrain mark
+- Add the WebBrain logo to the Traces header
+- added logo to settings and history.html
+- Restore the Apocalypse Mode nuclear emoji at its source and fix two broken tests
+- footer tightened
+- cosmetic changes
+- Fix Cloud runtime outbox delivery
+- Add durable terminal runtime outbox
+- docs: fix vision benchmark GitHub link
+- test: add vision benchmark and model comparison
+- fix(trace): address lossless tier review findings
+- fix(trace): preserve lifecycle event integrity
+- feat(trace): opt-in lossless recording tier sharing the event pipeline
+- feat(trace): turn/step boundary events with structured failure codes
+- fix(trace): preserve derived run lineage
+- feat(trace): plumb parent lineage from cloud_run and replay entry points
+- feat(trace): add session lineage fields and DB v2 lookup indexes
+- feat(trace): add event model with run-level format version and tolerant read path
+- refactor(ui): share schedule message reconciliation
+- fix(ui): reconcile schedule confirmations
+- fix(ui): deduplicate scheduled job messages
+- dist: rebuild submission zips for v33.0.8
+- chore: release v33.0.8
+- fix: resume vision downloads and organize settings
+- fix: require vision cache marker and isolate queued worker deadlines
+- fix: verify local vision cache and abort timed-out remote vision
+- fix: preflight mixed attachments and preserve queued vision stop
+- dist: rebuild submission zips for v33.0.7
+- chore: release v33.0.7
+- feat: make research escalation explicit opt-in
+- fix: reject staged screenshots without vision route
+- fix: make screenshot vision explicit and bounded
+- fix: close research escalation consent races
+- fix: bound actionable discovery resets
+- fix: preserve progress at observation limit
+- fix: keep long ChatGPT research answers as valid JSON
+- fix: ignore null research mappings and abort closed source tabs
+- fix: keep research mapping out of ordinary side-panel tabs
+- fix: stop research wait when the ChatGPT tab closes
+- fix: cancel research wait when ChatGPT helper tab closes
+- fix: treat ChatGPT stop-button test id as generating
+- fix: keep research Stop on the source run
+- dist: rebuild submission zips for v33.0.6
+- chore: release v33.0.6
+- fix: recheck ChatGPT origin before research submit
+- dist: rebuild submission zips for v33.0.5
+- chore: release v33.0.5
+- fix: prevent duplicate extension manifests
+- fix: expose research consent in ask mode
+- feat: add consent-gated research escalation
+- dist: rebuild submission zips for v33.0.4
+- chore: release v33.0.4
+- dist: rebuild submission zips for v33.0.3
+- chore: release v33.0.3
+- test: keep Wikipedia translation assertion with its call
+- fix(offline): skip personal non-English tasks and prefer the selected source language
+- fix(offline): keep prior-turn language for Wikipedia follow-ups
+- dist: rebuild submission zips for v33.0.2
+- chore: release v33.0.2
+- fix(offline): detect Wikipedia language from the original direct query
+- fix(offline): skip disabled Wikipedia translation and disambiguate shared scripts
+- Keep Clarify open while typing
+- fix(offline): detect Wikipedia translation language from the resolved query
+- Handle streamed WebBrain quota limits
+- fix(offline): disambiguate Han queries and reject non-string translations
+- Address WebBrain Plus review feedback
+- fix(offline): tighten multilingual Wikipedia retrieval routing
+- web: add an Apocalypse Mode video popup under Install WebBrain
+- Add WebBrain Plus upgrade prompt
+- fix(offline): restore script-based query language hints
+- dist: rebuild submission zips for v33.0.1
+- chore: release v33.0.1
+- test: allow GPL licensing checks after version bumps
+- Improve multilingual offline Wikipedia retrieval
+- web: make the Downloads FAQ a full-block link and publish the GPL 33 note
+- fix(chrome): stop sibling status polls from migrating Bonsai
+- fix(chrome): keep Emergency Box open when switching Minimal and Basic
+- test: update WebGPU text model label expectations
+- fix(settings): serialize model-load saves
+- fix(settings): ignore stale model list responses
+- fix(ui): name Minimal and Basic as text models in download boxes
+- fix(apocalypse): deduplicate corpus download starts
+- fix(offline-rag): keep emergency text pack status stable during extraction
+- fix(chrome): preserve CDP lifecycle ownership
+- fix(oauth): deduplicate subscription token refreshes
+- fix(chrome): make debugger teardown race-safe
+- test(chrome): cover debugger cleanup on run errors
+- fix(chrome): release debugger sessions after runs
+
 ## [34.1.0] - 2026-09-01
 
 ### Added

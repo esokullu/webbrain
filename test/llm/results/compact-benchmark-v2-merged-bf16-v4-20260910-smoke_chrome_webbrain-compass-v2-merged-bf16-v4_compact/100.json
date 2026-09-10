@@ -1,0 +1,32 @@
+{
+  "id": "100",
+  "user": "whats the highest rated item here",
+  "mode": "act",
+  "tab": {
+    "url": "https://www.amazon.com/s?k=wireless+earbuds",
+    "title": "Amazon.com : wireless earbuds"
+  },
+  "latencyMs": 4137,
+  "error": null,
+  "firstToolCall": {
+    "name": "get_accessibility_tree",
+    "args": {
+      "filter": "visible",
+      "maxChars": 6000,
+      "maxDepth": 10,
+      "ref_id": "",
+      "page": 1,
+      "tree_revision": ""
+    }
+  },
+  "toolCallSource": "tool_calls",
+  "finishReason": "tool_calls",
+  "content": "<function name=\"get_accessibility_tree\"><param name=\"filter\">visible</param><param name=\"maxChars\">6000</param><param name=\"maxDepth\">10</param><param name=\"ref_id\"></param><param name=\"page\">1</param><param name=\"tree_revision\"></param></function>",
+  "usage": {
+    "prompt_tokens": 9840,
+    "completion_tokens": 57,
+    "total_tokens": 9897
+  },
+  "attempts": 1,
+  "retryErrors": []
+}

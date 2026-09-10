@@ -1,0 +1,41 @@
+{
+  "id": "011",
+  "category": "tool-error-pivot",
+  "description": "inspect_viewport returned \"no vision capability\". Must pivot to AX tree, not retry the capture.",
+  "mode": "act",
+  "browser": "chrome",
+  "latencyMs": 861,
+  "error": null,
+  "firstToolCall": {
+    "name": "get_accessibility_tree",
+    "args": {
+      "filter": "visible"
+    }
+  },
+  "toolCallSource": "tool_calls",
+  "expected": {
+    "idealNextToolCall": {
+      "name": "get_accessibility_tree",
+      "args": {
+        "filter": "visible"
+      }
+    },
+    "antiPatterns": [
+      {
+        "match": "inspect_viewport({})",
+        "reason": "Retrying a tool that just declared it cannot work — gpt-4o trace xpx9t9 made this mistake."
+      }
+    ],
+    "successRubric": "Pivot to a text-based inspection tool (get_accessibility_tree, read_page, or get_interactive_elements). The error message even names the alternatives — use one of them."
+  },
+  "matchedAntiPattern": null,
+  "verdict": "ideal",
+  "scoreNote": null,
+  "finishReason": "tool_calls",
+  "content": "<function name=\"get_accessibility_tree\"><param name=\"filter\">visible</param></function>",
+  "usage": {
+    "prompt_tokens": 9816,
+    "completion_tokens": 17,
+    "total_tokens": 9833
+  }
+}

@@ -6,5 +6,5 @@
       "url": "https://www.linkedin.com/"
     }
   },
-  "successRubric": "Navigates the CURRENT tab (not new_tab — \"in this tab\" is explicit). URL: linkedin.com."
+  "successRubric": "Navigates the CURRENT tab — the only tab the agent controls, and \"in this tab\" is explicit anyway. URL: linkedin.com."
 }

@@ -3,6 +3,12 @@
 node_modules/
 test/anonymous/.test-profile/
 ci/artifacts/
+test/llm/results-social-publication/
+
+# Benchmark runner process state and console logs
+test/llm/analysis/**/*.pid
+test/llm/analysis/**/*.log
+test/llm/worker-logs/
 
 # ---- Expo / React Native local state ----
 .expo/
@@ -55,3 +61,6 @@ web/assets/_backup/
 
 # Local Wasm build work tree (scripts/build-zim-xapian.mjs)
 .build/
+
+# Mobile app (local dev)
+mobile/

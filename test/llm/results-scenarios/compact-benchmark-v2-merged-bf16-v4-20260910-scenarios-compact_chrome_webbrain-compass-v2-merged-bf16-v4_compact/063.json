@@ -1,0 +1,34 @@
+{
+  "id": "063",
+  "category": "mode-boundary",
+  "description": "Ask + summarize. Reading is fine in Ask mode.",
+  "mode": "ask",
+  "browser": "chrome",
+  "latencyMs": 1357,
+  "error": null,
+  "firstToolCall": null,
+  "toolCallSource": null,
+  "expected": {
+    "idealNextToolCall": {
+      "name": "read_page",
+      "args": {}
+    },
+    "antiPatterns": [
+      {
+        "match": "done({summary:\"I'm in Ask mode and...\"})",
+        "reason": "Reading IS permitted in Ask mode — no need to bail."
+      }
+    ],
+    "successRubric": "Ask mode allows read_page, extract_data, fetch_url, inspect_viewport. Use them and summarize."
+  },
+  "matchedAntiPattern": null,
+  "verdict": "no_tool",
+  "scoreNote": null,
+  "finishReason": "stop",
+  "content": "The article is a placeholder titled **“Example story — CNN”** and contains no real news content. It does not summarize because there is nothing to summarize.",
+  "usage": {
+    "prompt_tokens": 8051,
+    "completion_tokens": 33,
+    "total_tokens": 8084
+  }
+}

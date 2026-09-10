@@ -1,0 +1,27 @@
+{
+  "id": "048",
+  "user": "open my inbox",
+  "mode": "act",
+  "tab": {
+    "url": "https://mail.google.com/mail/u/0/#inbox",
+    "title": "Inbox (3) — Gmail"
+  },
+  "latencyMs": 1029,
+  "error": null,
+  "firstToolCall": {
+    "name": "get_accessibility_tree",
+    "args": {
+      "filter": "visible"
+    }
+  },
+  "toolCallSource": "tool_calls",
+  "finishReason": "tool_calls",
+  "content": "<function name=\"get_accessibility_tree\"><param name=\"filter\">visible</param></function>",
+  "usage": {
+    "prompt_tokens": 10473,
+    "completion_tokens": 17,
+    "total_tokens": 10490
+  },
+  "attempts": 1,
+  "retryErrors": []
+}

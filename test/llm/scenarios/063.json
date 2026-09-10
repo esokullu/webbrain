@@ -25,6 +25,6 @@
         "reason": "Reading IS permitted in Ask mode — no need to bail."
       }
     ],
-    "successRubric": "Ask mode allows read_page, extract_data, fetch_url, screenshot. Use them and summarize."
+    "successRubric": "Ask mode allows read_page, extract_data, fetch_url, inspect_viewport. Use them and summarize."
   }
 }

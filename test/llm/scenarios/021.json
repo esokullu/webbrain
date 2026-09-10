@@ -1,7 +1,7 @@
 {
   "id": "021",
   "category": "csp-blocked-eval",
-  "mode": "act",
+  "mode": "dev",
   "browser": "chrome",
   "tab": {
     "url": "https://github.com/acme/widgets",

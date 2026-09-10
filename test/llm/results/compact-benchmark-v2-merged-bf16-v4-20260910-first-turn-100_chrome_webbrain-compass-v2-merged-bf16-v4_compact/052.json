@@ -1,0 +1,28 @@
+{
+  "id": "052",
+  "user": "archive this",
+  "mode": "act",
+  "tab": {
+    "url": "https://mail.google.com/mail/u/0/#inbox/abc123",
+    "title": "Invoice from Acme — Gmail"
+  },
+  "latencyMs": 1214,
+  "error": null,
+  "firstToolCall": {
+    "name": "get_accessibility_tree",
+    "args": {
+      "filter": "visible",
+      "maxDepth": 10
+    }
+  },
+  "toolCallSource": "tool_calls",
+  "finishReason": "tool_calls",
+  "content": "<function name=\"get_accessibility_tree\"><param name=\"filter\">visible</param><param name=\"maxDepth\">10</param></function>",
+  "usage": {
+    "prompt_tokens": 10474,
+    "completion_tokens": 25,
+    "total_tokens": 10499
+  },
+  "attempts": 1,
+  "retryErrors": []
+}

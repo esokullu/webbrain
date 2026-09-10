@@ -51,7 +51,7 @@
         "reason": "Retrying the exact same broken URL — the failure mode observed in gpt-4o trace 9ckqpf."
       },
       {
-        "match": "new_tab({url:\"https://mastodon.turk\"})",
+        "match": "fetch_url({url:\"https://mastodon.turk\"})",
         "reason": "Same URL via a different tool — still a retry."
       }
     ],

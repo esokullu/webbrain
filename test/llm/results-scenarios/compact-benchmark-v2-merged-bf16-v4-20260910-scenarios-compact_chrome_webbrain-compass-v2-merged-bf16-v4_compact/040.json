@@ -1,0 +1,41 @@
+{
+  "id": "040",
+  "category": "truncation-cascade",
+  "description": "After repeated truncated reads of the same URL, agent should call done with what it has and tell user the response is partial.",
+  "mode": "ask",
+  "browser": "chrome",
+  "latencyMs": 3198,
+  "error": null,
+  "firstToolCall": {
+    "name": "done",
+    "args": {
+      "summary": "The page is a long, truncated article with only the section headers visible. I can’t provide a meaningful summary because the body text is not available in the current context."
+    }
+  },
+  "toolCallSource": "tool_calls",
+  "expected": {
+    "idealNextToolCall": {
+      "name": "done",
+      "args": {
+        "summary": "Summary of the visible portion: [synthesis of Section A and B]. The page is large and read_page returned truncated content twice — I've summarized what I can see."
+      }
+    },
+    "antiPatterns": [
+      {
+        "match": "read_page({})",
+        "reason": "Third identical read won't yield more."
+      }
+    ],
+    "successRubric": "Deliver a summary of what is visible. Acknowledge the truncation. Don't loop."
+  },
+  "matchedAntiPattern": null,
+  "verdict": "ideal_name",
+  "scoreNote": null,
+  "finishReason": "tool_calls",
+  "content": "The page is a long, truncated article with only the section headers visible. I can’t provide a meaningful summary because the body text is not available in the current context.\n<function name=\"done\"><param name=\"summary\">The page is a long, truncated article with only the section headers visible. I can’t provide a meaningful summary because the body text is not available in the current context.</param></function>",
+  "usage": {
+    "prompt_tokens": 8132,
+    "completion_tokens": 81,
+    "total_tokens": 8213
+  }
+}

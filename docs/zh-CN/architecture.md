@@ -178,7 +178,7 @@ while (steps < maxSteps) {
 |---|---|---|
 | `get_accessibility_tree`, `click_ax`, `type_ax`, `set_field`, `hover` | 内容脚本消息 | 注入的页面上下文 |
 | `click`, `type_text`, `press_keys`, `scroll`, `read_page` 等 | 内容脚本消息 | 注入的页面上下文 |
-| `navigate`, `new_tab`, `go_back`, `go_forward` | `chrome.tabs` / `browser.tabs` API | 后台脚本 |
+| `navigate`, `go_back`, `go_forward` | `chrome.tabs` / `browser.tabs` API | 后台脚本 |
 | `fetch_url`, `research_url`, `list_downloads` 等 | `network-tools.js` | Service Worker |
 | 已启用的技能工具 | `skills.js` 注册表 + `executeHttpSkillTool()` | Service Worker |
 | `done` | agent.js — 捕获验证截图 + 页面状态探测 | Service Worker + CDP |

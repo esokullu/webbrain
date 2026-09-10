@@ -1,0 +1,45 @@
+{
+  "id": "012",
+  "category": "tool-error-pivot",
+  "description": "click by text returned ambiguity error. Pivot to a more specific selector or index.",
+  "mode": "act",
+  "browser": "chrome",
+  "latencyMs": 917,
+  "error": null,
+  "firstToolCall": {
+    "name": "get_accessibility_tree",
+    "args": {
+      "filter": "interactive"
+    }
+  },
+  "toolCallSource": "tool_calls",
+  "expected": {
+    "idealNextToolCall": {
+      "name": "click",
+      "args": {
+        "text": "Add to Cart"
+      }
+    },
+    "antiPatterns": [
+      {
+        "match": "click({text:\"Add\"})",
+        "reason": "Same ambiguous query."
+      },
+      {
+        "match": "click({text:\"Add\", textMatch:\"contains\"})",
+        "reason": "Broader matching makes ambiguity worse, not better."
+      }
+    ],
+    "successRubric": "Use a more specific text (\"Add to Cart\" — the actual Amazon button) OR call get_interactive_elements first and use the index."
+  },
+  "matchedAntiPattern": null,
+  "verdict": "other",
+  "scoreNote": null,
+  "finishReason": "tool_calls",
+  "content": "<function name=\"get_accessibility_tree\"><param name=\"filter\">interactive</param></function>",
+  "usage": {
+    "prompt_tokens": 9793,
+    "completion_tokens": 18,
+    "total_tokens": 9811
+  }
+}

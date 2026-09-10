@@ -1,0 +1,45 @@
+{
+  "id": "047",
+  "category": "counter-polarity",
+  "description": "SO requires MINIMUM 20 chars in body. Currently 15 — too short. Add more.",
+  "mode": "act",
+  "browser": "chrome",
+  "latencyMs": 1019,
+  "error": null,
+  "firstToolCall": {
+    "name": "get_accessibility_tree",
+    "args": {
+      "filter": "visible"
+    }
+  },
+  "toolCallSource": "tool_calls",
+  "expected": {
+    "idealNextToolCall": {
+      "name": "clarify",
+      "args": {
+        "question": "Your body is only 15 characters but Stack Overflow requires at least 30. Want me to wait while you expand it, or should I add a generic explanation?"
+      }
+    },
+    "antiPatterns": [
+      {
+        "match": "click({text:\"Post Your Question\"})",
+        "reason": "Will be rejected — body too short."
+      },
+      {
+        "match": "set_field({ref_id:\"...\", text:\"thanks for any help\"})",
+        "reason": "Inventing body content for the user."
+      }
+    ],
+    "successRubric": "Length is below the MIN, not max. Don't submit. Either clarify or report. Definitely don't invent body text."
+  },
+  "matchedAntiPattern": null,
+  "verdict": "other",
+  "scoreNote": null,
+  "finishReason": "tool_calls",
+  "content": "<function name=\"get_accessibility_tree\"><param name=\"filter\">visible</param></function>",
+  "usage": {
+    "prompt_tokens": 9764,
+    "completion_tokens": 17,
+    "total_tokens": 9781
+  }
+}

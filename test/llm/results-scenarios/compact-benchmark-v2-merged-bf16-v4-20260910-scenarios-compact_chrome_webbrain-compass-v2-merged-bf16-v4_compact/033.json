@@ -1,0 +1,43 @@
+{
+  "id": "033",
+  "category": "truncation-cascade",
+  "description": "AX tree overflow on listing page. Switch to read_page or a more constrained AX call. Do not raise maxChars.",
+  "mode": "act",
+  "browser": "chrome",
+  "latencyMs": 1257,
+  "error": null,
+  "firstToolCall": {
+    "name": "get_accessibility_tree",
+    "args": {
+      "filter": "visible",
+      "maxChars": 6000
+    }
+  },
+  "toolCallSource": "tool_calls",
+  "expected": {
+    "idealNextToolCall": {
+      "name": "get_accessibility_tree",
+      "args": {
+        "filter": "visible",
+        "maxDepth": 10
+      }
+    },
+    "antiPatterns": [
+      {
+        "match": "get_accessibility_tree({filter:\"all\", maxChars:200000})",
+        "reason": "System prompt explicitly warns against raising maxChars on listings."
+      }
+    ],
+    "successRubric": "Switch to filter:\"visible\" or read_page. Listing pages don't fit in the AX tree under filter:\"all\"."
+  },
+  "matchedAntiPattern": null,
+  "verdict": "ideal_name",
+  "scoreNote": null,
+  "finishReason": "tool_calls",
+  "content": "<function name=\"get_accessibility_tree\"><param name=\"filter\">visible</param><param name=\"maxChars\">6000</param></function>",
+  "usage": {
+    "prompt_tokens": 9770,
+    "completion_tokens": 27,
+    "total_tokens": 9797
+  }
+}

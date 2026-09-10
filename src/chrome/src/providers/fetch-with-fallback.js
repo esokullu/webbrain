@@ -65,6 +65,11 @@ async function _ensureTimeoutInitialized() {
   } catch { /* keep the hardcoded default */ }
 }
 
+export async function getRequestTimeoutMs() {
+  await _ensureTimeoutInitialized();
+  return _cachedTimeoutMs;
+}
+
 /**
  * Try direct fetch first. If it fails with a network error, retry
  * through the offscreen document proxy.

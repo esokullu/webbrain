@@ -353,16 +353,18 @@ export class AnthropicProvider extends BaseLLMProvider {
       method: 'POST',
       headers: this._headers(),
       body: JSON.stringify(body),
+      signal: options.signal,
     });
 
     if (!res.ok) {
       let err = '';
-      try { err = (await res.text()).slice(0, 500); } catch {}
+      try { err = await this._readErrorResponse(res, 500, options); } catch (error) { this._rethrowAbortedChat(error, options); }
       throw new Error(`Anthropic error ${res.status}: ${err}`);
     }
 
     let data;
-    try { data = await res.json(); } catch {
+    try { data = await res.json(); } catch (error) {
+      this._rethrowAbortedChat(error, options);
       throw new Error('Anthropic returned invalid JSON in chat response.');
     }
 
@@ -432,8 +434,10 @@ export class AnthropicProvider extends BaseLLMProvider {
         method: 'POST',
         headers: this._headers(),
         body: JSON.stringify(body),
+        signal: options.signal,
       });
     } catch (error) {
+      this._rethrowAbortedChat(error, options);
       throw this._askStreamTransportError(
         `Anthropic network error — could not reach ${url} (${error?.message || 'request failed'}).`,
       );
@@ -441,7 +445,7 @@ export class AnthropicProvider extends BaseLLMProvider {
 
     if (!res.ok) {
       let err = '';
-      try { err = (await res.text()).slice(0, 500); } catch {}
+      try { err = await this._readErrorResponse(res, 500, options); } catch (error) { this._rethrowAbortedChat(error, options); }
       throw new Error(`Anthropic stream error ${res.status}: ${err}`);
     }
 
@@ -450,209 +454,215 @@ export class AnthropicProvider extends BaseLLMProvider {
     }
     let reader;
     try {
-      reader = res.body.getReader();
+      reader = await this._openStreamReader(res, options);
     } catch (error) {
+      this._rethrowAbortedChat(error, options);
       throw this._askStreamTransportError(
         `Anthropic stream could not open its response body (${error?.message || 'reader unavailable'}).`,
       );
     }
-    const decoder = new TextDecoder();
-    let buffer = '';
-    let sawUsage = false;
-    let stopReason = '';
-    const accumulatedUsage = {};
-    const streamedBlocks = new Map();
-    let replayValid = true;
-    let sawThinking = false;
-    let sawToolUse = false;
-    const updateUsage = (usage) => {
-      if (!usage || typeof usage !== 'object') return;
-      sawUsage = true;
-      for (const key of [
-        'input_tokens',
-        'output_tokens',
-        'prompt_tokens',
-        'completion_tokens',
-        'cache_read_input_tokens',
-        'cache_creation_input_tokens',
-      ]) {
-        const value = Number(usage[key] ?? 0);
-        if (Number.isFinite(value) && value > Number(accumulatedUsage[key] ?? 0)) {
-          accumulatedUsage[key] = value;
-        }
-      }
-      if (usage.cache_creation && typeof usage.cache_creation === 'object') {
-        const current = accumulatedUsage.cache_creation || {};
-        accumulatedUsage.cache_creation = { ...current };
-        for (const key of ['ephemeral_5m_input_tokens', 'ephemeral_1h_input_tokens']) {
-          const value = Number(usage.cache_creation[key] ?? 0);
-          if (Number.isFinite(value) && value > Number(current[key] ?? 0)) {
-            accumulatedUsage.cache_creation[key] = value;
+    try {
+      const decoder = new TextDecoder();
+      let buffer = '';
+      let sawUsage = false;
+      let stopReason = '';
+      const accumulatedUsage = {};
+      const streamedBlocks = new Map();
+      let replayValid = true;
+      let sawThinking = false;
+      let sawToolUse = false;
+      const updateUsage = (usage) => {
+        if (!usage || typeof usage !== 'object') return;
+        sawUsage = true;
+        for (const key of [
+          'input_tokens',
+          'output_tokens',
+          'prompt_tokens',
+          'completion_tokens',
+          'cache_read_input_tokens',
+          'cache_creation_input_tokens',
+        ]) {
+          const value = Number(usage[key] ?? 0);
+          if (Number.isFinite(value) && value > Number(accumulatedUsage[key] ?? 0)) {
+            accumulatedUsage[key] = value;
           }
         }
-      }
-    };
-    const usageChunk = () => sawUsage ? this._normalizeUsage(accumulatedUsage) : null;
+        if (usage.cache_creation && typeof usage.cache_creation === 'object') {
+          const current = accumulatedUsage.cache_creation || {};
+          accumulatedUsage.cache_creation = { ...current };
+          for (const key of ['ephemeral_5m_input_tokens', 'ephemeral_1h_input_tokens']) {
+            const value = Number(usage.cache_creation[key] ?? 0);
+            if (Number.isFinite(value) && value > Number(current[key] ?? 0)) {
+              accumulatedUsage.cache_creation[key] = value;
+            }
+          }
+        }
+      };
+      const usageChunk = () => sawUsage ? this._normalizeUsage(accumulatedUsage) : null;
 
-    while (true) {
-      let chunk;
-      try {
-        chunk = await reader.read();
-      } catch (error) {
-        const usage = usageChunk();
-        if (usage) yield { type: 'usage', usage };
-        throw this._askStreamTransportError(
-          `Anthropic stream transport error (${error?.message || 'read failed'}).`,
-        );
-      }
-      const { done, value } = chunk;
-      if (done) break;
-
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split('\n');
-      buffer = lines.pop() || '';
-
-      for (const line of lines) {
-        const trimmed = line.trim();
-        if (!trimmed || !trimmed.startsWith('data: ')) continue;
-        const payload = trimmed.slice(6);
-        let event;
+      while (true) {
+        let chunk;
         try {
-          event = JSON.parse(payload);
+          chunk = await reader.read();
         } catch (error) {
-          replayValid = false;
-          if (this._supportsInteractiveAskStreaming()) {
-            throw this._askStreamTransportError(
-              `Anthropic stream returned malformed JSON (${error?.message || 'parse failed'}).`,
-            );
-          }
-          console.warn('[anthropic] malformed SSE chunk skipped:', payload?.slice(0, 120), error?.message);
-          continue;
+          this._rethrowAbortedChat(error, options);
+          const usage = usageChunk();
+          if (usage) yield { type: 'usage', usage };
+          throw this._askStreamTransportError(
+            `Anthropic stream transport error (${error?.message || 'read failed'}).`,
+          );
         }
-        if (event.type === 'error') {
-          const detail = event.error?.message || event.error?.type || 'The provider reported a streaming error.';
-          throw this._askStreamTerminalError(`Anthropic stream error: ${detail}`);
-        }
-        if (event.type === 'message_start') {
-          updateUsage(event.message?.usage);
-        } else if (event.type === 'message_delta') {
-          updateUsage(event.usage);
-          if (event.delta?.stop_reason != null) stopReason = String(event.delta.stop_reason);
-        } else if (event.type === 'content_block_delta') {
-          const record = streamedBlocks.get(event.index);
-          const deltaType = event.delta?.type;
-          if (!record || record.stopped) {
+        const { done, value } = chunk;
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed || !trimmed.startsWith('data: ')) continue;
+          const payload = trimmed.slice(6);
+          let event;
+          try {
+            event = JSON.parse(payload);
+          } catch (error) {
             replayValid = false;
-          } else if (deltaType === 'thinking_delta' && record.block.type === 'thinking') {
-            record.block.thinking += String(event.delta.thinking || '');
-          } else if (deltaType === 'signature_delta' && record.block.type === 'thinking') {
-            record.block.signature += String(event.delta.signature || '');
-          } else if (deltaType === 'text_delta' && record.block.type === 'text') {
-            record.block.text += String(event.delta.text || '');
-          } else if (
-            deltaType === 'citations_delta'
-            && record.block.type === 'text'
-            && event.delta.citation
-            && typeof event.delta.citation === 'object'
-          ) {
-            if (!Array.isArray(record.block.citations)) record.block.citations = [];
-            record.block.citations.push(JSON.parse(JSON.stringify(event.delta.citation)));
-          } else if (deltaType === 'input_json_delta' && record.block.type === 'tool_use') {
-            record.inputJson += String(event.delta.partial_json || '');
-          } else {
-            replayValid = false;
+            if (this._supportsInteractiveAskStreaming()) {
+              throw this._askStreamTransportError(
+                `Anthropic stream returned malformed JSON (${error?.message || 'parse failed'}).`,
+              );
+            }
+            console.warn('[anthropic] malformed SSE chunk skipped:', payload?.slice(0, 120), error?.message);
+            continue;
           }
-          if (event.delta?.type === 'text_delta') {
-            yield { type: 'text', content: event.delta.text };
-          } else if (event.delta?.type === 'thinking_delta') {
-            yield { type: 'reasoning', content: event.delta.thinking };
-          } else if (event.delta?.type === 'input_json_delta') {
-            yield { type: 'tool_call_delta', content: event.delta.partial_json };
+          if (event.type === 'error') {
+            const detail = event.error?.message || event.error?.type || 'The provider reported a streaming error.';
+            throw this._askStreamTerminalError(`Anthropic stream error: ${detail}`);
           }
-        } else if (event.type === 'content_block_start') {
-          const index = event.index;
-          const source = event.content_block;
-          if (source?.type === 'thinking' || source?.type === 'redacted_thinking') sawThinking = true;
-          if (source?.type === 'tool_use') sawToolUse = true;
-          if (
-            !Number.isInteger(index)
-            || index !== streamedBlocks.size
-            || streamedBlocks.has(index)
-            || !source
-            || typeof source !== 'object'
-            || typeof source.type !== 'string'
-            || !source.type
-          ) {
-            replayValid = false;
-          } else {
-            let block;
-            try {
-              block = JSON.parse(JSON.stringify(source));
-            } catch {
+          if (event.type === 'message_start') {
+            updateUsage(event.message?.usage);
+          } else if (event.type === 'message_delta') {
+            updateUsage(event.usage);
+            if (event.delta?.stop_reason != null) stopReason = String(event.delta.stop_reason);
+          } else if (event.type === 'content_block_delta') {
+            const record = streamedBlocks.get(event.index);
+            const deltaType = event.delta?.type;
+            if (!record || record.stopped) {
+              replayValid = false;
+            } else if (deltaType === 'thinking_delta' && record.block.type === 'thinking') {
+              record.block.thinking += String(event.delta.thinking || '');
+            } else if (deltaType === 'signature_delta' && record.block.type === 'thinking') {
+              record.block.signature += String(event.delta.signature || '');
+            } else if (deltaType === 'text_delta' && record.block.type === 'text') {
+              record.block.text += String(event.delta.text || '');
+            } else if (
+              deltaType === 'citations_delta'
+              && record.block.type === 'text'
+              && event.delta.citation
+              && typeof event.delta.citation === 'object'
+            ) {
+              if (!Array.isArray(record.block.citations)) record.block.citations = [];
+              record.block.citations.push(JSON.parse(JSON.stringify(event.delta.citation)));
+            } else if (deltaType === 'input_json_delta' && record.block.type === 'tool_use') {
+              record.inputJson += String(event.delta.partial_json || '');
+            } else {
               replayValid = false;
             }
-            if (block) {
-              if (block.type === 'thinking') {
-                block.thinking = typeof block.thinking === 'string' ? block.thinking : '';
-                block.signature = typeof block.signature === 'string' ? block.signature : '';
-              } else if (block.type === 'text') {
-                block.text = typeof block.text === 'string' ? block.text : '';
-              }
-              streamedBlocks.set(index, { block, inputJson: '', stopped: false });
+            if (event.delta?.type === 'text_delta') {
+              yield { type: 'text', content: event.delta.text };
+            } else if (event.delta?.type === 'thinking_delta') {
+              yield { type: 'reasoning', content: event.delta.thinking };
+            } else if (event.delta?.type === 'input_json_delta') {
+              yield { type: 'tool_call_delta', content: event.delta.partial_json };
             }
-          }
-          if (event.content_block?.type === 'tool_use') {
-            yield {
-              type: 'tool_call_start',
-              content: {
-                id: event.content_block.id || '',
-                name: event.content_block.name || '',
-              },
-            };
-          }
-        } else if (event.type === 'content_block_stop') {
-          const record = streamedBlocks.get(event.index);
-          if (!record || record.stopped) {
-            replayValid = false;
-          } else {
-            record.stopped = true;
-            if (record.block.type === 'tool_use' && record.inputJson) {
+          } else if (event.type === 'content_block_start') {
+            const index = event.index;
+            const source = event.content_block;
+            if (source?.type === 'thinking' || source?.type === 'redacted_thinking') sawThinking = true;
+            if (source?.type === 'tool_use') sawToolUse = true;
+            if (
+              !Number.isInteger(index)
+              || index !== streamedBlocks.size
+              || streamedBlocks.has(index)
+              || !source
+              || typeof source !== 'object'
+              || typeof source.type !== 'string'
+              || !source.type
+            ) {
+              replayValid = false;
+            } else {
+              let block;
               try {
-                const input = JSON.parse(record.inputJson);
-                if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('invalid tool input');
-                record.block.input = input;
+                block = JSON.parse(JSON.stringify(source));
               } catch {
                 replayValid = false;
               }
+              if (block) {
+                if (block.type === 'thinking') {
+                  block.thinking = typeof block.thinking === 'string' ? block.thinking : '';
+                  block.signature = typeof block.signature === 'string' ? block.signature : '';
+                } else if (block.type === 'text') {
+                  block.text = typeof block.text === 'string' ? block.text : '';
+                }
+                streamedBlocks.set(index, { block, inputJson: '', stopped: false });
+              }
             }
+            if (event.content_block?.type === 'tool_use') {
+              yield {
+                type: 'tool_call_start',
+                content: {
+                  id: event.content_block.id || '',
+                  name: event.content_block.name || '',
+                },
+              };
+            }
+          } else if (event.type === 'content_block_stop') {
+            const record = streamedBlocks.get(event.index);
+            if (!record || record.stopped) {
+              replayValid = false;
+            } else {
+              record.stopped = true;
+              if (record.block.type === 'tool_use' && record.inputJson) {
+                try {
+                  const input = JSON.parse(record.inputJson);
+                  if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('invalid tool input');
+                  record.block.input = input;
+                } catch {
+                  replayValid = false;
+                }
+              }
+            }
+          } else if (event.type === 'message_stop') {
+            const usage = usageChunk();
+            if (usage) yield { type: 'usage', usage };
+            let replayState = null;
+            if (replayValid && [...streamedBlocks.values()].every(record => record.stopped)) {
+              const content = [...streamedBlocks.entries()]
+                .sort(([left], [right]) => left - right)
+                .map(([, record]) => record.block);
+              replayState = this._replayState(content);
+            }
+            const requiresReplay = sawThinking && sawToolUse;
+            if (requiresReplay && !replayState) {
+              console.warn('[anthropic] thinking+tool_use stream missing replay state; next turn will lose thinking context.');
+            }
+            yield {
+              type: 'done',
+              content: '',
+              ...(stopReason ? { finishReason: stopReason } : {}),
+              ...(replayState ? { responseItems: [replayState] } : {}),
+            };
+            return;
           }
-        } else if (event.type === 'message_stop') {
-          const usage = usageChunk();
-          if (usage) yield { type: 'usage', usage };
-          let replayState = null;
-          if (replayValid && [...streamedBlocks.values()].every(record => record.stopped)) {
-            const content = [...streamedBlocks.entries()]
-              .sort(([left], [right]) => left - right)
-              .map(([, record]) => record.block);
-            replayState = this._replayState(content);
-          }
-          const requiresReplay = sawThinking && sawToolUse;
-          if (requiresReplay && !replayState) {
-            console.warn('[anthropic] thinking+tool_use stream missing replay state; next turn will lose thinking context.');
-          }
-          yield {
-            type: 'done',
-            content: '',
-            ...(stopReason ? { finishReason: stopReason } : {}),
-            ...(replayState ? { responseItems: [replayState] } : {}),
-          };
-          return;
         }
       }
+      const usage = usageChunk();
+      if (usage) yield { type: 'usage', usage };
+      throw this._askStreamTransportError('Anthropic stream ended before the message_stop event.');
+    } finally {
+      reader.close();
     }
-    const usage = usageChunk();
-    if (usage) yield { type: 'usage', usage };
-    throw this._askStreamTransportError('Anthropic stream ended before the message_stop event.');
   }
 
   _supportsTemperatureParameter() {

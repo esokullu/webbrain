@@ -1,7 +1,7 @@
 {
   "id": "020",
   "category": "tool-error-pivot",
-  "mode": "act",
+  "mode": "dev",
   "browser": "chrome",
   "tab": {
     "url": "https://mastoturk.org/publish",

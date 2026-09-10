@@ -1,0 +1,42 @@
+{
+  "id": "080",
+  "category": "cross-lingual",
+  "description": "Mixed: English UI, but user types Arabic content. Should set field with the Arabic text as-is.",
+  "mode": "act",
+  "browser": "chrome",
+  "latencyMs": 2081,
+  "error": null,
+  "firstToolCall": {
+    "name": "set_field",
+    "args": {
+      "ref_id": "ref_0",
+      "text": "يرجى التسليم بعد الساعة 5 مساءً"
+    }
+  },
+  "toolCallSource": "tool_calls",
+  "expected": {
+    "idealNextToolCall": {
+      "name": "click",
+      "args": {
+        "index": 0
+      }
+    },
+    "antiPatterns": [
+      {
+        "match": "type_text({text:\"Please deliver after 5pm\"})",
+        "reason": "Translating user content to English without permission."
+      }
+    ],
+    "successRubric": "Preserve the Arabic text verbatim — never translate user-provided content to English without instruction."
+  },
+  "matchedAntiPattern": null,
+  "verdict": "other",
+  "scoreNote": null,
+  "finishReason": "tool_calls",
+  "content": "<function name=\"set_field\"><param name=\"ref_id\">ref_0</param><param name=\"text\">يرجى التسليم بعد الساعة 5 مساءً</param></function>",
+  "usage": {
+    "prompt_tokens": 9785,
+    "completion_tokens": 51,
+    "total_tokens": 9836
+  }
+}

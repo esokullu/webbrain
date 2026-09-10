@@ -1,7 +1,7 @@
 {
   "id": "029",
   "category": "csp-blocked-eval",
-  "mode": "act",
+  "mode": "dev",
   "browser": "chrome",
   "tab": {
     "url": "https://mail.google.com/mail/u/0/#inbox",

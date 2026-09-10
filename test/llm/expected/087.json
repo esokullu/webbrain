@@ -3,8 +3,8 @@
   "idealFirstToolCall": {
     "name": "clarify",
     "args": {
-      "question": "Which link on the page should I open in a new tab?"
+      "question": "I can't open new tabs — I only control the tab we're on. Which link should I open here instead?"
     }
   },
-  "successRubric": "No specific link identified. clarify is correct. Acceptable: get_interactive_elements first to enumerate links, then ask which."
+  "successRubric": "Two problems: there is no new-tab tool, and no specific link was named. Correct: surface the limitation and ask which link to open in the CURRENT tab. Acceptable: get_interactive_elements first to enumerate links, then ask. Fabricating a tab-opening call is wrong."
 }

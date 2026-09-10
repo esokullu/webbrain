@@ -1,0 +1,45 @@
+{
+  "id": "054",
+  "category": "stale-refid",
+  "description": "Page re-rendered after a JS event; ref_ids invalidated.",
+  "mode": "act",
+  "browser": "chrome",
+  "latencyMs": 963,
+  "error": null,
+  "firstToolCall": {
+    "name": "get_accessibility_tree",
+    "args": {
+      "filter": "visible"
+    }
+  },
+  "toolCallSource": "tool_calls",
+  "expected": {
+    "idealNextToolCall": {
+      "name": "get_accessibility_tree",
+      "args": {
+        "filter": "visible"
+      }
+    },
+    "antiPatterns": [
+      {
+        "match": "click_ax({ref_id:\"ref_22\"})",
+        "reason": "Tree invalidated after the size click triggered a re-render."
+      },
+      {
+        "match": "click_ax({ref_id:\"ref_23\"})",
+        "reason": "Adjacent guess."
+      }
+    ],
+    "successRubric": "After clicks that may re-render (variant selection on product pages), re-read AX tree before subsequent ref_id-based actions."
+  },
+  "matchedAntiPattern": null,
+  "verdict": "ideal",
+  "scoreNote": null,
+  "finishReason": "tool_calls",
+  "content": "<function name=\"get_accessibility_tree\"><param name=\"filter\">visible</param></function>",
+  "usage": {
+    "prompt_tokens": 9879,
+    "completion_tokens": 17,
+    "total_tokens": 9896
+  }
+}

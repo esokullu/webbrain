@@ -76,7 +76,7 @@ get_interactive_elements, click, type_text, press_keys, scroll, navigate,
 go_back, go_forward, extract_data, inspect_element_styles, wait_for_element,
 inject_css, remove_injected_css, patch_element, revert_patch, execute_js,
 read_console, inspect_network_requests, inspect_event_listeners,
-highlight_element, wait_for_stable, schedule_resume, schedule_task, get_selection, find_text, new_tab,
+highlight_element, wait_for_stable, schedule_resume, schedule_task, get_selection, find_text,
 promote_iframe,
 done, clarify, get_shadow_dom, shadow_dom_query, get_frames, iframe_read,
 iframe_click, iframe_type, fetch_url, research_url, list_downloads,
@@ -95,7 +95,7 @@ core surface, including Dev-only `execute_js`, is shared.
 |---|---|
 | AX-first DOM control | `get_accessibility_tree`, `click_ax`, `type_ax`, `set_field`, `set_checked`, `hover`, `drag_drop` |
 | Legacy DOM fallback | `get_interactive_elements`, `click`, `type_text`, `press_keys`, `scroll`, `wait_for_element`, `wait_for_stable` |
-| Navigation and tabs | `navigate`, `go_back`, `go_forward`, `new_tab`, `promote_iframe` |
+| Navigation | `navigate`, `go_back`, `go_forward`, `promote_iframe` |
 | Reading/extraction | `read_page`, `read_pdf`, `read_page_source`, `extract_data`, `inspect_element_styles`, `get_selection`, `find_text` |
 | Dev editing and diagnostics | `inject_css`, `remove_injected_css`, `patch_element`, `revert_patch`, `execute_js`, `read_console`, `inspect_network_requests`, `inspect_event_listeners`, `highlight_element` |
 | Shadow DOM and frames | `get_shadow_dom`, `shadow_dom_query` on Chrome, `get_frames`, `iframe_read`, `iframe_click`, `iframe_type`, `promote_iframe` |
