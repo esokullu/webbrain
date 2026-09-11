@@ -975,6 +975,7 @@ const {
   WEBGPU_LFM25_VL_16B_MODEL_ID,
   WEBGPU_LFM25_VL_3B_MODEL_ID,
   WEBGPU_NANBEIGE42_3B_MODEL_ID,
+  WEBGPU_MINICPM5_2B_MODEL_ID,
   WEBGPU_BONSAI27_MODEL_ID,
   WEBGPU_MODEL_ID,
   WEBGPU_MODEL_PRESETS,
@@ -62326,6 +62327,7 @@ test('Chrome exposes separate endpoint-free WebGPU text and vision providers', a
       { id: WEBGPU_LFM25_VL_16B_MODEL_ID, label: 'LFM2.5-VL-1.6B', runtime: 'onnx-vl', contextWindow: 16384, supportsVision: true },
       { id: WEBGPU_LFM25_VL_3B_MODEL_ID, label: 'LFM2.5-VL-3B', runtime: 'onnx-vl', contextWindow: 16384, supportsVision: true },
       { id: WEBGPU_NANBEIGE42_3B_MODEL_ID, label: 'Nanbeige4.2-3B', runtime: 'onnx', contextWindow: 4096, supportsVision: false },
+      { id: WEBGPU_MINICPM5_2B_MODEL_ID, label: 'MiniCPM5-2B', runtime: 'onnx', contextWindow: 16384, supportsVision: false },
       { id: WEBGPU_BONSAI27_MODEL_ID, label: 'Basic text model', runtime: 'bitgpu', contextWindow: 4096, supportsVision: false },
     ]);
     assert.equal(new WebGPUProvider({ model: WEBGPU_BONSAI27_MODEL_ID }).dtype, 'q1');
@@ -63155,6 +63157,7 @@ test('WebGPU worker follows local text-generation and WebBrain VL vision contrac
     WEBGPU_LFM25_VL_16B_MODEL_ID,
     WEBGPU_LFM25_VL_3B_MODEL_ID,
     WEBGPU_NANBEIGE42_3B_MODEL_ID,
+    WEBGPU_MINICPM5_2B_MODEL_ID,
   ]) {
     assert.match(apocalypseHtml, new RegExp(modelId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')),
       `${modelId} is missing from the Apocalypse WebGPU picker`);
@@ -64063,7 +64066,9 @@ test('WebGPU worker replays text tool history and applies model-specific generat
           const content = modelId === 'LiquidAI/LFM2.5-2.6B-ONNX'
             || modelId === 'Michionlion/Nanbeige4.2-3B-ONNX-WebGPU'
             ? 'private model reasoning</think>Hello!'
-            : 'text answer';
+            : modelId === 'RASMUS/MiniCPM5-2B-ONNX'
+              ? '<think>private model reasoning</think>Hello!'
+              : 'text answer';
           return [{ generated_text: [...input, { role: 'assistant', content }] }];
         };
         instance.model = {};
@@ -64370,6 +64375,26 @@ test('WebGPU worker replays text tool history and applies model-specific generat
       'model_webgpu_mlp',
       'the chat path must load the same overridden graph file name as the download path',
     );
+
+    const minicpmPayload = {
+      ...textPayload,
+      modelId: WEBGPU_MINICPM5_2B_MODEL_ID,
+    };
+    await dispatch('download-text', minicpmPayload);
+    assert.equal(globalThis.__webgpuPipelineOptions.options.model_file_name, undefined,
+      'MiniCPM5 publishes the default model_q4f16.onnx graph name');
+    const minicpmResponse = await dispatch('text-chat', minicpmPayload);
+    assert.equal(minicpmResponse.content, 'Hello!');
+    assert.equal(minicpmResponse.reasoningContent, 'private model reasoning',
+      'MiniCPM5 emits a full <think> wrapper, so the closed-think branch is the reasoning path');
+    assert.deepEqual(globalThis.__webgpuGenerationOptions, {
+      do_sample: true,
+      temperature: 1.0,
+      top_p: 0.95,
+      max_new_tokens: 2048,
+      tools: undefined,
+      tokenizer_encode_kwargs: { preserve_thinking: false },
+    }, 'MiniCPM5 must use its quickstart sampling and the reasoning-template argument');
 
     const lfmInstructPayload = {
       ...textPayload,
@@ -100338,6 +100363,38 @@ test('text tool-call parser is production code with format and allowlist coverag
       raw: [
         '<tool_call>{"name":"read_page","arguments":{}}</tool_call>',
         '<tool_call>{"name":"click_ax","arguments":{"ref_id":"ref_7"}}</tool_call>',
+      ].join('\n'),
+      expected: [
+        { name: 'read_page', args: {} },
+        { name: 'click_ax', args: { ref_id: 'ref_7' } },
+      ],
+    },
+    {
+      label: 'MiniCPM5 bare function with param tags',
+      raw: [
+        '<function name="click_ax">',
+        '<param name="ref_id">ref_7</param>',
+        '<param name="force">true</param>',
+        '</function>',
+      ].join(''),
+      expected: [{
+        name: 'click_ax',
+        args: { ref_id: 'ref_7', force: true },
+      }],
+    },
+    {
+      label: 'MiniCPM5 bare function with CDATA value',
+      raw: '<function name="read_page"><param name="text"><![CDATA[Keep <b>this</b> & that]]></param></function>',
+      expected: [{
+        name: 'read_page',
+        args: { text: 'Keep <b>this</b> & that' },
+      }],
+    },
+    {
+      label: 'MiniCPM5 bare functions preserve order alongside wrapper',
+      raw: [
+        '<tool_call>{"name":"read_page","arguments":{}}</tool_call>',
+        '<function name="click_ax"><param name="ref_id">ref_7</param></function>',
       ].join('\n'),
       expected: [
         { name: 'read_page', args: {} },

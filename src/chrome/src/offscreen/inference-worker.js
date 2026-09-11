@@ -31,6 +31,7 @@ const WEBGPU_LFM25_12B_THINKING_MODEL_ID = 'LiquidAI/LFM2.5-1.2B-Thinking-ONNX';
 const WEBGPU_LFM25_VL_16B_MODEL_ID = 'LiquidAI/LFM2.5-VL-1.6B-ONNX';
 const WEBGPU_LFM25_VL_3B_MODEL_ID = 'LiquidAI/LFM2.5-VL-3B-ONNX';
 const WEBGPU_NANBEIGE42_3B_MODEL_ID = 'Michionlion/Nanbeige4.2-3B-ONNX-WebGPU';
+const WEBGPU_MINICPM5_2B_MODEL_ID = 'RASMUS/MiniCPM5-2B-ONNX';
 const WEBGPU_BONSAI27_MODEL_ID = 'prism-ml/Bonsai-27B-gguf';
 const WEBGPU_LFM25_MAX_NEW_TOKENS = 2048;
 const WEBGPU_LFM25_TEXT_MODEL_IDS = new Set([
@@ -48,6 +49,7 @@ const WEBGPU_REASONING_MODEL_IDS = new Set([
   WEBGPU_LFM25_MODEL_ID,
   WEBGPU_LFM25_12B_THINKING_MODEL_ID,
   WEBGPU_NANBEIGE42_3B_MODEL_ID,
+  WEBGPU_MINICPM5_2B_MODEL_ID,
 ]);
 // Chat templates that emit the opening `<think>` themselves, so the runtime
 // only returns the reasoning suffix.
@@ -58,6 +60,7 @@ const WEBGPU_OPEN_THINKING_MODEL_IDS = new Set([
 const WEBGPU_LONG_OUTPUT_MODEL_IDS = new Set([
   ...WEBGPU_LFM25_TEXT_MODEL_IDS,
   WEBGPU_NANBEIGE42_3B_MODEL_ID,
+  WEBGPU_MINICPM5_2B_MODEL_ID,
 ]);
 // Publisher-recommended decoding for the shipped reasoning presets. Custom
 // repositories keep Transformers.js greedy defaults.
@@ -66,6 +69,8 @@ const WEBGPU_TEXT_SAMPLING = new Map([
   [WEBGPU_LFM25_12B_THINKING_MODEL_ID, { temperature: 0.05, top_k: 50, repetition_penalty: 1.05 }],
   // Nanbeige4.2-3B's own generation_config.json.
   [WEBGPU_NANBEIGE42_3B_MODEL_ID, { temperature: 0.6, top_k: 20, top_p: 0.95 }],
+  // MiniCPM5-2B quickstart: temperature=1.0, top_p=0.95.
+  [WEBGPU_MINICPM5_2B_MODEL_ID, { temperature: 1.0, top_p: 0.95 }],
 ]);
 // Nanbeige ships a single WebGPU-fused graph under a non-default file name.
 // Without this override Transformers.js looks for `onnx/model_q4f16.onnx`,

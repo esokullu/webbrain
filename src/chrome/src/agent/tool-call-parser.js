@@ -357,7 +357,12 @@ export function parseToolCallsFromText(text, allowedNames) {
 
   const results = [];
   const parseXmlParamValue = (value) => {
-    const cleaned = String(value || '')
+    const raw = String(value || '');
+    // MiniCPM5 wraps values containing <, &, or newlines in CDATA. Extract
+    // the literal content first so the tag strip below does not eat it.
+    const cdataMatch = /^\s*<!\[CDATA\[([\s\S]*?)\]\]>\s*$/.exec(raw);
+    if (cdataMatch) return cdataMatch[1];
+    const cleaned = raw
       .replace(/<[^>]+>/g, '')
       .trim();
     if (!cleaned) return '';
@@ -435,13 +440,36 @@ export function parseToolCallsFromText(text, allowedNames) {
   // XML-ish tool-call format used by some local/chat-template models:
   // <tool_call><function=click_ax><parameter=ref_id>ref_6</parameter>...
   const xmlToolRe = /<tool_call>\s*<function(?:\s*=\s*["']?([A-Za-z_]\w*)["']?|\s+name\s*=\s*["']?([A-Za-z_]\w*)["']?)\s*>\s*([\s\S]*?)\s*<\/function>\s*<\/tool_call>/gi;
+  const xmlToolSpans = [];
   let xmlMatch;
   while ((xmlMatch = xmlToolRe.exec(text)) !== null) {
+    xmlToolSpans.push({ start: xmlMatch.index, end: xmlMatch.index + xmlMatch[0].length });
     const toolName = xmlMatch[1] || xmlMatch[2];
     if (!allowedNames.has(toolName)) continue;
     const body = xmlMatch[3] || '';
     const args = {};
-    const paramRe = /<parameter(?:\s*=\s*["']?([A-Za-z_]\w*)["']?|\s+name\s*=\s*["']?([A-Za-z_]\w*)["']?)\s*>\s*([\s\S]*?)\s*<\/parameter>/gi;
+    const paramRe = /<(?:param|parameter)(?:\s*=\s*["']?([A-Za-z_]\w*)["']?|\s+name\s*=\s*["']?([A-Za-z_]\w*)["']?)\s*>\s*([\s\S]*?)\s*<\/(?:param|parameter)>/gi;
+    let paramMatch;
+    while ((paramMatch = paramRe.exec(body)) !== null) {
+      const key = paramMatch[1] || paramMatch[2];
+      if (!key) continue;
+      args[key] = parseXmlParamValue(paramMatch[3]);
+    }
+    results.push({ name: toolName, arguments: args });
+  }
+
+  // MiniCPM5-2B native tool format (no outer <tool_call> wrapper):
+  // <function name="click"><param name="ref_id">ref_6</param>...</function>
+  const minicpmFunctionRe = /<function(?:\s+name\s*=\s*["']([A-Za-z_]\w*)["']|\s*=\s*["']?([A-Za-z_]\w*)["']?)\s*>\s*([\s\S]*?)\s*<\/function>/gi;
+  let minicpmMatch;
+  while ((minicpmMatch = minicpmFunctionRe.exec(text)) !== null) {
+    // Skip functions already consumed inside a <tool_call> wrapper above.
+    if (xmlToolSpans.some(span => minicpmMatch.index >= span.start && minicpmMatch.index < span.end)) continue;
+    const toolName = minicpmMatch[1] || minicpmMatch[2];
+    if (!allowedNames.has(toolName)) continue;
+    const body = minicpmMatch[3] || '';
+    const args = {};
+    const paramRe = /<(?:param|parameter)(?:\s*=\s*["']?([A-Za-z_]\w*)["']?|\s+name\s*=\s*["']?([A-Za-z_]\w*)["']?)\s*>\s*([\s\S]*?)\s*<\/(?:param|parameter)>/gi;
     let paramMatch;
     while ((paramMatch = paramRe.exec(body)) !== null) {
       const key = paramMatch[1] || paramMatch[2];

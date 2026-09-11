@@ -47,7 +47,7 @@ class BaseLLMProvider {
 | `gpt4all` | `openai` | local | (loaded model) | Yes (default on) |
 | `local_openai_proxy` | `openai` | local | (required) | Off / manual toggle |
 | `unsloth` | `openai` | local | (required) | Off / manual toggle |
-| `webgpu` (Chromium) | `webgpu` | local | Seven shipped LFM2.5/Nanbeige/Bonsai presets; experimental custom HF ONNX repos | LFM2.5-VL presets |
+| `webgpu` (Chromium) | `webgpu` | local | Eight shipped LFM2.5/Nanbeige/MiniCPM5/Bonsai presets; experimental custom HF ONNX repos | LFM2.5-VL presets |
 | `azure_openai` | `azure_openai` | cloud | (deployment) | Manual toggle |
 | `aws_bedrock` | `aws_bedrock` | cloud | (model id) | No |
 | `openai` | `openai` | cloud | `gpt-5.6-terra` | Model-name regex |
@@ -150,7 +150,7 @@ duplicate request.
 ### Local Providers
 
 On Chromium, **WebGPU (In-browser)** is an endpoint-free local provider. Its
-Apocalypse text picker offers seven shipped presets:
+Apocalypse text picker offers eight shipped presets:
 
 - [`LiquidAI/LFM2.5-2.6B-ONNX`](https://huggingface.co/LiquidAI/LFM2.5-2.6B-ONNX/)
   (`q4f16`, about 1.55 GB) through the packaged Transformers.js 4.2 / ONNX
@@ -185,6 +185,15 @@ Apocalypse text picker offers seven shipped presets:
   implementation is the [Nanbeige Browser Lab](https://huggingface.co/spaces/borkiss/nanbeige4-2-3b-browser-lab)
   Space, which drives the same export through a hand-written ONNX Runtime Web
   loop rather than Transformers.js.
+- [`RASMUS/MiniCPM5-2B-ONNX`](https://huggingface.co/RASMUS/MiniCPM5-2B-ONNX)
+  (`q4f16`, about 1.83 GB), a browser-ready ONNX export of
+  [`openbmb/MiniCPM5-2B`](https://huggingface.co/openbmb/MiniCPM5-2B) built with
+  `onnxruntime-genai -e webgpu` (`MatMulNBits` + `GroupQueryAttention`, default
+  `onnx/model_q4f16.onnx` layout). It needs an adapter with `shader-f16` and
+  emits XML-style tool calls
+  (`<function name="..."><param name="...">...</param></function>`, CDATA-wrapped
+  when values contain `<`, `&`, or newlines), which the local fallback parser
+  accepts. Its practical context is 16k.
 - [`prism-ml/Bonsai-27B-gguf`](https://huggingface.co/prism-ml/Bonsai-27B-gguf)
   (`Q1_0`, about 3.8 GB) through a dedicated vendored [bitgpu](https://github.com/stfurkan/bitgpu)
   worker. Bonsai is opt-in: WebBrain never auto-downloads the 27B weights.
@@ -201,11 +210,11 @@ Do not point Transformers.js at the Bonsai GGUF — 27B is not an ONNX pipeline.
 The provider defaults to the Compact prompt tier with a conservative 16k
 practical context setting (4k for Nanbeige and Bonsai). Text-only presets
 reject image blocks; the two LFM2.5-VL presets route image and text blocks
-through the local image-text runtime. LFM2.5 2.6B, 1.2B Thinking, and
-Nanbeige4.2-3B use reasoning paths; WebBrain keeps completed thinking out of
+through the local image-text runtime. LFM2.5 2.6B, 1.2B Thinking,
+Nanbeige4.2-3B, and MiniCPM5-2B use reasoning paths; WebBrain keeps completed thinking out of
 the visible answer and reports an error when a template that opens `<think>`
 in the generation prompt exhausts its output budget before closing it. Those
-three presets decode with their publisher's recommended sampling settings; the
+four presets decode with their publisher's recommended sampling settings; the
 remaining ONNX presets stay greedy. Bonsai uses bitgpu
 `think: true` with a 128-token think budget and the same post-think visible-
 answer UX. Each repository is cached separately in Chrome.

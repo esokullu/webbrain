@@ -11,6 +11,7 @@ export const WEBGPU_LFM25_12B_THINKING_MODEL_ID = 'LiquidAI/LFM2.5-1.2B-Thinking
 export const WEBGPU_LFM25_VL_16B_MODEL_ID = 'LiquidAI/LFM2.5-VL-1.6B-ONNX';
 export const WEBGPU_LFM25_VL_3B_MODEL_ID = 'LiquidAI/LFM2.5-VL-3B-ONNX';
 export const WEBGPU_NANBEIGE42_3B_MODEL_ID = 'Michionlion/Nanbeige4.2-3B-ONNX-WebGPU';
+export const WEBGPU_MINICPM5_2B_MODEL_ID = 'RASMUS/MiniCPM5-2B-ONNX';
 export const WEBGPU_BONSAI27_MODEL_ID = 'prism-ml/Bonsai-27B-gguf';
 export const WEBGPU_DTYPE = 'q4f16';
 export const WEBGPU_BONSAI27_DTYPE = 'q1';
@@ -88,6 +89,19 @@ export const WEBGPU_MODEL_PRESETS = Object.freeze([
     // The 44 logical KV slots cost about 176 KB per token in FP16, so a 16k
     // window would need roughly 2.9 GB of cache on top of 3.1 GB of weights.
     contextWindow: 4096,
+    supportsVision: false,
+  }),
+  Object.freeze({
+    id: WEBGPU_MINICPM5_2B_MODEL_ID,
+    runtime: WEBGPU_RUNTIME_ONNX,
+    label: 'MiniCPM5-2B',
+    size: '1.83 GB',
+    dtype: WEBGPU_DTYPE,
+    dtypeLabel: WEBGPU_DTYPE,
+    // OpenBMB's base context is 131k, but the practical browser setting stays
+    // at 16k like the LFM2.5 text presets: 42 GQA layers cost roughly 42 KB
+    // per token in FP16, so 16k needs about 672 MB of cache on top of weights.
+    contextWindow: 16384,
     supportsVision: false,
   }),
   Object.freeze({
