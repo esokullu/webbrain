@@ -385,7 +385,7 @@ async function enrichWebGpuExecutionError(error) {
   const suffix = [
     details.length ? `GPU detail: ${details.join(' ')}` : '',
     adapter ? `Adapter: ${adapter}.` : '',
-    'Close other GPU-heavy tabs/apps and retry with a short prompt; a retry re-creates the on-device session from the cached download, it does not re-download. If it persists, this GPU/driver cannot execute this model with the current WebGPU runtime.',
+    'Close other GPU-heavy tabs/apps and retry with a short prompt; a retry restarts the on-device worker and re-creates the session from the cached download, it does not re-download. If it persists, this GPU/driver cannot execute this model with the current WebGPU runtime.',
   ].filter(Boolean).join(' ');
   return new Error(`${error?.message || String(error)} ${suffix}`);
 }
@@ -411,7 +411,42 @@ async function handleWebGpuExecutionFailure(error) {
   const enriched = await enrichWebGpuExecutionError(error);
   markWebgpuRuntimeDirty();
   await disposeAllRuntimes();
+  noteWebgpuExecutionFailure(error);
   return enriched;
+}
+
+// Consecutive WebGPU execution failures mean the device itself is dead, not
+// just one session: onnxruntime-web initializes its Dawn device exactly once
+// per worker lifetime, so no in-worker rebuild can recover. Signal the host to
+// terminate and recreate this worker; the next request then starts from a
+// fresh device while weights reload from the browser cache.
+let webgpuExecutionFailureStreak = 0;
+const WEBGPU_WORKER_RECYCLE_FAILURES = 2;
+const WEBGPU_CERTAIN_DEVICE_DEATH_PATTERN = /external Instance reference|device lost/i;
+
+function requestWebgpuWorkerRecycle(reason) {
+  webgpuExecutionFailureStreak = 0;
+  // Defer to a later macrotask so the failing request's `{ id, ok: false }`
+  // response (posted in the current microtask chain) reaches the host first.
+  // The caller then sees the enriched error instead of the recycle notice.
+  setTimeout(() => {
+    try {
+      self.postMessage({ type: 'webgpu-device-dead', reason });
+    } catch {}
+  }, 0);
+}
+
+function noteWebgpuExecutionFailure(error) {
+  webgpuExecutionFailureStreak += 1;
+  const message = error?.message || String(error);
+  const certainDeath = WEBGPU_CERTAIN_DEVICE_DEATH_PATTERN.test(message);
+  if (certainDeath || webgpuExecutionFailureStreak >= WEBGPU_WORKER_RECYCLE_FAILURES) {
+    requestWebgpuWorkerRecycle(certainDeath ? 'certain-device-death' : 'repeated-execution-failures');
+  }
+}
+
+function noteWebgpuExecutionSuccess() {
+  webgpuExecutionFailureStreak = 0;
 }
 
 function postProgress(modelId, event) {
@@ -600,6 +635,7 @@ async function getVisionRuntime(modelId, dtype, device, {
       if (isWebGpuExecutionFailure(failure)) {
         markWebgpuRuntimeDirty();
         await disposeAllRuntimes();
+        noteWebgpuExecutionFailure(failure);
         throw await enrichWebGpuExecutionError(failure);
       }
       throw failure;
@@ -753,6 +789,7 @@ async function getTextRuntime(modelId, dtype, device, { localFilesOnly = false }
       if (isWebGpuExecutionFailure(error)) {
         markWebgpuRuntimeDirty();
         await disposeAllRuntimes();
+        noteWebgpuExecutionFailure(error);
         throw await enrichWebGpuExecutionError(error);
       }
       throw error;
@@ -1159,10 +1196,11 @@ async function runVision(payload, requestId) {
       error.name = 'AbortError';
       throw error;
     }
-    const inputLength = inputs.input_ids.dims.at(-1);
-    const generated = outputs.slice(null, [inputLength, null]);
-    const decoded = runtime.processor.batch_decode(generated, { skip_special_tokens: true });
-    return String(decoded?.[0] || '').trim();
+  const inputLength = inputs.input_ids.dims.at(-1);
+  const generated = outputs.slice(null, [inputLength, null]);
+  const decoded = runtime.processor.batch_decode(generated, { skip_special_tokens: true });
+  noteWebgpuExecutionSuccess();
+  return String(decoded?.[0] || '').trim();
   } finally {
     activeVisionGenerations.delete(requestId);
     cancelledVisionGenerations.delete(requestId);
@@ -1317,6 +1355,7 @@ async function runMultimodalText(payload) {
   const generated = outputs.slice(null, [inputLength, null]);
   const decoded = runtime.processor.batch_decode(generated, { skip_special_tokens: true });
   const result = splitThinking(String(decoded?.[0] || '').trim());
+  noteWebgpuExecutionSuccess();
   return { content: result.content, reasoningContent: result.reasoningContent };
 }
 
@@ -1371,6 +1410,7 @@ async function runText(payload) {
   if (result.incompleteReasoning) {
     throw new Error(`${modelId} used its generation budget before finishing reasoning. Retry with a shorter prompt.`);
   }
+  noteWebgpuExecutionSuccess();
   return { content: result.content, reasoningContent: result.reasoningContent };
 }
 

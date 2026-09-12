@@ -22,6 +22,9 @@ let visionPreloadKey = '';
 let visionPreloadLifecycle = null;
 const timedOutVisionRequests = new Map();
 const WORKER_INITIALIZATION_TIMEOUT_MS = 15_000;
+const VISION_WORKER_RECYCLE_COOLDOWN_MS = 30_000;
+// Start one full window in the past so the first signal always recycles.
+let lastVisionWorkerRecycleAt = -VISION_WORKER_RECYCLE_COOLDOWN_MS;
 const VISION_INFERENCE_TIMEOUT_MS = 90_000;
 const CANCELLATION_GRACE_PERIOD_MS = 5_000;
 const DOWNLOAD_STALL_TIMEOUT_MS = 2 * 60_000;
@@ -480,6 +483,23 @@ async function ensureVisionWorker() {
   visionWorker = worker;
   worker.addEventListener('message', event => {
     if (visionWorker !== worker) return;
+    // The worker asks for a fresh context when its WebGPU device dies:
+    // onnxruntime-web initializes its Dawn device once per worker lifetime,
+    // so no in-worker session rebuild can recover. Terminate and recreate;
+    // the next request re-initializes and reloads weights from the cache.
+    // Stale workers (already replaced) are ignored by the guard above.
+    if (event.data?.type === 'webgpu-device-dead') {
+      // A persistently poisoned GPU process would otherwise recycle (and
+      // reload ~2 GB into) every attempt; back off instead and surface errors
+      // until the window passes, then recycle on the next signal.
+      if (Date.now() - lastVisionWorkerRecycleAt < VISION_WORKER_RECYCLE_COOLDOWN_MS) return;
+      lastVisionWorkerRecycleAt = Date.now();
+      resetVisionWorker(deadlineError(
+        'webgpu_device_recreated',
+        `The WebGPU device died (${event.data?.reason || 'execution failure'}); the worker was recreated.`,
+      ));
+      return;
+    }
     settleVisionRequest(event.data);
   });
   worker.addEventListener('error', event => {

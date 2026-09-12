@@ -63136,6 +63136,10 @@ test('WebGPU worker follows local text-generation and WebBrain VL vision contrac
   assert.match(worker, /load_image\(imageUrls\[0\]\)/);
   assert.match(worker, /type === 'multimodal-text-chat'[\s\S]*?runMultimodalText\(payload\)/);
   assert.match(host, /message\.runtime === 'onnx-vl'[\s\S]*?'multimodal-text-chat'/);
+  assert.match(worker, /type: 'webgpu-device-dead'/,
+    'the worker must signal the host when its WebGPU device dies');
+  assert.match(host, /type === 'webgpu-device-dead'[\s\S]*?resetVisionWorker/,
+    'the host must recycle the worker on a device-dead signal');
   assert.match(worker, /session_file_names:[\s\S]*?vision_encoder: 'embed_images'[\s\S]*?decoder_model_merged: 'decoder'/,
     'the legacy LFM2.5-VL-1.6B ONNX filenames must be mapped into the Transformers.js runtime');
   assert.match(worker, /image_processor_config_file: 'processor_config\.json'[\s\S]*?chat_template_file: 'chat_template\.jinja'/,
@@ -63824,6 +63828,31 @@ test('vision inference host enforces deadlines and recreates poisoned workers', 
   assert.equal(inferenceRetry.content, 'recovered vision',
     'a timed-out inference poisoned the next serialized request');
 
+  const deviceDeath = createHarness({});
+  await deviceDeath.dispatch({ type: 'webgpu-vision-probe', model: WEBGPU_VISION_MODEL_ID });
+  await deviceDeath.drain();
+  assert.equal(deviceDeath.workers.length, 1);
+  deviceDeath.workers[0].emit({ type: 'webgpu-device-dead', reason: 'repeated-execution-failures' });
+  await deviceDeath.drain();
+  assert.equal(deviceDeath.workers[0].terminated, true,
+    'a device-dead signal did not recycle the worker');
+  const afterRecycle = await deviceDeath.dispatch({ type: 'webgpu-vision-chat', model: WEBGPU_VISION_MODEL_ID });
+  assert.equal(deviceDeath.workers.length, 2, 'the next request did not boot a fresh worker');
+  assert.equal(afterRecycle.content, 'recovered vision',
+    'a request after device-death recovery did not succeed');
+  // A second signal within the cooldown must not recycle again (a
+  // persistently poisoned GPU would otherwise reload ~2 GB every attempt).
+  deviceDeath.workers[1].emit({ type: 'webgpu-device-dead', reason: 'certain-device-death' });
+  await deviceDeath.drain();
+  assert.equal(deviceDeath.workers[1].terminated, false,
+    'a device-dead signal inside the cooldown recycled the worker again');
+  assert.equal(deviceDeath.workers.length, 2, 'the cooldown signal booted an extra worker');
+  await deviceDeath.advance(30_000);
+  deviceDeath.workers[1].emit({ type: 'webgpu-device-dead', reason: 'certain-device-death' });
+  await deviceDeath.drain();
+  assert.equal(deviceDeath.workers[1].terminated, true,
+    'a device-dead signal after the cooldown did not recycle the worker');
+
   const queuedInference = createHarness({ hangChatCount: 1, cancelQueued: true });
   const hungQueuedInference = queuedInference.dispatch({ type: 'webgpu-vision-chat', model: WEBGPU_VISION_MODEL_ID });
   await queuedInference.drain();
@@ -64460,7 +64489,7 @@ test('WebGPU worker replays text tool history and applies model-specific generat
     assert.equal(poisonedText.ok, false);
     assert.match(poisonedText.error, /OrtRun|mapAsync/,
       'a dead WebGPU device must still surface the enriched execution error');
-    assert.match(poisonedText.error, /re-creates the on-device session/,
+    assert.match(poisonedText.error, /re-creates the session/,
       'the enriched error must explain that a retry rebuilds the session');
     assert.equal(globalThis.__webgpuRuntimeCounts.textDisposals, textDisposalsBeforePoison + 1,
       'an execution failure must dispose the poisoned text runtime');
@@ -64506,6 +64535,43 @@ test('WebGPU worker replays text tool history and applies model-specific generat
     assert.equal(recoveredVision.content, 'vision answer');
     assert.equal(globalThis.__webgpuRuntimeCounts.visionModelLoads, visionLoadsBeforePoison + 1,
       'the next vision turn after a device failure must rebuild the session');
+
+    const deviceDeadSignals = () => posted.filter(message => message?.type === 'webgpu-device-dead');
+    // The recycle signal is deferred to a later macrotask so the enriched
+    // failure response always delivers first; wait it out before counting.
+    const settleSignals = () => new Promise(resolve => setTimeout(resolve, 25));
+    const failTextChat = async () => {
+      const id = requestId++;
+      await workerListener({ data: { id, type: 'text-chat', payload: textPayload } });
+      await settleSignals();
+      return posted.find(message => message.id === id);
+    };
+    // The text poison above already carried certain device death, so it must
+    // have signalled immediately; the streak is 0 again after the recoveries.
+    await settleSignals();
+    assert.equal(deviceDeadSignals().length, 1, 'certain device death must recycle on the first failure');
+    assert.equal(deviceDeadSignals()[0].reason, 'certain-device-death');
+    globalThis.__webgpuInstanceExecutionError = 'failed to call OrtRun(): transient failure';
+    assert.equal((await failTextChat()).ok, false);
+    assert.equal(deviceDeadSignals().length, 1, 'the first consecutive failure must stay in-worker');
+    // The second consecutive failure proves the device itself is dead: the
+    // worker must ask the host for a fresh context, but only after the
+    // enriched failure response has already been delivered.
+    const secondFailure = await failTextChat();
+    assert.equal(secondFailure.ok, false);
+    assert.match(secondFailure.error, /OrtRun|mapAsync/,
+      'the failing turn must surface the enriched error, not the recycle notice');
+    assert.equal(deviceDeadSignals().length, 2, 'repeated execution failures must request a worker recycle');
+    assert.equal(deviceDeadSignals()[1].reason, 'repeated-execution-failures');
+    assert.ok(posted.indexOf(secondFailure) < posted.indexOf(deviceDeadSignals()[1]),
+      'the enriched error response must deliver before the recycle signal');
+    // A success resets the streak: fail, recover, fail again must not signal.
+    globalThis.__webgpuInstanceExecutionError = '';
+    assert.equal((await dispatch('text-chat', textPayload)).content, 'text answer');
+    globalThis.__webgpuInstanceExecutionError = 'failed to call OrtRun(): another transient failure';
+    assert.equal((await failTextChat()).ok, false);
+    assert.equal(deviceDeadSignals().length, 2, 'a success must reset the failure streak');
+    globalThis.__webgpuInstanceExecutionError = '';
   } finally {
     if (previousSelf === undefined) delete globalThis.self;
     else globalThis.self = previousSelf;
