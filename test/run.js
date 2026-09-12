@@ -976,6 +976,7 @@ const {
   WEBGPU_LFM25_VL_3B_MODEL_ID,
   WEBGPU_NANBEIGE42_3B_MODEL_ID,
   WEBGPU_MINICPM5_2B_MODEL_ID,
+  WEBGPU_COMPASS_TINY_V2_MODEL_ID,
   WEBGPU_BONSAI27_MODEL_ID,
   WEBGPU_MODEL_ID,
   WEBGPU_MODEL_PRESETS,
@@ -62328,6 +62329,7 @@ test('Chrome exposes separate endpoint-free WebGPU text and vision providers', a
       { id: WEBGPU_LFM25_VL_3B_MODEL_ID, label: 'LFM2.5-VL-3B', runtime: 'onnx-vl', contextWindow: 16384, supportsVision: true },
       { id: WEBGPU_NANBEIGE42_3B_MODEL_ID, label: 'Nanbeige4.2-3B', runtime: 'onnx', contextWindow: 4096, supportsVision: false },
       { id: WEBGPU_MINICPM5_2B_MODEL_ID, label: 'MiniCPM5-2B', runtime: 'onnx', contextWindow: 16384, supportsVision: false },
+      { id: WEBGPU_COMPASS_TINY_V2_MODEL_ID, label: 'Compass Tiny v2', runtime: 'onnx', contextWindow: 16384, supportsVision: false },
       { id: WEBGPU_BONSAI27_MODEL_ID, label: 'Basic text model', runtime: 'bitgpu', contextWindow: 4096, supportsVision: false },
     ]);
     assert.equal(new WebGPUProvider({ model: WEBGPU_BONSAI27_MODEL_ID }).dtype, 'q1');
@@ -63158,6 +63160,7 @@ test('WebGPU worker follows local text-generation and WebBrain VL vision contrac
     WEBGPU_LFM25_VL_3B_MODEL_ID,
     WEBGPU_NANBEIGE42_3B_MODEL_ID,
     WEBGPU_MINICPM5_2B_MODEL_ID,
+    WEBGPU_COMPASS_TINY_V2_MODEL_ID,
   ]) {
     assert.match(apocalypseHtml, new RegExp(modelId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')),
       `${modelId} is missing from the Apocalypse WebGPU picker`);
@@ -63962,6 +63965,8 @@ test('WebGPU worker replays text tool history and applies model-specific generat
   const previousPipelineOptions = globalThis.__webgpuPipelineOptions;
   const previousHoldTextGeneration = globalThis.__holdWebgpuTextGeneration;
   const previousReleaseTextGeneration = globalThis.__releaseWebgpuTextGeneration;
+  const previousInstanceExecutionError = globalThis.__webgpuInstanceExecutionError;
+  const previousVisionExecutionError = globalThis.__webgpuVisionExecutionError;
   let workerListener = null;
   const posted = [];
   try {
@@ -64045,7 +64050,12 @@ test('WebGPU worker replays text tool history and applies model-specific generat
         async from_pretrained() {
           globalThis.__webgpuRuntimeCounts.visionModelLoads++;
           return {
-            generate: async () => ({ slice: () => ({}) }),
+            generate: async () => {
+              if (globalThis.__webgpuVisionExecutionError) {
+                throw new Error(String(globalThis.__webgpuVisionExecutionError));
+              }
+              return { slice: () => ({}) };
+            },
             dispose: async () => { globalThis.__webgpuRuntimeCounts.visionModelDisposals++; },
           };
         },
@@ -64063,6 +64073,9 @@ test('WebGPU worker replays text tool history and applies model-specific generat
             await new Promise(resolve => { globalThis.__releaseWebgpuTextGeneration = resolve; });
           }
           globalThis.__webgpuGenerationOptions = options;
+          if (globalThis.__webgpuInstanceExecutionError) {
+            throw new Error(String(globalThis.__webgpuInstanceExecutionError));
+          }
           const content = modelId === 'LiquidAI/LFM2.5-2.6B-ONNX'
             || modelId === 'Michionlion/Nanbeige4.2-3B-ONNX-WebGPU'
             ? 'private model reasoning</think>Hello!'
@@ -64396,6 +64409,22 @@ test('WebGPU worker replays text tool history and applies model-specific generat
       tokenizer_encode_kwargs: { preserve_thinking: false },
     }, 'MiniCPM5 must use its quickstart sampling and the reasoning-template argument');
 
+    const compassPayload = {
+      ...textPayload,
+      modelId: WEBGPU_COMPASS_TINY_V2_MODEL_ID,
+    };
+    await dispatch('download-text', compassPayload);
+    assert.equal(globalThis.__webgpuPipelineOptions.options.model_file_name, undefined,
+      'Compass Tiny v2 publishes the default model_q4f16.onnx graph name');
+    const compassResponse = await dispatch('text-chat', compassPayload);
+    assert.equal(compassResponse.content, 'text answer');
+    assert.deepEqual(globalThis.__webgpuGenerationOptions, {
+      do_sample: false,
+      max_new_tokens: 256,
+      tools: undefined,
+      tokenizer_encode_kwargs: { enable_thinking: false },
+    }, 'Compass Tiny v2 must stay on the greedy thinking-disabled path from its tested integration');
+
     const lfmInstructPayload = {
       ...textPayload,
       modelId: WEBGPU_LFM25_12B_INSTRUCT_MODEL_ID,
@@ -64416,6 +64445,67 @@ test('WebGPU worker replays text tool history and applies model-specific generat
     const incompatible = posted.find(message => message.id === incompatibleId);
     assert.equal(incompatible.ok, false);
     assert.match(incompatible.error, /chat template that accepts tools/);
+
+    const warmedText = await dispatch('text-chat', textPayload);
+    assert.equal(warmedText.content, 'text answer', 'the healthy text runtime must be resident before simulating a device loss');
+    const textLoadsBeforePoison = globalThis.__webgpuRuntimeCounts.textLoads;
+    const textDisposalsBeforePoison = globalThis.__webgpuRuntimeCounts.textDisposals;
+    globalThis.__webgpuInstanceExecutionError =
+      "failed to call OrtRun(): BufferManager::Download mapAsync GPUBuffer failed: A valid external Instance reference no longer exists";
+    const poisonedTextId = requestId++;
+    await workerListener({
+      data: { id: poisonedTextId, type: 'text-chat', payload: textPayload },
+    });
+    const poisonedText = posted.find(message => message.id === poisonedTextId);
+    assert.equal(poisonedText.ok, false);
+    assert.match(poisonedText.error, /OrtRun|mapAsync/,
+      'a dead WebGPU device must still surface the enriched execution error');
+    assert.match(poisonedText.error, /re-creates the on-device session/,
+      'the enriched error must explain that a retry rebuilds the session');
+    assert.equal(globalThis.__webgpuRuntimeCounts.textDisposals, textDisposalsBeforePoison + 1,
+      'an execution failure must dispose the poisoned text runtime');
+    assert.equal(globalThis.__webgpuRuntimeCounts.textLoads, textLoadsBeforePoison,
+      'the failed turn itself must not trigger a rebuild');
+    globalThis.__webgpuInstanceExecutionError = '';
+    const recoveredText = await dispatch('text-chat', textPayload);
+    assert.equal(recoveredText.content, 'text answer');
+    assert.equal(globalThis.__webgpuRuntimeCounts.textLoads, textLoadsBeforePoison + 1,
+      'the next turn after a device failure must rebuild the session from cache');
+    assert.equal(globalThis.__webgpuRuntimeCounts.textDisposals, textDisposalsBeforePoison + 1,
+      'rebuilding must not dispose again');
+
+    const warmedVisionId = requestId++;
+    await workerListener({
+      data: { id: warmedVisionId, type: 'chat', payload: visionPayload },
+    });
+    assert.equal(posted.find(message => message.id === warmedVisionId)?.ok, true,
+      'the healthy vision session must be resident before simulating a device loss');
+    const visionLoadsBeforePoison = globalThis.__webgpuRuntimeCounts.visionModelLoads;
+    const visionDisposalsBeforePoison = globalThis.__webgpuRuntimeCounts.visionModelDisposals;
+    const textDisposalsBeforeVisionPoison = globalThis.__webgpuRuntimeCounts.textDisposals;
+    globalThis.__webgpuVisionExecutionError = 'failed to call OrtRun(): mapAsync on GPUBuffer failed';
+    const poisonedVisionId = requestId++;
+    await workerListener({
+      data: { id: poisonedVisionId, type: 'chat', payload: visionPayload },
+    });
+    const poisonedVision = posted.find(message => message.id === poisonedVisionId);
+    assert.equal(poisonedVision.ok, false);
+    assert.match(poisonedVision.error, /OrtRun|mapAsync/,
+      'a dead vision device must surface the enriched execution error');
+    assert.equal(globalThis.__webgpuRuntimeCounts.visionModelDisposals, visionDisposalsBeforePoison + 1,
+      'an execution failure must dispose the poisoned vision session');
+    assert.equal(globalThis.__webgpuRuntimeCounts.textDisposals, textDisposalsBeforeVisionPoison + 1,
+      'the shared corrupted device means the co-resident text session goes too');
+    globalThis.__webgpuVisionExecutionError = '';
+    const recoveredVisionId = requestId++;
+    await workerListener({
+      data: { id: recoveredVisionId, type: 'chat', payload: visionPayload },
+    });
+    const recoveredVision = posted.find(message => message.id === recoveredVisionId);
+    assert.equal(recoveredVision.ok, true);
+    assert.equal(recoveredVision.content, 'vision answer');
+    assert.equal(globalThis.__webgpuRuntimeCounts.visionModelLoads, visionLoadsBeforePoison + 1,
+      'the next vision turn after a device failure must rebuild the session');
   } finally {
     if (previousSelf === undefined) delete globalThis.self;
     else globalThis.self = previousSelf;
@@ -64433,6 +64523,10 @@ test('WebGPU worker replays text tool history and applies model-specific generat
     else globalThis.__holdWebgpuTextGeneration = previousHoldTextGeneration;
     if (previousReleaseTextGeneration === undefined) delete globalThis.__releaseWebgpuTextGeneration;
     else globalThis.__releaseWebgpuTextGeneration = previousReleaseTextGeneration;
+    if (previousInstanceExecutionError === undefined) delete globalThis.__webgpuInstanceExecutionError;
+    else globalThis.__webgpuInstanceExecutionError = previousInstanceExecutionError;
+    if (previousVisionExecutionError === undefined) delete globalThis.__webgpuVisionExecutionError;
+    else globalThis.__webgpuVisionExecutionError = previousVisionExecutionError;
   }
 });
 

@@ -355,11 +355,16 @@ function bindWebGpuDeviceDiagnostics(library) {
   lastWebGpuDeviceLost = '';
   device.addEventListener?.('uncapturederror', event => {
     lastWebGpuDeviceError = String(event?.error?.message || event?.message || 'Unknown WebGPU validation error.');
+    markWebgpuRuntimeDirty();
     console.error('[webgpu] uncaptured device error:', lastWebGpuDeviceError);
   });
   device.lost?.then(info => {
     if (device !== observedWebGpuDevice) return;
     lastWebGpuDeviceLost = String(info?.message || info?.reason || 'The WebGPU device was lost.');
+    // A lost device can poison resident sessions without any OrtRun error
+    // reaching the generate paths, so flag the runtimes dirty now: the next
+    // run disposes them and rebuilds instead of burning one failing turn.
+    markWebgpuRuntimeDirty();
     console.error('[webgpu] device lost:', lastWebGpuDeviceLost);
   }).catch(() => {});
 }
@@ -380,9 +385,33 @@ async function enrichWebGpuExecutionError(error) {
   const suffix = [
     details.length ? `GPU detail: ${details.join(' ')}` : '',
     adapter ? `Adapter: ${adapter}.` : '',
-    'Close other GPU-heavy tabs/apps and retry with a short prompt. If it persists, this GPU/driver cannot execute this model with the current WebGPU runtime.',
+    'Close other GPU-heavy tabs/apps and retry with a short prompt; a retry re-creates the on-device session from the cached download, it does not re-download. If it persists, this GPU/driver cannot execute this model with the current WebGPU runtime.',
   ].filter(Boolean).join(' ');
   return new Error(`${error?.message || String(error)} ${suffix}`);
+}
+
+// A failed WebGPU run poisons the resident ORT session: the next run must
+// rebuild from cache instead of reusing the dead device.
+let webgpuRuntimeDirty = false;
+
+function markWebgpuRuntimeDirty() {
+  webgpuRuntimeDirty = true;
+}
+
+async function disposeWebgpuRuntimesIfDirty() {
+  if (!webgpuRuntimeDirty) return false;
+  // Consume the flag before disposing so a listener firing mid-dispose
+  // re-marks it instead of being silently cleared.
+  webgpuRuntimeDirty = false;
+  await disposeAllRuntimes();
+  return true;
+}
+
+async function handleWebGpuExecutionFailure(error) {
+  const enriched = await enrichWebGpuExecutionError(error);
+  markWebgpuRuntimeDirty();
+  await disposeAllRuntimes();
+  return enriched;
 }
 
 function postProgress(modelId, event) {
@@ -497,6 +526,9 @@ async function getVisionRuntime(modelId, dtype, device, {
   readiness = 'vision',
 } = {}) {
   const key = `vision|${modelId}|${device}|${JSON.stringify(dtype)}`;
+  // A device loss flagged between turns leaves both resident sessions poisoned;
+  // dispose them before the cached gate so we never hand out a dead session.
+  await disposeWebgpuRuntimesIfDirty();
   if (visionRuntime && visionRuntimeKey === key) {
     visionRuntimeOwner = owner;
     return visionRuntime;
@@ -560,9 +592,17 @@ async function getVisionRuntime(modelId, dtype, device, {
           try { await resource.dispose(); } catch {}
         }
       }
-      throw processorResult.status === 'rejected'
+      const failure = processorResult.status === 'rejected'
         ? processorResult.reason
         : modelResult.reason;
+      // A session that dies while loading (dead adapter) must not leave a
+      // half-built runtime behind; flag it so the next call rebuilds.
+      if (isWebGpuExecutionFailure(failure)) {
+        markWebgpuRuntimeDirty();
+        await disposeAllRuntimes();
+        throw await enrichWebGpuExecutionError(failure);
+      }
+      throw failure;
     }
     const processor = processorResult.value;
     const model = modelResult.value;
@@ -674,6 +714,9 @@ function stopVisionDownload(modelId) {
 
 async function getTextRuntime(modelId, dtype, device, { localFilesOnly = false } = {}) {
   assertOnnxTextModel(modelId);
+  // Same poison gate as the vision path: never hand out a cached session after
+  // a device failure. The build below already starts from disposed runtimes.
+  await disposeWebgpuRuntimesIfDirty();
   const key = `text|${modelId}|${device}|${JSON.stringify(dtype)}`;
   if (textRuntime && textRuntimeKey === key) return textRuntime;
   if (textRuntimeLoadPromise) {
@@ -705,6 +748,14 @@ async function getTextRuntime(modelId, dtype, device, { localFilesOnly = false }
         local_files_only: localFilesOnly,
         progress_callback: event => postProgress(modelId, event),
       });
+    } catch (error) {
+      // A session that dies while loading must not poison the next call.
+      if (isWebGpuExecutionFailure(error)) {
+        markWebgpuRuntimeDirty();
+        await disposeAllRuntimes();
+        throw await enrichWebGpuExecutionError(error);
+      }
+      throw error;
     } finally {
       if (localFilesOnly && library.env) library.env.allowLocalModels = previousAllowLocalModels;
     }
@@ -1087,12 +1138,22 @@ async function runVision(payload, requestId) {
     const maxNewTokens = Number.isFinite(requestedTokens)
       ? Math.max(1, Math.min(1600, Math.round(requestedTokens)))
       : 800;
-    const outputs = await runtime.model.generate({
-      ...inputs,
-      do_sample: false,
-      max_new_tokens: maxNewTokens,
-      ...(stoppingCriteria ? { stopping_criteria: [stoppingCriteria] } : {}),
-    });
+    lastWebGpuDeviceError = '';
+    lastWebGpuDeviceLost = '';
+    let outputs;
+    try {
+      outputs = await runtime.model.generate({
+        ...inputs,
+        do_sample: false,
+        max_new_tokens: maxNewTokens,
+        ...(stoppingCriteria ? { stopping_criteria: [stoppingCriteria] } : {}),
+      });
+    } catch (error) {
+      // A dead WebGPU device poisons the resident session: enrich, drop it,
+      // and let the next turn rebuild from the cached weights.
+      if (isWebGpuExecutionFailure(error)) throw await handleWebGpuExecutionFailure(error);
+      throw error;
+    }
     if (cancelledVisionGenerations.has(requestId)) {
       const error = new Error('Vision generation was cancelled.');
       error.name = 'AbortError';
@@ -1249,7 +1310,7 @@ async function runMultimodalText(payload) {
       max_new_tokens: maxNewTokens,
     });
   } catch (error) {
-    if (isWebGpuExecutionFailure(error)) throw await enrichWebGpuExecutionError(error);
+    if (isWebGpuExecutionFailure(error)) throw await handleWebGpuExecutionFailure(error);
     throw error;
   }
   const inputLength = inputs.input_ids.dims.at(-1);
@@ -1296,7 +1357,7 @@ async function runText(payload) {
         : { enable_thinking: false },
     });
   } catch (error) {
-    if (isWebGpuExecutionFailure(error)) throw await enrichWebGpuExecutionError(error);
+    if (isWebGpuExecutionFailure(error)) throw await handleWebGpuExecutionFailure(error);
     throw error;
   }
   const generated = output?.[0]?.generated_text;

@@ -47,7 +47,7 @@ class BaseLLMProvider {
 | `gpt4all` | `openai` | local | (loaded model) | Yes (default on) |
 | `local_openai_proxy` | `openai` | local | (required) | Off / manual toggle |
 | `unsloth` | `openai` | local | (required) | Off / manual toggle |
-| `webgpu` (Chromium) | `webgpu` | local | Eight shipped LFM2.5/Nanbeige/MiniCPM5/Bonsai presets; experimental custom HF ONNX repos | LFM2.5-VL presets |
+| `webgpu` (Chromium) | `webgpu` | local | Nine shipped LFM2.5/Nanbeige/MiniCPM5/Compass/Bonsai presets; experimental custom HF ONNX repos | LFM2.5-VL presets |
 | `azure_openai` | `azure_openai` | cloud | (deployment) | Manual toggle |
 | `aws_bedrock` | `aws_bedrock` | cloud | (model id) | No |
 | `openai` | `openai` | cloud | `gpt-5.6-terra` | Model-name regex |
@@ -150,7 +150,7 @@ duplicate request.
 ### Local Providers
 
 On Chromium, **WebGPU (In-browser)** is an endpoint-free local provider. Its
-Apocalypse text picker offers eight shipped presets:
+Apocalypse text picker offers nine shipped presets:
 
 - [`LiquidAI/LFM2.5-2.6B-ONNX`](https://huggingface.co/LiquidAI/LFM2.5-2.6B-ONNX/)
   (`q4f16`, about 1.55 GB) through the packaged Transformers.js 4.2 / ONNX
@@ -194,6 +194,15 @@ Apocalypse text picker offers eight shipped presets:
   (`<function name="..."><param name="...">...</param></function>`, CDATA-wrapped
   when values contain `<`, `&`, or newlines), which the local fallback parser
   accepts. Its practical context is 16k.
+- [`webbrain-one/webbrain-compass-tiny-v2.1`](https://huggingface.co/webbrain-one/webbrain-compass-tiny-v2.1)
+  (`q4f16`, about 1.87 GB across two external-data shards), WebBrain's Compass
+  Tiny v2.1 fine-tune of MiniCPM5-2B for Compact tool routing (v2.1 export
+  revision with the WebGPU numerical-parity fix). Same default
+  `onnx/model_q4f16.onnx` layout and MiniCPM5 XML tool calls as the base export.
+  It runs greedy with thinking disabled (the worker default for non-reasoning
+  presets) at a practical 16k context. Experimental integration-testing release
+  under a noncommercial research license; see the repository README and
+  `PROVENANCE.json` before treating it as production.
 - [`prism-ml/Bonsai-27B-gguf`](https://huggingface.co/prism-ml/Bonsai-27B-gguf)
   (`Q1_0`, about 3.8 GB) through a dedicated vendored [bitgpu](https://github.com/stfurkan/bitgpu)
   worker. Bonsai is opt-in: WebBrain never auto-downloads the 27B weights.
