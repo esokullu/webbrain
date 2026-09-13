@@ -11992,6 +11992,8 @@ const TRACE_PRIVACY_CH = await import('file://' + path.join(ROOT, 'src/chrome/sr
 const TRACE_PRIVACY_FX = await import('file://' + path.join(ROOT, 'src/firefox/src/trace/privacy.js').replace(/\\/g, '/'));
 const CLOUD_RUNTIME_OUTBOX_CH = await import('file://' + path.join(ROOT, 'src/chrome/src/trace/cloud-runtime-outbox.js').replace(/\\/g, '/'));
 const CLOUD_RUNTIME_OUTBOX_FX = await import('file://' + path.join(ROOT, 'src/firefox/src/trace/cloud-runtime-outbox.js').replace(/\\/g, '/'));
+const SHARE_OUTBOX_CH = await import('file://' + path.join(ROOT, 'src/chrome/src/trace/webbrain-share-outbox.js').replace(/\\/g, '/'));
+const SHARE_OUTBOX_FX = await import('file://' + path.join(ROOT, 'src/firefox/src/trace/webbrain-share-outbox.js').replace(/\\/g, '/'));
 
 test('trace event model: catalog covers every kind the recorder writes', () => {
   const kinds = EVENT_MODEL_CH.EVENT_KINDS;
@@ -12460,6 +12462,224 @@ test('Cloud runtime delivery stays consent-gated and mirrored across both builds
     assert.match(agent, /void flushCloudRuntimeOutbox\(provider\)/);
     assert.match(provider, /\/improvement\/runtime-events/);
     assert.match(provider, /retryable: response\.status === 408 \|\| response\.status === 429 \|\| response\.status >= 500/);
+  }
+});
+
+test('Share-for-research item scrubs images and clamps oversized content', () => {
+  for (const [label, outbox] of [['chrome', SHARE_OUTBOX_CH], ['firefox', SHARE_OUTBOX_FX]]) {
+    const itemsBefore = globalThis.crypto?.randomUUID;
+    if (itemsBefore) globalThis.crypto.randomUUID = () => `uuid-${label}`;
+    try {
+      const item = outbox.buildShareGenerationItem({
+        runId: `run-share-${label}`,
+        finalContent: 'Summary.',
+        messages: [
+          { role: 'user', content: 'tag', image_url: 'data:image/png;base64,RAWBYTES' },
+          {
+            role: 'user',
+            content: [
+              { type: 'text', text: 'A'.repeat(12_000) },
+              { type: 'image_url', image_url: { url: 'data:image/png;base64,RAWBYTES' } },
+            ],
+          },
+          { role: 'assistant', content: 'Short reply' },
+        ],
+        model: 'some-model',
+        mode: 'act',
+        provider: 'anthropic',
+        provider_name: 'Anthropic Claude',
+      });
+      assert.equal(item.id, `run-share-${label}`, `${label}: run id not carried`);
+      assert.equal(item.provider, 'anthropic');
+      assert.equal(item.provider_name, 'Anthropic Claude');
+      assert.equal(item.model, 'some-model');
+      assert.equal(item.mode, 'act');
+      assert.equal(JSON.stringify(item).includes('RAWBYTES'), false, `${label}: image bytes escaped the scrub`);
+      assert.equal(item.request[0].image_url, undefined, `${label}: top-level image_url key survived`);
+      assert.equal(item.request[1].content[0].type, 'text', `${label}: text block dropped with the image`);
+      assert.match(item.request[1].content[0].text, /\[… 2000 characters omitted\]/, `${label}: long text block not clamped`);
+      assert.equal(item.request[2].content, 'Short reply');
+      assert.deepEqual(item.response, { role: 'assistant', content: 'Summary.' });
+    } finally {
+      if (itemsBefore) globalThis.crypto.randomUUID = itemsBefore;
+    }
+  }
+});
+
+test('Share-for-research item drops empty runs and caps the whole request', () => {
+  assert.equal(SHARE_OUTBOX_CH.buildShareGenerationItem({
+    runId: 'r', finalContent: 'x', messages: [], model: 'm', mode: 'act', provider: 'p', provider_name: 'p',
+  }), null, 'empty message list must not be shared');
+  assert.equal(SHARE_OUTBOX_CH.buildShareGenerationItem({
+    runId: 'r', finalContent: '   ', messages: [{ role: 'user', content: 'hi' }], model: 'm', mode: 'act', provider: 'p', provider_name: 'p',
+  }), null, 'blank response must not be shared');
+  const item = SHARE_OUTBOX_CH.buildShareGenerationItem({
+    runId: 'r', finalContent: 'x',
+    messages: Array.from({ length: 60 }, () => ({ role: 'user', content: 'y'.repeat(9_000) })),
+    model: 'm', mode: 'act', provider: 'p', provider_name: 'p',
+  });
+  const total = JSON.stringify(item.request).length;
+  assert.ok(total <= 150_000, `shared request exceeded the byte budget (${total})`);
+  assert.deepEqual(item.request.at(-1), { role: 'system', content: '[remaining shared message omitted]' });
+});
+
+test('Share-for-research item excludes terminal answers and binary document blocks', () => {
+  for (const [label, outbox] of [['chrome', SHARE_OUTBOX_CH], ['firefox', SHARE_OUTBOX_FX]]) {
+    const item = outbox.buildShareGenerationItem({
+      runId: `run-share-binary-${label}`,
+      finalContent: 'Final answer',
+      messages: [
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: 'Read this attachment' },
+            { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: 'SECRET_PDF_BYTES' } },
+            { type: 'other', payload: { source: { type: 'base64', data: 'UNKNOWN_BINARY_BYTES' } } },
+            { type: 'file', source: { data: 'LONG_FILE_BLOB_BYTES' } },
+            { type: 'input_file', data: 'INPUT_FILE_BLOB_BYTES' },
+          ],
+        },
+        { role: 'assistant', content: 'Final answer' },
+      ],
+      model: 'some-model', mode: 'act', provider: 'anthropic', provider_name: 'Anthropic Claude',
+    });
+    assert.equal(item.request.length, 1, `${label}: terminal answer stayed in the shared request`);
+    assert.deepEqual(item.request[0].content, [{ type: 'text', text: 'Read this attachment' }]);
+    const serialized = JSON.stringify(item);
+    assert.equal(serialized.includes('SECRET_PDF_BYTES'), false, `${label}: document bytes escaped the scrub`);
+    assert.equal(serialized.includes('UNKNOWN_BINARY_BYTES'), false, `${label}: nested base64 bytes escaped the scrub`);
+    assert.equal(serialized.includes('LONG_FILE_BLOB_BYTES'), false, `${label}: file source.data bytes escaped the scrub`);
+    assert.equal(serialized.includes('INPUT_FILE_BLOB_BYTES'), false, `${label}: input_file data bytes escaped the scrub`);
+  }
+});
+
+test('Share-for-research outbox persists retryable failures and removes acknowledged or rejected entries', async () => {
+  const originalChrome = globalThis.chrome;
+  const storage = {};
+  globalThis.chrome = {
+    storage: {
+      local: {
+        async get(keys) {
+          const key = Array.isArray(keys) ? keys[0] : keys;
+          return { [key]: storage[key] };
+        },
+        async set(values) { Object.assign(storage, values); },
+      },
+    },
+  };
+  const entry = { id: 'share-entry-1', session_id: 'share_conv_1', provider: 'anthropic', provider_name: 'x', model: 'm', mode: 'act', request: [{ role: 'user', content: 'hi' }], response: { role: 'assistant', content: 'yo' } };
+  try {
+    assert.equal(await SHARE_OUTBOX_CH.enqueueShareGeneration(entry), true);
+    assert.equal(storage[SHARE_OUTBOX_CH.SHARE_OUTBOX_STORAGE_KEY].length, 1);
+    let calls = 0;
+    const provider = {
+      async sendShareGeneration() {
+        calls++;
+        return calls === 1
+          ? { ok: false, retryable: true, status: 503 }
+          : calls === 2
+            ? { ok: false, retryable: false, status: 400 }
+            : { ok: true, retryable: false, status: 202 };
+      },
+    };
+    assert.equal(await SHARE_OUTBOX_CH.flushShareOutbox(provider), 0, 'retryable failure must stay queued');
+    assert.equal(storage[SHARE_OUTBOX_CH.SHARE_OUTBOX_STORAGE_KEY].length, 1);
+    assert.equal(await SHARE_OUTBOX_CH.flushShareOutbox(provider), 1, 'rejected entry must be dropped without retry');
+    assert.equal(storage[SHARE_OUTBOX_CH.SHARE_OUTBOX_STORAGE_KEY].length, 0);
+    assert.equal(await SHARE_OUTBOX_CH.enqueueShareGeneration(entry), true);
+    const listenedProvider = {
+      sent: null,
+      async sendShareGeneration(sessionId, payload) {
+        this.sent = { sessionId, payload };
+        return { ok: true, retryable: false, status: 202 };
+      },
+    };
+    assert.equal(await SHARE_OUTBOX_CH.flushShareOutbox(listenedProvider), 1);
+    assert.deepEqual(listenedProvider.sent, { sessionId: 'share_conv_1', payload: { client_share_id: 'share-entry-1', provider: 'anthropic', provider_name: 'x', model: 'm', mode: 'act', request: entry.request, response: entry.response } });
+    assert.equal(storage[SHARE_OUTBOX_CH.SHARE_OUTBOX_STORAGE_KEY].length, 0);
+    assert.equal(await SHARE_OUTBOX_CH.enqueueShareGeneration(entry), true);
+    let sendCalls = 0;
+    let releaseSend;
+    const overlappingProvider = {
+      async sendShareGeneration() {
+        sendCalls++;
+        await new Promise(resolve => { releaseSend = resolve; });
+        return { ok: true, retryable: false, status: 202 };
+      },
+    };
+    const firstFlush = SHARE_OUTBOX_CH.flushShareOutbox(overlappingProvider);
+    const secondFlush = SHARE_OUTBOX_CH.flushShareOutbox(overlappingProvider);
+    await new Promise(resolve => setTimeout(resolve, 0));
+    assert.equal(sendCalls, 1, 'overlapping flushes must not send one entry twice');
+    releaseSend();
+    assert.deepEqual(await Promise.all([firstFlush, secondFlush]), [1, 0]);
+    assert.equal(storage[SHARE_OUTBOX_CH.SHARE_OUTBOX_STORAGE_KEY].length, 0);
+  } finally {
+    if (originalChrome === undefined) delete globalThis.chrome;
+    else globalThis.chrome = originalChrome;
+  }
+});
+
+test('Firefox Share-for-research outbox uses the promise-based browser storage namespace', async () => {
+  const originalBrowser = globalThis.browser;
+  const originalChrome = globalThis.chrome;
+  const storage = {};
+  let chromeCalls = 0;
+  globalThis.browser = {
+    storage: {
+      local: {
+        async get(keys) {
+          const key = Array.isArray(keys) ? keys[0] : keys;
+          return { [key]: storage[key] };
+        },
+        async set(values) { Object.assign(storage, values); },
+      },
+    },
+  };
+  globalThis.chrome = {
+    storage: {
+      local: {
+        get() { chromeCalls++; throw new Error('callback-only chrome namespace used'); },
+        set() { chromeCalls++; throw new Error('callback-only chrome namespace used'); },
+      },
+    },
+  };
+  try {
+    const entry = { id: 'share-firefox-1', session_id: 'share_firefox', provider: 'anthropic', provider_name: 'x', model: 'm', mode: 'act', request: [{ role: 'user', content: 'hi' }], response: { role: 'assistant', content: 'yo' } };
+    assert.equal(await SHARE_OUTBOX_FX.enqueueShareGeneration(entry), true);
+    assert.equal(storage[SHARE_OUTBOX_FX.SHARE_OUTBOX_STORAGE_KEY].length, 1);
+    assert.equal(await SHARE_OUTBOX_FX.flushShareOutbox({
+      async sendShareGeneration() { return { ok: true, retryable: false, status: 202 }; },
+    }), 1);
+    assert.equal(storage[SHARE_OUTBOX_FX.SHARE_OUTBOX_STORAGE_KEY].length, 0);
+    assert.equal(chromeCalls, 0, 'Firefox share outbox touched the callback-based chrome namespace');
+  } finally {
+    if (originalBrowser === undefined) delete globalThis.browser;
+    else globalThis.browser = originalBrowser;
+    if (originalChrome === undefined) delete globalThis.chrome;
+    else globalThis.chrome = originalChrome;
+  }
+});
+
+test('Share-for-research delivery stays opt-in and mirrored across both builds', () => {
+  const chromeOutbox = fs.readFileSync(path.join(ROOT, 'src/chrome/src/trace/webbrain-share-outbox.js'), 'utf8');
+  const firefoxOutbox = fs.readFileSync(path.join(ROOT, 'src/firefox/src/trace/webbrain-share-outbox.js'), 'utf8');
+  assert.equal(chromeOutbox, firefoxOutbox, 'Chrome/Firefox share outboxes drifted');
+  for (const browser of ['chrome', 'firefox']) {
+    const agent = fs.readFileSync(path.join(ROOT, `src/${browser}/src/agent/agent.js`), 'utf8');
+    const settings = fs.readFileSync(path.join(ROOT, `src/${browser}/src/ui/settings.js`), 'utf8');
+    const provider = fs.readFileSync(path.join(ROOT, `src/${browser}/src/providers/openai.js`), 'utf8');
+    assert.match(agent, /status === 'done'[\s\S]*hadProviderCompletion === true[\s\S]*shareQueriesForResearch === true[\s\S]*enqueueShareGeneration/, `${browser}: capture must require a provider completion and the per-provider toggle`);
+    assert.match(agent, /shareRequest/, `${browser}: capture must prefer the model-facing source-grounded request`);
+    assert.match(agent, /shareHadProviderCompletion/, `${browser}: local-only fast paths must not be shareable`);
+    assert.match(agent, /'webbrain-cloud'/, `${browser}: Compass provider must not route through the share path`);
+    assert.match(agent, /void flushShareOutbox\(shareTransport\)/, `${browser}: run-end share flush missing`);
+    assert.match(agent, /_shareSessionId\(/, `${browser}: share session id sanitizer missing`);
+    assert.match(chromeOutbox, /client_share_id/, `${browser}: outbox flush must send an idempotency key`);
+    assert.match(chromeOutbox, /input_file/, `${browser}: binary scrub must cover file/input_file blocks`);
+    assert.match(settings, /shareQueriesForResearch/, `${browser}: share toggle field missing from settings`);
+    assert.match(settings, /!input\.checked[\s\S]*?confirm\(/, `${browser}: consent confirmation must guard turning the share toggle on`);
+    assert.match(provider, /\/improvement\/generations/, `${browser}: share endpoint missing from the Compass provider transport`);
   }
 });
 
@@ -44384,7 +44604,7 @@ test('Help Improve WebBrain is default-on in Advanced, persisted, and reloads Co
     assert.match(settings, /helpImproveToggle\.checked = stored\.helpImproveWebBrain !== false/, `${label}: missing default-on storage hydration`);
     assert.match(settings, new RegExp(`${runtime}\\.storage\\.local\\.set\\(\\{ helpImproveWebBrain: helpImproveToggle\\.checked \\}\\)`), `${label}: setting should persist`);
     assert.match(locale, /'st\.display\.help_improve\.label': 'Help Improve WebBrain'/, `${label}: setting label missing`);
-    assert.match(locale, /On by default[^']*<u>Local-model and bring-your-own API requests are never collected by WebBrain\.<\/u>/, `${label}: setting disclosure should explain and emphasize its default and scope`);
+    assert.match(locale, /On by default[^']*<u>Local-model and bring-your-own API requests are only collected by WebBrain from providers where you turn on “Share queries for research”\.<\/u>/, `${label}: setting disclosure should explain and emphasize its default and scope`);
     assert.match(locale, /Turn it off in General → Advanced to exclude future Compass interactions/, `${label}: provider disclosure should point to General > Advanced`);
     for (const localeFile of fs.readdirSync(localeDir).filter((name) => name.endsWith('.js'))) {
       const translatedLocale = fs.readFileSync(path.join(localeDir, localeFile), 'utf8');
@@ -69713,7 +69933,7 @@ test('Ask streaming lifecycle tracing is wired through recorder, agent, and Trac
     assert.match(agentSource, /status: 'attempted'[\s\S]*?status: 'completed'[\s\S]*?status: fallbackSafe \? 'fallback' : 'failed'/, `${browser}: lifecycle outcomes missing`);
     assert.match(agentSource, /if \(shouldOrderInteractiveAskTrace\) queueAskStreamingTraceWrite\(writeRequestTrace\)/, `${browser}: request trace must lead the streaming lifecycle queue`);
     assert.match(agentSource, /if \(shouldOrderInteractiveAskTrace\) await queueAskStreamingTraceWrite\(writeResponseTrace\)/, `${browser}: response trace must flush after streaming lifecycle events`);
-    assert.match(agentSource, /finally \{[\s\S]{0,120}?await askStreamingTraceWrite;[\s\S]{0,200}?_endTraceRun/, `${browser}: run finalization must wait for streaming lifecycle traces`);
+    assert.match(agentSource, /finally \{[\s\S]{0,1200}?await askStreamingTraceWrite;[\s\S]{0,1200}?_endTraceRun/, `${browser}: run finalization must wait for streaming lifecycle traces`);
     assert.match(tracesSource, /case 'streaming':[\s\S]*?t\('st\.display\.openai_ask_streaming\.label'\)/, `${browser}: localized Traces UI renderer missing`);
     assert.doesNotMatch(tracesSource, /Ask stream:|text delta|first delta|ms total|tool call/, `${browser}: streaming trace copy should not be hard-coded in English`);
     assert.match(tracesHtml, /\.event\.streaming \{ border-left:/, `${browser}: Traces UI styling missing`);

@@ -361,6 +361,14 @@ export class ProviderManager {
         ...this._storedDefaultOverride(config, storedConfig),
         configured,
       };
+      // Voluntary research sharing is opt-in per provider and default-off
+      // (never on for WebBrain Compass itself, which already shares via its
+      // own outbox). Applied in the field-level merge so existing stored
+      // configs without the key inherit the off state without polluting the
+      // default catalog snapshots.
+      if (id !== WEBBRAIN_CLOUD_PROVIDER_ID && !Object.hasOwn(configs[id], 'shareQueriesForResearch')) {
+        configs[id].shareQueriesForResearch = false;
+      }
       if (Object.hasOwn(configs[id], 'duplicateOf')) {
         delete configs[id].duplicateOf;
         providerStateMigrated = true;
@@ -461,7 +469,7 @@ export class ProviderManager {
   }
 
   _defaultConfigs() {
-    return {
+    const defaults = {
       webbrain_cloud: {
         type: 'openai',
         category: 'cloud',
@@ -929,6 +937,7 @@ export class ProviderManager {
       },
       ...ADDITIONAL_PROVIDER_DEFAULTS,
     };
+    return defaults;
   }
 
   _migrateStoredProviderConfigs(stored) {

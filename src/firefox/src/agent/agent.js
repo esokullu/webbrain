@@ -71,6 +71,7 @@ import {
 import { normalizePdfOcrResult, PDF_OCR_SYSTEM_PROMPT } from './pdf-ocr.js';
 import * as trace from '../trace/recorder.js';
 import { buildTerminalRuntimeEvent, enqueueCloudRuntimeEvent, flushCloudRuntimeOutbox } from '../trace/cloud-runtime-outbox.js';
+import { buildShareGenerationItem, enqueueShareGeneration, flushShareOutbox } from '../trace/webbrain-share-outbox.js';
 import { normalizeRuntimeTraceConfig } from '../trace/runtime-config.js';
 import { tracesToMarkdown } from './trace-export.js';
 import { solveCaptcha, detectCaptcha, injectToken, captchaParamError, captchaTypesMatch, captchaWebsiteUrl } from './captcha-solver.js';
@@ -16509,7 +16510,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
    * Compass delivery remains active when optional local tracing is disabled.
    * Shared by the streaming and non-streaming message paths. (#9)
    */
-  async _endTraceRun(tabId, runId, status, finalContent, { provider = null, messages = null, mode = '' } = {}) {
+  async _endTraceRun(tabId, runId, status, finalContent, { provider = null, messages = null, mode = '', shareRequest = null, hadProviderCompletion = false } = {}) {
     if (String(provider?.config?.providerName || '').toLowerCase() === 'webbrain-cloud') {
       try {
         const sessionId = this.conversationIds.get(tabId) || null;
@@ -16533,6 +16534,43 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
         void flushCloudRuntimeOutbox(provider);
       } catch {}
     }
+    // Voluntary per-provider research sharing. The WebBrain Compass provider
+    // acts as transport (its API hosts the endpoint); which provider produced
+    // the run only decides whether capture is gated on (the per-provider
+    // toggle) and what attribution to record. Compass itself never goes
+    // through this path. Capture additionally requires a successful provider
+    // completion (hadProviderCompletion): local-only fast paths (recommended
+    // first tool, selection-restoration read, dev guards, attachment rejects)
+    // return with status 'done' but never called the model, and must not be
+    // uploaded as model generations. shareRequest, when provided, is the
+    // actual model-facing request (source-grounded filtered + pruned); the
+    // full persisted `messages` array can contain unrelated history the
+    // provider never received.
+    const shareTransport = this.providerManager?.getProvider?.('webbrain_cloud');
+    if (shareTransport
+        && status === 'done'
+        && hadProviderCompletion === true
+        && provider?.config?.shareQueriesForResearch === true
+        && String(provider?.config?.providerName || '').toLowerCase() !== 'webbrain-cloud') {
+      try {
+        const shareSessionId = this._shareSessionId(this.conversationIds.get(tabId) || null);
+        if (shareSessionId) {
+          const shareItem = buildShareGenerationItem({
+            runId,
+            finalContent,
+            messages: Array.isArray(shareRequest) && shareRequest.length ? shareRequest : messages,
+            model: provider?.model,
+            mode,
+            provider: String(provider?.config?.providerName || '').toLowerCase(),
+            provider_name: String(provider?.config?.label || provider?.name || '').slice(0, 128),
+          });
+          if (shareItem) await enqueueShareGeneration({ session_id: shareSessionId, ...shareItem });
+        }
+      } catch {}
+    }
+    // Retry delivery of previously queued voluntary shares on every run end,
+    // mirroring the Compass runtime outbox pattern.
+    void flushShareOutbox(shareTransport);
     if (runId) {
       await this._flushAdapterMatchTraceRun(runId);
       try {
@@ -16551,6 +16589,16 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     // conversation-bound via _takeContinuationTaskToken.
     this._storeContinuationTaskToken(tabId);
     this._taskTokens.delete(tabId);
+  }
+
+  /**
+   * Namespace a conversation id into a backend-valid `share_` session id.
+   * Keeps only the charset the improvement endpoint accepts and stays well
+   * under the 200-char session id cap.
+   */
+  _shareSessionId(conversationId) {
+    const safe = String(conversationId || '').replace(/[^A-Za-z0-9._:-]/g, '').slice(0, 190);
+    return safe ? `share_${safe}` : '';
   }
 
   /**
@@ -33581,6 +33629,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     // to upload; the current run is enqueued at finalization and may complete
     // in the background or on the next Compass run.
     void flushCloudRuntimeOutbox(provider);
+    void flushShareOutbox(this.providerManager?.getProvider?.('webbrain_cloud'));
 
     if (typeof runOptions?.isDetachedStartCancelled === 'function'
         && runOptions.isDetachedStartCancelled()) {
@@ -33597,7 +33646,13 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     let runId = null;
     let finalResponse = '';
     let messageCompletion = null;
-    let _traceStatus = 'done';
+    let _traceStatus = 'done'; // updated on early exits
+    // Voluntary research sharing must only capture runs where the model was
+    // actually called. Local-only fast paths (recommended first tool,
+    // selection-restoration read, dev/attachment guards) return with status
+    // 'done' but never hit the provider. Flipped to true once past those
+    // guards (or on a successful response-only turn).
+    let shareHadProviderCompletion = false;
     let traceFailureCode = null;
     let traceTurnEndExtra = {}; // step-limit handoff outcome; trace status keeps max_steps
     let lastTraceStep = 0; // step counter for turn_end, readable outside the loop
@@ -33720,6 +33775,9 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       );
       finalResponse = responseOnly.content;
       _traceStatus = responseOnly.status;
+      // Response-only turns do call the model (source-grounded + pruned
+      // inside _generateContextOnlyResponse). Only mark shareable on success.
+      if (responseOnly.status === 'done') shareHadProviderCompletion = true;
       return finalResponse;
     }
     if (this._consumeSelectionGroundingRestoration(tabId, enriched)) this._persist(tabId);
@@ -33939,6 +33997,10 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
         return finalResponse;
       }
     }
+    // Past all local-only fast paths: the main loop below always calls the
+    // provider before producing a 'done' outcome, so research sharing may
+    // consider this run. Failures/cancels are still excluded via _traceStatus.
+    shareHadProviderCompletion = true;
 
     while (steps < this.maxSteps) {
       if (this._checkAbort(tabId)) {
@@ -34561,7 +34623,15 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
         lastTraceStep,
         this._traceTurnEndPayload(_traceStatus, traceFailureCode, traceTurnEndExtra),
       );
-      await this._endTraceRun(tabId, runId, _traceStatus, finalResponse, { provider, messages, mode });
+      // Share the actual model-facing request (source-grounded filtered +
+      // pruned), not the full persisted history which can contain unrelated
+      // pages/attachments the provider never received.
+      let shareRequest = null;
+      try {
+        const rawShare = typeof modelMessagesForRun === 'function' ? modelMessagesForRun() : messages;
+        shareRequest = this._pruneOldImages(rawShare, provider);
+      } catch {}
+      await this._endTraceRun(tabId, runId, _traceStatus, finalResponse, { provider, messages, mode, shareRequest, hadProviderCompletion: shareHadProviderCompletion });
     }
   }
 
@@ -34727,6 +34797,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
 
     const provider = this.providerManager.getActive();
     void flushCloudRuntimeOutbox(provider);
+    void flushShareOutbox(this.providerManager?.getProvider?.('webbrain_cloud'));
 
     // The run claim owns cancellation reset. Stop during setup must survive.
     this._throwIfAborted(this._runAbortSignal(tabId));
@@ -34735,6 +34806,8 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     let finalResponse = '';
     let lastTraceStep = 0; // step counter for turn_end, readable outside the loop
     let _traceStatus = 'done';
+    // See processMessage: only provider-backed completions may be shared.
+    let shareHadProviderCompletion = false;
     let traceFailureCode = null;
     let traceTurnEndExtra = {}; // step-limit handoff outcome; trace status keeps max_steps
     const finish = (response, status = _traceStatus) => {
@@ -34796,6 +34869,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
         tabId, messages, onUpdate, provider, costState, runId,
         runOptions, enriched, sourceBoundPriorMessages,
       );
+      if (responseOnly.status === 'done') shareHadProviderCompletion = true;
       return finish(responseOnly.content, responseOnly.status);
     }
     if (this._consumeSelectionGroundingRestoration(tabId, enriched)) this._persist(tabId);
@@ -34869,6 +34943,8 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
         return finish(restorationFirstRead.value, 'cancelled');
       }
     }
+    // Past local-only fast paths: the streaming loop below calls the provider.
+    shareHadProviderCompletion = true;
 
     while (steps < this.maxSteps) {
       if (this._checkAbort(tabId)) {
@@ -35447,7 +35523,18 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
         lastTraceStep,
         this._traceTurnEndPayload(_traceStatus, traceFailureCode, traceTurnEndExtra),
       );
-      await this._endTraceRun(tabId, runId, _traceStatus, finalResponse, { provider, messages, mode });
+      // Prefer the last pruned streaming request (exact model input); fall
+      // back to the source-grounded filtered request so unrelated history is
+      // never uploaded as the prompt that produced the response.
+      let shareRequest = null;
+      try {
+        if (Array.isArray(currentStreamRequestMessages) && currentStreamRequestMessages.length) {
+          shareRequest = currentStreamRequestMessages;
+        } else if (typeof modelMessagesForRun === 'function') {
+          shareRequest = this._pruneOldImages(modelMessagesForRun(), provider);
+        }
+      } catch {}
+      await this._endTraceRun(tabId, runId, _traceStatus, finalResponse, { provider, messages, mode, shareRequest, hadProviderCompletion: shareHadProviderCompletion });
     }
   }
 }

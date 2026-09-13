@@ -1907,6 +1907,12 @@ const OPTIONAL_LOCAL_API_KEY_FIELD = {
   placeholder: 'optional',
   collapsed: true,
 };
+const SHARE_RESEARCH_FIELD = {
+  key: 'shareQueriesForResearch',
+  labelKey: 'st.providers.share_research.label',
+  hintKey: 'st.providers.share_research.hint',
+  type: 'checkbox',
+};
 
 function providerDefinitionId(id, config = providersData[id]) {
   return String(config?.sourceProviderId || config?.duplicateOf || id || '');
@@ -2665,6 +2671,9 @@ function renderProviders() {
     const keys = new Set(definition.fields.map(field => field.key));
     if (!keys.has('contextWindow')) definition.fields.push(CONTEXT_WINDOW_FIELD);
     if (!keys.has('maxOutputTokens')) definition.fields.push(MAX_OUTPUT_TOKENS_FIELD);
+    // Voluntary research sharing is opt-in per provider and never shown for
+    // WebBrain Compass itself.
+    if (!keys.has('shareQueriesForResearch')) definition.fields.push(SHARE_RESEARCH_FIELD);
   }
 
   providersContainer.appendChild(renderProviderFilterBar());
@@ -2727,6 +2736,9 @@ function renderProviders() {
             <label style="margin:0;cursor:pointer;">${escapeHtml(label)}</label>
           </div>
         `;
+        if (field.hintKey) {
+          fieldHTML += `<div class="field-hint" style="margin:-4px 0 10px;font-size:12px;color:var(--text2);">${escapeHtml(t(field.hintKey))}</div>`;
+        }
         } else if (field.suggestions && field.key === 'model') {
         const rawVal = config[field.key] || '';
         const isCustom = rawVal && !field.suggestions.includes(rawVal);
@@ -2893,6 +2905,17 @@ function renderProviders() {
   document.querySelectorAll('input[data-provider], select[data-provider], textarea[data-provider]').forEach(input => {
     const eventName = input.tagName === 'SELECT' ? 'change' : 'input';
     input.addEventListener(eventName, () => markProviderDirty(input.dataset.provider));
+  });
+  document.querySelectorAll('input[data-key="shareQueriesForResearch"]').forEach(input => {
+    input.addEventListener('click', (event) => {
+      // In click handlers, `input.checked` has already updated to the target
+      // state. Only prompt for confirmation when turning the toggle ON.
+      // preventDefault() cancels the click and rolls `checked` back to false.
+      if (!input.checked) return;
+      if (!window.confirm(t('st.providers.share_research.confirm'))) {
+        event.preventDefault();
+      }
+    });
   });
   document.querySelectorAll('.btn-remove-duplicate').forEach(btn => {
     btn.addEventListener('click', () => removeDuplicateProvider(btn.dataset.provider));
