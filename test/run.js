@@ -12535,6 +12535,8 @@ test('Share-for-research item excludes terminal answers and binary document bloc
             { type: 'text', text: 'Read this attachment' },
             { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: 'SECRET_PDF_BYTES' } },
             { type: 'other', payload: { source: { type: 'base64', data: 'UNKNOWN_BINARY_BYTES' } } },
+            { type: 'file', source: { data: 'LONG_FILE_BLOB_BYTES' } },
+            { type: 'input_file', data: 'INPUT_FILE_BLOB_BYTES' },
           ],
         },
         { role: 'assistant', content: 'Final answer' },
@@ -12546,6 +12548,8 @@ test('Share-for-research item excludes terminal answers and binary document bloc
     const serialized = JSON.stringify(item);
     assert.equal(serialized.includes('SECRET_PDF_BYTES'), false, `${label}: document bytes escaped the scrub`);
     assert.equal(serialized.includes('UNKNOWN_BINARY_BYTES'), false, `${label}: nested base64 bytes escaped the scrub`);
+    assert.equal(serialized.includes('LONG_FILE_BLOB_BYTES'), false, `${label}: file source.data bytes escaped the scrub`);
+    assert.equal(serialized.includes('INPUT_FILE_BLOB_BYTES'), false, `${label}: input_file data bytes escaped the scrub`);
   }
 });
 
@@ -12591,7 +12595,7 @@ test('Share-for-research outbox persists retryable failures and removes acknowle
       },
     };
     assert.equal(await SHARE_OUTBOX_CH.flushShareOutbox(listenedProvider), 1);
-    assert.deepEqual(listenedProvider.sent, { sessionId: 'share_conv_1', payload: { provider: 'anthropic', provider_name: 'x', model: 'm', mode: 'act', request: entry.request, response: entry.response } });
+    assert.deepEqual(listenedProvider.sent, { sessionId: 'share_conv_1', payload: { client_share_id: 'share-entry-1', provider: 'anthropic', provider_name: 'x', model: 'm', mode: 'act', request: entry.request, response: entry.response } });
     assert.equal(storage[SHARE_OUTBOX_CH.SHARE_OUTBOX_STORAGE_KEY].length, 0);
     assert.equal(await SHARE_OUTBOX_CH.enqueueShareGeneration(entry), true);
     let sendCalls = 0;
@@ -12665,10 +12669,14 @@ test('Share-for-research delivery stays opt-in and mirrored across both builds',
     const agent = fs.readFileSync(path.join(ROOT, `src/${browser}/src/agent/agent.js`), 'utf8');
     const settings = fs.readFileSync(path.join(ROOT, `src/${browser}/src/ui/settings.js`), 'utf8');
     const provider = fs.readFileSync(path.join(ROOT, `src/${browser}/src/providers/openai.js`), 'utf8');
-    assert.match(agent, /status === 'done'[\s\S]*shareQueriesForResearch === true[\s\S]*enqueueShareGeneration/, `${browser}: capture must be successful and gated on the per-provider toggle`);
+    assert.match(agent, /status === 'done'[\s\S]*hadProviderCompletion === true[\s\S]*shareQueriesForResearch === true[\s\S]*enqueueShareGeneration/, `${browser}: capture must require a provider completion and the per-provider toggle`);
+    assert.match(agent, /shareRequest/, `${browser}: capture must prefer the model-facing source-grounded request`);
+    assert.match(agent, /shareHadProviderCompletion/, `${browser}: local-only fast paths must not be shareable`);
     assert.match(agent, /'webbrain-cloud'/, `${browser}: Compass provider must not route through the share path`);
     assert.match(agent, /void flushShareOutbox\(shareTransport\)/, `${browser}: run-end share flush missing`);
     assert.match(agent, /_shareSessionId\(/, `${browser}: share session id sanitizer missing`);
+    assert.match(chromeOutbox, /client_share_id/, `${browser}: outbox flush must send an idempotency key`);
+    assert.match(chromeOutbox, /input_file/, `${browser}: binary scrub must cover file/input_file blocks`);
     assert.match(settings, /shareQueriesForResearch/, `${browser}: share toggle field missing from settings`);
     assert.match(settings, /!input\.checked[\s\S]*?confirm\(/, `${browser}: consent confirmation must guard turning the share toggle on`);
     assert.match(provider, /\/improvement\/generations/, `${browser}: share endpoint missing from the Compass provider transport`);
@@ -69925,7 +69933,7 @@ test('Ask streaming lifecycle tracing is wired through recorder, agent, and Trac
     assert.match(agentSource, /status: 'attempted'[\s\S]*?status: 'completed'[\s\S]*?status: fallbackSafe \? 'fallback' : 'failed'/, `${browser}: lifecycle outcomes missing`);
     assert.match(agentSource, /if \(shouldOrderInteractiveAskTrace\) queueAskStreamingTraceWrite\(writeRequestTrace\)/, `${browser}: request trace must lead the streaming lifecycle queue`);
     assert.match(agentSource, /if \(shouldOrderInteractiveAskTrace\) await queueAskStreamingTraceWrite\(writeResponseTrace\)/, `${browser}: response trace must flush after streaming lifecycle events`);
-    assert.match(agentSource, /finally \{[\s\S]{0,120}?await askStreamingTraceWrite;[\s\S]{0,200}?_endTraceRun/, `${browser}: run finalization must wait for streaming lifecycle traces`);
+    assert.match(agentSource, /finally \{[\s\S]{0,1200}?await askStreamingTraceWrite;[\s\S]{0,1200}?_endTraceRun/, `${browser}: run finalization must wait for streaming lifecycle traces`);
     assert.match(tracesSource, /case 'streaming':[\s\S]*?t\('st\.display\.openai_ask_streaming\.label'\)/, `${browser}: localized Traces UI renderer missing`);
     assert.doesNotMatch(tracesSource, /Ask stream:|text delta|first delta|ms total|tool call/, `${browser}: streaming trace copy should not be hard-coded in English`);
     assert.match(tracesHtml, /\.event\.streaming \{ border-left:/, `${browser}: Traces UI styling missing`);

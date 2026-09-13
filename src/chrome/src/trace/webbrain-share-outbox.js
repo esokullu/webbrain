@@ -28,19 +28,48 @@ function clampText(value, limit = MAX_MESSAGE_CHARS) {
 }
 
 function containsBinaryBlock(value) {
+  // Bare data-URI strings can appear as array items (e.g. screenshot bytes
+  // echoed into a tool result). Catch them before the object checks below.
+  if (typeof value === 'string') {
+    if (value.length > 1000 && value.slice(0, 200).match(/^data:(image|audio|video|application)\/[^;]+;base64,/i)) return true;
+    return false;
+  }
   if (!value || typeof value !== 'object') return false;
-  if (value.type === 'image_url' || value.type === 'image' || value.type === 'document') return true;
-  if (value.source?.type === 'base64') return true;
+  const type = typeof value.type === 'string' ? value.type.toLowerCase() : '';
+  if (type === 'image_url' || type === 'image' || type === 'document'
+    || type === 'file' || type === 'input_file' || type === 'image_file' || type === 'pdf') return true;
+  // Anthropic document/file blocks: { source: { type: 'base64', data: '...' } }.
+  // Also catch { source: { data: '<long blob>' } } where the type tag varies
+  // across provider contracts but the payload is still raw bytes.
+  if (value.source && typeof value.source === 'object') {
+    if (value.source.type === 'base64') return true;
+    if (typeof value.source.data === 'string' && value.source.data.length > 500) return true;
+  }
+  // Generic base64 payload fields (OpenAI input_file, attachments, etc.).
+  // Long user text lives in .text, never in .data, so this is safe.
+  if (typeof value.data === 'string' && value.data.length > 500) return true;
+  if (typeof value.url === 'string' && value.url.length > 1000 && value.url.startsWith('data:')) return true;
   if (Array.isArray(value)) return value.some(containsBinaryBlock);
   return Object.values(value).some(containsBinaryBlock);
 }
 
 function requestMessages(messages, responseContent) {
   if (!Array.isArray(messages)) return messages;
+  const want = String(responseContent ?? '').trim();
+  if (!want) return [...messages];
   const request = [...messages];
   for (let index = request.length - 1; index >= 0; index--) {
     const message = request[index];
-    if (message?.role === 'assistant' && message.content === responseContent) {
+    if (message?.role !== 'assistant') continue;
+    // Normal path: the agent appends the final string answer before _endTraceRun.
+    if (typeof message.content === 'string' && message.content.trim() === want) {
+      request.splice(index, 1);
+      break;
+    }
+    // Multimodal path: single text block echoing the final answer.
+    if (Array.isArray(message.content) && message.content.length === 1
+      && message.content[0]?.type === 'text'
+      && String(message.content[0]?.text ?? '').trim() === want) {
       request.splice(index, 1);
       break;
     }
@@ -169,6 +198,7 @@ async function flushShareOutboxNow(transportProvider) {
     let result;
     try {
       result = await transportProvider.sendShareGeneration(entry.session_id, {
+        client_share_id: entry.id,
         provider: entry.provider,
         provider_name: entry.provider_name,
         model: entry.model,
