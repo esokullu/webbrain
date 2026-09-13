@@ -465,6 +465,13 @@ export function parseToolCallsFromText(text, allowedNames) {
   while ((minicpmMatch = minicpmFunctionRe.exec(text)) !== null) {
     // Skip functions already consumed inside a <tool_call> wrapper above.
     if (xmlToolSpans.some(span => minicpmMatch.index >= span.start && minicpmMatch.index < span.end)) continue;
+    // A bare call replaces the model's prose outright, so only accept it on
+    // the same standalone-line boundary the JSON fallback requires. This
+    // keeps quoted/explanatory markup such as `Do not call <function ...>`
+    // from dispatching while still allowing genuine calls emitted on their
+    // own lines.
+    const matchEnd = minicpmMatch.index + minicpmMatch[0].length - 1;
+    if (!standsAloneOnLine(text, minicpmMatch.index, matchEnd)) continue;
     const toolName = minicpmMatch[1] || minicpmMatch[2];
     if (!allowedNames.has(toolName)) continue;
     const body = minicpmMatch[3] || '';
