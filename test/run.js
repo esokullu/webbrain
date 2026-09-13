@@ -63558,8 +63558,18 @@ test('WebGPU worker follows local text-generation and WebBrain VL vision contrac
   assert.match(apocalypseScript, /visionFallbackExplicitlyEnabled[\s\S]*?settings\.html#multimodal/,
     'Apocalypse Mode must route first-time local-vision enablement to its dedicated Settings control');
   assert.match(apocalypseScript, /webgpu-text-download-state/);
+  assert.match(settingsScript, /btn-webgpu-download/,
+    'the Settings WebGPU card must offer its own download control so the chat error first path works');
+  assert.match(settingsScript, /sendToBackground\('start_webgpu_download'\)/,
+    'the Settings download control must start the model fetch');
+  assert.match(settingsScript, /sendToBackground\('stop_webgpu_download'\)/,
+    'the Settings download control must stop or remove the model fetch');
+  assert.match(settingsScript, /sendToBackground\('get_webgpu_download_status'\)/,
+    'the Settings download control must reflect live download state');
+  assert.match(settingsScript, /data-webgpu-download-status/,
+    'the Settings WebGPU card must render a download status line');
   assert.doesNotMatch(settingsScript, /data-webgpu-download-action=/,
-    'the WebGPU provider download block must live on Apocalypse Mode, not Settings');
+    'the Apocalypse-style download action block must not be duplicated on Settings');
   assert.doesNotMatch(settingsScript, /saveVisionConfig\(\{\s*type:\s*'webgpu'/);
   assert.match(settingsScript, /let entries = Object\.entries\(providersData\);/,
     'Settings should render the WebGPU provider card');

@@ -2704,6 +2704,114 @@ function providerSubscriptionGuideHtml(definitionId) {
   </aside>`;
 }
 
+// The WebGPU chat error points users at Settings > Providers > WebGPU, so the
+// card needs its own download surface instead of sending everyone to
+// Apocalypse Mode. This drives the same background routes
+// (`start/stop/get_webgpu_download_status`) with a start/stop button and a
+// status line, using only already-translated `webgpu_download` strings.
+let webgpuDownloadPollTimer = null;
+let webgpuDownloadActionInFlight = false;
+
+function normalizeWebgpuDownloadSnapshot(snapshot = {}) {
+  const allowedStatuses = new Set(['checking', 'not-downloaded', 'downloading', 'paused', 'stopping', 'ready', 'error']);
+  const status = allowedStatuses.has(snapshot.status) ? snapshot.status : 'not-downloaded';
+  const loaded = Math.max(0, Number(snapshot.loaded) || 0);
+  const total = Math.max(0, Number(snapshot.total) || 0);
+  const progress = status === 'ready'
+    ? 100
+    : Math.max(0, Math.min(100, Number(snapshot.progress) || (total > 0 ? loaded / total * 100 : 0)));
+  return {
+    status,
+    ready: snapshot.ready === true || status === 'ready',
+    progress: Math.round(progress),
+    error: String(snapshot.error || ''),
+  };
+}
+
+function webgpuDownloadCardLabel(state) {
+  if (state.ready || ['downloading', 'paused', 'stopping'].includes(state.status)) {
+    return t('st.providers.webgpu_download.stop');
+  }
+  return t('st.providers.webgpu_download.start');
+}
+
+function webgpuDownloadStatusLine(state) {
+  if (state.ready) return t('st.providers.webgpu_download.ready_detail');
+  switch (state.status) {
+    case 'checking':
+      return t('st.providers.webgpu_download.checking');
+    case 'downloading':
+      return t('st.providers.webgpu_download.downloading', { progress: state.progress });
+    case 'paused':
+      return `${t('st.providers.webgpu_download.paused', { progress: state.progress })} ${t('st.providers.webgpu_download.paused_detail')}`;
+    case 'stopping':
+      return t('st.providers.webgpu_download.stopping');
+    case 'error':
+      return `${t('st.providers.webgpu_download.error')}: ${state.error || t('st.providers.webgpu_download.error_detail')}`;
+    default:
+      return t('st.providers.webgpu_download.required');
+  }
+}
+
+function renderWebgpuDownloadControl(id, state) {
+  const btn = document.querySelector(`.btn-webgpu-download[data-provider="${id}"]`);
+  const line = document.querySelector(`[data-webgpu-download-status="${id}"]`);
+  if (btn) {
+    btn.textContent = webgpuDownloadCardLabel(state);
+    btn.disabled = webgpuDownloadActionInFlight || ['checking', 'stopping'].includes(state.status);
+  }
+  if (line) line.textContent = webgpuDownloadStatusLine(state);
+}
+
+async function refreshWebgpuDownloadControls() {
+  const ids = [...new Set([...document.querySelectorAll('.btn-webgpu-download')].map(btn => btn.dataset.provider))];
+  if (!ids.length) {
+    if (webgpuDownloadPollTimer) {
+      clearInterval(webgpuDownloadPollTimer);
+      webgpuDownloadPollTimer = null;
+    }
+    return;
+  }
+  let active = false;
+  for (const id of ids) {
+    try {
+      const state = normalizeWebgpuDownloadSnapshot(await sendToBackground('get_webgpu_download_status') || {});
+      renderWebgpuDownloadControl(id, state);
+      if (!state.ready && ['checking', 'downloading', 'paused', 'stopping'].includes(state.status)) active = true;
+    } catch (error) {
+      const line = document.querySelector(`[data-webgpu-download-status="${id}"]`);
+      if (line) line.textContent = String(error?.message || error);
+    }
+  }
+  if (active && !webgpuDownloadPollTimer) {
+    webgpuDownloadPollTimer = setInterval(refreshWebgpuDownloadControls, 2000);
+  } else if (!active && webgpuDownloadPollTimer) {
+    clearInterval(webgpuDownloadPollTimer);
+    webgpuDownloadPollTimer = null;
+  }
+}
+
+async function handleWebgpuDownloadButton(btn) {
+  const id = btn.dataset.provider;
+  if (webgpuDownloadActionInFlight) return;
+  webgpuDownloadActionInFlight = true;
+  try {
+    btn.disabled = true;
+    const state = normalizeWebgpuDownloadSnapshot(await sendToBackground('get_webgpu_download_status') || {});
+    if (state.ready || ['downloading', 'paused'].includes(state.status)) {
+      await sendToBackground('stop_webgpu_download');
+    } else {
+      await sendToBackground('start_webgpu_download');
+    }
+  } catch (error) {
+    const line = document.querySelector(`[data-webgpu-download-status="${id}"]`);
+    if (line) line.textContent = String(error?.message || error);
+  } finally {
+    webgpuDownloadActionInFlight = false;
+    await refreshWebgpuDownloadControls();
+  }
+}
+
 function renderProviders() {
   providersContainer.innerHTML = '';
 
@@ -3284,12 +3392,14 @@ function renderProviders() {
       <div class="btn-row">
         <button class="btn-primary btn-save" data-provider="${id}">${escapeHtml(t('st.providers.save'))}</button>
         <button class="btn-secondary btn-test" data-provider="${id}">${escapeHtml(t('st.providers.test'))}</button>
+        ${definitionId === 'webgpu' ? `<button class="btn-secondary btn-webgpu-download" data-provider="${id}">${escapeHtml(t('st.providers.webgpu_download.start'))}</button>` : ''}
         ${billingButton}
         ${!isSelected ? `<button class="btn-secondary btn-activate" data-provider="${id}">${escapeHtml(t('st.providers.select_for_chat'))}</button>` : ''}
         ${config.isDuplicate
           ? `<button class="btn-secondary btn-remove-duplicate" data-provider="${id}">${escapeHtml(t('st.providers.remove_duplicate'))}</button>`
           : `<button class="btn-secondary btn-duplicate" data-provider="${id}"${duplicateDisabledKey ? ` disabled title="${escapeHtml(t(duplicateDisabledKey))}"` : ''}>${escapeHtml(t('st.providers.duplicate'))}</button>`}
       </div>
+      ${definitionId === 'webgpu' ? `<div class="webgpu-download-status" data-webgpu-download-status="${id}" style="margin-top:8px;font-size:12px;color:var(--text2);">${escapeHtml(t('st.providers.webgpu_download.checking'))}</div>` : ''}
       <div class="test-result" id="test-${id}"></div>
     `;
 
@@ -3316,6 +3426,10 @@ function renderProviders() {
   document.querySelectorAll('.btn-test').forEach(btn => {
     btn.addEventListener('click', () => testProvider(btn.dataset.provider));
   });
+  document.querySelectorAll('.btn-webgpu-download').forEach(btn => {
+    btn.addEventListener('click', () => handleWebgpuDownloadButton(btn));
+  });
+  refreshWebgpuDownloadControls();
   document.querySelectorAll('.btn-activate').forEach(btn => {
     btn.addEventListener('click', () => activateProvider(btn.dataset.provider));
   });
