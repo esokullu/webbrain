@@ -3,9 +3,11 @@
 This directory packages the JavaScript and WASM runtime used by two local
 WebGPU paths in Chrome and by offline RAG's CPU/WASM semantic reranker:
 
-- **Apocalypse Mode -> local WebGPU chat** downloads the selected LFM2.5 text
-  or vision-language preset, or the Nanbeige4.2-3B ONNX export, used by the
-  standalone-chat nuclear override. An opt-in Bonsai 27B preset uses a separate
+- **Apocalypse Mode / Settings -> local WebGPU chat** downloads Compass Tiny
+  v2.1 (`webbrain-one/webbrain-compass-tiny-v2.1`, ~1.87 GB), the sole text
+  preset exposed in the UI, used by the standalone-chat nuclear control and
+  selectable as a normal chat provider. The underlying runtime also supports
+  LFM2.5 and Nanbeige exports. An opt-in Bonsai 27B preset uses a separate
   vendored bitgpu worker, not this Transformers.js runtime; see
   `src/chrome/vendor/bitgpu/README.webbrain.md`.
 - **Settings -> Multimodal -> Vision -> LFM2.5-VL local fallback** runs
@@ -14,13 +16,14 @@ WebGPU paths in Chrome and by offline RAG's CPU/WASM semantic reranker:
   `Xenova/multilingual-e5-small` q8 model in a separate CPU/WASM worker. Model
   weights remain optional and are never bundled or downloaded by a question.
 
-Model weights are not bundled. Transformers.js downloads each selected WebGPU
-model on first use and stores it in the browser cache. The shipped ONNX chat
-presets are LFM2.5 2.6B, 1.2B Instruct, 1.2B Thinking, VL 1.6B, VL 3B, and
-Nanbeige4.2-3B.
-They are available through the nuclear control in standalone chat and can also
-be selected as the normal provider after download. The reasoning presets keep
-completed thinking out of visible answers. Current LFM2.5-VL layouts use:
+Model weights are not bundled. Transformers.js downloads the WebGPU model on
+first use and stores it in the browser cache. The exposed UI text preset is
+Compass Tiny v2.1 (~1.87 GB), with underlying runtime support for LFM2.5
+(2.6B, 1.2B Instruct, 1.2B Thinking, VL 1.6B, VL 3B) and Nanbeige4.2-3B.
+Compass Tiny v2.1 is available through the nuclear control in standalone chat
+and can also be configured, downloaded, and selected directly in Settings ->
+Providers -> WebGPU. Reasoning presets supported by the runtime keep completed
+thinking out of visible answers. Current LFM2.5-VL layouts use:
 
 - `embed_tokens`: FP16
 - `vision_encoder`: FP16
@@ -145,7 +148,7 @@ ProviderManager._createProvider('webgpu') / getVisionProvider()
   -> MV3 offscreen document
   -> dedicated module Worker
   -> text-generation pipeline / AutoProcessor + AutoModelForImageTextToText
-  -> selected LFM2.5 or Nanbeige ONNX repo / LFM2.5-VL-450M-ONNX over WebGPU
+  -> selected Compass Tiny v2.1 (or custom ONNX repo) / local vision sidecar over WebGPU
 ```
 
 Keep inference in the Worker. The MV3 service worker has no WebGPU, while the
