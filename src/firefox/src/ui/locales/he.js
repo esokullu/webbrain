@@ -1024,5 +1024,5 @@ export default {
   "st.sync.confirm.reset": "האם להחליף את עותק הענן המוצפן בהגדרות WebBrain הנוכחיות של המכשיר הזה?",
   "st.sync.consent.legacy": "להפעיל סנכרון מוצפן? WebBrain ישדר עותק מוצפן מקצה לקצה של הזיכרונות, המילוי האוטומטי של הפרופיל והגדרות ספק מפתח ה-API שלך ל-WebBrain Compass. היסטוריית הצ'אט וכניסות OAuth אינן מסונכרנות.",
   "st.sync.consent.denied": "הרשאת סנכרון מוצפן לא ניתנה.",
-  'st.providers.webgpu_note.body': '{modelLink} runs entirely in Chrome with no API endpoint. The first generation downloads about 4.85 GB and caches it in the browser. Test Connection checks the packaged runtime and hardware adapter without downloading the model.',
+  'st.providers.webgpu_note.body': '{modelLink} runs entirely in Chrome with no API endpoint. Download it in Settings > Providers > WebGPU or Apocalypse Mode, then use the nuclear control in standalone chat.',
 };

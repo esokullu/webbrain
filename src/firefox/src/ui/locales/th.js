@@ -1071,5 +1071,5 @@ export default {
   "st.sync.confirm.reset": "แทนที่สำเนาบนคลาวด์ที่เข้ารหัสด้วยการตั้งค่า WebBrain ปัจจุบันของอุปกรณ์นี้หรือไม่",
   "st.sync.consent.legacy": "เปิดการซิงค์ที่เข้ารหัสไหม WebBrain จะส่งสำเนาความทรงจำของคุณ การกรอกโปรไฟล์อัตโนมัติ และการตั้งค่าผู้ให้บริการคีย์ API ที่เข้ารหัสจากต้นทางถึงปลายทางไปยัง WebBrain Compass ประวัติการแชทและการลงชื่อเข้าใช้ OAuth จะไม่ซิงค์กัน",
   "st.sync.consent.denied": "ไม่ได้รับสิทธิ์การซิงค์ที่เข้ารหัส",
-  'st.providers.webgpu_note.body': '{modelLink} runs entirely in Chrome with no API endpoint. The first generation downloads about 4.85 GB and caches it in the browser. Test Connection checks the packaged runtime and hardware adapter without downloading the model.',
+  'st.providers.webgpu_note.body': '{modelLink} runs entirely in Chrome with no API endpoint. Download it in Settings > Providers > WebGPU or Apocalypse Mode, then use the nuclear control in standalone chat.',
 };

@@ -22,7 +22,7 @@ WebBrain is designed to minimize remote network dependencies. All downloads fall
 
 | Component | Remote Server / Origin | Origin Description | Typical Size | Protocol / Method | Checksum & Integrity | Local Storage Destination |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| **WebGPU Text / Multimodal Models** | `huggingface.co` / Hugging Face CDN | Nine shipped presets: LiquidAI LFM2.5 2.6B, 1.2B Instruct, 1.2B Thinking, VL 1.6B, VL 3B, Michionlion Nanbeige4.2-3B, RASMUS MiniCPM5-2B, webbrain-one Compass Tiny v2.1, and prism-ml Bonsai 27B | ~0.76 – 4.0 GB per selected preset | HTTPS GET (Transformers.js/ONNX or bitgpu) | Hugging Face Git LFS SHA-256 hash | Browser Cache API & IndexedDB (`transformers-cache`) |
+| **WebGPU Text Model** | `huggingface.co` / Hugging Face CDN | `webbrain-one/webbrain-compass-tiny-v2.1` ONNX weights, the only shipped text preset | ~1.87 GB | HTTPS GET (Transformers.js/ONNX) | Hugging Face Git LFS SHA-256 hash | Browser Cache API & IndexedDB (`transformers-cache`) |
 | **Local Vision Model** | `huggingface.co` / Hugging Face CDN | `webbrain-one/webbrain-vl-2-450M-onnx` weights for local screenshot description and UI analysis | ~810 MB | HTTPS GET (Transformers.js pipeline) | Hugging Face Git LFS SHA-256 hash | Browser Cache API & IndexedDB (`transformers-cache`) |
 | **Emergency Text Pack & SQLite Index** | `github.com/webbrain-one/emergency-box-corpus` (GitHub Releases CDN) | Release assets for curated public-domain field references, prebuilt SQLite FTS5 database, and precomputed E5 embeddings | ~245 MB (compressed ZIP) | Resumable HTTP `Range: bytes={offset}-` streaming fetch | Strict **SHA-256** hash comparison against hardcoded release descriptor before activation | OPFS (`webbrain-offline-rag/emergency-box-text/`) & IndexedDB (`webbrain_offline_rag`) |
 | **Multilingual Semantic Model** | `huggingface.co` / Hugging Face CDN (`Xenova/multilingual-e5-small`) | ONNX weights for multilingual query embedding and vector search / candidate reranking | ~134 MB | HTTPS GET (ONNX Runtime Web / Transformers.js) | SHA-256 verification via Transformers.js manifest | Browser Cache API & IndexedDB (`transformers-cache`) |
@@ -40,7 +40,7 @@ When a user turns on **Apocalypse Mode** (or opens `apocalypse-mode.html` with A
 ```mermaid
 flowchart TD
     A["User enables Apocalypse Mode"] --> B["1. Parallel Auto-Downloads Start"]
-    B --> C["Default WebGPU Text Model (~1.55 GB)<br/><b>Hugging Face CDN</b>"]
+    B --> C["Compass Tiny v2.1 Text Model (~1.87 GB)<br/><b>Hugging Face CDN</b>"]
     B --> E["Emergency Text Pack (~245-502 MB)<br/><b>GitHub Releases CDN</b>"]
     B --> F["Multilingual E5 Semantic Model (~134 MB)<br/><b>Hugging Face CDN</b>"]
     B --> G["Simple English Wikipedia ZIM (~50-100 MB)<br/><b>Kiwix / Wikimedia Mirrors</b>"]
@@ -60,7 +60,7 @@ flowchart TD
    │      - Estimate OPFS and storage quota availability
    │
    ├─► 2. Parallel Background Downloads (Active Tab + Service Worker / Offscreen):
-   │      ├── [Default WebGPU Text Model] (Offscreen document, ~1.55 GB from Hugging Face)
+   │      ├── [Compass Tiny v2.1 Text Model] (Offscreen document, ~1.87 GB from Hugging Face)
    │      ├── [Emergency Text Pack] (Tab stream, ~245 MB from GitHub Releases)
    │      │     └── Verify SHA-256 ──► Extract ZIP ──► Register SQLite FTS5 in OPFS SAH-pool
    │      ├── [Multilingual E5 Semantic Model] (Tab stream, ~134 MB from Hugging Face)
@@ -89,11 +89,9 @@ flowchart TD
    - Triggered when the user clicks the microphone button for the first time with local voice input configured.
    - Downloads the quantized Whisper model from Hugging Face into the browser's Cache API.
 
-4. **Optional WebGPU text and multimodal presets (`apocalypse-mode.html`)**:
-   - Selecting and starting a non-default preset downloads only that chosen
-     repository. The 1.2B variants are about 760 MB; VL 1.6B is about 2.3 GB;
-     Nanbeige4.2-3B is about 3.1 GB; VL 3B is about 4.0 GB; and Bonsai is about
-     3.8 GB.
+4. **WebGPU text model (`apocalypse-mode.html`)**:
+   - The picker offers only Compass Tiny v2.1 (about 1.87 GB); starting its
+     download caches that repository.
    - The separate 810 MB local vision fallback is downloaded only after the
      user enables it in **Settings -> Multimodal -> Vision**.
 

@@ -1071,5 +1071,5 @@ export default {
   "st.sync.confirm.reset": "هل تريد استبدال النسخة السحابية المشفرة بإعداد WebBrain الحالي لهذا الجهاز؟",
   "st.sync.consent.legacy": "هل تريد تفعيل المزامنة المشفرة؟ سيرسل WebBrain نسخة مشفرة من طرف إلى طرف من ذكرياتك، والملء التلقائي لملفك الشخصي، وإعدادات موفر مفتاح واجهة برمجة التطبيقات (API) إلى WebBrain Compass. لا تتم مزامنة سجل الدردشة وتسجيلات الدخول عبر OAuth.",
   "st.sync.consent.denied": "لم يتم منح إذن المزامنة المشفرة.",
-  'st.providers.webgpu_note.body': '{modelLink} runs entirely in Chrome with no API endpoint. The first generation downloads about 4.85 GB and caches it in the browser. Test Connection checks the packaged runtime and hardware adapter without downloading the model.',
+  'st.providers.webgpu_note.body': '{modelLink} runs entirely in Chrome with no API endpoint. Download it in Settings > Providers > WebGPU or Apocalypse Mode, then use the nuclear control in standalone chat.',
 };

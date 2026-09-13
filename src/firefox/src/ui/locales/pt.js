@@ -1091,5 +1091,5 @@ export default {
   "st.sync.confirm.reset": "Substituir a cópia criptografada na nuvem pela configuração atual do WebBrain deste dispositivo?",
   "st.sync.consent.legacy": "Ativar a sincronização criptografada? O WebBrain transmitirá uma cópia criptografada de ponta a ponta de suas memórias, preenchimento automático de perfil e configurações do provedor de chave API para o WebBrain Compass. O histórico de bate-papo e os logins do OAuth não são sincronizados.",
   "st.sync.consent.denied": "A permissão de sincronização criptografada não foi concedida.",
-  'st.providers.webgpu_note.body': '{modelLink} é executado inteiramente no Chrome, sem endpoint de API. A primeira geração baixa cerca de 4,85 GB e armazena o modelo no cache do navegador. Testar conexão verifica o runtime incluído e o adaptador de hardware sem baixar o modelo.',
+  'st.providers.webgpu_note.body': '{modelLink} é executado inteiramente no Chrome, sem endpoint de API. Baixe-o em Settings > Providers > WebGPU ou no Modo Apocalipse e use o controle nuclear no standalone chat.',
 };

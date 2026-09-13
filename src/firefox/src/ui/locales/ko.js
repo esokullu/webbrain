@@ -1071,5 +1071,5 @@ export default {
   "st.sync.confirm.reset": "암호화된 클라우드 사본을 이 기기의 현재 WebBrain 설정으로 바꾸시겠습니까?",
   "st.sync.consent.legacy": "암호화된 동기화를 사용하시겠습니까? WebBrain은 추억, 프로필 자동 완성 및 API 키 제공자 설정의 엔드 투 엔드 암호화 사본을 WebBrain Compass로 전송합니다. 채팅 기록과 OAuth 로그인은 동기화되지 않습니다.",
   "st.sync.consent.denied": "암호화된 동기화 권한이 부여되지 않았습니다.",
-  'st.providers.webgpu_note.body': '{modelLink} runs entirely in Chrome with no API endpoint. The first generation downloads about 4.85 GB and caches it in the browser. Test Connection checks the packaged runtime and hardware adapter without downloading the model.',
+  'st.providers.webgpu_note.body': '{modelLink} runs entirely in Chrome with no API endpoint. Download it in Settings > Providers > WebGPU or Apocalypse Mode, then use the nuclear control in standalone chat.',
 };

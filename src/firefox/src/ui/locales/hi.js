@@ -1091,5 +1091,5 @@ export default {
   "st.sync.confirm.reset": "क्या एन्क्रिप्टेड क्लाउड कॉपी को इस डिवाइस के मौजूदा WebBrain सेटअप से बदलना है?",
   "st.sync.consent.legacy": "एन्क्रिप्टेड सिंक चालू करें? WebBrain आपकी यादों, प्रोफ़ाइल ऑटोफ़िल और API-कुंजी प्रदाता सेटिंग्स की एंड-टू-एंड एन्क्रिप्टेड कॉपी WebBrain Compass को भेजेगा। चैट इतिहास और OAuth साइन-इन सिंक नहीं किए जाते।",
   "st.sync.consent.denied": "एन्क्रिप्टेड सिंक अनुमति नहीं दी गई थी.",
-  'st.providers.webgpu_note.body': '{modelLink} बिना किसी API एंडपॉइंट के पूरी तरह Chrome में चलता है। पहली जनरेशन लगभग 4.85 GB डाउनलोड करती है और इसे ब्राउज़र में कैश करती है। कनेक्शन जाँच मॉडल डाउनलोड किए बिना पैकेज किए गए रनटाइम और हार्डवेयर अडैप्टर की जाँच करती है।',
+  'st.providers.webgpu_note.body': '{modelLink} बिना किसी API एंडपॉइंट के पूरी तरह Chrome में चलता है। इसे Settings > Providers > WebGPU या Apocalypse Mode में डाउनलोड करें, फिर standalone chat में nuclear control का उपयोग करें।',
 };

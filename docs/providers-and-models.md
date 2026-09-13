@@ -47,7 +47,7 @@ class BaseLLMProvider {
 | `gpt4all` | `openai` | local | (loaded model) | Yes (default on) |
 | `local_openai_proxy` | `openai` | local | (required) | Off / manual toggle |
 | `unsloth` | `openai` | local | (required) | Off / manual toggle |
-| `webgpu` (Chromium) | `webgpu` | local | Nine shipped LFM2.5/Nanbeige/MiniCPM5/Compass/Bonsai presets; experimental custom HF ONNX repos | LFM2.5-VL presets |
+| `webgpu` (Chromium) | `webgpu` | local | Compass Tiny v2.1 (only preset); experimental custom HF ONNX repos | No |
 | `azure_openai` | `azure_openai` | cloud | (deployment) | Manual toggle |
 | `aws_bedrock` | `aws_bedrock` | cloud | (model id) | No |
 | `openai` | `openai` | cloud | `gpt-5.6-terra` | Model-name regex |
@@ -150,87 +150,33 @@ duplicate request.
 ### Local Providers
 
 On Chromium, **WebGPU (In-browser)** is an endpoint-free local provider. Its
-Apocalypse text picker offers nine shipped presets:
+Apocalypse text picker offers a single shipped preset:
 
-- [`LiquidAI/LFM2.5-2.6B-ONNX`](https://huggingface.co/LiquidAI/LFM2.5-2.6B-ONNX/)
-  (`q4f16`, about 1.55 GB) through the packaged Transformers.js 4.2 / ONNX
-  Runtime Web GPU worker. This remains the default. Enabling Apocalypse Mode
-  starts this download automatically.
-- [`LiquidAI/LFM2.5-1.2B-Instruct-ONNX`](https://huggingface.co/LiquidAI/LFM2.5-1.2B-Instruct-ONNX)
-  and [`LiquidAI/LFM2.5-1.2B-Thinking-ONNX`](https://huggingface.co/LiquidAI/LFM2.5-1.2B-Thinking-ONNX)
-  (`q4f16`, about 760 MB each). The Thinking preset preserves reasoning as
-  hidden reasoning content while Instruct uses the normal visible-answer path.
-- [`LiquidAI/LFM2.5-VL-1.6B-ONNX`](https://huggingface.co/LiquidAI/LFM2.5-VL-1.6B-ONNX)
-  (FP16 vision/text embeddings plus Q4 decoder, about 2.3 GB) and
-  [`LiquidAI/LFM2.5-VL-3B-ONNX`](https://huggingface.co/LiquidAI/LFM2.5-VL-3B-ONNX)
-  (the corresponding Transformers.js layout, about 4.0 GB). These two presets
-  advertise `supportsVision`, accept image blocks in normal provider chat, and
-  are marked **Multimodal** in the picker. The 1.6B export uses older ONNX
-  component filenames; WebBrain maps those filenames into the packaged
-  Transformers.js image-text runtime before loading it. LiquidAI's current VL
-  exports also nest their image metadata in `processor_config.json` and ship
-  `chat_template.jinja` separately; the local runtime loads that layout
-  explicitly instead of probing for the older `preprocessor_config.json`.
-- [`Michionlion/Nanbeige4.2-3B-ONNX-WebGPU`](https://huggingface.co/Michionlion/Nanbeige4.2-3B-ONNX-WebGPU)
-  (`q4f16`, about 3.1 GB), a browser export of
-  [`Nanbeige/Nanbeige4.2-3B`](https://huggingface.co/Nanbeige/Nanbeige4.2-3B)
-  that runs the same 22 physical layers twice and therefore keeps 44 KV-cache
-  slots. It publishes one WebGPU-fused graph under a non-default file name, so
-  the worker loads it with `model_file_name: 'model_webgpu_mlp'`; the external
-  data shards come from the repository's own `use_external_data_format`. The
-  graph needs the `com.microsoft::MatMulNBitsMlp` WebGPU kernel from the
-  vendored ONNX Runtime build and an adapter with `shader-f16`. Its practical
-  context is set to 4k rather than 16k because those 44 slots cost roughly
-  176 KB per token in FP16, on top of 3.1 GB of weights. The reference
-  implementation is the [Nanbeige Browser Lab](https://huggingface.co/spaces/borkiss/nanbeige4-2-3b-browser-lab)
-  Space, which drives the same export through a hand-written ONNX Runtime Web
-  loop rather than Transformers.js.
-- [`RASMUS/MiniCPM5-2B-ONNX`](https://huggingface.co/RASMUS/MiniCPM5-2B-ONNX)
-  (`q4f16`, about 1.83 GB), a browser-ready ONNX export of
-  [`openbmb/MiniCPM5-2B`](https://huggingface.co/openbmb/MiniCPM5-2B) built with
-  `onnxruntime-genai -e webgpu` (`MatMulNBits` + `GroupQueryAttention`, default
-  `onnx/model_q4f16.onnx` layout). It needs an adapter with `shader-f16` and
-  emits XML-style tool calls
-  (`<function name="..."><param name="...">...</param></function>`, CDATA-wrapped
-  when values contain `<`, `&`, or newlines), which the local fallback parser
-  accepts. Its practical context is 16k.
 - [`webbrain-one/webbrain-compass-tiny-v2.1`](https://huggingface.co/webbrain-one/webbrain-compass-tiny-v2.1)
   (`q4f16`, about 1.87 GB across two external-data shards), WebBrain's Compass
-  Tiny v2.1 fine-tune of MiniCPM5-2B for Compact tool routing (v2.1 export
-  revision with the WebGPU numerical-parity fix). Same default
-  `onnx/model_q4f16.onnx` layout and MiniCPM5 XML tool calls as the base export.
-  It runs greedy with thinking disabled (the worker default for non-reasoning
-  presets) at a practical 16k context. Experimental integration-testing release
-  under a noncommercial research license; see the repository README and
-  `PROVENANCE.json` before treating it as production.
-- [`prism-ml/Bonsai-27B-gguf`](https://huggingface.co/prism-ml/Bonsai-27B-gguf)
-  (`Q1_0`, about 3.8 GB) through a dedicated vendored [bitgpu](https://github.com/stfurkan/bitgpu)
-  worker. Bonsai is opt-in: WebBrain never auto-downloads the 27B weights.
-  It needs a high-end GPU (16 GB+ RAM/VRAM recommended). Mutually exclusive
-  WebGPU text runtimes are released when the selected preset changes; disk
-  caches may coexist.
+  Tiny v2.1 fine-tune of MiniCPM5-2B for Compact tool routing. It runs greedy
+  with thinking disabled through the packaged Transformers.js 4.2 / ONNX
+  Runtime Web GPU worker, and emits MiniCPM5 XML-style tool calls
+  (`<function name="..."><param name="...">...</param></function>`, CDATA-wrapped
+  when values contain `<`, `&`, or newlines), which the local fallback parser
+  accepts. Enabling Apocalypse Mode starts this download automatically.
 
 Custom Hugging Face repositories have not been tested and are likely not to
 work. They must be compatible with Transformers.js text generation, provide a
 `q4f16` ONNX variant, and use a chat template that accepts `tools`; WebBrain
 validates the template after loading and rejects incompatible repositories.
-Do not point Transformers.js at the Bonsai GGUF — 27B is not an ONNX pipeline.
 
-The provider defaults to the Compact prompt tier with a conservative 16k
-practical context setting (4k for Nanbeige and Bonsai). Text-only presets
-reject image blocks; the two LFM2.5-VL presets route image and text blocks
-through the local image-text runtime. LFM2.5 2.6B, 1.2B Thinking,
-Nanbeige4.2-3B, and MiniCPM5-2B use reasoning paths; WebBrain keeps completed thinking out of
-the visible answer and reports an error when a template that opens `<think>`
-in the generation prompt exhausts its output budget before closing it. Those
-four presets decode with their publisher's recommended sampling settings; the
-remaining ONNX presets stay greedy. Bonsai uses bitgpu
-`think: true` with a 128-token think budget and the same post-think visible-
-answer UX. Each repository is cached separately in Chrome.
-After downloading a preset in Apocalypse Mode, the WebGPU card in
+The provider is text-only and defaults to the Compact prompt tier with a
+32k context window. Budget roughly 4 GB of GPU headroom (about 1.87 GB of
+weights plus KV cache that grows with context length); on constrained GPUs,
+lower the context window on the WebGPU card in Settings → Providers (16384 is
+a safe fallback) and retry with a short prompt. Each repository is cached
+separately in Chrome.
+After downloading Compass in Apocalypse Mode, the WebGPU card in
 **Settings -> Providers** can be configured, tested, and selected as the normal
 chat provider. The nuclear standalone-chat control remains available as a
-per-run override that does not change the global selection.
+per-run override that does not change the global selection. Once its files are
+cached, Compass works without Apocalypse Mode enabled.
 **Test Connection** checks only the packaged runtime and hardware WebGPU
 adapter, so it does not trigger a model download. There is no API key, base
 URL, localhost server, or OpenAI-compatible endpoint. Firefox does not expose

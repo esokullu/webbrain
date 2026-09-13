@@ -1064,5 +1064,5 @@ export default {
   "st.sync.confirm.reset": "Die verschlüsselte Cloud-Kopie durch das aktuelle WebBrain-Setup dieses Geräts ersetzen?",
   "st.sync.consent.legacy": "Verschlüsselte Synchronisierung aktivieren? WebBrain überträgt eine Ende-zu-Ende-verschlüsselte Kopie Ihrer Erinnerungen, des automatischen Ausfüllens Ihres Profils und der Einstellungen des API-Schlüsselanbieters an die WebBrain Compass. Chatverlauf und OAuth-Anmeldungen werden nicht synchronisiert.",
   "st.sync.consent.denied": "Die Berechtigung zur verschlüsselten Synchronisierung wurde nicht erteilt.",
-  'st.providers.webgpu_note.body': '{modelLink} runs entirely in Chrome with no API endpoint. The first generation downloads about 4.85 GB and caches it in the browser. Test Connection checks the packaged runtime and hardware adapter without downloading the model.',
+  'st.providers.webgpu_note.body': '{modelLink} runs entirely in Chrome with no API endpoint. Download it in Settings > Providers > WebGPU or Apocalypse Mode, then use the nuclear control in standalone chat.',
 };

@@ -385,7 +385,7 @@ async function enrichWebGpuExecutionError(error) {
   const suffix = [
     details.length ? `GPU detail: ${details.join(' ')}` : '',
     adapter ? `Adapter: ${adapter}.` : '',
-    'Close other GPU-heavy tabs/apps and retry with a short prompt; a retry restarts the on-device worker and re-creates the session from the cached download, it does not re-download. If it persists, this GPU/driver cannot execute this model with the current WebGPU runtime.',
+    'Close other GPU-heavy tabs/apps and retry with a short prompt; a retry restarts the on-device worker and re-creates the session from the cached download, it does not re-download. On repeated out-of-memory failures, lower the context window on the WebGPU card in Settings > Providers (16384 is a safe fallback for Compass Tiny v2.1). If it persists, this GPU/driver cannot execute this model with the current WebGPU runtime.',
   ].filter(Boolean).join(' ');
   return new Error(`${error?.message || String(error)} ${suffix}`);
 }
