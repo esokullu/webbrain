@@ -63273,6 +63273,8 @@ test('WebGPU worker follows local text-generation and WebBrain VL vision contrac
     'LiquidAI VL repos must use their shipped nested processor config and standalone chat template');
   assert.match(worker, /clearLegacyLfm25VlWrongPrecisionCache[\s\S]*?wrongPrecisionFile/,
     'a retry must remove FP32 files cached by the old VL 1.6B dtype mapping');
+  assert.match(worker, /clearLegacyLfm25VlWrongPrecisionCache[\s\S]*?readyTextModelKeys\.delete[\s\S]*?webgpu-model-ready/,
+    'deleting legacy VL precision artifacts must invalidate in-memory and cached readiness markers');
   assert.match(chromeTransformers, /async function loadImageProcessorConfig[\s\S]*?source\?\.image_processor/,
     'the browser runtime must normalize nested Transformers v5 image processor metadata');
   assert.match(chromeTransformers, /options\.chat_template_file[\s\S]*?getModelText/,
@@ -63468,6 +63470,10 @@ test('WebGPU worker follows local text-generation and WebBrain VL vision contrac
   assert.match(host, /function findActiveTextTransfer/);
   assert.match(host, /activeTransfer/);
   assert.match(host, /probeExistingTextWorkerStatus/);
+  assert.match(host, /probeActive: true/,
+    'cross-worker transfer checks must query active transfers independently of a hard-coded model');
+  assert.match(worker, /payload\?\.probeActive === true[\s\S]*?textDownloadSnapshot/,
+    'text-download-status probes must return the active transfer when requested');
   assert.match(host, /sendTextWorkerMessage\(message\.model, 'text-download-status'/);
   assert.match(host, /'webgpu-dispose'/);
   assert.match(host, /'webgpu-vision-dispose'/);

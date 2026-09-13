@@ -891,6 +891,17 @@ self.addEventListener('message', async (event) => {
       return;
     }
     if (type === 'text-download-status') {
+      const modelId = String(payload?.modelId || '').trim();
+      if (!modelId || payload?.probeActive === true) {
+        if (['starting', 'queued', 'downloading', 'paused', 'stopping'].includes(textDownloadState.status)) {
+          self.postMessage({ id, ok: true, ...textDownloadSnapshot() });
+          return;
+        }
+        if (!modelId) {
+          self.postMessage({ id, ok: true, ...textDownloadSnapshot() });
+          return;
+        }
+      }
       self.postMessage({ id, ok: true, ...(await getTextDownloadStatus(payload?.modelId, payload?.dtype)) });
       return;
     }

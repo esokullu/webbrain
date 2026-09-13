@@ -895,7 +895,7 @@ async function downloadTextModel(payload, { onStarted } = {}) {
   if (tracksDifferentTransfer) {
     throw new Error(`Finish or stop the ${textDownloadState.modelId} download before downloading ${modelId}.`);
   }
-  await clearLegacyLfm25VlWrongPrecisionCache(modelId);
+  await clearLegacyLfm25VlWrongPrecisionCache(modelId, dtype);
   if (await isTextModelReady(modelId, dtype)) {
     if (payload?.requireTools === true) {
       const runtime = await getDownloadedTextRuntime(modelId, dtype, device, { localFilesOnly: true });
@@ -977,7 +977,7 @@ async function downloadTextModel(payload, { onStarted } = {}) {
   }
 }
 
-async function clearLegacyLfm25VlWrongPrecisionCache(modelId) {
+async function clearLegacyLfm25VlWrongPrecisionCache(modelId, dtype) {
   if (modelId !== WEBGPU_LFM25_VL_16B_MODEL_ID || typeof caches === 'undefined') return 0;
   const modelPath = `/${modelId}/`;
   const wrongPrecisionFile = /\/onnx\/(?:decoder|embed_images)\.onnx(?:_data(?:_\d+)?)?(?:[?#]|$)/;
@@ -989,6 +989,25 @@ async function clearLegacyLfm25VlWrongPrecisionCache(modelId) {
       const url = safeDecodedUrl(request.url);
       if (url.includes(modelPath) && wrongPrecisionFile.test(url) && await cache.delete(request)) {
         deletedEntries++;
+      }
+    }
+  }
+  if (deletedEntries > 0) {
+    for (const key of readyTextModelKeys) {
+      if (key === modelId || key.startsWith(`${modelId}|`)) {
+        readyTextModelKeys.delete(key);
+      }
+    }
+    const markerUrl = dtype ? textReadyMarkerUrl(modelId, dtype) : '';
+    for (const name of await caches.keys()) {
+      if (!/transformers/i.test(name)) continue;
+      const cache = await caches.open(name);
+      if (markerUrl) await cache.delete(markerUrl);
+      for (const request of await cache.keys()) {
+        const url = safeDecodedUrl(request.url);
+        if (url.includes('/.well-known/webgpu-model-ready/') && (url.includes(modelId) || url.includes(encodeURIComponent(modelId)))) {
+          await cache.delete(request);
+        }
       }
     }
   }
@@ -1487,6 +1506,16 @@ self.addEventListener('message', async event => {
     if (type === 'text-download-status') {
       const modelId = String(payload?.modelId || '').trim();
       const dtype = payload?.dtype || 'q4f16';
+      if (!modelId || payload?.probeActive === true) {
+        if (['starting', 'queued', 'downloading', 'paused', 'stopping'].includes(textDownloadState.status)) {
+          self.postMessage({ id, ok: true, ...textDownloadSnapshot() });
+          return;
+        }
+        if (!modelId) {
+          self.postMessage({ id, ok: true, ...textDownloadSnapshot() });
+          return;
+        }
+      }
       self.postMessage({ id, ok: true, ...(await getTextDownloadStatus(modelId, dtype)) });
       return;
     }

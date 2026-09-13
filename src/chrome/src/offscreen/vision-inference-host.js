@@ -331,24 +331,24 @@ function isActiveTextTransfer(state) {
   return TEXT_TRANSFER_STATUSES.has(String(state?.status || '').toLowerCase());
 }
 
-async function probeExistingTextWorkerStatus(modelId) {
+async function probeExistingTextWorkerStatus(modelId = '', options = {}) {
   try {
+    const payload = modelId ? { modelId, ...options } : { ...options };
     if (isBitgpuTextModel(modelId)) {
       if (!bonsaiWorker) return null;
-      return await sendBonsaiWorkerMessage('text-download-status', { modelId });
+      return await sendBonsaiWorkerMessage('text-download-status', payload);
     }
     if (!visionWorker) return null;
-    return await sendVisionWorkerMessage('text-download-status', { modelId });
+    return await sendVisionWorkerMessage('text-download-status', payload);
   } catch {
     return null;
   }
 }
 
 async function findActiveTextTransfer(requestedModel) {
-  const otherModel = isBitgpuTextModel(requestedModel)
-    ? WEBGPU_LFM25_MODEL_ID
-    : WEBGPU_BONSAI27_MODEL_ID;
-  const other = await probeExistingTextWorkerStatus(otherModel);
+  const other = isBitgpuTextModel(requestedModel)
+    ? await probeExistingTextWorkerStatus('', { probeActive: true })
+    : await probeExistingTextWorkerStatus(WEBGPU_BONSAI27_MODEL_ID, { probeActive: true });
   return isActiveTextTransfer(other) ? other : null;
 }
 
