@@ -821,13 +821,20 @@ This changelog was generated from the repository Git history and release tags. V
 
 ### Added
 - Added OpenRouter routing variant controls, including support for encoding **Exacto** as an OpenRouter model variant
+- Added WebBrain Compass Tiny v2.1 (`webbrain-one/webbrain-compass-tiny-v2.1`, ~1.87 GB) with a 32k context window as the sole exposed Chromium WebGPU text model
+- Added runtime support for LFM2.5 text/VL and Nanbeige ONNX exports in the underlying WebGPU worker
 
 ### Changed
 - Restored the **default compact activity history** behavior
+- Restored the Chromium WebGPU text provider in Settings and the normal chat provider picker with direct download controls and standalone operation outside Apocalypse Mode
 - Preserved OpenRouter model variants when routing, and synced routing after loaded model selection (Chrome + Firefox)
 - Updated provider compatibility handling for DeepSeek support
 
 ### Fixed
+- Fixed LFM2.5-VL downloads selecting FP32 artifacts, failing to mount the
+  corresponding external ONNX data, and probing LiquidAI's nonexistent legacy
+  processor filename; retries now discard obsolete wrong-precision cache
+  entries before fetching the intended FP16-encoder/Q4-decoder files
 - Improved completion recovery behavior around verification availability:
   - Allowed honest exit after failed verification
   - Preserved honest completion when verification is unavailable

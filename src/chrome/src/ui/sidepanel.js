@@ -7276,11 +7276,11 @@ function syncStandaloneWebgpuUi() {
   standaloneWebgpuBtn.classList.toggle('active', standaloneWebgpuActive);
   standaloneWebgpuBtn.setAttribute('aria-pressed', String(standaloneWebgpuActive));
   standaloneWebgpuBtn.title = !standaloneWebgpuEnabled
-    ? 'Enable Apocalypse Mode first'
+    ? 'WebGPU is unavailable'
     : standaloneWebgpuActive
       ? standaloneWebgpuReady
         ? 'Using WebGPU for this standalone chat'
-        : 'Using WebGPU for this standalone chat · download LFM2.5 2.6B before sending'
+        : 'Using WebGPU for this standalone chat · download Compass Tiny v2.1 before sending'
       : standaloneWebgpuReady
         ? 'Use WebGPU for this standalone chat'
         : 'Use WebGPU for this standalone chat · model download required';

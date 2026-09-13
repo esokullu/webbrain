@@ -46,7 +46,7 @@ class BaseLLMProvider {
 | `localai` | `openai` | local | (modèle chargé) | Métadonnées auto / surcharge |
 | `gpt4all` | `openai` | local | (modèle chargé) | Oui (activé par défaut) |
 | `local_openai_proxy` | `openai` | local | (requis) | Désactivée / bascule manuelle |
-| `webgpu` (Chromium) | `webgpu` | local | LFM2.5 2.6B (valeur par défaut) ou Bonsai 27B en option ; dépôt HF ONNX personnalisé expérimental | Non |
+| `webgpu` (Chromium) | `webgpu` | local | Compass Tiny v2.1 (préréglage unique) ; dépôt HF ONNX personnalisé expérimental | Non |
 | `azure_openai` | `azure_openai` | cloud | (déploiement) | Bascule manuelle |
 | `aws_bedrock` | `aws_bedrock` | cloud | (ID de modèle) | Non |
 | `openai` | `openai` | cloud | `gpt-5.6-terra` | Regex nom de modèle |
@@ -118,13 +118,12 @@ Entrées volontairement exclues : `github-models` (retrait de GitHub Models le
 ### Fournisseurs Locaux
 
 Sur Chromium, **WebGPU (dans le navigateur)** est un fournisseur local sans
-point de terminaison. Le sélecteur Apocalypse propose deux préréglages
-embarqués : **LFM2.5 2.6B** (`q4f16`, environ 1,55 Go) via Transformers.js /
-ONNX, toujours le défaut et téléchargé à l’activation d’Apocalypse ; et
-**Bonsai 27B** (`Q1_0`, environ 3,8 Go) via un worker bitgpu optionnel, jamais
-téléchargé automatiquement. Bonsai exige un GPU haut de gamme (16 Go+ de
-RAM/VRAM recommandés). LFM et Bonsai ne sont jamais résidents GPU en même
-temps. Firefox n’expose pas cette carte.
+point de terminaison. Le sélecteur Apocalypse propose un préréglage embarqué
+unique : **Compass Tiny v2.1** (`q4f16`, environ 1,87 Go) via Transformers.js /
+ONNX, téléchargé à l’activation d’Apocalypse. Une fois en cache, Compass
+fonctionne sans qu’Apocalypse soit activé. Le fournisseur est texte seul, avec
+une fenêtre de contexte de 32k par défaut ; sur les GPU limités, réduisez-la
+dans Settings → Providers si nécessaire. Firefox n’expose pas cette carte.
 
 Neuf fournisseurs à terminaison locale sont activés par défaut. Les moteurs de
 modèles n'exigent pas de clé sauf si le serveur utilise l'authentification ; la

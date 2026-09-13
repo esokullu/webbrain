@@ -1071,5 +1071,5 @@ export default {
   "st.sync.confirm.reset": "使用该设备当前的 WebBrain 设置替换加密的云副本？",
   "st.sync.consent.legacy": "开启加密同步？ WebBrain 会将您的记忆、个人资料自动填充和 API 密钥提供商设置的端到端加密副本传输到 WebBrain Compass。聊天历史记录和 OAuth 登录不同步。",
   "st.sync.consent.denied": "未授予加密同步权限。",
-  'st.providers.webgpu_note.body': '{modelLink} runs entirely in Chrome with no API endpoint. The first generation downloads about 4.85 GB and caches it in the browser. Test Connection checks the packaged runtime and hardware adapter without downloading the model.',
+  'st.providers.webgpu_note.body': '{modelLink} runs entirely in Chrome with no API endpoint. Download it in Settings > Providers > WebGPU or Apocalypse Mode, then use the nuclear control in standalone chat.',
 };

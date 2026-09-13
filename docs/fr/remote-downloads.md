@@ -22,7 +22,7 @@ WebBrain est conçu pour minimiser les dépendances réseau distantes. Tous les 
 
 | Composant | Serveur distant / Origine | Description de l'origine | Taille typique | Protocole / Méthode | Somme de contrôle & Intégrité | Destination de stockage local |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| **Modèle de texte WebGPU** | `huggingface.co` / CDN Hugging Face | Dépôt officiel Hugging Face hébergeant les poids ONNX / SafeTensors (ex. SmolLM2, Llama-3.2) | ~1,5 – 2,5 Go | HTTPS GET (pipeline Transformers.js) | Hash SHA-256 Git LFS Hugging Face | Cache API du navigateur & IndexedDB (`transformers-cache`) |
+| **Modèle de texte WebGPU** | `huggingface.co` / CDN Hugging Face | Poids ONNX `webbrain-one/webbrain-compass-tiny-v2.1`, l'unique préréglage texte embarqué | ~1,87 Go | HTTPS GET (pipeline Transformers.js) | Hash SHA-256 Git LFS Hugging Face | Cache API du navigateur & IndexedDB (`transformers-cache`) |
 | **Modèle de vision locale** | `huggingface.co` / CDN Hugging Face | Poids ONNX pour la description locale de captures d'écran (LFM2.5-VL / SmolVLM) | ~770 Mo | HTTPS GET (pipeline Transformers.js) | Hash SHA-256 Git LFS Hugging Face | Cache API du navigateur & IndexedDB (`transformers-cache`) |
 | **Pack de texte d'urgence & Index SQLite** | `github.com/webbrain-one/emergency-box-corpus` (GitHub Releases) | Fichiers de référence du domaine public, base SQLite FTS5 préconstruite et vecteurs E5 | ~245 Mo (ZIP compressé) | Flux de téléchargement continu avec reprise `Range: bytes={offset}-` | Comparaison stricte du hash **SHA-256** avec le descripteur de version avant activation | OPFS (`webbrain-offline-rag/emergency-box-text/`) & IndexedDB (`webbrain_offline_rag`) |
 | **Modèle sémantique multilingue** | `huggingface.co` / CDN Hugging Face (`Xenova/multilingual-e5-small`) | Poids ONNX pour le plongement de requêtes et la recherche vectorielle / réordonnancement | ~134 Mo | HTTPS GET (ONNX Runtime Web / Transformers.js) | Vérification SHA-256 via manifeste Transformers.js | Cache API du navigateur & IndexedDB (`transformers-cache`) |
@@ -40,7 +40,7 @@ Lors de l'activation du **Mode Apocalypse** (ou à l'ouverture de `apocalypse-mo
 ```mermaid
 flowchart TD
     A["L'utilisateur active le Mode Apocalypse"] --> B["1. Téléchargements parallèles"]
-    B --> C["Modèle de texte WebGPU (~1,5-2,5 Go)<br/><b>CDN Hugging Face</b>"]
+    B --> C["Modèle de texte Compass Tiny v2.1 (~1,87 Go)<br/><b>CDN Hugging Face</b>"]
     B --> D["Modèle de vision locale (~770 Mo)<br/><b>CDN Hugging Face</b>"]
     B --> E["Pack de texte d'urgence (~245-502 Mo)<br/><b>CDN GitHub Releases</b>"]
     B --> F["Modèle sémantique E5 (~134 Mo)<br/><b>CDN Hugging Face</b>"]
@@ -55,7 +55,7 @@ flowchart TD
 
 1. **Vérifications préalables** : Détection des capacités WebGPU et estimation de l'espace disque disponible.
 2. **Téléchargements parallèles en arrière-plan** :
-   - Modèle de texte WebGPU (~1,5-2,5 Go depuis Hugging Face)
+   - Modèle de texte Compass Tiny v2.1 (~1,87 Go depuis Hugging Face)
    - Modèle de vision locale (~770 Mo depuis Hugging Face)
    - Pack de texte d'urgence (~245 Mo depuis GitHub Releases $\rightarrow$ vérification SHA-256 $\rightarrow$ extraction $\rightarrow$ enregistrement SQLite FTS5 dans OPFS)
    - Modèle sémantique multilingue E5 (~134 Mo depuis Hugging Face)

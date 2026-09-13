@@ -18,11 +18,14 @@ fallback** control in **Settings → Multimodal → Vision** checks WebGPU suppo
 records explicit consent, and starts caching the approximately 810 MB model
 from Hugging Face. The download continues in the background, but screenshot
 operations report its status and never wait for it. Wikipedia archives still
-require their own confirmation. The local **text** model defaults to LFM2.5
-2.6B (about 1.55 GB), and that download starts automatically when Apocalypse
-Mode is enabled. Bonsai 27B is an opt-in second preset (about 3.8 GB, 16 GB+
-RAM/VRAM recommended) and is never auto-downloaded. Disabling local vision
-preserves its cache and any configured remote vision provider.
+require their own confirmation. The local **text** model is Compass Tiny v2.1
+(`webbrain-one/webbrain-compass-tiny-v2.1`, about 1.87 GB, 32k context
+window), and it is the only text preset the picker offers. That download
+starts automatically when Apocalypse Mode is enabled. Once downloaded,
+Compass works without Apocalypse Mode enabled: it is selectable as a chat
+provider under Settings → Providers and through the standalone chat control.
+Disabling
+local vision preserves its cache and any configured remote vision provider.
 
 Archive language is selected independently from WebBrain's interface language.
 The management page reads Kiwix's current OPDS catalog and offers a language plus
@@ -73,6 +76,9 @@ current entry.
 - The Chromium-only local vision model uses the browser's Transformers cache.
   After its explicitly requested download completes, its GPU allocations are
   released until WebBrain actually needs local screenshot analysis.
+- Every optional WebGPU text/VL preset has a separate completion marker and
+  cache entry. Switching presets can release the previous GPU runtime without
+  deleting its cached files.
 - An installed archive that later becomes unreadable because of corruption,
   eviction, or a revoked file grant moves from ready to an actionable error;
   WebBrain reports the read failure instead of misreporting an empty search.

@@ -1044,5 +1044,5 @@ export default {
   "st.sync.confirm.reset": "De gecodeerde cloudkopie vervangen door de huidige WebBrain-installatie van dit apparaat?",
   "st.sync.consent.legacy": "Versleutelde synchronisatie inschakelen? WebBrain verzendt een end-to-end gecodeerde kopie van uw herinneringen, automatisch aanvullen van profielen en API-sleutelproviderinstellingen naar WebBrain Compass. Chatgeschiedenis en OAuth-aanmeldingen worden niet gesynchroniseerd.",
   "st.sync.consent.denied": "Er is geen versleutelde synchronisatietoestemming verleend.",
-  'st.providers.webgpu_note.body': '{modelLink} runs entirely in Chrome with no API endpoint. The first generation downloads about 4.85 GB and caches it in the browser. Test Connection checks the packaged runtime and hardware adapter without downloading the model.',
+  'st.providers.webgpu_note.body': '{modelLink} runs entirely in Chrome with no API endpoint. Download it in Settings > Providers > WebGPU or Apocalypse Mode, then use the nuclear control in standalone chat.',
 };

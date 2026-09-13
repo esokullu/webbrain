@@ -1031,5 +1031,5 @@ export default {
   "st.sync.confirm.reset": "Zastąpić zaszyfrowaną kopię w chmurze bieżącą konfiguracją WebBrain tego urządzenia?",
   "st.sync.consent.legacy": "Włączyć szyfrowaną synchronizację? WebBrain prześle kompleksowo zaszyfrowaną kopię Twoich wspomnień, autouzupełniania profilu i ustawień dostawcy klucza API do WebBrain Compass. Historia czatów i logowania OAuth nie są synchronizowane.",
   "st.sync.consent.denied": "Nie przyznano zezwolenia na szyfrowaną synchronizację.",
-  'st.providers.webgpu_note.body': '{modelLink} runs entirely in Chrome with no API endpoint. The first generation downloads about 4.85 GB and caches it in the browser. Test Connection checks the packaged runtime and hardware adapter without downloading the model.',
+  'st.providers.webgpu_note.body': '{modelLink} runs entirely in Chrome with no API endpoint. Download it in Settings > Providers > WebGPU or Apocalypse Mode, then use the nuclear control in standalone chat.',
 };

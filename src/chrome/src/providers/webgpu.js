@@ -6,11 +6,29 @@ import { ensureOffscreen } from '../offscreen/ensure.js';
 export const WEBGPU_VISION_MODEL_ID = 'webbrain-one/webbrain-vl-2-450M-onnx';
 export const WEBGPU_MODEL_ID = 'LiquidAI/LFM2.5-2.6B-ONNX';
 export const WEBGPU_LFM25_MODEL_ID = WEBGPU_MODEL_ID;
+export const WEBGPU_LFM25_12B_INSTRUCT_MODEL_ID = 'LiquidAI/LFM2.5-1.2B-Instruct-ONNX';
+export const WEBGPU_LFM25_12B_THINKING_MODEL_ID = 'LiquidAI/LFM2.5-1.2B-Thinking-ONNX';
+export const WEBGPU_LFM25_VL_16B_MODEL_ID = 'LiquidAI/LFM2.5-VL-1.6B-ONNX';
+export const WEBGPU_LFM25_VL_3B_MODEL_ID = 'LiquidAI/LFM2.5-VL-3B-ONNX';
+export const WEBGPU_NANBEIGE42_3B_MODEL_ID = 'Michionlion/Nanbeige4.2-3B-ONNX-WebGPU';
+export const WEBGPU_MINICPM5_2B_MODEL_ID = 'RASMUS/MiniCPM5-2B-ONNX';
+export const WEBGPU_COMPASS_TINY_V2_MODEL_ID = 'webbrain-one/webbrain-compass-tiny-v2.1';
 export const WEBGPU_BONSAI27_MODEL_ID = 'prism-ml/Bonsai-27B-gguf';
 export const WEBGPU_DTYPE = 'q4f16';
 export const WEBGPU_BONSAI27_DTYPE = 'q1';
 export const WEBGPU_RUNTIME_ONNX = 'onnx';
+export const WEBGPU_RUNTIME_ONNX_VL = 'onnx-vl';
 export const WEBGPU_RUNTIME_BITGPU = 'bitgpu';
+export const WEBGPU_LFM25_VL_16B_DTYPE = Object.freeze({
+  embed_tokens: 'fp16',
+  vision_encoder: 'fp16',
+  decoder_model_merged: 'q4',
+});
+export const WEBGPU_LFM25_VL_3B_DTYPE = Object.freeze({
+  embed_tokens: 'fp16',
+  vision_encoder: 'fp16',
+  decoder_model_merged: 'q4',
+});
 export const WEBGPU_MODEL_PRESETS = Object.freeze([
   Object.freeze({
     id: WEBGPU_LFM25_MODEL_ID,
@@ -20,6 +38,85 @@ export const WEBGPU_MODEL_PRESETS = Object.freeze([
     dtype: WEBGPU_DTYPE,
     dtypeLabel: WEBGPU_DTYPE,
     contextWindow: 16384,
+    supportsVision: false,
+  }),
+  Object.freeze({
+    id: WEBGPU_LFM25_12B_INSTRUCT_MODEL_ID,
+    runtime: WEBGPU_RUNTIME_ONNX,
+    label: 'LFM2.5-1.2B-Instruct',
+    size: '760 MB',
+    dtype: WEBGPU_DTYPE,
+    dtypeLabel: WEBGPU_DTYPE,
+    contextWindow: 16384,
+    supportsVision: false,
+  }),
+  Object.freeze({
+    id: WEBGPU_LFM25_12B_THINKING_MODEL_ID,
+    runtime: WEBGPU_RUNTIME_ONNX,
+    label: 'LFM2.5-1.2B-Thinking',
+    size: '760 MB',
+    dtype: WEBGPU_DTYPE,
+    dtypeLabel: WEBGPU_DTYPE,
+    contextWindow: 16384,
+    supportsVision: false,
+  }),
+  Object.freeze({
+    id: WEBGPU_LFM25_VL_16B_MODEL_ID,
+    runtime: WEBGPU_RUNTIME_ONNX_VL,
+    label: 'LFM2.5-VL-1.6B',
+    size: '2.3 GB',
+    dtype: WEBGPU_LFM25_VL_16B_DTYPE,
+    dtypeLabel: 'FP16/Q4',
+    contextWindow: 16384,
+    supportsVision: true,
+  }),
+  Object.freeze({
+    id: WEBGPU_LFM25_VL_3B_MODEL_ID,
+    runtime: WEBGPU_RUNTIME_ONNX_VL,
+    label: 'LFM2.5-VL-3B',
+    size: '4.0 GB',
+    dtype: WEBGPU_LFM25_VL_3B_DTYPE,
+    dtypeLabel: 'FP16/Q4',
+    contextWindow: 16384,
+    supportsVision: true,
+  }),
+  Object.freeze({
+    id: WEBGPU_NANBEIGE42_3B_MODEL_ID,
+    runtime: WEBGPU_RUNTIME_ONNX,
+    label: 'Nanbeige4.2-3B',
+    size: '3.1 GB',
+    dtype: WEBGPU_DTYPE,
+    dtypeLabel: WEBGPU_DTYPE,
+    // The 44 logical KV slots cost about 176 KB per token in FP16, so a 16k
+    // window would need roughly 2.9 GB of cache on top of 3.1 GB of weights.
+    contextWindow: 4096,
+    supportsVision: false,
+  }),
+  Object.freeze({
+    id: WEBGPU_MINICPM5_2B_MODEL_ID,
+    runtime: WEBGPU_RUNTIME_ONNX,
+    label: 'MiniCPM5-2B',
+    size: '1.83 GB',
+    dtype: WEBGPU_DTYPE,
+    dtypeLabel: WEBGPU_DTYPE,
+    // OpenBMB's base context is 131k, but the practical browser setting stays
+    // at 16k like the LFM2.5 text presets: 42 GQA layers cost roughly 42 KB
+    // per token in FP16, so 16k needs about 672 MB of cache on top of weights.
+    contextWindow: 16384,
+    supportsVision: false,
+  }),
+  Object.freeze({
+    id: WEBGPU_COMPASS_TINY_V2_MODEL_ID,
+    runtime: WEBGPU_RUNTIME_ONNX,
+    label: 'Compass Tiny v2.1',
+    size: '1.87 GB',
+    dtype: WEBGPU_DTYPE,
+    dtypeLabel: WEBGPU_DTYPE,
+    // WebBrain Compass Tiny v2.1 fine-tune of MiniCPM5-2B for Compact tool
+    // routing. Same 42-layer GQA shape as the base export. Default browser
+    // context is 32k.
+    contextWindow: 32768,
+    supportsVision: false,
   }),
   Object.freeze({
     id: WEBGPU_BONSAI27_MODEL_ID,
@@ -29,9 +126,10 @@ export const WEBGPU_MODEL_PRESETS = Object.freeze([
     dtype: WEBGPU_BONSAI27_DTYPE,
     dtypeLabel: WEBGPU_BONSAI27_DTYPE,
     contextWindow: 4096,
+    supportsVision: false,
   }),
 ]);
-export const WEBGPU_MODEL_NOT_READY_ERROR = `${WEBGPU_MODEL_ID} is not downloaded. Open Apocalypse Mode > WebGPU to download it before chatting.`;
+export const WEBGPU_MODEL_NOT_READY_ERROR = `${WEBGPU_COMPASS_TINY_V2_MODEL_ID} is not downloaded. Open Settings > Providers > WebGPU or Apocalypse Mode > WebGPU to download it before chatting.`;
 // Chrome-only selection state. Keep this separate from the synced
 // `visionModel` endpoint so enabling the fallback never overwrites a user's
 // remote vision credentials or sends a Chromium-only provider type to Firefox.
@@ -82,7 +180,7 @@ export async function hasWebgpuVisionCache(modelId = WEBGPU_VISION_MODEL_ID) {
 
 export function normalizeWebgpuModelId(value) {
   let model = String(value || '').trim();
-  if (!model) return WEBGPU_MODEL_ID;
+  if (!model) return WEBGPU_COMPASS_TINY_V2_MODEL_ID;
   if (/^https?:\/\//i.test(model)) {
     let url;
     try {
@@ -131,6 +229,10 @@ export function webgpuModelDisplayName(modelId) {
 export function webgpuModelDtype(modelId, fallback = WEBGPU_DTYPE) {
   const normalized = normalizeWebgpuModelId(modelId);
   return webgpuModelPreset(normalized)?.dtype || fallback;
+}
+
+export function webgpuModelSupportsVision(modelId) {
+  return webgpuModelPreset(modelId)?.supportsVision === true;
 }
 
 export function webgpuModelRequiresToolTemplate(modelId) {
@@ -202,8 +304,8 @@ class WebGPUOffscreenProvider extends BaseLLMProvider {
 }
 
 /**
- * General, endpoint-free local provider. LFM2.5 2.6B uses Transformers.js ONNX;
- * Bonsai 27B uses the vendored bitgpu worker.
+ * General, endpoint-free local provider. LFM2.5 text and VL checkpoints use
+ * Transformers.js ONNX; Bonsai 27B uses the vendored bitgpu worker.
  */
 export class WebGPUProvider extends WebGPUOffscreenProvider {
   constructor(config = {}) {
@@ -220,7 +322,7 @@ export class WebGPUProvider extends WebGPUOffscreenProvider {
       device: 'webgpu',
       dtype,
       promptTier: config.promptTier || 'compact',
-      supportsVision: false,
+      supportsVision: webgpuModelSupportsVision(model),
       supportsAskStreaming: false,
     });
     this.model = model;
@@ -238,13 +340,17 @@ export class WebGPUProvider extends WebGPUOffscreenProvider {
     return true;
   }
 
+  get supportsVision() {
+    return webgpuModelSupportsVision(this.model);
+  }
+
   async chat(messages, options = {}) {
-    if (this._messagesContainImage(messages)) {
+    if (this._messagesContainImage(messages) && !this.supportsVision) {
       throw new Error('The WebGPU chat model is text-only. Configure a separate model under Settings -> Multimodal for screenshots.');
     }
     const download = await this.downloadStatus();
     if (!download.ready) {
-      throw new Error(`${webgpuModelDisplayName(this.model)} is not downloaded. Open Apocalypse Mode > WebGPU to download it before chatting.`);
+      throw new Error(`${webgpuModelDisplayName(this.model)} is not downloaded. Open Settings > Providers > WebGPU or Apocalypse Mode > WebGPU to download it before chatting.`);
     }
     const response = await this._dispatch({
       type: 'webgpu-chat',

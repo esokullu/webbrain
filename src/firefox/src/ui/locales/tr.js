@@ -1070,5 +1070,5 @@ export default {
   "st.sync.confirm.reset": "Şifrelenmiş bulut kopyası bu cihazın mevcut WebBrain kurulumuyla değiştirilsin mi?",
   "st.sync.consent.legacy": "Şifreli senkronizasyon açılsın mı? WebBrain, anılarınızın, profil otomatik doldurmanızın ve API anahtarı sağlayıcı ayarlarınızın uçtan uca şifrelenmiş bir kopyasını WebBrain Compass'a iletecektir. Sohbet geçmişi ve OAuth oturum açma işlemleri senkronize edilmez.",
   "st.sync.consent.denied": "Şifrelenmiş senkronizasyon izni verilmedi.",
-  'st.providers.webgpu_note.body': '{modelLink} runs entirely in Chrome with no API endpoint. The first generation downloads about 4.85 GB and caches it in the browser. Test Connection checks the packaged runtime and hardware adapter without downloading the model.',
+  'st.providers.webgpu_note.body': '{modelLink} runs entirely in Chrome with no API endpoint. Download it in Settings > Providers > WebGPU or Apocalypse Mode, then use the nuclear control in standalone chat.',
 };

@@ -1091,5 +1091,5 @@ export default {
   "st.sync.confirm.reset": "کپی ابری رمزگذاری شده با راه‌اندازی فعلی WebBrain این دستگاه جایگزین شود؟",
   "st.sync.consent.legacy": "همگام سازی رمزگذاری شده روشن شود؟ WebBrain یک نسخه رمزگذاری شده سرتاسر از خاطرات، تکمیل خودکار نمایه و تنظیمات ارائه دهنده کلید API شما را به WebBrain Compass منتقل می کند. سابقه گپ و ورود به سیستم OAuth همگام سازی نمی شوند.",
   "st.sync.consent.denied": "مجوز همگام‌سازی رمزگذاری شده داده نشد.",
-  'st.providers.webgpu_note.body': '{modelLink} بدون هیچ نقطهٔ پایانی API کاملاً در Chrome اجرا می‌شود. نخستین تولید حدود 4.85 GB دانلود می‌کند و آن را در مرورگر ذخیره می‌کند. آزمایش اتصال، محیط اجرایی بسته‌بندی‌شده و آداپتور سخت‌افزاری را بدون دانلود مدل بررسی می‌کند.',
+  'st.providers.webgpu_note.body': '{modelLink} بدون هیچ نقطهٔ پایانی API کاملاً در Chrome اجرا می‌شود. آن را در Settings > Providers > WebGPU یا حالت Apocalypse دانلود کنید، سپس از کنترل nuclear در standalone chat استفاده کنید.',
 };

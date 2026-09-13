@@ -357,7 +357,12 @@ export function parseToolCallsFromText(text, allowedNames) {
 
   const results = [];
   const parseXmlParamValue = (value) => {
-    const cleaned = String(value || '')
+    const raw = String(value || '');
+    // MiniCPM5 wraps values containing <, &, or newlines in CDATA. Extract
+    // the literal content first so the tag strip below does not eat it.
+    const cdataMatch = /^\s*<!\[CDATA\[([\s\S]*?)\]\]>\s*$/.exec(raw);
+    if (cdataMatch) return cdataMatch[1];
+    const cleaned = raw
       .replace(/<[^>]+>/g, '')
       .trim();
     if (!cleaned) return '';
@@ -392,19 +397,25 @@ export function parseToolCallsFromText(text, allowedNames) {
     /<functioncall>\s*([\s\S]*?)\s*<\/functioncall>/gi,
   ];
 
+  const wrapperSpans = [];
   for (const re of patterns) {
     let match;
     while ((match = re.exec(text)) !== null) {
+      const spanStart = match.index;
+      const spanEnd = match.index + match[0].length;
+      const pushedBefore = results.length;
       const inner = match[1].trim();
       const wrappedArray = parseWholeResponseJsonArray(inner, allowedNames);
       if (wrappedArray !== null) {
         results.push(...wrappedArray);
+        wrapperSpans.push({ start: spanStart, end: spanEnd });
         continue;
       }
       try {
         const obj = JSON.parse(inner);
         if (obj && obj.name && allowedNames.has(obj.name)) {
           results.push(obj);
+          wrapperSpans.push({ start: spanStart, end: spanEnd });
           continue;
         }
       } catch { /* not JSON — try call:name{} format below */ }
@@ -414,6 +425,7 @@ export function parseToolCallsFromText(text, allowedNames) {
       const bailingCall = parseBailingToolCall(inner);
       if (bailingCall) {
         results.push(bailingCall);
+        wrapperSpans.push({ start: spanStart, end: spanEnd });
         continue;
       }
 
@@ -429,26 +441,84 @@ export function parseToolCallsFromText(text, allowedNames) {
           results.push({ name: toolName, arguments: args });
         } catch { /* malformed arguments must never dispatch */ }
       }
+      if (results.length > pushedBefore) wrapperSpans.push({ start: spanStart, end: spanEnd });
     }
   }
 
   // XML-ish tool-call format used by some local/chat-template models:
   // <tool_call><function=click_ax><parameter=ref_id>ref_6</parameter>...
   const xmlToolRe = /<tool_call>\s*<function(?:\s*=\s*["']?([A-Za-z_]\w*)["']?|\s+name\s*=\s*["']?([A-Za-z_]\w*)["']?)\s*>\s*([\s\S]*?)\s*<\/function>\s*<\/tool_call>/gi;
+  const xmlToolSpans = [];
+  const xmlPushedSpans = [];
   let xmlMatch;
   while ((xmlMatch = xmlToolRe.exec(text)) !== null) {
+    xmlToolSpans.push({ start: xmlMatch.index, end: xmlMatch.index + xmlMatch[0].length });
     const toolName = xmlMatch[1] || xmlMatch[2];
     if (!allowedNames.has(toolName)) continue;
     const body = xmlMatch[3] || '';
     const args = {};
-    const paramRe = /<parameter(?:\s*=\s*["']?([A-Za-z_]\w*)["']?|\s+name\s*=\s*["']?([A-Za-z_]\w*)["']?)\s*>\s*([\s\S]*?)\s*<\/parameter>/gi;
+    const paramRe = /<(?:param|parameter)(?:\s*=\s*["']?([A-Za-z_]\w*)["']?|\s+name\s*=\s*["']?([A-Za-z_]\w*)["']?)\s*>\s*([\s\S]*?)\s*<\/(?:param|parameter)>/gi;
     let paramMatch;
     while ((paramMatch = paramRe.exec(body)) !== null) {
       const key = paramMatch[1] || paramMatch[2];
       if (!key) continue;
       args[key] = parseXmlParamValue(paramMatch[3]);
     }
+    xmlPushedSpans.push({ start: xmlMatch.index, end: xmlMatch.index + xmlMatch[0].length });
     results.push({ name: toolName, arguments: args });
+  }
+
+  // MiniCPM5-2B native tool format (no outer <tool_call> wrapper):
+  // <function name="click"><param name="ref_id">ref_6</param>...</function>
+  const minicpmFunctionRe = /<function(?:\s+name\s*=\s*["']([A-Za-z_]\w*)["']|\s*=\s*["']?([A-Za-z_]\w*)["']?)\s*>\s*([\s\S]*?)\s*<\/function>/gi;
+  const minicpmCandidates = [];
+  let minicpmMatch;
+  while ((minicpmMatch = minicpmFunctionRe.exec(text)) !== null) {
+    // Skip functions already consumed inside a <tool_call> wrapper above.
+    if (xmlToolSpans.some(span => minicpmMatch.index >= span.start && minicpmMatch.index < span.end)) continue;
+    // A bare call replaces the model's prose outright, so it must stand alone
+    // on its own line like the JSON fallback requires. Quoted or inline
+    // markup such as `Do not call <function ...>` never dispatches.
+    const matchEnd = minicpmMatch.index + minicpmMatch[0].length - 1;
+    if (!standsAloneOnLine(text, minicpmMatch.index, matchEnd)) continue;
+    const toolName = minicpmMatch[1] || minicpmMatch[2];
+    if (!allowedNames.has(toolName)) continue;
+    const body = minicpmMatch[3] || '';
+    const args = {};
+    const paramRe = /<(?:param|parameter)(?:\s*=\s*["']?([A-Za-z_]\w*)["']?|\s+name\s*=\s*["']?([A-Za-z_]\w*)["']?)\s*>\s*([\s\S]*?)\s*<\/(?:param|parameter)>/gi;
+    let paramMatch;
+    while ((paramMatch = paramRe.exec(body)) !== null) {
+      const key = paramMatch[1] || paramMatch[2];
+      if (!key) continue;
+      args[key] = parseXmlParamValue(paramMatch[3]);
+    }
+    minicpmCandidates.push({
+      start: minicpmMatch.index,
+      end: minicpmMatch.index + minicpmMatch[0].length,
+      call: { name: toolName, arguments: args },
+    });
+  }
+  // Dispatch bare calls only when the response holds nothing but call
+  // elements: explanatory prose on any other line (e.g. `Do not execute
+  // this:` above the call) rejects them, since a dispatch would discard that
+  // prose. Only successfully parsed wrapper calls count as call elements, so
+  // a disallowed or malformed call-shaped block still blocks bare dispatch.
+  if (minicpmCandidates.length > 0) {
+    const callSpans = [
+      ...wrapperSpans,
+      ...xmlPushedSpans,
+      ...minicpmCandidates.map(({ start, end }) => ({ start, end })),
+    ].sort((a, b) => a.start - b.start);
+    let remainder = '';
+    let cursor = 0;
+    for (const span of callSpans) {
+      if (span.start > cursor) remainder += text.slice(cursor, span.start);
+      cursor = Math.max(cursor, span.end);
+    }
+    remainder += text.slice(cursor);
+    if (remainder.trim() === '') {
+      for (const candidate of minicpmCandidates) results.push(candidate.call);
+    }
   }
 
   if (results.length === 0) {

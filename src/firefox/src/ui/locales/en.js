@@ -1093,5 +1093,5 @@ export default {
   'st.sync.confirm.reset': 'Replace the encrypted cloud copy with this device’s current WebBrain setup?',
   'st.sync.consent.legacy': 'Turn on encrypted sync? WebBrain will transmit an end-to-end encrypted copy of your memories, profile autofill, and API-key provider settings to WebBrain Compass. Chat history and OAuth sign-ins are not synced.',
   'st.sync.consent.denied': 'Encrypted sync permission was not granted.',
-  'st.providers.webgpu_note.body': '{modelLink} runs entirely in Chrome with no API endpoint. The first generation downloads about 4.85 GB and caches it in the browser. Test Connection checks the packaged runtime and hardware adapter without downloading the model.',
+  'st.providers.webgpu_note.body': '{modelLink} runs entirely in Chrome with no API endpoint. Download it in Settings > Providers > WebGPU or Apocalypse Mode, then use the nuclear control in standalone chat.',
 };

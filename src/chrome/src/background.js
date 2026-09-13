@@ -1,6 +1,6 @@
 import { ProviderManager } from './providers/manager.js';
 import {
-  WEBGPU_MODEL_ID,
+  WEBGPU_COMPASS_TINY_V2_MODEL_ID,
   WEBGPU_VISION_DOWNLOAD_STATE_KEY,
   WEBGPU_VISION_DOWNLOAD_STATE_MESSAGE,
   WEBGPU_VISION_MODEL_ID,
@@ -2173,14 +2173,12 @@ async function standaloneRunProviderId(msg) {
   if (providerId !== 'webgpu' || msg.standaloneChat !== true) {
     throw new Error('WebGPU is available only through the standalone chat control.');
   }
-  const apocalypse = await apocalypseController.handle('status');
-  if (apocalypse?.enabled !== true) {
-    throw new Error('Enable Apocalypse Mode before using WebGPU in standalone chat.');
-  }
+  // Compass Tiny v2.1 works independently of Apocalypse Mode: Apocalypse can
+  // still host the download, but its enabled toggle is no longer required.
   const config = providerManager.getAll().webgpu;
   const download = await providerManager.getWebgpuDownloadStatus().catch(() => null);
   if (!isShippedWebgpuPreset(config?.model) || download?.ready !== true) {
-    throw new Error(`Download ${webgpuModelDisplayName(config?.model || WEBGPU_MODEL_ID)} in Apocalypse Mode before using WebGPU in standalone chat.`);
+    throw new Error(`Download ${webgpuModelDisplayName(config?.model || WEBGPU_COMPASS_TINY_V2_MODEL_ID)} in Settings > Providers > WebGPU or Apocalypse Mode > WebGPU before using WebGPU in standalone chat.`);
   }
   return providerId;
 }
@@ -3938,17 +3936,17 @@ async function handleMessage(msg, sender) {
 
     case 'get_providers': {
       const providers = providerManager.getAll();
-      delete providers.webgpu;
       return { providers, active: providerManager.activeProviderId };
     }
 
     case 'get_standalone_webgpu_status': {
-      const apocalypse = await apocalypseController.handle('status');
       const config = providerManager.getAll().webgpu;
       const download = await providerManager.getWebgpuDownloadStatus().catch(() => null);
       return {
         ok: true,
-        enabled: apocalypse?.enabled === true,
+        // Compass Tiny v2.1 is usable without Apocalypse Mode; the control
+        // stays enabled and only tracks download readiness.
+        enabled: true,
         ready: isShippedWebgpuPreset(config?.model) && download?.ready === true,
         status: download?.status || 'not-downloaded',
       };
@@ -3965,9 +3963,6 @@ async function handleMessage(msg, sender) {
     }
 
     case 'set_active_provider': {
-      if (msg.providerId === 'webgpu') {
-        throw new Error('Use the nuclear WebGPU control in standalone chat.');
-      }
       await providerManager.setActive(msg.providerId);
       return { ok: true };
     }
