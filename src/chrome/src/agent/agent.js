@@ -77,6 +77,7 @@ import { isPdfHandlerTabUrl, pdfUrlFromTabUrl } from './pdf-extraction.js';
 import { normalizePdfOcrResult, PDF_OCR_SYSTEM_PROMPT } from './pdf-ocr.js';
 import * as trace from '../trace/recorder.js';
 import { buildTerminalRuntimeEvent, enqueueCloudRuntimeEvent, flushCloudRuntimeOutbox } from '../trace/cloud-runtime-outbox.js';
+import { buildShareGenerationItem, enqueueShareGeneration, flushShareOutbox } from '../trace/webbrain-share-outbox.js';
 import { normalizeRuntimeTraceConfig } from '../trace/runtime-config.js';
 import { tracesToMarkdown } from './trace-export.js';
 import { solveCaptcha, detectCaptcha, injectToken, captchaParamError, captchaTypesMatch, captchaWebsiteUrl } from './captcha-solver.js';
@@ -18739,6 +18740,34 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
         void flushCloudRuntimeOutbox(provider);
       } catch {}
     }
+    // Voluntary per-provider research sharing. The WebBrain Compass provider
+    // acts as transport (its API hosts the endpoint); which provider produced
+    // the run only decides whether capture is gated on (the per-provider
+    // toggle) and what attribution to record. Compass itself never goes
+    // through this path.
+    const shareTransport = this.providerManager?.getProvider?.('webbrain_cloud');
+    if (shareTransport
+        && provider?.config?.shareQueriesForResearch === true
+        && String(provider?.config?.providerName || '').toLowerCase() !== 'webbrain-cloud') {
+      try {
+        const shareSessionId = this._shareSessionId(this.conversationIds.get(tabId) || null);
+        if (shareSessionId) {
+          const shareItem = buildShareGenerationItem({
+            runId,
+            finalContent,
+            messages,
+            model: provider?.model,
+            mode,
+            provider: String(provider?.config?.providerName || '').toLowerCase(),
+            provider_name: String(provider?.config?.label || provider?.name || '').slice(0, 128),
+          });
+          if (shareItem) await enqueueShareGeneration({ session_id: shareSessionId, ...shareItem });
+        }
+      } catch {}
+    }
+    // Retry delivery of previously queued voluntary shares on every run end,
+    // mirroring the Compass runtime outbox pattern.
+    void flushShareOutbox(shareTransport);
     if (runId) {
       await this._flushAdapterMatchTraceRun(runId);
       try {
@@ -18757,6 +18786,16 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     // conversation-bound via _takeContinuationTaskToken.
     this._storeContinuationTaskToken(tabId);
     this._taskTokens.delete(tabId);
+  }
+
+  /**
+   * Namespace a conversation id into a backend-valid `share_` session id.
+   * Keeps only the charset the improvement endpoint accepts and stays well
+   * under the 200-char session id cap.
+   */
+  _shareSessionId(conversationId) {
+    const safe = String(conversationId || '').replace(/[^A-Za-z0-9._:-]/g, '').slice(0, 190);
+    return safe ? `share_${safe}` : '';
   }
 
   /**
@@ -40435,6 +40474,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     // to upload; the current run is enqueued at finalization and may complete
     // in the background or on the next Compass run.
     void flushCloudRuntimeOutbox(provider);
+    void flushShareOutbox(this.providerManager?.getProvider?.('webbrain_cloud'));
 
     if (typeof runOptions?.isDetachedStartCancelled === 'function'
         && runOptions.isDetachedStartCancelled()) {
@@ -41744,6 +41784,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
 
     const provider = this._activeProvider(tabId);
     void flushCloudRuntimeOutbox(provider);
+    void flushShareOutbox(this.providerManager?.getProvider?.('webbrain_cloud'));
 
     // The run claim owns cancellation reset. Stop during setup must survive.
     this._throwIfAborted(this._runAbortSignal(tabId));

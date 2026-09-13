@@ -727,6 +727,9 @@ export default {
   'st.providers.compat.value.system': "Hệ thống",
   'st.providers.compat.value.developer': "Nhà phát triển",
   'st.providers.webbrain_data_use.body': "Đã bao gồm việc sử dụng WebBrain Compass miễn phí hàng ngày. Mặc dù Trợ giúp cải thiện WebBrain được bật theo mặc định, nhưng các cuộc hội thoại Compass đã chọn có thể được giữ lại và sử dụng để đánh giá, cải tiến, tinh chỉnh và đào tạo. Hãy tắt tính năng này trong Chung → Nâng cao để loại trừ các tương tác Compass trong tương lai khỏi những mục đích sử dụng đó. <u>Các yêu cầu API theo mô hình cục bộ và mang theo của riêng bạn không bao giờ được WebBrain thu thập.</u> {privacyLink}. Để sử dụng nhiều hơn, hãy đăng ký tại {subscribeLink}. Quản lý thanh toán tại {accountLink}.",
+  'st.providers.share_research.label': "Share queries for research",
+  'st.providers.share_research.hint': "Send anonymized prompts and responses from this provider to WebBrain for evaluation and improvement, including the provider and model used. Images are stripped before sharing.",
+  'st.providers.share_research.confirm': "Share queries from this provider with WebBrain for research?\n\nWhen on, your prompts, responses, and tool interactions with this provider will be sent to WebBrain for evaluation and improvement, together with the provider and model name. You can turn this off at any time to stop future sharing.",
   'st.providers.webbrain_note.body': "Đã bao gồm việc sử dụng WebBrain Compass miễn phí hàng ngày. Yêu cầu đi qua api.webbrain.one; theo mặc định, chúng tôi ghi lại siêu dữ liệu để lấy hạn mức và gỡ lỗi, chứ không phải văn bản nhắc nhở, nội dung trang, ảnh chụp màn hình hoặc phản hồi mô hình. {privacyLink}. Để sử dụng nhiều hơn, hãy đăng ký tại {subscribeLink}. Quản lý thanh toán tại {accountLink}.",
   'st.providers.webbrain_note.privacy_link': "Chính sách bảo mật",
 

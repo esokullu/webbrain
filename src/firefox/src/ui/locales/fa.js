@@ -713,6 +713,9 @@ export default {
   'st.providers.compat.value.system': "سیستم",
   'st.providers.compat.value.developer': "توسعه دهنده",
   'st.providers.webbrain_data_use.body': "استفاده روزانه رایگان از WebBrain Compass گنجانده شده است. در حالی که Help Improve WebBrain به طور پیش‌فرض روشن است، مکالمات انتخابی Compass ممکن است حفظ شوند و برای ارزیابی، بهبود، تنظیم دقیق و آموزش استفاده شوند. آن را در عمومی ← پیشرفته خاموش کنید تا تعاملات Compass آینده را از این کاربردها حذف کنید. <u>درخواست‌های API مدل محلی و خود را بیاورید هرگز توسط WebBrain جمع‌آوری نمی‌شوند.</u> {privacyLink}. برای استفاده بیشتر، در {subscribeLink} مشترک شوید. صورتحساب را در {accountLink} مدیریت کنید.",
+  'st.providers.share_research.label': "Share queries for research",
+  'st.providers.share_research.hint': "Send anonymized prompts and responses from this provider to WebBrain for evaluation and improvement, including the provider and model used. Images are stripped before sharing.",
+  'st.providers.share_research.confirm': "Share queries from this provider with WebBrain for research?\n\nWhen on, your prompts, responses, and tool interactions with this provider will be sent to WebBrain for evaluation and improvement, together with the provider and model name. You can turn this off at any time to stop future sharing.",
   'st.providers.webbrain_note.body': "استفاده روزانه رایگان از WebBrain Compass گنجانده شده است. درخواست ها از طریق api.webbrain.one انجام می شود. به‌طور پیش‌فرض، فراداده‌ها را برای سهمیه و اشکال‌زدایی ثبت می‌کنیم، نه متن درخواستی، محتوای صفحه، عکس‌های صفحه، یا پاسخ‌های مدل. {privacyLink}. برای استفاده بیشتر، در {subscribeLink} مشترک شوید. صورتحساب را در {accountLink} مدیریت کنید.",
   'st.providers.webbrain_note.privacy_link': "سیاست حفظ حریم خصوصی",
 

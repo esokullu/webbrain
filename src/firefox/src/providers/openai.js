@@ -149,7 +149,7 @@ export class OpenAICompatibleProvider extends BaseLLMProvider {
     return options.signal ? { signal: options.signal } : {};
   }
 
-  _headers() {
+  _headers(options = {}) {
     const headers = { 'Content-Type': 'application/json' };
     const providerName = (this.config.providerName || '').toLowerCase();
     if (this.config.requiresApiKey && !String(this.config.apiKey || '').trim()) {
@@ -167,7 +167,8 @@ export class OpenAICompatibleProvider extends BaseLLMProvider {
     if (providerName === 'webbrain-cloud') {
       if (this.config.deviceGuid) headers['X-WebBrain-Device-Id'] = this.config.deviceGuid;
       headers['X-WebBrain-Client'] = 'extension';
-      headers['X-WebBrain-Help-Improve'] = this.config.helpImproveWebBrain === false ? '0' : '1';
+      const helpImprove = options.helpImprove ?? (this.config.helpImproveWebBrain === false ? '0' : '1');
+      headers['X-WebBrain-Help-Improve'] = helpImprove;
     }
     // OpenRouter-specific headers
     if (providerName === 'openrouter') {
@@ -194,6 +195,41 @@ export class OpenAICompatibleProvider extends BaseLLMProvider {
         method: 'POST',
         headers: this._headers(),
         body: JSON.stringify({ session_id: String(sessionId || ''), events }),
+        ...(controller ? { signal: controller.signal } : {}),
+      });
+      if (response.ok) return { ok: true, retryable: false, status: response.status };
+      try { await response.text(); } catch {}
+      return {
+        ok: false,
+        retryable: response.status === 408 || response.status === 429 || response.status >= 500,
+        status: response.status,
+      };
+    } catch {
+      return { ok: false, retryable: true, status: 0 };
+    } finally {
+      if (timer != null) clearTimeout(timer);
+    }
+  }
+
+  /**
+   * Transport for the voluntary per-provider "share queries for research"
+   * outbox. Only ever called on the WebBrain Compass provider instance (the
+   * share outbox routes through it because the backend lives on the WebBrain
+   * API). Consent is forced on for this call: the share_ session is what the
+   * user opted into by enabling the per-provider toggle, independent of the
+   * global Help Improve WebBrain switch.
+   */
+  async sendShareGeneration(sessionId, payload, { timeoutMs = 4000 } = {}) {
+    if (String(this.config.providerName || '').toLowerCase() !== 'webbrain-cloud') {
+      return { ok: false, retryable: false, status: 0 };
+    }
+    const controller = typeof AbortController === 'function' ? new AbortController() : null;
+    const timer = controller ? setTimeout(() => controller.abort(), Math.max(250, timeoutMs)) : null;
+    try {
+      const response = await fetchWithTimeout(`${this.baseUrl}/improvement/generations`, {
+        method: 'POST',
+        headers: this._headers({ helpImprove: '1' }),
+        body: JSON.stringify({ session_id: String(sessionId || ''), ...payload }),
         ...(controller ? { signal: controller.signal } : {}),
       });
       if (response.ok) return { ok: true, retryable: false, status: response.status };

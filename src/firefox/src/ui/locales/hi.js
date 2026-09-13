@@ -713,6 +713,9 @@ export default {
   'st.providers.compat.value.system': "सिस्टम",
   'st.providers.compat.value.developer': "डेवलपर",
   'st.providers.webbrain_data_use.body': "मुफ़्त दैनिक WebBrain Compass उपयोग शामिल है। जबकि हेल्प इम्प्रूव WebBrain डिफ़ॉल्ट रूप से चालू है, चयनित Compass वार्तालापों को बनाए रखा जा सकता है और मूल्यांकन, सुधार, फाइन-ट्यूनिंग और प्रशिक्षण के लिए उपयोग किया जा सकता है। उन उपयोगों से भविष्य के Compass इंटरैक्शन को बाहर करने के लिए इसे सामान्य → उन्नत में बंद करें। <u>स्थानीय-मॉडल और अपनी खुद की एपीआई अनुरोध WebBrain द्वारा कभी एकत्र नहीं किए जाते हैं।</u> {privacyLink}. अधिक उपयोग के लिए, {subscribeLink} पर सदस्यता लें। {accountLink} पर बिलिंग प्रबंधित करें।",
+  'st.providers.share_research.label': "Share queries for research",
+  'st.providers.share_research.hint': "Send anonymized prompts and responses from this provider to WebBrain for evaluation and improvement, including the provider and model used. Images are stripped before sharing.",
+  'st.providers.share_research.confirm': "Share queries from this provider with WebBrain for research?\n\nWhen on, your prompts, responses, and tool interactions with this provider will be sent to WebBrain for evaluation and improvement, together with the provider and model name. You can turn this off at any time to stop future sharing.",
   'st.providers.webbrain_note.body': "मुफ़्त दैनिक WebBrain Compass उपयोग शामिल है। अनुरोध api.webbrain.one से होकर गुजरते हैं; डिफ़ॉल्ट रूप से हम कोटा और डिबगिंग के लिए मेटाडेटा लॉग करते हैं, प्रॉम्प्ट टेक्स्ट, पेज सामग्री, स्क्रीनशॉट या मॉडल प्रतिक्रियाओं के लिए नहीं। {privacyLink}. अधिक उपयोग के लिए, {subscribeLink} पर सदस्यता लें। {accountLink} पर बिलिंग प्रबंधित करें।",
   'st.providers.webbrain_note.privacy_link': "गोपनीयता नीति",
 

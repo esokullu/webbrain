@@ -727,6 +727,9 @@ export default {
   'st.providers.compat.value.system': "সিস্টেম",
   'st.providers.compat.value.developer': "বিকাশকারী",
   'st.providers.webbrain_data_use.body': "বিনামূল্যে দৈনিক WebBrain Compass ব্যবহার অন্তর্ভুক্ত করা হয়েছে। WebBrain উন্নত করার জন্য সহায়তা ডিফল্টরূপে চালু থাকলেও, নির্বাচিত Compass কথোপকথনগুলি বজায় রাখা যেতে পারে এবং মূল্যায়ন, উন্নতি, ফাইন-টিউনিং এবং প্রশিক্ষণের জন্য ব্যবহার করা যেতে পারে। এই ব্যবহারগুলি থেকে ভবিষ্যতের Compass ইন্টারঅ্যাকশনগুলি বাদ দিতে সাধারণ → উন্নত-এ এটি বন্ধ করুন৷ <u>স্থানীয়-মডেল এবং আন-আপনার-নিজের API অনুরোধগুলি WebBrain দ্বারা সংগ্রহ করা হয় না।</u> {privacyLink}। আরও ব্যবহারের জন্য, {subscribeLink}-এ সদস্যতা নিন। {accountLink} এ বিলিং পরিচালনা করুন।",
+  'st.providers.share_research.label': "Share queries for research",
+  'st.providers.share_research.hint': "Send anonymized prompts and responses from this provider to WebBrain for evaluation and improvement, including the provider and model used. Images are stripped before sharing.",
+  'st.providers.share_research.confirm': "Share queries from this provider with WebBrain for research?\n\nWhen on, your prompts, responses, and tool interactions with this provider will be sent to WebBrain for evaluation and improvement, together with the provider and model name. You can turn this off at any time to stop future sharing.",
   'st.providers.webbrain_note.body': "বিনামূল্যে দৈনিক WebBrain Compass ব্যবহার অন্তর্ভুক্ত করা হয়েছে। অনুরোধগুলি api.webbrain.one এর মাধ্যমে যায়; ডিফল্টরূপে আমরা কোটা এবং ডিবাগিংয়ের জন্য মেটাডেটা লগ করি, প্রম্পট টেক্সট, পৃষ্ঠার বিষয়বস্তু, স্ক্রিনশট বা মডেল প্রতিক্রিয়া নয়। {privacyLink}। আরও ব্যবহারের জন্য, {subscribeLink}-এ সদস্যতা নিন। {accountLink} এ বিলিং পরিচালনা করুন।",
   'st.providers.webbrain_note.privacy_link': "গোপনীয়তা নীতি",
 

@@ -727,6 +727,9 @@ export default {
   'st.providers.compat.value.system': "Sistema",
   'st.providers.compat.value.developer': "Desenvolvedor",
   'st.providers.webbrain_data_use.body': "O uso diário gratuito do WebBrain Compass está incluído. Embora Ajudar a melhorar WebBrain esteja ativado por padrão, conversas selecionadas no Compass podem ser retidas e usadas para avaliação, melhoria, ajuste fino e treinamento. Desative-o em Geral → Avançado para excluir futuras interações no Compass desses usos. <u>Solicitações de API de modelo local e de criação própria nunca são coletadas por WebBrain.</u> {privacyLink}. Para mais uso, assine em {subscribeLink}. Gerencie o faturamento em {accountLink}.",
+  'st.providers.share_research.label': "Share queries for research",
+  'st.providers.share_research.hint': "Send anonymized prompts and responses from this provider to WebBrain for evaluation and improvement, including the provider and model used. Images are stripped before sharing.",
+  'st.providers.share_research.confirm': "Share queries from this provider with WebBrain for research?\n\nWhen on, your prompts, responses, and tool interactions with this provider will be sent to WebBrain for evaluation and improvement, together with the provider and model name. You can turn this off at any time to stop future sharing.",
   'st.providers.webbrain_note.body': "O uso diário gratuito do WebBrain Compass está incluído. As solicitações passam por api.webbrain.one; por padrão, registramos metadados para cota e depuração, e não texto de prompt, conteúdo de página, capturas de tela ou respostas de modelo. {privacyLink}. Para mais uso, assine em {subscribeLink}. Gerencie o faturamento em {accountLink}.",
   'st.providers.webbrain_note.privacy_link': "Política de privacidade",
 
