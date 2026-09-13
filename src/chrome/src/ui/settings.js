@@ -2763,6 +2763,11 @@ function renderWebgpuDownloadControl(id, state) {
   if (line) line.textContent = webgpuDownloadStatusLine(state);
 }
 
+function getDisplayedWebgpuModel(id = 'webgpu') {
+  const input = document.querySelector(`input[data-provider="${id}"][data-key="model"]`);
+  return String(input?.value || providersData[id]?.model || '').trim();
+}
+
 async function refreshWebgpuDownloadControls() {
   const ids = [...new Set([...document.querySelectorAll('.btn-webgpu-download')].map(btn => btn.dataset.provider))];
   if (!ids.length) {
@@ -2775,7 +2780,9 @@ async function refreshWebgpuDownloadControls() {
   let active = false;
   for (const id of ids) {
     try {
-      const state = normalizeWebgpuDownloadSnapshot(await sendToBackground('get_webgpu_download_status') || {});
+      const model = getDisplayedWebgpuModel(id);
+      const query = model ? { model } : {};
+      const state = normalizeWebgpuDownloadSnapshot(await sendToBackground('get_webgpu_download_status', query) || {});
       renderWebgpuDownloadControl(id, state);
       if (!state.ready && ['checking', 'downloading', 'paused', 'stopping'].includes(state.status)) active = true;
     } catch (error) {
@@ -2797,11 +2804,18 @@ async function handleWebgpuDownloadButton(btn) {
   webgpuDownloadActionInFlight = true;
   try {
     btn.disabled = true;
-    const state = normalizeWebgpuDownloadSnapshot(await sendToBackground('get_webgpu_download_status') || {});
+    // Persist any form changes on the WebGPU card first so the background
+    // provider configuration stays in sync with the user's selected model.
+    if (dirtyProviderIds.has(id)) {
+      await saveProvider(id, { showFlash: false });
+    }
+    const model = getDisplayedWebgpuModel(id);
+    const msg = model ? { model } : {};
+    const state = normalizeWebgpuDownloadSnapshot(await sendToBackground('get_webgpu_download_status', msg) || {});
     if (state.ready || ['downloading', 'paused'].includes(state.status)) {
-      await sendToBackground('stop_webgpu_download');
+      await sendToBackground('stop_webgpu_download', msg);
     } else {
-      await sendToBackground('start_webgpu_download');
+      await sendToBackground('start_webgpu_download', msg);
     }
   } catch (error) {
     const line = document.querySelector(`[data-webgpu-download-status="${id}"]`);
@@ -3478,6 +3492,7 @@ function renderProviders() {
       markProviderDirty(providerId);
       refreshProviderCompatibilitySummary(providerId);
       refreshVisionStatus(providerId);
+      if (providerId === 'webgpu') refreshWebgpuDownloadControls();
     });
   });
   document.querySelectorAll('select[data-key="visionMode"]').forEach((select) => {
@@ -3500,6 +3515,7 @@ function renderProviders() {
       refreshProviderCompatibilitySummary(input.dataset.provider);
       refreshVisionStatus(input.dataset.provider);
       if (providerDefinitionId(input.dataset.provider) === 'ollama') refreshVisionStatus(input.dataset.provider);
+      if (input.dataset.provider === 'webgpu' && input.dataset.key === 'model') refreshWebgpuDownloadControls();
     });
   });
   document.querySelectorAll('.btn-reset-compatibility').forEach((button) => {
