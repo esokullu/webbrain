@@ -8,6 +8,7 @@ import { AwsBedrockProvider } from './aws-bedrock.js';
 import {
   WebGPUProvider,
   WebGPUVisionProvider,
+  WEBGPU_COMPASS_TINY_V2_MODEL_ID,
   WEBGPU_DTYPE,
   WEBGPU_MODEL_ID,
   WEBGPU_RUNTIME_BITGPU,
@@ -628,10 +629,10 @@ export class ProviderManager {
         label: 'WebGPU (In-browser)',
         providerName: 'webgpu',
         baseUrl: '',
-        model: WEBGPU_MODEL_ID,
+        model: WEBGPU_COMPASS_TINY_V2_MODEL_ID,
         device: 'webgpu',
         dtype: WEBGPU_DTYPE,
-        contextWindow: 16384,
+        contextWindow: 32768,
         promptTier: 'compact',
         supportsAskStreaming: false,
         supportsVision: false,
@@ -965,6 +966,30 @@ export class ProviderManager {
       migrated.deepseek = {
         ...storedDeepSeek,
         baseUrl: DEEPSEEK_DEFAULT_BASE_URL,
+      };
+    }
+    // WebGPU now ships Compass Tiny v2.1 only (32k). Migrate untouched
+    // LFM2.5 2.6B 16k defaults so fresh and uncustomized installs land on
+    // Compass without wiping an explicitly chosen model.
+    if (migrated.webgpu
+      && String(migrated.webgpu.model || '').trim() === WEBGPU_MODEL_ID
+      && migrated.webgpu.configured !== true
+      && Number(migrated.webgpu.contextWindow) === 16384) {
+      migrated.webgpu = {
+        ...migrated.webgpu,
+        model: WEBGPU_COMPASS_TINY_V2_MODEL_ID,
+        contextWindow: 32768,
+      };
+    }
+    // Compass itself shipped at 16k before the 32k default. Bump untouched
+    // Compass 16k configs to 32k.
+    if (migrated.webgpu
+      && String(migrated.webgpu.model || '').trim() === WEBGPU_COMPASS_TINY_V2_MODEL_ID
+      && migrated.webgpu.configured !== true
+      && Number(migrated.webgpu.contextWindow) === 16384) {
+      migrated.webgpu = {
+        ...migrated.webgpu,
+        contextWindow: 32768,
       };
     }
     this._migrateUntouchedShippedDefaults(migrated);
@@ -1722,17 +1747,17 @@ export class ProviderManager {
     return this._webgpuProvider().downloadStatus(msg);
   }
 
-  /** Configure a shipped Apocalypse text preset and start LFM's cache fill. */
+  /** Configure a shipped Apocalypse text preset and start Compass cache fill. */
   async enableAndStartWebgpuTextDownload() {
     try {
       const currentModel = this.getAll().webgpu?.model;
       const preset = webgpuModelPreset(currentModel);
-      const model = preset?.id || WEBGPU_MODEL_ID;
+      const model = preset?.id || WEBGPU_COMPASS_TINY_V2_MODEL_ID;
       const dtype = preset?.dtype || webgpuModelDtype(model, WEBGPU_DTYPE);
       await this.updateProvider('webgpu', {
         model,
         dtype,
-        contextWindow: preset?.contextWindow || 16384,
+        contextWindow: preset?.contextWindow || 32768,
         promptTier: 'compact',
       });
       const provider = this._webgpuProvider();
@@ -1783,7 +1808,7 @@ export class ProviderManager {
     if (nextProvider instanceof WebGPUProvider) {
       const download = await nextProvider.downloadStatus();
       if (!download.ready) {
-        throw new Error(`Download ${webgpuModelDisplayName(nextProvider.model)} in Apocalypse Mode > WebGPU before selecting it for chat.`);
+        throw new Error(`Download ${webgpuModelDisplayName(nextProvider.model)} in Settings > Providers > WebGPU or Apocalypse Mode > WebGPU before selecting it for chat.`);
       }
     }
     this.activeProviderId = id;
@@ -1822,6 +1847,12 @@ export class ProviderManager {
       ...updates,
       configured: id !== WEBBRAIN_CLOUD_PROVIDER_ID && (markConfigured || current.configured === true),
     };
+    if (id === 'webgpu' && Object.hasOwn(updates, 'model')) {
+      const preset = webgpuModelPreset(merged.model);
+      if (preset?.contextWindow && !Object.hasOwn(updates, 'contextWindow')) {
+        merged.contextWindow = preset.contextWindow;
+      }
+    }
     if (this._providerDefinitionId(id, current) === 'ollama') {
       merged.visionMode = OLLAMA_VISION_MODES.has(merged.visionMode) ? merged.visionMode : 'auto';
       delete merged.supportsVision;

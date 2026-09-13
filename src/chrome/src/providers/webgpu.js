@@ -108,15 +108,14 @@ export const WEBGPU_MODEL_PRESETS = Object.freeze([
   Object.freeze({
     id: WEBGPU_COMPASS_TINY_V2_MODEL_ID,
     runtime: WEBGPU_RUNTIME_ONNX,
-    label: 'Compass Tiny v2',
+    label: 'Compass Tiny v2.1',
     size: '1.87 GB',
     dtype: WEBGPU_DTYPE,
     dtypeLabel: WEBGPU_DTYPE,
-    // WebBrain Compass Tiny v2 fine-tune of MiniCPM5-2B for Compact tool
-    // routing. Same 42-layer GQA shape as the base export, so the practical
-    // browser setting stays at 16k. Tested with thinking disabled and greedy
-    // decoding, which is the worker's default path for non-reasoning presets.
-    contextWindow: 16384,
+    // WebBrain Compass Tiny v2.1 fine-tune of MiniCPM5-2B for Compact tool
+    // routing. Same 42-layer GQA shape as the base export. Default browser
+    // context is 32k.
+    contextWindow: 32768,
     supportsVision: false,
   }),
   Object.freeze({
@@ -130,7 +129,7 @@ export const WEBGPU_MODEL_PRESETS = Object.freeze([
     supportsVision: false,
   }),
 ]);
-export const WEBGPU_MODEL_NOT_READY_ERROR = `${WEBGPU_MODEL_ID} is not downloaded. Open Apocalypse Mode > WebGPU to download it before chatting.`;
+export const WEBGPU_MODEL_NOT_READY_ERROR = `${WEBGPU_MODEL_ID} is not downloaded. Open Settings > Providers > WebGPU or Apocalypse Mode > WebGPU to download it before chatting.`;
 // Chrome-only selection state. Keep this separate from the synced
 // `visionModel` endpoint so enabling the fallback never overwrites a user's
 // remote vision credentials or sends a Chromium-only provider type to Firefox.
@@ -351,7 +350,7 @@ export class WebGPUProvider extends WebGPUOffscreenProvider {
     }
     const download = await this.downloadStatus();
     if (!download.ready) {
-      throw new Error(`${webgpuModelDisplayName(this.model)} is not downloaded. Open Apocalypse Mode > WebGPU to download it before chatting.`);
+      throw new Error(`${webgpuModelDisplayName(this.model)} is not downloaded. Open Settings > Providers > WebGPU or Apocalypse Mode > WebGPU to download it before chatting.`);
     }
     const response = await this._dispatch({
       type: 'webgpu-chat',

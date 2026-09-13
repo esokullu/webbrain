@@ -35580,9 +35580,10 @@ test('Apocalypse Mode keeps summary stats in its header and optional Wikipedia i
         'chrome: Emergency Box must render locked until basic setup is ready');
       assert.match(pageScript, /function updateEmergencyBoxGate\(readinessKind\)[\s\S]*?const locked = readinessKind !== 'ready'/,
         'chrome: Emergency Box is not gated by aggregate readiness');
-      assert.match(pageScript, /update_provider[\s\S]*?providerId: 'webgpu'[\s\S]*?model,[\s\S]*?contextWindow: preset\.contextWindow/, 'chrome: Apocalypse Mode does not configure the selected WebGPU download');
+      assert.match(pageScript, /update_provider[\s\S]*?providerId: 'webgpu'[\s\S]*?model,[\s\S]*?contextWindow: preset\?\.contextWindow/, 'chrome: Apocalypse Mode does not configure the selected WebGPU download');
       assert.match(pageHtml, /data-webgpu-text-preset/, 'chrome: the local text model picker is missing');
-      assert.match(pageHtml, /value="prism-ml\/Bonsai-27B-gguf"/, 'chrome: the Bonsai 27B preset is missing');
+      assert.match(pageHtml, /value="webbrain-one\/webbrain-compass-tiny-v2\.1"/, 'chrome: the Compass Tiny v2.1 preset is missing');
+      assert.doesNotMatch(pageHtml, /value="prism-ml\/Bonsai-27B-gguf"/, 'chrome: only Compass Tiny v2.1 should be offered');
       assert.doesNotMatch(pageScript, /testWebgpuTextModel|providerCommand\('test_provider', \{ providerId: 'webgpu' \}\)/,
         'chrome: the removed local text Test action is still wired');
       assert.match(pageScript, /testWebgpuVisionModel[\s\S]*?providerCommand\('test_vision_provider'\)/,
@@ -49062,15 +49063,15 @@ test('standalone WebGPU control uses a per-run provider without changing global 
   assert.match(panel, /providerSelect\.disabled = standaloneWebgpuActive[\s\S]*?providerPickerBtn\.disabled = standaloneWebgpuActive/,
     'the ordinary provider picker should lock while the WebGPU override is active');
   assert.match(panel, /standaloneWebgpuBtn\.disabled = !standaloneWebgpuEnabled/,
-    'the nuclear control should be clickable whenever Apocalypse Mode is enabled');
+    'the nuclear control should be clickable whenever WebGPU is available');
   assert.match(panel, /function standaloneWebgpuRunPayload\(\) \{[\s\S]*?return isStandaloneWindow && standaloneWebgpuActive[\s\S]*?\? \{ providerId: 'webgpu', \.\.\.offlineRagRunPayload\(\) \}[\s\S]*?: \{\};/,
     'standalone WebGPU state is not carried as a run-scoped override');
   assert.doesNotMatch(background, /case 'get_providers': \{[\s\S]*?delete providers\.webgpu/,
     'WebGPU should remain available in the ordinary provider picker');
   assert.match(background, /case 'set_active_provider': \{\s*await providerManager\.setActive\(msg\.providerId\);/,
     'WebGPU should use the ordinary global provider activation path');
-  assert.match(background, /case 'get_standalone_webgpu_status': \{[\s\S]*?enabled: apocalypse\?\.enabled === true[\s\S]*?ready:/,
-    'the standalone control should distinguish Apocalypse enablement from model readiness');
+  assert.match(background, /case 'get_standalone_webgpu_status': \{[\s\S]*?enabled: true,[\s\S]*?ready:/,
+    'the standalone control should stay enabled independently of Apocalypse Mode and only track model readiness');
   assert.match(background, /type: 'apocalypse-mode-state'[\s\S]*?enabled: snapshot\.enabled === true/,
     'open standalone windows should be notified when Apocalypse Mode changes');
   assert.match(agentSource, /this\._runProviderOverrides = new Map\(\)/);
@@ -49090,23 +49091,19 @@ test('standalone WebGPU control uses a per-run provider without changing global 
   const helperStart = background.indexOf('async function standaloneRunProviderId(msg) {');
   const helperEnd = background.indexOf('\n}', helperStart) + 2;
   assert.ok(helperStart >= 0 && helperEnd > helperStart, 'standalone WebGPU background guard is missing');
-  const apocalypseState = { enabled: true };
   const webgpuState = { ready: true };
-  let webgpuModel = 'LiquidAI/LFM2.5-2.6B-ONNX';
+  let webgpuModel = 'webbrain-one/webbrain-compass-tiny-v2.1';
   const standaloneRunProviderId = vm.runInNewContext(
     `(${background.slice(helperStart, helperEnd)})`,
     {
       WEBGPU_MODEL_ID: 'LiquidAI/LFM2.5-2.6B-ONNX',
       isShippedWebgpuPreset: (model) => [
-        'LiquidAI/LFM2.5-2.6B-ONNX',
+        'webbrain-one/webbrain-compass-tiny-v2.1',
         'prism-ml/Bonsai-27B-gguf',
       ].includes(model),
       webgpuModelDisplayName: (model) => (
-        model === 'prism-ml/Bonsai-27B-gguf' ? 'Bonsai 27B' : 'LFM2.5 2.6B'
+        model === 'prism-ml/Bonsai-27B-gguf' ? 'Bonsai 27B' : 'Compass Tiny v2.1'
       ),
-      apocalypseController: {
-        handle: async () => ({ enabled: apocalypseState.enabled }),
-      },
       providerManager: {
         getAll: () => ({
           webgpu: { model: webgpuModel },
@@ -49123,17 +49120,12 @@ test('standalone WebGPU control uses a per-run provider without changing global 
   assert.equal(
     await standaloneRunProviderId({ providerId: 'webgpu', standaloneChat: true }),
     'webgpu',
+    'Compass Tiny v2.1 must work without Apocalypse Mode enabled',
   );
-  apocalypseState.enabled = false;
-  await assert.rejects(
-    standaloneRunProviderId({ providerId: 'webgpu', standaloneChat: true }),
-    /Enable Apocalypse Mode/,
-  );
-  apocalypseState.enabled = true;
   webgpuState.ready = false;
   await assert.rejects(
     standaloneRunProviderId({ providerId: 'webgpu', standaloneChat: true }),
-    /Download LFM2\.5 2\.6B/,
+    /Download Compass Tiny v2\.1/,
   );
   webgpuState.ready = true;
   webgpuModel = 'prism-ml/Bonsai-27B-gguf';
@@ -62437,10 +62429,11 @@ test('Chrome exposes separate endpoint-free WebGPU text and vision providers', a
       'switching the shipped vision model must require explicit consent again');
     assert.equal(WEBGPU_VISION_READY_MARKER_VERSION, 2);
     assert.match(webgpuVisionReadyMarkerUrl(), /\/webgpu-vision-ready\/v2\/webbrain-one%2Fwebbrain-vl-2-450M-onnx$/);
-    assert.equal(webgpuConfig.model, WEBGPU_MODEL_ID);
+    assert.equal(webgpuConfig.model, WEBGPU_COMPASS_TINY_V2_MODEL_ID);
     assert.equal(WEBGPU_MODEL_ID, WEBGPU_LFM25_MODEL_ID);
     assert.equal(webgpuConfig.baseUrl, '');
     assert.equal(webgpuConfig.dtype, WEBGPU_DTYPE);
+    assert.equal(webgpuConfig.contextWindow, 32768);
     const generalProvider = manager._createProvider('webgpu', webgpuConfig);
     assert.ok(generalProvider instanceof WebGPUProvider);
     assert.equal(generalProvider.promptTier, 'compact');
@@ -62463,7 +62456,7 @@ test('Chrome exposes separate endpoint-free WebGPU text and vision providers', a
       { id: WEBGPU_LFM25_VL_3B_MODEL_ID, label: 'LFM2.5-VL-3B', runtime: 'onnx-vl', contextWindow: 16384, supportsVision: true },
       { id: WEBGPU_NANBEIGE42_3B_MODEL_ID, label: 'Nanbeige4.2-3B', runtime: 'onnx', contextWindow: 4096, supportsVision: false },
       { id: WEBGPU_MINICPM5_2B_MODEL_ID, label: 'MiniCPM5-2B', runtime: 'onnx', contextWindow: 16384, supportsVision: false },
-      { id: WEBGPU_COMPASS_TINY_V2_MODEL_ID, label: 'Compass Tiny v2', runtime: 'onnx', contextWindow: 16384, supportsVision: false },
+      { id: WEBGPU_COMPASS_TINY_V2_MODEL_ID, label: 'Compass Tiny v2.1', runtime: 'onnx', contextWindow: 32768, supportsVision: false },
       { id: WEBGPU_BONSAI27_MODEL_ID, label: 'Basic text model', runtime: 'bitgpu', contextWindow: 4096, supportsVision: false },
     ]);
     assert.equal(new WebGPUProvider({ model: WEBGPU_BONSAI27_MODEL_ID }).dtype, 'q1');
@@ -62490,13 +62483,13 @@ test('Chrome exposes separate endpoint-free WebGPU text and vision providers', a
     assert.deepEqual(localResult.toolCalls, returnedToolCalls);
     assert.deepEqual(sentMessages[1], {
       type: 'webgpu-download-status',
-      model: WEBGPU_MODEL_ID,
+      model: WEBGPU_COMPASS_TINY_V2_MODEL_ID,
       runtime: 'onnx',
       dtype: WEBGPU_DTYPE,
     });
     assert.deepEqual(sentMessages[2], {
       type: 'webgpu-chat',
-      model: WEBGPU_MODEL_ID,
+      model: WEBGPU_COMPASS_TINY_V2_MODEL_ID,
       runtime: 'onnx',
       device: 'webgpu',
       dtype: WEBGPU_DTYPE,
@@ -62560,7 +62553,7 @@ test('Chrome exposes separate endpoint-free WebGPU text and vision providers', a
       generalProvider.chat([{ role: 'user', content: 'Do not download implicitly.' }]),
       /not downloaded/,
     );
-    await assert.rejects(manager.setActive('webgpu'), /Download Minimal/);
+    await assert.rejects(manager.setActive('webgpu'), /Download Compass Tiny/);
     assert.equal(manager.activeProviderId, 'remote', 'an uncached WebGPU provider must not become active');
 
     textModelReady = true;
@@ -62570,7 +62563,7 @@ test('Chrome exposes separate endpoint-free WebGPU text and vision providers', a
       error => error.isAskStreamTerminalError === true && /OrtRun/.test(error.message),
       'fatal WebGPU execution failures should bypass the generic network retry',
     );
-    webgpuExecutionError = `${WEBGPU_MODEL_ID} used its generation budget before finishing reasoning. Retry with a shorter prompt.`;
+    webgpuExecutionError = `${WEBGPU_COMPASS_TINY_V2_MODEL_ID} used its generation budget before finishing reasoning. Retry with a shorter prompt.`;
     await assert.rejects(
       generalProvider.chat([{ role: 'user', content: 'Exercise the deterministic token limit.' }]),
       error => error.isAskStreamTerminalError === true && /generation budget/.test(error.message),
@@ -63084,7 +63077,7 @@ test('local vision readiness probes cache before advertising a ready fallback', 
   }
 });
 
-test('Apocalypse text download fixes the LFM preset and avoids duplicate starts', async () => {
+test('Apocalypse text download fixes the Compass preset and avoids duplicate starts', async () => {
   const previousChrome = globalThis.chrome;
   const sentMessages = [];
   const storageWrites = [];
@@ -63092,7 +63085,7 @@ test('Apocalypse text download fixes the LFM preset and avoids duplicate starts'
   let downloadState = {
     status: 'not-downloaded',
     ready: false,
-    modelId: WEBGPU_MODEL_ID,
+    modelId: WEBGPU_COMPASS_TINY_V2_MODEL_ID,
     dtype: WEBGPU_DTYPE,
   };
   try {
@@ -63150,9 +63143,9 @@ test('Apocalypse text download fixes the LFM preset and avoids duplicate starts'
       'webgpu-download-start',
     ]);
     const config = manager.getAll().webgpu;
-    assert.equal(config.model, WEBGPU_MODEL_ID);
+    assert.equal(config.model, WEBGPU_COMPASS_TINY_V2_MODEL_ID);
     assert.equal(config.dtype, WEBGPU_DTYPE);
-    assert.equal(config.contextWindow, 16384);
+    assert.equal(config.contextWindow, 32768);
     assert.equal(config.promptTier, 'compact');
     assert.equal(config.configured, true);
     assert.equal(manager.activeProviderId, 'webbrain_cloud', 'automatic download must not select WebGPU for normal chat');
@@ -63166,20 +63159,20 @@ test('Apocalypse text download fixes the LFM preset and avoids duplicate starts'
     assert.deepEqual(sentMessages.map(message => message.type), [
       'webgpu-probe',
       'webgpu-download-status',
-    ], 'an in-progress LFM download must not be queued twice');
+    ], 'an in-progress Compass download must not be queued twice');
 
     sentMessages.length = 0;
     hasWebGPU = false;
     downloadState = {
       status: 'not-downloaded',
       ready: false,
-      modelId: WEBGPU_MODEL_ID,
+      modelId: WEBGPU_COMPASS_TINY_V2_MODEL_ID,
       dtype: WEBGPU_DTYPE,
     };
     const unsupported = await manager.enableAndStartWebgpuTextDownload();
     assert.equal(unsupported.ok, false);
     assert.deepEqual(sentMessages.map(message => message.type), ['webgpu-probe'],
-      'unsupported hardware must fail before starting the LFM download');
+      'unsupported hardware must fail before starting the Compass download');
   } finally {
     if (previousChrome === undefined) delete globalThis.chrome;
     else globalThis.chrome = previousChrome;
@@ -63292,19 +63285,24 @@ test('WebGPU worker follows local text-generation and WebBrain VL vision contrac
   assert.ok(ortWasm.includes(Buffer.from('MatMulNBitsMlp')),
     'the vendored ONNX Runtime build must keep the WebGPU kernel the Nanbeige graph is fused around');
   for (const modelId of [
+    WEBGPU_COMPASS_TINY_V2_MODEL_ID,
+  ]) {
+    assert.match(apocalypseHtml, new RegExp(modelId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')),
+      `${modelId} is missing from the Apocalypse WebGPU picker`);
+  }
+  for (const retiredId of [
     WEBGPU_LFM25_12B_INSTRUCT_MODEL_ID,
     WEBGPU_LFM25_12B_THINKING_MODEL_ID,
     WEBGPU_LFM25_VL_16B_MODEL_ID,
     WEBGPU_LFM25_VL_3B_MODEL_ID,
     WEBGPU_NANBEIGE42_3B_MODEL_ID,
     WEBGPU_MINICPM5_2B_MODEL_ID,
-    WEBGPU_COMPASS_TINY_V2_MODEL_ID,
   ]) {
-    assert.match(apocalypseHtml, new RegExp(modelId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')),
-      `${modelId} is missing from the Apocalypse WebGPU picker`);
+    assert.doesNotMatch(apocalypseHtml, new RegExp(retiredId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')),
+      `${retiredId} should no longer be offered in the Apocalypse WebGPU picker`);
   }
-  assert.equal((apocalypseHtml.match(/class="webgpu-capability"/g) || []).length, 2,
-    'both LFM2.5-VL presets must be visibly marked multimodal');
+  assert.equal((apocalypseHtml.match(/class="webgpu-capability"/g) || []).length, 0,
+    'only the text-only Compass preset is offered, so no multimodal badge should remain');
   assert.match(worker, /decoder_model_merged:\s*'q4'/);
   assert.match(worker, /const blocks = \[\.\.\.imageBlocks, \.\.\.textBlocks\]/);
   assert.match(worker, /createVisionProbeImage\(runtime\.library\.RawImage\)/);
@@ -63578,14 +63576,16 @@ test('WebGPU worker follows local text-generation and WebBrain VL vision contrac
   assert.match(apocalypseCopy, /'ap\.models\.text\.title': 'Text Model'/);
   assert.match(apocalypseCopy, /'ap\.models\.vision\.title': 'Vision Model'/);
   assert.match(apocalypseCopy, /'ap\.models\.wikipedia\.title': 'Wikipedia in Simple English'/);
-  assert.match(apocalypseHtml, /1\.55 GB · WebGPU/);
+  assert.match(apocalypseHtml, /1\.87 GB · WebGPU/);
   assert.match(apocalypseHtml, /data-webgpu-text-preset/);
-  assert.match(apocalypseHtml, /value="prism-ml\/Bonsai-27B-gguf"/);
+  assert.match(apocalypseHtml, /value="webbrain-one\/webbrain-compass-tiny-v2\.1"/);
+  assert.doesNotMatch(apocalypseHtml, /value="prism-ml\/Bonsai-27B-gguf"/);
   assert.match(apocalypseHtml, /data-i18n="ap\.models\.text\.bonsai_warning"/);
   assert.match(apocalypseCopy, /'ap\.models\.text\.lfm': 'Minimal text model'/);
   assert.match(apocalypseCopy, /'ap\.models\.text\.bonsai': 'Basic text model'/);
-  assert.match(apocalypseHtml, />Minimal text model<\/span>/);
-  assert.match(apocalypseHtml, />Basic text model<\/span>/);
+  assert.match(apocalypseHtml, />Compass Tiny v2\.1<\/span>/);
+  assert.doesNotMatch(apocalypseHtml, />Minimal text model<\/span>/);
+  assert.doesNotMatch(apocalypseHtml, />Basic text model<\/span>/);
   assert.doesNotMatch(apocalypseHtml, /· LFM2\.5 2\.6B/);
   assert.doesNotMatch(apocalypseHtml, /· Bonsai 27B/);
   assert.match(emergencyCopy, /Runs LFM2\.5 2\.6B on your GPU/);
@@ -63597,7 +63597,7 @@ test('WebGPU worker follows local text-generation and WebBrain VL vision contrac
   assert.match(apocalypseScript, /function anyOtherWebgpuTextBusy/);
   assert.match(background, /getWebgpuDownloadStatus\(msg\)/,
     'download-status probes must be able to inspect an unselected shipped text model');
-  assert.match(apocalypseScript, /ap\.webgpu\.rag\.pro/);
+  assert.doesNotMatch(apocalypseScript, /ap\.webgpu\.rag\.pro/);
   assert.match(apocalypseHtml, /data-webgpu-text-copy/);
   assert.doesNotMatch(apocalypseHtml, /id="webgpu-(?:model|context-window|prompt-tier|save|activate)/);
   assert.doesNotMatch(apocalypseHtml, /id="webgpu-test"/);
@@ -63606,14 +63606,14 @@ test('WebGPU worker follows local text-generation and WebBrain VL vision contrac
   assert.doesNotMatch(apocalypseScript, /normalizeWebgpuModelId|set_active_provider/);
   assert.doesNotMatch(apocalypseScript, /providerCommand\('test_provider', \{ providerId: 'webgpu' \}\)/);
   assert.match(apocalypseScript, /providerCommand\('test_vision_provider'\)/);
-  assert.match(apocalypseScript, /update_provider[\s\S]*?providerId: 'webgpu'[\s\S]*?model,[\s\S]*?contextWindow: preset\.contextWindow[\s\S]*?promptTier: 'compact'/);
+  assert.match(apocalypseScript, /update_provider[\s\S]*?providerId: 'webgpu'[\s\S]*?model,[\s\S]*?contextWindow: preset\?\.contextWindow [\s\S]*?promptTier: 'compact'/);
   assert.doesNotMatch(profileSync, /webgpuVisionEnabled/, 'Chrome-only vision selection must not profile-sync to Firefox');
   assert.doesNotMatch(profileSync, /webgpuVisionAutoSelected/, 'automatic local-vision provenance must not profile-sync to Firefox');
   assert.match(englishLocale, /Selecting “Use local fallback” checks WebGPU, records your consent,[\s\S]*Tasks report its status and never wait for it; keep Chrome open/);
   assert.match(apocalypseCopy, /Local vision is optional and never starts automatically/);
   assert.match(apocalypseDocs, /Apocalypse Mode never enables or downloads it/);
   assert.doesNotMatch(apocalypseDocs, /enabling Apocalypse Mode also enables[\s\S]{0,80}vision/i);
-  assert.match(englishLocale, /Download it in Apocalypse Mode, then use the nuclear control in standalone chat[\s\S]*It does not replace your selected provider/);
+  assert.match(englishLocale, /Download it in Settings > Providers > WebGPU or Apocalypse Mode, then use the nuclear control in standalone chat[\s\S]*It does not replace your selected provider/);
 
   const settings = fs.readFileSync(path.join(ROOT, 'src/chrome/src/ui/settings.html'), 'utf8');
   const multimodal = settings.indexOf('data-panel="multimodal"');
@@ -63657,7 +63657,7 @@ test('WebGPU worker follows local text-generation and WebBrain VL vision contrac
   assert.match(bonsaiWorker, /return \{ content, reasoningContent, toolCalls \}/);
   assert.match(bonsaiWorker, /if \(queuedTextDownload === request\) queuedTextDownload = null/,
     'a completed download request must not clear a newer queued resume for the same model');
-  assert.match(apocalypseScript, /if \(!preset\)[\s\S]*?setWebgpuDownloadState\(state\)[\s\S]*?ensureFixedWebgpuProvider\(\{ force: true \}\)[\s\S]*?get_webgpu_download_status/,
+  assert.match(apocalypseScript, /if \(!preset \|\| preset\.id !== WEBGPU_COMPASS_TINY_V2_MODEL_ID\)[\s\S]*?setWebgpuDownloadState\(state\)[\s\S]*?ensureFixedWebgpuProvider\(\{ force: true \}\)[\s\S]*?get_webgpu_download_status/,
     'Apocalypse Mode must replace a persisted custom WebGPU model with the checked shipped preset');
   const resumeHelpersStart = bonsaiWorker.indexOf('function parseContentRange');
   const resumeHelpersEnd = bonsaiWorker.indexOf('\n\nasync function fetchGgufForStorage', resumeHelpersStart);

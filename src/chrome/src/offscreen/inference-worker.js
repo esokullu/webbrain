@@ -1311,7 +1311,7 @@ async function runMultimodalText(payload) {
     decoder_model_merged: 'q4',
   };
   if (!await isTextModelReady(modelId, dtype)) {
-    throw new Error(`${modelId} is not downloaded. Open Apocalypse Mode > WebGPU to download it before chatting.`);
+    throw new Error(`${modelId} is not downloaded. Open Settings > Providers > WebGPU or Apocalypse Mode > WebGPU to download it before chatting.`);
   }
   const runtime = await getVisionRuntime(modelId, dtype, device, {
     localFilesOnly: true,
@@ -1368,7 +1368,7 @@ async function runText(payload) {
   const usesLongOutputBudget = WEBGPU_LONG_OUTPUT_MODEL_IDS.has(modelId);
   const sampling = WEBGPU_TEXT_SAMPLING.get(modelId);
   if (!await isTextModelReady(modelId, dtype)) {
-    throw new Error(`${modelId} is not downloaded. Open Apocalypse Mode > WebGPU to download it before chatting.`);
+    throw new Error(`${modelId} is not downloaded. Open Settings > Providers > WebGPU or Apocalypse Mode > WebGPU to download it before chatting.`);
   }
   const runtime = await getTextRuntime(modelId, dtype, device, { localFilesOnly: true });
   if (payload?.requireTools === true) assertToolCapableTextRuntime(runtime, modelId);

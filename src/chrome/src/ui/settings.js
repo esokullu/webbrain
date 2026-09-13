@@ -64,6 +64,7 @@ import { ADDITIONAL_PROVIDER_UI } from '../providers/provider-catalog.js';
 import { AUTO_VISION_PROVIDER_IDS, visionDetectionMatches } from '../providers/vision-capabilities.js';
 import { canonicalizeOllamaBaseUrl } from '../providers/context-windows.js';
 import {
+  WEBGPU_COMPASS_TINY_V2_MODEL_ID,
   WEBGPU_MODEL_PRESETS,
   WEBGPU_VISION_AUTO_SELECTED_KEY,
   WEBGPU_VISION_CONSENT_VERSION,
@@ -2364,6 +2365,11 @@ const CONTEXT_WINDOW_FIELD = {
   step: 1024,
 };
 
+const WEBGPU_CONTEXT_WINDOW_FIELD = {
+  ...CONTEXT_WINDOW_FIELD,
+  placeholder: '32768',
+};
+
 const MAX_OUTPUT_TOKENS_FIELD = {
   key: 'maxOutputTokens',
   labelKey: 'st.provider.field.max_output_tokens',
@@ -2816,13 +2822,13 @@ function renderProviders() {
           labelKey: 'st.provider.field.model',
           type: 'text',
           placeholder: 'owner/repository',
-          suggestions: WEBGPU_MODEL_PRESETS.map(option => option.id),
-          suggestionLabels: Object.fromEntries(WEBGPU_MODEL_PRESETS.map(option => [
+          suggestions: [WEBGPU_COMPASS_TINY_V2_MODEL_ID],
+          suggestionLabels: Object.fromEntries(WEBGPU_MODEL_PRESETS.filter(option => option.id === WEBGPU_COMPASS_TINY_V2_MODEL_ID).map(option => [
             option.id,
             `${option.label} — ${option.id}${option.supportsVision ? ` — ${t('st.provider.field.supports_vision')}` : ''}`,
           ])),
         },
-        CONTEXT_WINDOW_FIELD,
+        WEBGPU_CONTEXT_WINDOW_FIELD,
         PROMPT_TIER_FIELD,
       ],
     },
@@ -3345,6 +3351,14 @@ function renderProviders() {
       } else {
         input.style.display = 'none';
         input.value = sel.value;
+      }
+      if (providerId === 'webgpu' && sel.value !== '__custom__') {
+        const preset = WEBGPU_MODEL_PRESETS.find(option => option.id === sel.value);
+        if (preset?.contextWindow) {
+          const contextInput = document.querySelector(`input[data-provider="${providerId}"][data-key="contextWindow"]`);
+          if (contextInput) contextInput.value = String(preset.contextWindow);
+          if (providersData[providerId]) providersData[providerId].contextWindow = preset.contextWindow;
+        }
       }
       syncInferredOpenRouterRoutingVariant(providerId, input.value);
       markProviderDirty(providerId);
