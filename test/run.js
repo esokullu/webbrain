@@ -12523,6 +12523,32 @@ test('Share-for-research item drops empty runs and caps the whole request', () =
   assert.deepEqual(item.request.at(-1), { role: 'system', content: '[remaining shared message omitted]' });
 });
 
+test('Share-for-research item excludes terminal answers and binary document blocks', () => {
+  for (const [label, outbox] of [['chrome', SHARE_OUTBOX_CH], ['firefox', SHARE_OUTBOX_FX]]) {
+    const item = outbox.buildShareGenerationItem({
+      runId: `run-share-binary-${label}`,
+      finalContent: 'Final answer',
+      messages: [
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: 'Read this attachment' },
+            { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: 'SECRET_PDF_BYTES' } },
+            { type: 'other', payload: { source: { type: 'base64', data: 'UNKNOWN_BINARY_BYTES' } } },
+          ],
+        },
+        { role: 'assistant', content: 'Final answer' },
+      ],
+      model: 'some-model', mode: 'act', provider: 'anthropic', provider_name: 'Anthropic Claude',
+    });
+    assert.equal(item.request.length, 1, `${label}: terminal answer stayed in the shared request`);
+    assert.deepEqual(item.request[0].content, [{ type: 'text', text: 'Read this attachment' }]);
+    const serialized = JSON.stringify(item);
+    assert.equal(serialized.includes('SECRET_PDF_BYTES'), false, `${label}: document bytes escaped the scrub`);
+    assert.equal(serialized.includes('UNKNOWN_BINARY_BYTES'), false, `${label}: nested base64 bytes escaped the scrub`);
+  }
+});
+
 test('Share-for-research outbox persists retryable failures and removes acknowledged or rejected entries', async () => {
   const originalChrome = globalThis.chrome;
   const storage = {};
@@ -12566,6 +12592,23 @@ test('Share-for-research outbox persists retryable failures and removes acknowle
     };
     assert.equal(await SHARE_OUTBOX_CH.flushShareOutbox(listenedProvider), 1);
     assert.deepEqual(listenedProvider.sent, { sessionId: 'share_conv_1', payload: { provider: 'anthropic', provider_name: 'x', model: 'm', mode: 'act', request: entry.request, response: entry.response } });
+    assert.equal(storage[SHARE_OUTBOX_CH.SHARE_OUTBOX_STORAGE_KEY].length, 0);
+    assert.equal(await SHARE_OUTBOX_CH.enqueueShareGeneration(entry), true);
+    let sendCalls = 0;
+    let releaseSend;
+    const overlappingProvider = {
+      async sendShareGeneration() {
+        sendCalls++;
+        await new Promise(resolve => { releaseSend = resolve; });
+        return { ok: true, retryable: false, status: 202 };
+      },
+    };
+    const firstFlush = SHARE_OUTBOX_CH.flushShareOutbox(overlappingProvider);
+    const secondFlush = SHARE_OUTBOX_CH.flushShareOutbox(overlappingProvider);
+    await new Promise(resolve => setTimeout(resolve, 0));
+    assert.equal(sendCalls, 1, 'overlapping flushes must not send one entry twice');
+    releaseSend();
+    assert.deepEqual(await Promise.all([firstFlush, secondFlush]), [1, 0]);
     assert.equal(storage[SHARE_OUTBOX_CH.SHARE_OUTBOX_STORAGE_KEY].length, 0);
   } finally {
     if (originalChrome === undefined) delete globalThis.chrome;
@@ -12622,7 +12665,7 @@ test('Share-for-research delivery stays opt-in and mirrored across both builds',
     const agent = fs.readFileSync(path.join(ROOT, `src/${browser}/src/agent/agent.js`), 'utf8');
     const settings = fs.readFileSync(path.join(ROOT, `src/${browser}/src/ui/settings.js`), 'utf8');
     const provider = fs.readFileSync(path.join(ROOT, `src/${browser}/src/providers/openai.js`), 'utf8');
-    assert.match(agent, /shareQueriesForResearch === true[\s\S]*enqueueShareGeneration/, `${browser}: capture not gated on the per-provider toggle`);
+    assert.match(agent, /status === 'done'[\s\S]*shareQueriesForResearch === true[\s\S]*enqueueShareGeneration/, `${browser}: capture must be successful and gated on the per-provider toggle`);
     assert.match(agent, /'webbrain-cloud'/, `${browser}: Compass provider must not route through the share path`);
     assert.match(agent, /void flushShareOutbox\(shareTransport\)/, `${browser}: run-end share flush missing`);
     assert.match(agent, /_shareSessionId\(/, `${browser}: share session id sanitizer missing`);

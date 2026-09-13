@@ -16541,6 +16541,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     // through this path.
     const shareTransport = this.providerManager?.getProvider?.('webbrain_cloud');
     if (shareTransport
+        && status === 'done'
         && provider?.config?.shareQueriesForResearch === true
         && String(provider?.config?.providerName || '').toLowerCase() !== 'webbrain-cloud') {
       try {

@@ -12,6 +12,7 @@ const MAX_MESSAGE_CHARS = 10_000;
 const MAX_REQUEST_BUDGET = 150_000;
 const MAX_RESPONSE_CHARS = 40_000;
 let storageQueue = Promise.resolve();
+let flushQueue = Promise.resolve();
 let fallbackRunCounter = 0;
 
 function bounded(value, limit) {
@@ -24,6 +25,27 @@ function bounded(value, limit) {
 function clampText(value, limit = MAX_MESSAGE_CHARS) {
   if (typeof value !== 'string') return value;
   return bounded(value, limit);
+}
+
+function containsBinaryBlock(value) {
+  if (!value || typeof value !== 'object') return false;
+  if (value.type === 'image_url' || value.type === 'image' || value.type === 'document') return true;
+  if (value.source?.type === 'base64') return true;
+  if (Array.isArray(value)) return value.some(containsBinaryBlock);
+  return Object.values(value).some(containsBinaryBlock);
+}
+
+function requestMessages(messages, responseContent) {
+  if (!Array.isArray(messages)) return messages;
+  const request = [...messages];
+  for (let index = request.length - 1; index >= 0; index--) {
+    const message = request[index];
+    if (message?.role === 'assistant' && message.content === responseContent) {
+      request.splice(index, 1);
+      break;
+    }
+  }
+  return request;
 }
 
 function scrubMessage(message) {
@@ -39,14 +61,14 @@ function scrubMessage(message) {
       }
       // Drop images entirely so raw screenshot/data-URI bytes never leave the
       // browser; text blocks are clamped individually.
-      if (item.type === 'image_url' || item.type === 'image') continue;
+      if (containsBinaryBlock(item)) continue;
       if (item.type === 'text' && typeof item.text === 'string') {
         items.push({ ...item, text: clampText(item.text) });
         continue;
       }
       items.push(item);
     }
-    if (!items.length) return { role: message.role, content: '[image content omitted]' };
+    if (!items.length) return { role: message.role, content: '[binary content omitted]' };
     copy.content = items;
   } else if (typeof message.content === 'string') {
     if (!message.content.length) return null;
@@ -84,10 +106,10 @@ export function buildShareGenerationItem({
   provider,
   provider_name,
 }) {
-  const request = scrubMessages(messages);
-  if (!request?.length) return null;
   const responseContent = String(finalContent ?? '');
   if (!responseContent.trim()) return null;
+  const request = scrubMessages(requestMessages(messages, responseContent));
+  if (!request?.length) return null;
   const generatedId = globalThis.crypto?.randomUUID?.()
     || `${Date.now().toString(36)}_${(++fallbackRunCounter).toString(36)}`;
   return {
@@ -136,7 +158,7 @@ export async function enqueueShareGeneration(item) {
   return true;
 }
 
-export async function flushShareOutbox(transportProvider) {
+async function flushShareOutboxNow(transportProvider) {
   if (typeof transportProvider?.sendShareGeneration !== 'function') return 0;
   await storageQueue.catch(() => {});
   let snapshot;
@@ -163,6 +185,12 @@ export async function flushShareOutbox(transportProvider) {
     await updateOutbox(current => current.filter(entry => !removeIds.has(entry?.id)));
   }
   return removeIds.size;
+}
+
+export function flushShareOutbox(transportProvider) {
+  const next = flushQueue.catch(() => {}).then(() => flushShareOutboxNow(transportProvider));
+  flushQueue = next;
+  return next;
 }
 
 export const SHARE_OUTBOX_STORAGE_KEY = STORAGE_KEY;
