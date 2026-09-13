@@ -14,8 +14,8 @@ For vulnerability disclosure, see [SECURITY.md](../SECURITY.md).
 {
   "permissions": [
     "sidePanel", "activeTab", "contextMenus", "tabs", "tabGroups",
-    "scripting", "storage", "webNavigation", "webRequest", "debugger",
-    "downloads", "alarms", "unlimitedStorage", "offscreen",
+    "scripting", "storage", "notifications", "webNavigation", "webRequest",
+    "debugger", "downloads", "alarms", "unlimitedStorage", "offscreen",
     "privateNetworkAccess", "tabCapture",
     "clipboardWrite", "clipboardRead"
   ],
@@ -25,9 +25,10 @@ For vulnerability disclosure, see [SECURITY.md](../SECURITY.md).
 
 (This is the Chrome MV3 manifest. Firefox MV2 grants a narrower set —
 `activeTab`, `menus`, `webNavigation`, `webRequest`, `storage`,
-`unlimitedStorage`, `tabs`, `tabGroups`, `downloads`, `alarms`, `clipboard*`,
-`<all_urls>` — and has no `debugger`/`offscreen`/`tabCapture`, see Firefox
-Differences below.)
+`unlimitedStorage`, `tabs`, `tabGroups`, `notifications`, `downloads`,
+`alarms`, `clipboard*`, `<all_urls>` — and has no
+`debugger`/`offscreen`/`tabCapture`/`sidePanel`/`scripting`/`privateNetworkAccess`,
+see Firefox Differences below.)
 
 | Permission | Risk | Mitigation |
 |---|---|---|
@@ -37,6 +38,18 @@ Differences below.)
 | `downloads` | Can save files to the user's Downloads folder without prompting | Only the agent's explicit download-capable tool calls (`download_files`, `download_file`, `download_resource_from_page`, `download_social_media`, download-job skill tools) use this, and each is gated by the capability × origin permission prompt. |
 | `alarms` | Can wake scheduled jobs in future browser sessions | `schedule_resume` / `schedule_task` are gated; the user-authored `/watch` slash command can also create a page-bound 30–120 second conditional poll. |
 | `offscreen` | An offscreen document can make HTTP requests immune to user CSP, run local inference, or play audio without an open panel | Used for the localhost LLM proxy, the optional endpoint-free WebGPU text and vision providers, tab recording, validated download staging, the local controller bridge, and successful `/watch /beep` tones. The text provider receives the same bounded conversation and allowlisted tool schemas that would be sent to another active provider; dedicated local vision receives only its screenshot/prompt. Model files are downloaded from Hugging Face, while inference stays in the worker. Watch audio receives only a style selector, never page content or an arbitrary URL. |
+| `sidePanel` | Opens the extension side panel UI | The panel is user-invoked (toolbar click / `Alt+Shift+W`). No model-callable tool opens it silently; it only hosts the chat UI the user already sees. |
+| `activeTab` | Temporary access to the currently active tab when invoked | Scoped to the tab the user invoked the extension on. Reads stay read-only in Ask mode; writes still require Act/Dev plus the capability × origin gate. |
+| `contextMenus` (`menus` on Firefox) | Adds right-click menu entries | Menu entries only surface user-invoked prompts (selection context, page actions). Invoking one still routes through the normal Ask/Act tool gating — it grants no silent capability. |
+| `tabs` / `tabGroups` | Can see tab titles/URLs and group membership | Used for run scoping, tab selection, and conversation recovery. General tab creation, enumeration, activation, and run retargeting are not exposed as model-callable tools. |
+| `scripting` (Chrome only) | Can inject content scripts / execute code in pages | Injection targets the user's own open tabs and runs the same audited content scripts (`accessibility-tree.js`, teacher capture, visual indicator). Arbitrary page JS execution (`execute_js`) is a Dev-only tool and always passes the capability × origin gate. |
+| `storage` / `unlimitedStorage` | Persists settings, traces, workflows, and model files locally | Data stays in `chrome.storage.local` / IndexedDB on the user's machine. Cloud Sync encrypts credentials, autofill, and memory in an AES-GCM envelope before egress; the sync password never leaves the device. |
+| `webNavigation` | Observes navigation events (URL, tab, frame transitions) | Used to scope runs to the current page family, detect navigations mid-run, and invalidate stale element references. It exposes no page content by itself. |
+| `notifications` | Can show OS-level notifications | Used as a completion fallback for restricted or discarded background tabs, including scheduled runs. The message is the current tab title, falling back to its URL, so page-controlled titles and sensitive URL components may appear on OS notification surfaces or in notification history. Run output, page bodies, and trace payloads are not intentionally included. |
+| `tabCapture` (Chrome only) | Can capture tab audio/video | Used only for the explicit slash-driven tab/screen recording flow. Recording starts on a user command and stops on completion; there is no background capture. |
+| `clipboardWrite` / `clipboardRead` | Can write to / read from the clipboard | Writes place agent-produced snippets the user asked for; reads support paste-driven tasks. Clipboard content entering a prompt is treated like other untrusted input and never exfiltrated except as the user's requested result. |
+| `privateNetworkAccess` (Chrome only) | Allows requests to local/private-network LLM endpoints | Required for llama.cpp / Ollama / LM Studio on localhost or LAN. `fetch_url` to private/RFC1918 addresses is blocked by default unless the user enables local-network access; cloud-metadata endpoints (169.254.169.254) are always blocked. |
+| `http://localhost/*`, `http://127.0.0.1/*`, `http://*/*` host permissions | Lets the extension call local-model servers and plain-HTTP endpoints | Localhost entries exist for local LLM servers (llama.cpp, Ollama, LM Studio). Provider inference and discovery requests to a user-configured HTTP endpoint use the provider transport directly and do not pass the agent-tool permission prompt. Model-callable network tools such as `fetch_url` and `research_url` are separately subject to the capability × origin gate; `connect-src *` in the extension CSP does not waive that gate. |
 
 ### Authentication
 

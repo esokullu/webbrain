@@ -25,6 +25,16 @@ export function registerMessageRecipientNavigationFixtures({
           <a id="jobs" class="destination" href="/jobs/"><span id="jobs-label">Jobs</span></a>
           <a id="messaging" href="/messaging/">Messaging</a>
         </nav>
+        <main>
+          <a id="portfolio" href="https://portfolio.example/"><span id="portfolio-label">View my portfolio</span></a>
+          <a id="contact-info" href="/in/alice/overlay/contact-info/">Contact info</a>
+        </main>
+        <div id="contact-info-dialog" role="dialog" aria-modal="true" hidden>
+          <button id="close-contact-info" type="button">Close</button>
+          <a id="contact-profile" href="/in/alice/">linkedin.com/in/alice</a>
+          <a id="safety-portfolio" href="/safety/go/?url=https%3A%2F%2Fportfolio.example%2F">portfolio.example</a>
+          <a id="legacy-portfolio" href="/redir/redirect?url=https%3A%2F%2Flegacy-portfolio.example%2F">legacy-portfolio.example</a>
+        </div>
         <form id="chat" hidden>
           <h2>Alice</h2><textarea id="body">Hello Alice</textarea><button id="send" type="button">Send</button>
         </form>`, kind);
@@ -65,9 +75,315 @@ export function registerMessageRecipientNavigationFixtures({
       }
     });
 
+    register(`${kind}: LinkedIn ordinary document links bypass the message recipient guard (#3010)`, async (page) => {
+      const { guard, probe } = await setup(page);
+      for (const open of [false, true]) {
+        await page.evaluate(open => { document.querySelector('#chat').hidden = !open; }, open);
+        const portfolioRef = await page.evaluate(
+          () => window.__wb_ax_ref(document.querySelector('#portfolio-label')),
+        );
+        for (const [tool, args, expected] of [
+          ['click', { text: 'View my portfolio', textMatch: 'exact' }, 'portfolio'],
+          ['click_ax', { ref_id: portfolioRef }, 'portfolio'],
+          ['click', { text: 'Contact info', textMatch: 'exact' }, 'contact-info'],
+        ]) {
+          const result = await probe(tool, args);
+          assert.equal(result.conclusive, true, JSON.stringify(result));
+          assert.equal(result.messageSend, false);
+          assert.equal(result.navigation, true);
+          assert.equal(await guard(tool, args), null);
+          const clicked = await call(page, tool, args);
+          assert.equal(clicked.success, true, JSON.stringify(clicked));
+          assert.equal(await page.evaluate(() => window.fixtureClicks.at(-1)), expected);
+        }
+      }
+    });
+
+    register(`${kind}: LinkedIn contact-info safety redirects navigate inside the modal (#3010)`, async (page) => {
+      const { guard, probe } = await setup(page);
+      await page.evaluate(() => {
+        history.replaceState(null, '', '/in/alice/overlay/contact-info/');
+        document.querySelector('#contact-info-dialog').hidden = false;
+      });
+      for (const open of [false, true]) {
+        await page.evaluate(open => { document.querySelector('#chat').hidden = !open; }, open);
+        const safetyRef = await page.evaluate(
+          () => window.__wb_ax_ref(document.querySelector('#safety-portfolio')),
+        );
+        for (const [tool, args, expected] of [
+          ['click', { text: 'portfolio.example', textMatch: 'exact' }, 'safety-portfolio'],
+          ['click_ax', { ref_id: safetyRef }, 'safety-portfolio'],
+          ['click', { text: 'legacy-portfolio.example', textMatch: 'exact' }, 'legacy-portfolio'],
+        ]) {
+          const result = await probe(tool, args);
+          assert.equal(result.conclusive, true, JSON.stringify(result));
+          assert.equal(result.messageSend, false);
+          assert.equal(result.navigation, true);
+          assert.equal(await guard(tool, args), null);
+          const clicked = await call(page, tool, args);
+          assert.equal(clicked.success, true, JSON.stringify(clicked));
+          assert.equal(await page.evaluate(() => window.fixtureClicks.at(-1)), expected);
+        }
+      }
+      for (const href of [
+        '#',
+        'mailto:alice@example.com',
+        'https://portfolio.example/',
+        '/safety/go/',
+        '/safety/go/?url=javascript%3Aalert(1)',
+        '/safety/go/?url=https%3A%2F%2Flinkedin.com%2Fmessaging%2Fsend',
+        '/safety/go/?url=https%3A%2F%2Fm.linkedin.com%2Fmessaging%2Fsend',
+        '/safety/go/?url=https%3A%2F%2Fm.linkedin.com.%2Fmessaging%2Fsend',
+      ]) {
+        await page.locator('#safety-portfolio').evaluate((el, value) => el.setAttribute('href', value), href);
+        const args = { text: 'portfolio.example', textMatch: 'exact' };
+        const result = await probe('click', args);
+        assert.notEqual(result.navigation, true, `${href}: ${JSON.stringify(result)}`);
+        assert.equal((await guard('click', args))?.noDispatch, true, `${href}: recipient guard must fail closed`);
+      }
+    });
+
+    register(`${kind}: LinkedIn contact-info redirects honor composed-tree safety boundaries`, async (page) => {
+      const { guard, probe } = await setup(page);
+      const refs = await page.evaluate(() => {
+        history.replaceState(null, '', '/in/alice/overlay/contact-info/');
+        document.querySelector('#chat').hidden = false;
+        const dialog = document.querySelector('#contact-info-dialog');
+        dialog.hidden = false;
+        const addShadowLink = (parent, hostId, text) => {
+          const host = document.createElement('span');
+          host.id = hostId;
+          parent.append(host);
+          const shadow = host.attachShadow({ mode: 'open' });
+          shadow.innerHTML = `<a href="/safety/go/?url=https%3A%2F%2Fportfolio.example%2F" style="display:inline-block;padding:8px">${text}</a>`;
+          return window.__wb_ax_ref(shadow.querySelector('a'));
+        };
+        const form = document.createElement('form');
+        dialog.append(form);
+        const action = document.createElement('span');
+        action.dataset.action = 'send';
+        dialog.append(action);
+        return {
+          safe: addShadowLink(dialog, 'shadow-safe-host', 'Shadow safe link'),
+          form: addShadowLink(form, 'shadow-form-host', 'Shadow form link'),
+          action: addShadowLink(action, 'shadow-action-host', 'Shadow action link'),
+        };
+      });
+      const safeArgs = { ref_id: refs.safe };
+      const safe = await probe('click_ax', safeArgs);
+      assert.equal(safe.navigation, true, JSON.stringify(safe));
+      assert.equal(await guard('click_ax', safeArgs), null);
+      for (const ref_id of [refs.form, refs.action]) {
+        const args = { ref_id };
+        const result = await probe('click_ax', args);
+        assert.equal(result.navigationBlocked, true, JSON.stringify(result));
+        assert.equal(result.conclusive, false, JSON.stringify(result));
+        assert.equal((await guard('click_ax', args))?.noDispatch, true);
+      }
+    });
+
+    register(`${kind}: LinkedIn safety redirects cannot escape a shadow-root modal`, async (page) => {
+      const { guard, probe } = await setup(page);
+      const ref_id = await page.evaluate(() => {
+        history.replaceState(null, '', '/in/alice/overlay/contact-info/');
+        document.querySelector('#chat').hidden = false;
+        const modal = document.createElement('div');
+        modal.setAttribute('role', 'dialog');
+        modal.setAttribute('aria-modal', 'true');
+        modal.style.cssText = 'position:fixed;inset:0;background:white';
+        document.body.append(modal);
+        const host = document.createElement('span');
+        modal.append(host);
+        const shadow = host.attachShadow({ mode: 'open' });
+        shadow.innerHTML = '<a href="/safety/go/?url=https%3A%2F%2Fportfolio.example%2F" style="display:inline-block;padding:8px">Shadow modal link</a>';
+        return window.__wb_ax_ref(shadow.querySelector('a'));
+      });
+      const args = { ref_id };
+      const result = await probe('click_ax', args);
+      assert.equal(result.navigationBlocked, true, JSON.stringify(result));
+      assert.equal(result.conclusive, false, JSON.stringify(result));
+      assert.equal((await guard('click_ax', args))?.noDispatch, true);
+    });
+
+    register(`${kind}: LinkedIn Contact info ownership crosses open shadow roots`, async (page) => {
+      const { guard, probe } = await setup(page);
+      await page.evaluate(() => {
+        history.replaceState(null, '', '/in/alice/overlay/contact-info/');
+        const dialog = document.querySelector('#contact-info-dialog');
+        dialog.hidden = false;
+        const profile = document.querySelector('#contact-profile');
+        const host = document.createElement('span');
+        dialog.append(host);
+        host.attachShadow({ mode: 'open' }).append(profile);
+      });
+      const args = { text: 'portfolio.example', textMatch: 'exact' };
+      const result = await probe('click', args);
+      assert.equal(result.navigation, true, JSON.stringify(result));
+      assert.equal(await guard('click', args), null);
+    });
+
+    register(`${kind}: LinkedIn Contact info ownership follows flattened slots`, async (page) => {
+      const { guard, probe } = await setup(page);
+      const ref_id = await page.evaluate(() => {
+        history.replaceState(null, '', '/in/alice/overlay/contact-info/');
+        document.querySelector('#contact-info-dialog').remove();
+        const host = document.createElement('div');
+        const profile = document.createElement('a');
+        profile.slot = 'profile';
+        profile.href = '/in/alice/';
+        profile.textContent = 'linkedin.com/in/alice';
+        host.append(profile);
+        document.body.append(host);
+        const shadow = host.attachShadow({ mode: 'open' });
+        shadow.innerHTML = `
+          <div role="dialog" aria-modal="true" style="position:fixed;inset:0;background:white">
+            <slot name="profile"></slot>
+            <a id="slotted-ownership-link" href="/safety/go/?url=https%3A%2F%2Fportfolio.example%2F"
+              style="display:inline-block;padding:8px">Slotted ownership link</a>
+          </div>`;
+        return window.__wb_ax_ref(shadow.querySelector('#slotted-ownership-link'));
+      });
+      const args = { ref_id };
+      const result = await probe('click_ax', args);
+      assert.equal(result.navigation, true, JSON.stringify(result));
+      assert.equal(await guard('click_ax', args), null);
+    });
+
+    register(`${kind}: LinkedIn Contact info recognizes shadow-root overlay content siblings`, async (page) => {
+      const { guard, probe } = await setup(page);
+      for (const [index, contentClass] of ['DialogContent', 'ModalContent'].entries()) {
+        const ref_id = await page.evaluate(({ contentClass, index }) => {
+          history.replaceState(null, '', '/in/alice/overlay/contact-info/');
+          document.querySelector('#chat').hidden = false;
+          const host = document.createElement('div');
+          host.id = `shadow-sibling-modal-host-${index}`;
+          document.body.append(host);
+          const shadow = host.attachShadow({ mode: 'open' });
+          shadow.innerHTML = `
+            <div class="DialogOverlay" style="position:fixed;inset:0;background:rgba(0,0,0,.5)"></div>
+            <div class="${contentClass}" style="position:fixed;inset:40px;background:white">
+              <a href="/in/alice/">linkedin.com/in/alice</a>
+              <a id="sibling-modal-link" href="/safety/go/?url=https%3A%2F%2Fportfolio.example%2F"
+                style="display:inline-block;padding:8px">Sibling modal link</a>
+            </div>`;
+          return window.__wb_ax_ref(shadow.querySelector('#sibling-modal-link'));
+        }, { contentClass, index });
+        const args = { ref_id };
+        const result = await probe('click_ax', args);
+        assert.equal(result.navigation, true, `${contentClass}: ${JSON.stringify(result)}`);
+        assert.equal(await guard('click_ax', args), null);
+        await page.evaluate((index) => {
+          document.querySelector(`#shadow-sibling-modal-host-${index}`)?.remove();
+        }, index);
+      }
+      const ref_id = await page.evaluate(() => {
+        const host = document.createElement('div');
+        host.id = 'shadow-content-without-overlay-host';
+        document.body.append(host);
+        const shadow = host.attachShadow({ mode: 'open' });
+        shadow.innerHTML = `
+          <div class="DialogContent" style="position:fixed;inset:40px;background:white">
+            <a href="/in/alice/">linkedin.com/in/alice</a>
+            <a id="content-without-overlay-link"
+              href="/safety/go/?url=https%3A%2F%2Fportfolio.example%2F"
+              style="display:inline-block;padding:8px">Unbacked content link</a>
+          </div>`;
+        return window.__wb_ax_ref(shadow.querySelector('#content-without-overlay-link'));
+      });
+      const result = await probe('click_ax', { ref_id });
+      assert.equal(result.navigationBlocked, true, JSON.stringify(result));
+      assert.equal(result.conclusive, false, JSON.stringify(result));
+      assert.equal((await guard('click_ax', { ref_id }))?.noDispatch, true);
+    });
+
+    register(`${kind}: LinkedIn non-blocking dialogs cannot claim Contact info redirects`, async (page) => {
+      const { guard, probe } = await setup(page);
+      await page.evaluate(() => {
+        history.replaceState(null, '', '/in/alice/overlay/contact-info/');
+        document.querySelector('#chat').hidden = false;
+        document.body.insertAdjacentHTML('beforeend', `
+          <div role="dialog" style="position:fixed;inset:120px;background:white">
+            <a href="/in/alice/">linkedin.com/in/alice</a>
+            <a id="non-blocking-dialog-link" href="/safety/go/?url=https%3A%2F%2Fportfolio.example%2F">Non-blocking dialog link</a>
+          </div>`);
+      });
+      const args = { selector: '#non-blocking-dialog-link' };
+      const result = await probe('click', args);
+      assert.equal(result.navigationBlocked, true, JSON.stringify(result));
+      assert.equal(result.conclusive, false, JSON.stringify(result));
+      assert.equal((await guard('click', args))?.noDispatch, true);
+    });
+
+    register(`${kind}: LinkedIn safety redirects cannot escape a heuristic modal`, async (page) => {
+      const { guard, probe } = await setup(page);
+      await page.evaluate(() => {
+        history.replaceState(null, '', '/in/alice/overlay/contact-info/');
+        document.querySelector('#chat').hidden = false;
+        const modal = document.createElement('div');
+        modal.className = 'modal show';
+        modal.style.cssText = 'position:fixed;inset:0;background:white';
+        modal.innerHTML = '<a id="heuristic-modal-link" href="/safety/go/?url=https%3A%2F%2Fportfolio.example%2F" style="display:inline-block;padding:8px">Heuristic modal link</a>';
+        document.body.append(modal);
+      });
+      const args = { selector: '#heuristic-modal-link' };
+      const result = await probe('click', args);
+      assert.equal(result.navigationBlocked, true, JSON.stringify(result));
+      assert.equal(result.conclusive, false, JSON.stringify(result));
+      assert.equal((await guard('click', args))?.noDispatch, true);
+    });
+
+    register(`${kind}: LinkedIn safety redirects cannot escape a shadow-root heuristic modal`, async (page) => {
+      const { guard, probe } = await setup(page);
+      const ref_id = await page.evaluate(() => {
+        history.replaceState(null, '', '/in/alice/overlay/contact-info/');
+        document.querySelector('#chat').hidden = false;
+        const host = document.createElement('div');
+        document.body.append(host);
+        const shadow = host.attachShadow({ mode: 'open' });
+        shadow.innerHTML = `
+          <div class="modal show" style="position:fixed;inset:0;background:white">
+            <a href="/safety/go/?url=https%3A%2F%2Fportfolio.example%2F" style="display:inline-block;padding:8px">Shadow heuristic modal link</a>
+          </div>`;
+        return window.__wb_ax_ref(shadow.querySelector('a'));
+      });
+      const args = { ref_id };
+      const result = await probe('click_ax', args);
+      assert.equal(result.navigationBlocked, true, JSON.stringify(result));
+      assert.equal(result.conclusive, false, JSON.stringify(result));
+      assert.equal((await guard('click_ax', args))?.noDispatch, true);
+    });
+
     register(`${kind}: LinkedIn recipient guard rejects ambiguous navigation and action lookalikes`, async (page) => {
-      const { guard } = await setup(page);
-      for (const href of ['#', 'javascript:void(0)', 'https://example.com/jobs/', '/messaging/compose/', '/messaging/send/']) {
+      const { guard, probe } = await setup(page);
+      const messageActionHrefs = [
+        '/messaging/compose/',
+        '/messaging/send/',
+        'https://linkedin.com/messaging/send/',
+        'https://m.linkedin.com/messaging/send/',
+        'https://m.linkedin.com./messaging/send/',
+      ];
+      await page.evaluate(() => { document.querySelector('#chat').hidden = false; });
+      for (const href of messageActionHrefs) {
+        await page.locator('#jobs').evaluate((el, value) => el.setAttribute('href', value), href);
+        const args = { text: 'Jobs' };
+        const result = await probe('click', args);
+        assert.equal(result.navigationBlocked, true, `${href}: ${JSON.stringify(result)}`);
+        assert.equal((await guard('click', args))?.noDispatch, true, href);
+      }
+      await page.evaluate(() => { document.querySelector('#chat').hidden = true; });
+      for (const href of [
+        '#',
+        'javascript:void(0)',
+        'mailto:alice@example.com',
+        '/in/alice/',
+        '/safety/go/?url=https%3A%2F%2Fportfolio.example%2F',
+        '/safety/go/',
+        '/safety/go/?url=javascript%3Aalert(1)',
+        '/safety/go/?url=https%3A%2F%2Fwww.linkedin.com%2Fmessaging%2Fsend',
+        '/safety/go/?url=https%3A%2F%2Flinkedin.com%2Fmessaging%2Fsend',
+        '/safety/go/?url=https%3A%2F%2Fm.linkedin.com%2Fmessaging%2Fsend',
+        '/safety/go/?url=https%3A%2F%2Fm.linkedin.com.%2Fmessaging%2Fsend',
+      ]) {
         await page.locator('#jobs').evaluate((el, href) => el.setAttribute('href', href), href);
         assert.equal((await guard('click', { text: 'Jobs' }))?.noDispatch, true, href);
       }

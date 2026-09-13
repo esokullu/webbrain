@@ -1,4 +1,7 @@
-# WebBrain Compass v2: merged BF16 routing results
+# WebBrain Compass Tiny v2: merged BF16 routing results
+
+The model's corrected release name is WebBrain Compass Tiny v2. Historical
+run IDs and artifact paths below are retained unchanged for reproducibility.
 
 Completed 2026-09-10. This is the full merged BF16 candidate, not the earlier
 unmerged adapter and not ONNX. Base: OpenBMB MiniCPM5-2B (~2.6B), revision

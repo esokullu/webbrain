@@ -10233,6 +10233,140 @@ test('report-driven adapter notes remain bounded and do not overfit low-evidence
   assert.equal(getActiveAdapter('https://naukrigulf.com.evil.example/job/1'), null);
 });
 
+test('VK adapter covers canonical, mobile, and login hosts without trusting lookalikes', () => {
+  const trustedUrls = [
+    'https://vk.com/feed',
+    'https://www.vk.com/im',
+    'https://m.vk.com/messages',
+    'https://vk.ru/feed',
+    'https://www.vk.ru/im',
+    'https://m.vk.ru/messages',
+    'https://id.vk.ru/auth',
+  ];
+  const lookalikeUrls = [
+    'https://id.vk.com.evil.example/auth',
+    'https://m.vk.ru.evil.example/messages',
+    'https://example.com/?next=https://id.vk.ru/auth',
+  ];
+
+  for (const getAdapter of [getActiveAdapter, getActiveAdapterFx]) {
+    for (const url of trustedUrls) assert.equal(getAdapter(url)?.name, 'vk', url);
+    for (const url of lookalikeUrls) assert.notEqual(getAdapter(url)?.name, 'vk', url);
+  }
+});
+
+test('Noon adapter covers its primary and Supermall storefronts without trusting lookalikes', () => {
+  const trustedUrls = [
+    'https://noon.com/egypt-en/',
+    'https://www.noon.com/uae-en/',
+    'https://supermall.noon.com/saudi-en/cart/',
+  ];
+  const lookalikeUrls = [
+    'https://supermall.noon.com.evil.example/saudi-en/cart/',
+    'https://example.com/?next=https://supermall.noon.com/saudi-en/cart/',
+  ];
+
+  for (const getAdapter of [getActiveAdapter, getActiveAdapterFx]) {
+    for (const url of trustedUrls) assert.equal(getAdapter(url)?.name, 'noon', url);
+    for (const url of lookalikeUrls) assert.notEqual(getAdapter(url)?.name, 'noon', url);
+  }
+});
+
+test('Tokopedia adapter covers desktop and mobile storefronts without trusting lookalikes', () => {
+  for (const getAdapter of [getActiveAdapter, getActiveAdapterFx]) {
+    assert.equal(getAdapter('https://www.tokopedia.com/example/product')?.name, 'tokopedia');
+    assert.equal(getAdapter('https://m.tokopedia.com/example/product')?.name, 'tokopedia');
+    assert.notEqual(getAdapter('https://m.tokopedia.com.evil.example/example/product')?.name, 'tokopedia');
+    assert.notEqual(getAdapter('https://example.com/?next=https://m.tokopedia.com/example/product')?.name, 'tokopedia');
+  }
+});
+
+test('LATAM adapters cover OLX mobile and the real Despegar Chile domain', () => {
+  for (const getAdapter of [getActiveAdapter, getActiveAdapterFx]) {
+    assert.equal(getAdapter('https://m.olx.com.br/anuncio/123')?.name, 'olx');
+    assert.equal(getAdapter('https://www.olx.com.br/autos-e-pecas')?.name, 'olx');
+    assert.notEqual(getAdapter('https://m.olx.com.br.evil.example/anuncio/123')?.name, 'olx');
+
+    assert.equal(getAdapter('https://www.despegar.cl/vuelos/')?.name, 'despegar');
+    assert.equal(getAdapter('https://www.despegar.com.ar/hoteles/')?.name, 'despegar');
+    assert.notEqual(getAdapter('https://www.despegar.cl.evil.example/vuelos/')?.name, 'despegar');
+  }
+});
+
+test('Africa and MENA adapters cover country, mobile, and transactional hosts', () => {
+  for (const getAdapter of [getActiveAdapter, getActiveAdapterFx]) {
+    assert.equal(getAdapter('https://www.jumia.ci/catalog/')?.name, 'jumia');
+    assert.notEqual(getAdapter('https://www.jumia.ci.evil.example/catalog/')?.name, 'jumia');
+
+    for (const url of [
+      'https://www.kilimall.ug/product/123',
+      'https://m.kilimall.co.ke/product/123',
+      'https://h5.kilimall.co.ke/cart',
+    ]) assert.equal(getAdapter(url)?.name, 'kilimall', url);
+    assert.notEqual(getAdapter('https://m.kilimall.co.ke.evil.example/product/123')?.name, 'kilimall');
+
+    for (const url of [
+      'https://app.careem.com/ride',
+      'https://food.careem.com/restaurants',
+      'https://pay.careem.com/',
+    ]) assert.equal(getAdapter(url)?.name, 'careem', url);
+    for (const url of [
+      'https://help.careem.com/',
+      'https://pay.careem.com.evil.example/',
+    ]) assert.notEqual(getAdapter(url)?.name, 'careem', url);
+  }
+});
+
+test('East Asia adapters route transactional hosts without overmatching unrelated services', () => {
+  for (const getAdapter of [getActiveAdapter, getActiveAdapterFx]) {
+    const mercari = getAdapter('https://jp.mercari.com/item/m123');
+    assert.equal(mercari?.name, 'mercari');
+    assert.match(mercari?.notes || '', /seller-provided "商品の状態"/);
+    assert.match(mercari?.notes || '', /there is no buyer-selectable condition/);
+    assert.doesNotMatch(mercari?.notes || '', /Select the exact item state/);
+
+    for (const url of [
+      'https://page.auctions.yahoo.co.jp/jp/auction/x123',
+      'https://store.shopping.yahoo.co.jp/example/item.html',
+      'https://auctions.yahoo.co.jp/',
+    ]) assert.equal(getAdapter(url)?.name, 'yahoo-jp', url);
+    for (const url of [
+      'https://news.yahoo.co.jp/',
+      'https://page.auctions.yahoo.co.jp.evil.example/jp/auction/x123',
+    ]) assert.notEqual(getAdapter(url)?.name, 'yahoo-jp', url);
+
+    for (const url of [
+      'https://shopping.naver.com/',
+      'https://m.shopping.naver.com/',
+      'https://smartstore.naver.com/example',
+      'https://order.pay.naver.com/orderSheet/123',
+    ]) assert.equal(getAdapter(url)?.name, 'naver', url);
+    for (const url of [
+      'https://news.naver.com/',
+      'https://mail.naver.com/',
+      'https://blog.naver.com/',
+      'https://order.pay.naver.com.evil.example/orderSheet/123',
+    ]) assert.notEqual(getAdapter(url)?.name, 'naver', url);
+  }
+});
+
+test('India payment and Tatkal guidance keeps finance, timing, and authentication safety signals', () => {
+  for (const getAdapter of [getActiveAdapter, getActiveAdapterFx]) {
+    const paytm = getAdapter('https://paytm.com/recharge');
+    assert.equal(paytm?.name, 'paytm');
+    assert.equal(paytm?.category, 'finance');
+
+    const irctc = getAdapter('https://www.irctc.co.in/nget/train-search');
+    assert.equal(irctc?.name, 'irctc');
+    assert.match(irctc?.notes || '', /10:00 IST for AC classes/);
+    assert.match(irctc?.notes || '', /11:00 IST for non-AC classes/);
+    assert.match(irctc?.notes || '', /departure date at its originating station/);
+    assert.match(irctc?.notes || '', /requires an Aadhaar-authenticated account/);
+    assert.match(irctc?.notes || '', /Aadhaar-based OTP during booking/);
+    assert.doesNotMatch(irctc?.notes || '', /~24h before departure/);
+  }
+});
+
 test('adapter-match trace metadata is content-free, queued before tracing, and de-duplicated per run', () => {
   for (const [label, AgentClass] of [['chrome', AgentCh], ['firefox', AgentFx]]) {
     const agent = new AgentClass({});
