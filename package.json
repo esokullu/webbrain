@@ -18,6 +18,7 @@
     "test:webmcp": "node test/webmcp-e2e.mjs",
     "test:vision": "node test/vision/run.mjs",
     "test:vision:validate": "node --test test/vision/lib/score.test.mjs && node test/vision/validate.mjs",
+    "test:llm-tiny:validate": "node --test test/llm-tiny/cases.test.mjs test/llm-tiny/lib/adapters.test.mjs && node --check test/llm-tiny/run.mjs && node test/llm-tiny/run.mjs --help",
     "test:anonymous": "node test/anonymous/run.mjs",
     "test:ci": "node ci/test.mjs && node ci/cloud-capture.test.mjs",
     "ci:e2e": "node ci/run.mjs",
