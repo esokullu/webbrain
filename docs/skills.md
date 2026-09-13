@@ -140,6 +140,7 @@ enable. They are not seeded on by default.
 | Open Library | Ask, Act, Dev | Open Library search HTTPS |
 | Wikipedia | Ask, Act, Dev | Live Wikipedia APIs + explicitly installed Kiwix/ZIM archives |
 | Turkish deasciifier | Ask, Act, Dev | Instruction-only; uses ordinary verbatim form-entry tools |
+| Phone calls (Phonr) | Ask (instructed GET only), Act, Dev | Bearer-authenticated `fetch_url` to `https://phonr.xyz/v1`; POST requires the existing API-mutation permission |
 
 Enable a skill only when you want its tools and instructions available for
 `load_skill` on eligible runs.
@@ -150,6 +151,33 @@ license metadata, install resumably, import an existing `.zim`, and manage its
 lifecycle. It is independent from the interface language, disabled by default,
 and never downloads an archive merely because the Wikipedia skill is enabled.
 Installed archive passages retain canonical attribution and remain untrusted.
+
+### Phone calls (Phonr)
+
+Enable **Phone calls (Phonr)** under Settings → Skills, then ask WebBrain to call
+a person or business with a specific purpose and language. Supply your Phonr
+bearer key for that service; the packaged skill contains no credential and cannot
+read the server's `.env`. Act/Dev calls use `fetch_url` with the existing
+`/allow-api` or persistent API-mutation authorization. Ask mode can read call
+status and results through the skill's instructions; `fetch_url` does not enforce
+that restriction. Previewing uses POST but never places a call. The service
+address is `https://phonr.xyz/v1`; installing the skill does not deploy it.
+
+The skill preserves an idempotency key across interrupted starts, follows the
+same call through completion, handles uncertain provider status without
+redialing, and distinguishes a call ending from its purpose being fulfilled.
+Caller number, recording mode, and duration limit come from the Phonr server.
+It uses the default natural-conversation system message unless the user requests
+a change. Example: “Call this restaurant in Spanish and ask whether a table for
+four is available tonight at 7. Get the options; don't book yet.”
+
+This is an instruction-only API integration: its bearer header is part of
+model-generated `fetch_url` arguments, so the key may appear in the configured
+LLM conversation and enabled traces. Do not embed it in skill text, memory,
+scheduled instructions, or links. The skill can inspect transcript, result, and
+clip metadata; WebBrain's generic download tool cannot attach a bearer header,
+so actual audio retrieval uses the local Phonr dashboard or the authenticated
+curl example in the skill. It does not claim to play audio from metadata alone.
 
 ## See also
 

@@ -469,6 +469,17 @@ responses as untrusted unless the manifest says otherwise. Removing or
 disabling a skill stops that data flow. See [Skills](skills.md#bundled-skills)
 for the full packaged catalog.
 
+The opt-in **Phone calls (Phonr)** skill uses ordinary `fetch_url` requests to
+`https://phonr.xyz/v1`. The selected phone number, purpose, language, and optional
+system message go to Phonr; Phonr uses its configured OpenAI and telephone
+provider accounts to conduct the call and retain call history and configured
+recordings. The bearer key is supplied by the user and included in tool arguments,
+which can be present in the configured LLM conversation and enabled traces; this
+skill does not provide a separate credential vault. Returned call details and
+transcripts enter the conversation as untrusted data. The skill ships without a
+key and does not send unrelated browsing content. POST requests keep WebBrain's
+existing API-mutation permission gate; merely enabling the skill does not dial.
+
 The packaged Wikipedia skill does not silently create an offline corpus.
 Apocalypse Mode is disabled by default and requires a separate opt-in under
 Settings → Advanced. Catalog browsing sends the selected archive language to

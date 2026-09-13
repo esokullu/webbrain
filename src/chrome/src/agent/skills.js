@@ -66,6 +66,11 @@ export const PACKAGED_SKILL_SOURCES = Object.freeze([
     name: 'Turkish deasciifier',
     path: 'skills/turkish-deasciifier.md',
   }),
+  Object.freeze({
+    id: 'phonr-calls',
+    name: 'Phone calls (Phonr)',
+    path: 'skills/phonr-calls.md',
+  }),
 ]);
 export const DEFAULT_SKILL_SOURCES = Object.freeze(
   PACKAGED_SKILL_SOURCES.filter((source) => [
