@@ -1,0 +1,1717 @@
+{
+  "version": "reasoning-browser-v2.1",
+  "seeds": [
+    17,
+    43,
+    89
+  ],
+  "categories": {
+    "planning": 15,
+    "calculation": 15,
+    "evidence": 10,
+    "workflow": 10,
+    "recovery": 5,
+    "visual": 5
+  },
+  "limits": {
+    "maxTurns": 80,
+    "maxActions": 120,
+    "taskTimeoutMs": 900000,
+    "requestTimeoutMs": 90000,
+    "maxTokens": 4096
+  },
+  "files": {
+    "cases.mjs": "41e83731f976af8166d8608c069841e600f801c843d039efd6e670187809802c",
+    "models.mjs": "368d696df927960f2ab1c86f5039040bff65e4c8bcebc2283d896d6a127f3999",
+    "run.mjs": "7e9f470531cd98bcaf2dadd9c016f929ac7f51fbf3b409e22c0a69ceef497102",
+    "compare.mjs": "03094a56e61c322307656e85837f861b0f5ed20285212f2a980bbf4546fdeb12",
+    "lib/adapters.mjs": "538076896593fa1b116effcabb08cb9c852c8c14c5d328055137dac50a6b6057",
+    "lib/fara-reference.json": "1e7e196e72d1c941e7ff42f7037bcf2a45b0298d7f7e5e1b2cb7c19bff5a74cd",
+    "lib/browser.mjs": "0bc6ad1ec80f3b1eef0adc2eb517afb76c623a9d676483b53418424807b1e2e2",
+    "lib/fixture.mjs": "e4897d0ca07c86d77fed160793975e8ddb3534f988fa1edf02de0c08e72be355",
+    "lib/scoring.mjs": "2fb992c551af1371295ddbf05590d983556440ae5e2a9f4f0734354668199b8b",
+    "lib/manifest.mjs": "c886027e24fd2caac9d682f877b183a8b2912927e2f932aff0fa6fca1252eaf9"
+  },
+  "cases": [
+    {
+      "id": "pilot-planning-01-s17",
+      "taskId": "pilot-planning-01",
+      "category": "planning",
+      "split": "pilot",
+      "seed": 17,
+      "sha256": "c75731331d0b3d9914ea7410db005297a1e9c6330a104ddf9cd8e320fc261b52"
+    },
+    {
+      "id": "pilot-planning-01-s43",
+      "taskId": "pilot-planning-01",
+      "category": "planning",
+      "split": "pilot",
+      "seed": 43,
+      "sha256": "a2963af83eeca5c804399c913f4efff7bdf2b889ac091450bb67e2dcb40bfcd3"
+    },
+    {
+      "id": "pilot-planning-01-s89",
+      "taskId": "pilot-planning-01",
+      "category": "planning",
+      "split": "pilot",
+      "seed": 89,
+      "sha256": "c46c29f8a8951d490d792e6067730126a3d72b28ae33b431505dbe0cfa4dfae3"
+    },
+    {
+      "id": "pilot-planning-02-s17",
+      "taskId": "pilot-planning-02",
+      "category": "planning",
+      "split": "pilot",
+      "seed": 17,
+      "sha256": "c6cadf8e4a7feb9e060724098f26e84d15ef386de36d0af1102ca6120e183d08"
+    },
+    {
+      "id": "pilot-planning-02-s43",
+      "taskId": "pilot-planning-02",
+      "category": "planning",
+      "split": "pilot",
+      "seed": 43,
+      "sha256": "6c7782b114d240fe693b1b9623da97a2267b6d31c8d9efebda9481be04cf5a5a"
+    },
+    {
+      "id": "pilot-planning-02-s89",
+      "taskId": "pilot-planning-02",
+      "category": "planning",
+      "split": "pilot",
+      "seed": 89,
+      "sha256": "08c2ced796282bc5891abae07f7c284ba14d72aa1dcc00a7c34ee181b244b1b3"
+    },
+    {
+      "id": "pilot-calculation-01-s17",
+      "taskId": "pilot-calculation-01",
+      "category": "calculation",
+      "split": "pilot",
+      "seed": 17,
+      "sha256": "67d6114b82850075b9a175d1c1cb495610d72c66012ff6c46e00d2326d95594d"
+    },
+    {
+      "id": "pilot-calculation-01-s43",
+      "taskId": "pilot-calculation-01",
+      "category": "calculation",
+      "split": "pilot",
+      "seed": 43,
+      "sha256": "d98a362406fbc632c7a0d4f91958da3b77aed5cc2f043c7df5ac8120853ae388"
+    },
+    {
+      "id": "pilot-calculation-01-s89",
+      "taskId": "pilot-calculation-01",
+      "category": "calculation",
+      "split": "pilot",
+      "seed": 89,
+      "sha256": "fadfb11f1c35b553a762c7613178914b3608776551f26af99c64a2d5ec35979f"
+    },
+    {
+      "id": "pilot-calculation-02-s17",
+      "taskId": "pilot-calculation-02",
+      "category": "calculation",
+      "split": "pilot",
+      "seed": 17,
+      "sha256": "c7c3a74e0a20182304ea9c4b382e36a1847b3411d4245f22c014214b207e14ca"
+    },
+    {
+      "id": "pilot-calculation-02-s43",
+      "taskId": "pilot-calculation-02",
+      "category": "calculation",
+      "split": "pilot",
+      "seed": 43,
+      "sha256": "c885f703fa101420ac72d91faa0280e7ac8a42493922086ede13baff9a17d24d"
+    },
+    {
+      "id": "pilot-calculation-02-s89",
+      "taskId": "pilot-calculation-02",
+      "category": "calculation",
+      "split": "pilot",
+      "seed": 89,
+      "sha256": "29990a66e8820f7f34174f6fcd059352b453c59ab5b3cdad8f9bca7cf469a676"
+    },
+    {
+      "id": "pilot-evidence-01-s17",
+      "taskId": "pilot-evidence-01",
+      "category": "evidence",
+      "split": "pilot",
+      "seed": 17,
+      "sha256": "dd728e313486ce2d875aa795469d744bc80fb68228dd28e176d24de440f4a41d"
+    },
+    {
+      "id": "pilot-evidence-01-s43",
+      "taskId": "pilot-evidence-01",
+      "category": "evidence",
+      "split": "pilot",
+      "seed": 43,
+      "sha256": "4cbe9792fbe7ec5bb5b788ee3aa26f51cd986118b88d0e1d145c0bd7869658da"
+    },
+    {
+      "id": "pilot-evidence-01-s89",
+      "taskId": "pilot-evidence-01",
+      "category": "evidence",
+      "split": "pilot",
+      "seed": 89,
+      "sha256": "2d7390eeb6f0c815e689571e4890215442623e1734bfee647ea61e1e36473d88"
+    },
+    {
+      "id": "pilot-evidence-02-s17",
+      "taskId": "pilot-evidence-02",
+      "category": "evidence",
+      "split": "pilot",
+      "seed": 17,
+      "sha256": "1b778c0788990c47359e1c9e9652c8fb6160d1e013510c439bf7a672aa48bb79"
+    },
+    {
+      "id": "pilot-evidence-02-s43",
+      "taskId": "pilot-evidence-02",
+      "category": "evidence",
+      "split": "pilot",
+      "seed": 43,
+      "sha256": "cc27aadf68ce00c9c0ce4dd58dfef78031d85663b58e982e19b7660fd89e1d92"
+    },
+    {
+      "id": "pilot-evidence-02-s89",
+      "taskId": "pilot-evidence-02",
+      "category": "evidence",
+      "split": "pilot",
+      "seed": 89,
+      "sha256": "d21a37f986c53107a3f6a3475cf43a3b124f54142f6c9f5a52a6d5d05b4aae79"
+    },
+    {
+      "id": "pilot-workflow-01-s17",
+      "taskId": "pilot-workflow-01",
+      "category": "workflow",
+      "split": "pilot",
+      "seed": 17,
+      "sha256": "9ee53946c9ea88b3939baa78356a954b241a9178d76eb610a99b60ef7ee00ba3"
+    },
+    {
+      "id": "pilot-workflow-01-s43",
+      "taskId": "pilot-workflow-01",
+      "category": "workflow",
+      "split": "pilot",
+      "seed": 43,
+      "sha256": "c8c19131fbd568609ec8b1677bdd4f00db34dc185dba28e7a7e0fdcebf804bf4"
+    },
+    {
+      "id": "pilot-workflow-01-s89",
+      "taskId": "pilot-workflow-01",
+      "category": "workflow",
+      "split": "pilot",
+      "seed": 89,
+      "sha256": "ee21377005a6c08092da6f39ccdbedb28d28034eb1e88e16277df24d0245c452"
+    },
+    {
+      "id": "pilot-workflow-02-s17",
+      "taskId": "pilot-workflow-02",
+      "category": "workflow",
+      "split": "pilot",
+      "seed": 17,
+      "sha256": "33144275dec6f5e7b9c6379199691ab69b6e1144d4a285f91c3b9c81b488b824"
+    },
+    {
+      "id": "pilot-workflow-02-s43",
+      "taskId": "pilot-workflow-02",
+      "category": "workflow",
+      "split": "pilot",
+      "seed": 43,
+      "sha256": "5e2f05cffc6fc37d1aecad662100295cfb8e1a71b1177494de43a4c70ea57d3a"
+    },
+    {
+      "id": "pilot-workflow-02-s89",
+      "taskId": "pilot-workflow-02",
+      "category": "workflow",
+      "split": "pilot",
+      "seed": 89,
+      "sha256": "6259be731e151ef25d46cccf4a925888304fc5b92de7079c654d9a0a03ab6d80"
+    },
+    {
+      "id": "pilot-recovery-01-s17",
+      "taskId": "pilot-recovery-01",
+      "category": "recovery",
+      "split": "pilot",
+      "seed": 17,
+      "sha256": "002a97915e16b196589c6639ffaf08d1a63d1c83b20139ff0711c50be62c1061"
+    },
+    {
+      "id": "pilot-recovery-01-s43",
+      "taskId": "pilot-recovery-01",
+      "category": "recovery",
+      "split": "pilot",
+      "seed": 43,
+      "sha256": "809e9faf4143b2dd83d95c8e19fd7782e83ca23039315c07a819de4353a035b3"
+    },
+    {
+      "id": "pilot-recovery-01-s89",
+      "taskId": "pilot-recovery-01",
+      "category": "recovery",
+      "split": "pilot",
+      "seed": 89,
+      "sha256": "dc1e3afc14d1306f4f872ec61fc995273ffc6e83250c8071131d387c68d17d2e"
+    },
+    {
+      "id": "pilot-visual-01-s17",
+      "taskId": "pilot-visual-01",
+      "category": "visual",
+      "split": "pilot",
+      "seed": 17,
+      "sha256": "3ff520f0d09c69f0d190e9d310c923d7a31aaf52373295fa3271cd59a3224738"
+    },
+    {
+      "id": "pilot-visual-01-s43",
+      "taskId": "pilot-visual-01",
+      "category": "visual",
+      "split": "pilot",
+      "seed": 43,
+      "sha256": "8712c838fafb0029d72e9ed41035d6c547f2514ee0a684870c79dcb5e4d6f13b"
+    },
+    {
+      "id": "pilot-visual-01-s89",
+      "taskId": "pilot-visual-01",
+      "category": "visual",
+      "split": "pilot",
+      "seed": 89,
+      "sha256": "70f51f0fd1dea03cf81013fe91d3e1d789a12a49cec5d09d00f6e232c88944da"
+    },
+    {
+      "id": "heldout-planning-01-s17",
+      "taskId": "heldout-planning-01",
+      "category": "planning",
+      "split": "heldout",
+      "seed": 17,
+      "sha256": "7f1cd2f65a28c6b4a9d86c2241b8e3b3e46ae2c0e6e5c6983e930cfed7b74585"
+    },
+    {
+      "id": "heldout-planning-01-s43",
+      "taskId": "heldout-planning-01",
+      "category": "planning",
+      "split": "heldout",
+      "seed": 43,
+      "sha256": "e06bca70cbcb235d415f883cc0e9dbc951a7e70c34f5926275b3217abe856f80"
+    },
+    {
+      "id": "heldout-planning-01-s89",
+      "taskId": "heldout-planning-01",
+      "category": "planning",
+      "split": "heldout",
+      "seed": 89,
+      "sha256": "f2bec0118a3757849792b75d878ec42a83b60191b1eca749e231426bddafb777"
+    },
+    {
+      "id": "heldout-planning-02-s17",
+      "taskId": "heldout-planning-02",
+      "category": "planning",
+      "split": "heldout",
+      "seed": 17,
+      "sha256": "3d0dcc55ae4606697d1c501438fce83bd923e35a55cb627636296561918060ee"
+    },
+    {
+      "id": "heldout-planning-02-s43",
+      "taskId": "heldout-planning-02",
+      "category": "planning",
+      "split": "heldout",
+      "seed": 43,
+      "sha256": "37ac7f9bd70fa32eb611d076cf72485e55d1f9ea25800195698652728e09af67"
+    },
+    {
+      "id": "heldout-planning-02-s89",
+      "taskId": "heldout-planning-02",
+      "category": "planning",
+      "split": "heldout",
+      "seed": 89,
+      "sha256": "ac68406940061fd3a029c28bb184705988fdee08b943163024e0a83bc7f4793b"
+    },
+    {
+      "id": "heldout-planning-03-s17",
+      "taskId": "heldout-planning-03",
+      "category": "planning",
+      "split": "heldout",
+      "seed": 17,
+      "sha256": "ff34b9891fa8ef7325b4281e5a38c489d8224b0454eebbda4777d67d7366e7f3"
+    },
+    {
+      "id": "heldout-planning-03-s43",
+      "taskId": "heldout-planning-03",
+      "category": "planning",
+      "split": "heldout",
+      "seed": 43,
+      "sha256": "b8370958afb1311a996e796186490dc074e8a6a7be53a2385c3cc75f162fb89c"
+    },
+    {
+      "id": "heldout-planning-03-s89",
+      "taskId": "heldout-planning-03",
+      "category": "planning",
+      "split": "heldout",
+      "seed": 89,
+      "sha256": "32ef8b1ee2828628431e3a0cf301a1b571db1834a83c30c71049d20fefb46ba3"
+    },
+    {
+      "id": "heldout-planning-04-s17",
+      "taskId": "heldout-planning-04",
+      "category": "planning",
+      "split": "heldout",
+      "seed": 17,
+      "sha256": "3223d07610e00945de326f26030cdfcbd40f11c3b7fe575c556d08df3a5ac2cd"
+    },
+    {
+      "id": "heldout-planning-04-s43",
+      "taskId": "heldout-planning-04",
+      "category": "planning",
+      "split": "heldout",
+      "seed": 43,
+      "sha256": "ed614a9a47d392a96a0c0ee4044a1e4530544bf206f724bc01f3bdd41dba73af"
+    },
+    {
+      "id": "heldout-planning-04-s89",
+      "taskId": "heldout-planning-04",
+      "category": "planning",
+      "split": "heldout",
+      "seed": 89,
+      "sha256": "4b8ed83d98395bae28b2a11ef5f56c3a91ec6189c1968d5450abf2cb475cdf06"
+    },
+    {
+      "id": "heldout-planning-05-s17",
+      "taskId": "heldout-planning-05",
+      "category": "planning",
+      "split": "heldout",
+      "seed": 17,
+      "sha256": "8cd75a878c266738f5c18616d6ea247703069264f381e2fb2d0616ac0755a488"
+    },
+    {
+      "id": "heldout-planning-05-s43",
+      "taskId": "heldout-planning-05",
+      "category": "planning",
+      "split": "heldout",
+      "seed": 43,
+      "sha256": "3bde6ed5b86c8dff2250dc41f0be69767a91a21db6de25b8d8917a9229a8d529"
+    },
+    {
+      "id": "heldout-planning-05-s89",
+      "taskId": "heldout-planning-05",
+      "category": "planning",
+      "split": "heldout",
+      "seed": 89,
+      "sha256": "b093cc917f946567be6c93b11f5fbb04308d078b19e6b6c43548c82bac7ef5f3"
+    },
+    {
+      "id": "heldout-planning-06-s17",
+      "taskId": "heldout-planning-06",
+      "category": "planning",
+      "split": "heldout",
+      "seed": 17,
+      "sha256": "a8c641aebfb78b26ca78d8c2983dd08d925fcc3e60f9a601f0fc0cae72b5481d"
+    },
+    {
+      "id": "heldout-planning-06-s43",
+      "taskId": "heldout-planning-06",
+      "category": "planning",
+      "split": "heldout",
+      "seed": 43,
+      "sha256": "db25338c79edd2d53fa6d80fa6aed714ce1533eb054eeffc3e360fcccd29fc39"
+    },
+    {
+      "id": "heldout-planning-06-s89",
+      "taskId": "heldout-planning-06",
+      "category": "planning",
+      "split": "heldout",
+      "seed": 89,
+      "sha256": "5363b14f3a6537d6f42b95ea6c418409e450ea0d1e0d9d3eed6b844ccb1fa73f"
+    },
+    {
+      "id": "heldout-planning-07-s17",
+      "taskId": "heldout-planning-07",
+      "category": "planning",
+      "split": "heldout",
+      "seed": 17,
+      "sha256": "c58b4194cf3d343ebb682ebb9ac159fe460dfd0981ba7019e3ba4a05b088104a"
+    },
+    {
+      "id": "heldout-planning-07-s43",
+      "taskId": "heldout-planning-07",
+      "category": "planning",
+      "split": "heldout",
+      "seed": 43,
+      "sha256": "de8aca9e719d0fcb7e94ea5ba74fa80ac91987a208f83e0c2dc594afe97f14cb"
+    },
+    {
+      "id": "heldout-planning-07-s89",
+      "taskId": "heldout-planning-07",
+      "category": "planning",
+      "split": "heldout",
+      "seed": 89,
+      "sha256": "2d601afd9dd03c83235cbd199811491f254d2d1098b2828cd42cf246af185f69"
+    },
+    {
+      "id": "heldout-planning-08-s17",
+      "taskId": "heldout-planning-08",
+      "category": "planning",
+      "split": "heldout",
+      "seed": 17,
+      "sha256": "207beb7951125898b5b55a6587ff88062efbcefe9b744ee0c834a16c0341a623"
+    },
+    {
+      "id": "heldout-planning-08-s43",
+      "taskId": "heldout-planning-08",
+      "category": "planning",
+      "split": "heldout",
+      "seed": 43,
+      "sha256": "f270a3b79587c98825f2d3408881e4dfe4f67c99260e534710ea714c450fe34d"
+    },
+    {
+      "id": "heldout-planning-08-s89",
+      "taskId": "heldout-planning-08",
+      "category": "planning",
+      "split": "heldout",
+      "seed": 89,
+      "sha256": "48a77e809ab56ece3c477bf35a0a0a3de740d3e4d6c59f665e63237d796e5c70"
+    },
+    {
+      "id": "heldout-planning-09-s17",
+      "taskId": "heldout-planning-09",
+      "category": "planning",
+      "split": "heldout",
+      "seed": 17,
+      "sha256": "45d78ed02f247566dc6770c10683ebb7d2ce42d1c10f71a05ba86d51672dad91"
+    },
+    {
+      "id": "heldout-planning-09-s43",
+      "taskId": "heldout-planning-09",
+      "category": "planning",
+      "split": "heldout",
+      "seed": 43,
+      "sha256": "15c55dcb24e7a84f17b4dd5eb55d8ccaf1e380e558eef98429263d1f09c65aeb"
+    },
+    {
+      "id": "heldout-planning-09-s89",
+      "taskId": "heldout-planning-09",
+      "category": "planning",
+      "split": "heldout",
+      "seed": 89,
+      "sha256": "b2d0bafecea8fda03babadd6c3c12abe73c63c747be79c80781f5b66db89fd77"
+    },
+    {
+      "id": "heldout-planning-10-s17",
+      "taskId": "heldout-planning-10",
+      "category": "planning",
+      "split": "heldout",
+      "seed": 17,
+      "sha256": "436a7b526740b2cfe89d6ad163bb42126e4e83565143f6c9e669d0c2bc5112f6"
+    },
+    {
+      "id": "heldout-planning-10-s43",
+      "taskId": "heldout-planning-10",
+      "category": "planning",
+      "split": "heldout",
+      "seed": 43,
+      "sha256": "d0e7e2de9903b2471b98f3428ee12de9d30dc6ca2362b3df0a655bc027452ba2"
+    },
+    {
+      "id": "heldout-planning-10-s89",
+      "taskId": "heldout-planning-10",
+      "category": "planning",
+      "split": "heldout",
+      "seed": 89,
+      "sha256": "4efd76f5d4b915ed366084e89c4fb5a6532a4e90649a72060da2d842de2ffbd2"
+    },
+    {
+      "id": "heldout-planning-11-s17",
+      "taskId": "heldout-planning-11",
+      "category": "planning",
+      "split": "heldout",
+      "seed": 17,
+      "sha256": "31bb5e27df189650d137e99c56a6e6894e9489a4cb84dfef155a6844ac4176b2"
+    },
+    {
+      "id": "heldout-planning-11-s43",
+      "taskId": "heldout-planning-11",
+      "category": "planning",
+      "split": "heldout",
+      "seed": 43,
+      "sha256": "1d8834c76071891de6fe19f7a72cedd283b20344d5187d0eb2713fd299551498"
+    },
+    {
+      "id": "heldout-planning-11-s89",
+      "taskId": "heldout-planning-11",
+      "category": "planning",
+      "split": "heldout",
+      "seed": 89,
+      "sha256": "2ab2a0edc00bf3f782ebe5418f5331bd056b7fbee144d83ea1ba77dde89ac493"
+    },
+    {
+      "id": "heldout-planning-12-s17",
+      "taskId": "heldout-planning-12",
+      "category": "planning",
+      "split": "heldout",
+      "seed": 17,
+      "sha256": "c3d24107a7cb998fdf1d39e52e8ebf4305a5cebadf2843d0f6934aa379f25e55"
+    },
+    {
+      "id": "heldout-planning-12-s43",
+      "taskId": "heldout-planning-12",
+      "category": "planning",
+      "split": "heldout",
+      "seed": 43,
+      "sha256": "d8aa42849ab788fc4b025467cad87177ccf88b84ee2f17829d6aa6788231baec"
+    },
+    {
+      "id": "heldout-planning-12-s89",
+      "taskId": "heldout-planning-12",
+      "category": "planning",
+      "split": "heldout",
+      "seed": 89,
+      "sha256": "153a144cfae8a01a7596f68480e438d3f2f783baa9b67616a75952cc1828640c"
+    },
+    {
+      "id": "heldout-planning-13-s17",
+      "taskId": "heldout-planning-13",
+      "category": "planning",
+      "split": "heldout",
+      "seed": 17,
+      "sha256": "c1ea6be658f079703fbf68b21042b7a412a5bd7e65359b96eb7d94f43fb2f456"
+    },
+    {
+      "id": "heldout-planning-13-s43",
+      "taskId": "heldout-planning-13",
+      "category": "planning",
+      "split": "heldout",
+      "seed": 43,
+      "sha256": "33e54fdf147bdffca199f3da1b774a2d2cad62c6c38e410ce5be8f5ddc97e262"
+    },
+    {
+      "id": "heldout-planning-13-s89",
+      "taskId": "heldout-planning-13",
+      "category": "planning",
+      "split": "heldout",
+      "seed": 89,
+      "sha256": "ae7e1361be6ec65103a35bb66b2a210467b9c4010515199839f7e182388f736a"
+    },
+    {
+      "id": "heldout-planning-14-s17",
+      "taskId": "heldout-planning-14",
+      "category": "planning",
+      "split": "heldout",
+      "seed": 17,
+      "sha256": "43db7fed7e9e3b7f5a541a348e9dfd8c82eac275bb5d8a361d5fb467d6ff2667"
+    },
+    {
+      "id": "heldout-planning-14-s43",
+      "taskId": "heldout-planning-14",
+      "category": "planning",
+      "split": "heldout",
+      "seed": 43,
+      "sha256": "e4e40fa7d3ba8ebabd9b8aa0842d29da9c1412e0bd09d36eaa810ad4ed114c4d"
+    },
+    {
+      "id": "heldout-planning-14-s89",
+      "taskId": "heldout-planning-14",
+      "category": "planning",
+      "split": "heldout",
+      "seed": 89,
+      "sha256": "7fd78fd004ce16439722c8b850b37f521a1d68ddd8aab4505c04966a00c38da6"
+    },
+    {
+      "id": "heldout-planning-15-s17",
+      "taskId": "heldout-planning-15",
+      "category": "planning",
+      "split": "heldout",
+      "seed": 17,
+      "sha256": "be9ca222f0d91293b55376b9062d4a3bc1d606687abb4c4a56d64b3d566e58f2"
+    },
+    {
+      "id": "heldout-planning-15-s43",
+      "taskId": "heldout-planning-15",
+      "category": "planning",
+      "split": "heldout",
+      "seed": 43,
+      "sha256": "6c5a1775223ada7175013d6dabffa6e9d2cca31391ea96e48005be941933ad5d"
+    },
+    {
+      "id": "heldout-planning-15-s89",
+      "taskId": "heldout-planning-15",
+      "category": "planning",
+      "split": "heldout",
+      "seed": 89,
+      "sha256": "f5a16ee8a55755f7ec2104a5f5f5f039d36d52ad87ab8feca8acfcdda5d94e3f"
+    },
+    {
+      "id": "heldout-calculation-01-s17",
+      "taskId": "heldout-calculation-01",
+      "category": "calculation",
+      "split": "heldout",
+      "seed": 17,
+      "sha256": "032a3e7b582a6fbebc1b14b377146ef84e4974b0546d8fc9ec8694c63e4119b5"
+    },
+    {
+      "id": "heldout-calculation-01-s43",
+      "taskId": "heldout-calculation-01",
+      "category": "calculation",
+      "split": "heldout",
+      "seed": 43,
+      "sha256": "3cb11701f8d40d994a0d371ef53c96e061f4dd79273795be8d5d6385ff47808a"
+    },
+    {
+      "id": "heldout-calculation-01-s89",
+      "taskId": "heldout-calculation-01",
+      "category": "calculation",
+      "split": "heldout",
+      "seed": 89,
+      "sha256": "9b776fe4002a82a8bc5b0bcb6fc67236bc9d5817760ef5c7a7ea1a5083533d86"
+    },
+    {
+      "id": "heldout-calculation-02-s17",
+      "taskId": "heldout-calculation-02",
+      "category": "calculation",
+      "split": "heldout",
+      "seed": 17,
+      "sha256": "87cbaf8b336fa450cb4a20faf435338242d984be5e72bf9e72d9b60720873530"
+    },
+    {
+      "id": "heldout-calculation-02-s43",
+      "taskId": "heldout-calculation-02",
+      "category": "calculation",
+      "split": "heldout",
+      "seed": 43,
+      "sha256": "b73ab8b667444661ba66b9fee1d3b96d5554cef79b540d27b945beca7c910212"
+    },
+    {
+      "id": "heldout-calculation-02-s89",
+      "taskId": "heldout-calculation-02",
+      "category": "calculation",
+      "split": "heldout",
+      "seed": 89,
+      "sha256": "1abe439255d24b32815c3e4bead48ce0e7a847a33f4673797d09ad978c4919a9"
+    },
+    {
+      "id": "heldout-calculation-03-s17",
+      "taskId": "heldout-calculation-03",
+      "category": "calculation",
+      "split": "heldout",
+      "seed": 17,
+      "sha256": "58a386fb6837d13fda5c26569dae57fe901113aa50ad9fac0cc4d85a10e9950b"
+    },
+    {
+      "id": "heldout-calculation-03-s43",
+      "taskId": "heldout-calculation-03",
+      "category": "calculation",
+      "split": "heldout",
+      "seed": 43,
+      "sha256": "93b86ed2f78a4c396369490eca08688c53b48fc8ac275ddd8713c50b72a4c534"
+    },
+    {
+      "id": "heldout-calculation-03-s89",
+      "taskId": "heldout-calculation-03",
+      "category": "calculation",
+      "split": "heldout",
+      "seed": 89,
+      "sha256": "43ccace08c2c77ce7f85ce8cfe8ba6cd71425a4db01e71244b76b2f3ad6b5dcf"
+    },
+    {
+      "id": "heldout-calculation-04-s17",
+      "taskId": "heldout-calculation-04",
+      "category": "calculation",
+      "split": "heldout",
+      "seed": 17,
+      "sha256": "fb9b9ef13872aaf708645730b8cd46dfda77cf68b8dda33beb1579b074c1259f"
+    },
+    {
+      "id": "heldout-calculation-04-s43",
+      "taskId": "heldout-calculation-04",
+      "category": "calculation",
+      "split": "heldout",
+      "seed": 43,
+      "sha256": "c7ca0ef3e090653527d62dfad75284c4face4a500ea3a36859416284568ea5bd"
+    },
+    {
+      "id": "heldout-calculation-04-s89",
+      "taskId": "heldout-calculation-04",
+      "category": "calculation",
+      "split": "heldout",
+      "seed": 89,
+      "sha256": "99cf693a3acc7021390513273bf94c03f0a57e80a5a91edbf2eb454f46eb78ad"
+    },
+    {
+      "id": "heldout-calculation-05-s17",
+      "taskId": "heldout-calculation-05",
+      "category": "calculation",
+      "split": "heldout",
+      "seed": 17,
+      "sha256": "1f01e928c0d07a291e38e313c4d2f31c3bb9a74f2d6ffe30ace80e96091b4f7b"
+    },
+    {
+      "id": "heldout-calculation-05-s43",
+      "taskId": "heldout-calculation-05",
+      "category": "calculation",
+      "split": "heldout",
+      "seed": 43,
+      "sha256": "6348d54250f7a64671c0a1a34909967b6d5cecfa3ee32ddb8882856449af0eb7"
+    },
+    {
+      "id": "heldout-calculation-05-s89",
+      "taskId": "heldout-calculation-05",
+      "category": "calculation",
+      "split": "heldout",
+      "seed": 89,
+      "sha256": "1a76f891759e7de272ab392dbf8d16e2231a988a454a6f8be9f9448801468df2"
+    },
+    {
+      "id": "heldout-calculation-06-s17",
+      "taskId": "heldout-calculation-06",
+      "category": "calculation",
+      "split": "heldout",
+      "seed": 17,
+      "sha256": "2f15afae6ebad65a7883ff04c9b5226f7f21e0cdd53768dcfbdc0fa9914dd11f"
+    },
+    {
+      "id": "heldout-calculation-06-s43",
+      "taskId": "heldout-calculation-06",
+      "category": "calculation",
+      "split": "heldout",
+      "seed": 43,
+      "sha256": "c87b8b851d6d02c258dd232a0e0cd22177729edbfa05e46683e459d9a2f8cf3e"
+    },
+    {
+      "id": "heldout-calculation-06-s89",
+      "taskId": "heldout-calculation-06",
+      "category": "calculation",
+      "split": "heldout",
+      "seed": 89,
+      "sha256": "27cdc4fab7a72953af0bdc306f5db10f3df14a8c955483360dfcb572a7b54a69"
+    },
+    {
+      "id": "heldout-calculation-07-s17",
+      "taskId": "heldout-calculation-07",
+      "category": "calculation",
+      "split": "heldout",
+      "seed": 17,
+      "sha256": "0fedf12e9e7d499197696b3cd0beb9331df59f67fec6579d43cc27bcab6da066"
+    },
+    {
+      "id": "heldout-calculation-07-s43",
+      "taskId": "heldout-calculation-07",
+      "category": "calculation",
+      "split": "heldout",
+      "seed": 43,
+      "sha256": "e38dfe2cd18ab46aa36e04f92eea5df5a072e83ec500f821dfda6ac33d8e8b17"
+    },
+    {
+      "id": "heldout-calculation-07-s89",
+      "taskId": "heldout-calculation-07",
+      "category": "calculation",
+      "split": "heldout",
+      "seed": 89,
+      "sha256": "6e224d9b7a38a3eaa81a0a77f54b43445d3bd81b6b23cfcfdf087003e45c06eb"
+    },
+    {
+      "id": "heldout-calculation-08-s17",
+      "taskId": "heldout-calculation-08",
+      "category": "calculation",
+      "split": "heldout",
+      "seed": 17,
+      "sha256": "f61f78cc49912b3ac3daefdd0e66cc8d9caa8cc64b5b3e427f5190b5d091fdf4"
+    },
+    {
+      "id": "heldout-calculation-08-s43",
+      "taskId": "heldout-calculation-08",
+      "category": "calculation",
+      "split": "heldout",
+      "seed": 43,
+      "sha256": "efd579a6ddf57fa384a3ba15bb0ef72ebee8992ff2ee5e6c3b8c821981d9760d"
+    },
+    {
+      "id": "heldout-calculation-08-s89",
+      "taskId": "heldout-calculation-08",
+      "category": "calculation",
+      "split": "heldout",
+      "seed": 89,
+      "sha256": "476d359242de1ad00629e30e99eb2b1f35cc8acceac04e5b53ad6dc5f1dde818"
+    },
+    {
+      "id": "heldout-calculation-09-s17",
+      "taskId": "heldout-calculation-09",
+      "category": "calculation",
+      "split": "heldout",
+      "seed": 17,
+      "sha256": "94376130632fb5af5f6fdfb64da4a38fea8aca864cf89461ed04908146ebb112"
+    },
+    {
+      "id": "heldout-calculation-09-s43",
+      "taskId": "heldout-calculation-09",
+      "category": "calculation",
+      "split": "heldout",
+      "seed": 43,
+      "sha256": "168565d2dadd2cf9044e326c3dd10440b0c18e1e60d3b3852828fd68db02257c"
+    },
+    {
+      "id": "heldout-calculation-09-s89",
+      "taskId": "heldout-calculation-09",
+      "category": "calculation",
+      "split": "heldout",
+      "seed": 89,
+      "sha256": "a3ab6c61575c9a23c94e79ad4eb017da918b5c23a736bdeb292ef642d337f2d0"
+    },
+    {
+      "id": "heldout-calculation-10-s17",
+      "taskId": "heldout-calculation-10",
+      "category": "calculation",
+      "split": "heldout",
+      "seed": 17,
+      "sha256": "ef77f446bbc8501144e4d80ad278e2a2a97c940bc6f652f6b472130993b21904"
+    },
+    {
+      "id": "heldout-calculation-10-s43",
+      "taskId": "heldout-calculation-10",
+      "category": "calculation",
+      "split": "heldout",
+      "seed": 43,
+      "sha256": "16e74f0a88c3719c40404199a0a5997d19f296692e92445cd71e96c5630c4849"
+    },
+    {
+      "id": "heldout-calculation-10-s89",
+      "taskId": "heldout-calculation-10",
+      "category": "calculation",
+      "split": "heldout",
+      "seed": 89,
+      "sha256": "0bc57fbf50a2366951c9a8e7b716df9e54cdc78b8f830b768df0c85190513ccd"
+    },
+    {
+      "id": "heldout-calculation-11-s17",
+      "taskId": "heldout-calculation-11",
+      "category": "calculation",
+      "split": "heldout",
+      "seed": 17,
+      "sha256": "1cdb0ae8904dd2ab9eb707385a442cc57f3dc606e1d6dcf2a7052b4deafc98a4"
+    },
+    {
+      "id": "heldout-calculation-11-s43",
+      "taskId": "heldout-calculation-11",
+      "category": "calculation",
+      "split": "heldout",
+      "seed": 43,
+      "sha256": "dfd296cf6474a6e6b780fd1a8b889980bc39b21bd2d512ba0aad09a6d7614d0b"
+    },
+    {
+      "id": "heldout-calculation-11-s89",
+      "taskId": "heldout-calculation-11",
+      "category": "calculation",
+      "split": "heldout",
+      "seed": 89,
+      "sha256": "a7449c8906d63d937a2bfc1ff2576e424a6c6fcb91d85c8e5a6172e505b34c8f"
+    },
+    {
+      "id": "heldout-calculation-12-s17",
+      "taskId": "heldout-calculation-12",
+      "category": "calculation",
+      "split": "heldout",
+      "seed": 17,
+      "sha256": "6062d52cbb58eff9a3a7e95f23fa66e1c82354ca5b4cf41396ac6f1690cceda7"
+    },
+    {
+      "id": "heldout-calculation-12-s43",
+      "taskId": "heldout-calculation-12",
+      "category": "calculation",
+      "split": "heldout",
+      "seed": 43,
+      "sha256": "12eaf470cde3c211890092a4aea221332f35a575fe3238232d142c0f8a134c58"
+    },
+    {
+      "id": "heldout-calculation-12-s89",
+      "taskId": "heldout-calculation-12",
+      "category": "calculation",
+      "split": "heldout",
+      "seed": 89,
+      "sha256": "9f066fca475c69c9511c0ccc06a75b3dfda1859b1ade1a5c111942c04155f318"
+    },
+    {
+      "id": "heldout-calculation-13-s17",
+      "taskId": "heldout-calculation-13",
+      "category": "calculation",
+      "split": "heldout",
+      "seed": 17,
+      "sha256": "76d37cd6ca90c2d3787db906de9ebd2343843964f1d720c5bd7a20465be32a1a"
+    },
+    {
+      "id": "heldout-calculation-13-s43",
+      "taskId": "heldout-calculation-13",
+      "category": "calculation",
+      "split": "heldout",
+      "seed": 43,
+      "sha256": "8baadbfbdb2a0507bae0742f37d01ab775ecb7371ac23f5087819032d0eb266c"
+    },
+    {
+      "id": "heldout-calculation-13-s89",
+      "taskId": "heldout-calculation-13",
+      "category": "calculation",
+      "split": "heldout",
+      "seed": 89,
+      "sha256": "c41b7be4c2abb405dce32b2d7ec3f99d6cccb7a3416cae74070f1435a6711435"
+    },
+    {
+      "id": "heldout-calculation-14-s17",
+      "taskId": "heldout-calculation-14",
+      "category": "calculation",
+      "split": "heldout",
+      "seed": 17,
+      "sha256": "297f6d8e890cbfb1cc5f7dcc7ffd8ed5156e675481ba3846465134d186fb0ca6"
+    },
+    {
+      "id": "heldout-calculation-14-s43",
+      "taskId": "heldout-calculation-14",
+      "category": "calculation",
+      "split": "heldout",
+      "seed": 43,
+      "sha256": "92106d9afbb62f1cc589085f01c0997fde1b2f400dd8fcc500288e6f4206a05a"
+    },
+    {
+      "id": "heldout-calculation-14-s89",
+      "taskId": "heldout-calculation-14",
+      "category": "calculation",
+      "split": "heldout",
+      "seed": 89,
+      "sha256": "c371d646362f3beb4b0eeab864a08936f006c00b1b4861fba72d201eeae4aa5b"
+    },
+    {
+      "id": "heldout-calculation-15-s17",
+      "taskId": "heldout-calculation-15",
+      "category": "calculation",
+      "split": "heldout",
+      "seed": 17,
+      "sha256": "467aafd4e4f59ac76a5a42e69ad18ca35e85ae73f859cd2b3cfc02fd3939a7fb"
+    },
+    {
+      "id": "heldout-calculation-15-s43",
+      "taskId": "heldout-calculation-15",
+      "category": "calculation",
+      "split": "heldout",
+      "seed": 43,
+      "sha256": "2487e62b2d1ad1ef55901e29e3e09db459ce2e6f42b5eff06dec0bc391542bbd"
+    },
+    {
+      "id": "heldout-calculation-15-s89",
+      "taskId": "heldout-calculation-15",
+      "category": "calculation",
+      "split": "heldout",
+      "seed": 89,
+      "sha256": "e60ff2c772a77e4b3005ef53cf11f82cac39c048f6e6b4eee6a711a955188d2c"
+    },
+    {
+      "id": "heldout-evidence-01-s17",
+      "taskId": "heldout-evidence-01",
+      "category": "evidence",
+      "split": "heldout",
+      "seed": 17,
+      "sha256": "cab69674b3c69b5300447785a0c3f1804fdf8ab13f9e253fb0c3b839cf0a700a"
+    },
+    {
+      "id": "heldout-evidence-01-s43",
+      "taskId": "heldout-evidence-01",
+      "category": "evidence",
+      "split": "heldout",
+      "seed": 43,
+      "sha256": "d9b8de548ba6d4d05f386d4f647332fa51a1437a2f3182480e1a9e76650a9c7e"
+    },
+    {
+      "id": "heldout-evidence-01-s89",
+      "taskId": "heldout-evidence-01",
+      "category": "evidence",
+      "split": "heldout",
+      "seed": 89,
+      "sha256": "ca605ba2f5a61240467419e05fb799469aaf461eb41c8556a8219d250d684dac"
+    },
+    {
+      "id": "heldout-evidence-02-s17",
+      "taskId": "heldout-evidence-02",
+      "category": "evidence",
+      "split": "heldout",
+      "seed": 17,
+      "sha256": "4560836ce2ef9fc3a444e0733578cb2f2c6d7ee22a1e20a2ecdf07064156e6b3"
+    },
+    {
+      "id": "heldout-evidence-02-s43",
+      "taskId": "heldout-evidence-02",
+      "category": "evidence",
+      "split": "heldout",
+      "seed": 43,
+      "sha256": "702ae266a9201e4b4ff79ab53192832cdd36be7ec88a7190f6647e67ba0da243"
+    },
+    {
+      "id": "heldout-evidence-02-s89",
+      "taskId": "heldout-evidence-02",
+      "category": "evidence",
+      "split": "heldout",
+      "seed": 89,
+      "sha256": "efbf26732b1d3f5f7fc7d2f2d910bb0f42cd469bcfff7b336207a61795ba8c01"
+    },
+    {
+      "id": "heldout-evidence-03-s17",
+      "taskId": "heldout-evidence-03",
+      "category": "evidence",
+      "split": "heldout",
+      "seed": 17,
+      "sha256": "3d9de251aa0ae19ce1b85df8424c156c616936e36bc18bbb0516869dc33b8659"
+    },
+    {
+      "id": "heldout-evidence-03-s43",
+      "taskId": "heldout-evidence-03",
+      "category": "evidence",
+      "split": "heldout",
+      "seed": 43,
+      "sha256": "4b00550ea1ff11cbb381eae610fc0f3c352457ba6ceb72e56a9f5926048b85d2"
+    },
+    {
+      "id": "heldout-evidence-03-s89",
+      "taskId": "heldout-evidence-03",
+      "category": "evidence",
+      "split": "heldout",
+      "seed": 89,
+      "sha256": "c03a24b80d3669b3ef337ba34c9ceea59837fdea0c2bdafa2923983b1662fd67"
+    },
+    {
+      "id": "heldout-evidence-04-s17",
+      "taskId": "heldout-evidence-04",
+      "category": "evidence",
+      "split": "heldout",
+      "seed": 17,
+      "sha256": "e59115e9cedd818581a121dcb510d8a39f00b80881d0829d78e3d3573c35e4b8"
+    },
+    {
+      "id": "heldout-evidence-04-s43",
+      "taskId": "heldout-evidence-04",
+      "category": "evidence",
+      "split": "heldout",
+      "seed": 43,
+      "sha256": "47cfb26dc2a78a9a8e7b725df3a3c73ca139abeb2b983b93668b99ab1c9feaf4"
+    },
+    {
+      "id": "heldout-evidence-04-s89",
+      "taskId": "heldout-evidence-04",
+      "category": "evidence",
+      "split": "heldout",
+      "seed": 89,
+      "sha256": "c135aa5637d7dc54c4cdf9df568bd5d62e4f9c6f8752c5879d7a6284e466fdb4"
+    },
+    {
+      "id": "heldout-evidence-05-s17",
+      "taskId": "heldout-evidence-05",
+      "category": "evidence",
+      "split": "heldout",
+      "seed": 17,
+      "sha256": "f51415abf1f3ce3f71f0b34ac2cc0c0e2f710368cbc07194b87deb27e0b6e70a"
+    },
+    {
+      "id": "heldout-evidence-05-s43",
+      "taskId": "heldout-evidence-05",
+      "category": "evidence",
+      "split": "heldout",
+      "seed": 43,
+      "sha256": "6bb7151dd11c80b77aff315bb450c67f816c41918ef3248435cb581badf65c4d"
+    },
+    {
+      "id": "heldout-evidence-05-s89",
+      "taskId": "heldout-evidence-05",
+      "category": "evidence",
+      "split": "heldout",
+      "seed": 89,
+      "sha256": "19348bcb409b0f98a1268a2535451f80465c977064b730382f8bd1f16db08d41"
+    },
+    {
+      "id": "heldout-evidence-06-s17",
+      "taskId": "heldout-evidence-06",
+      "category": "evidence",
+      "split": "heldout",
+      "seed": 17,
+      "sha256": "fa6c50f96a884afb337391bbc72e56ad8a5f01745499e62fe49611a65878bfc8"
+    },
+    {
+      "id": "heldout-evidence-06-s43",
+      "taskId": "heldout-evidence-06",
+      "category": "evidence",
+      "split": "heldout",
+      "seed": 43,
+      "sha256": "7cac467f775b7a75371f444e85d381e79b0eda5c1e177e449981798aaa04630d"
+    },
+    {
+      "id": "heldout-evidence-06-s89",
+      "taskId": "heldout-evidence-06",
+      "category": "evidence",
+      "split": "heldout",
+      "seed": 89,
+      "sha256": "24aade5aeb0b5204c0a684c83e6fb78d896f33772c956b256c606ba2ec182cc1"
+    },
+    {
+      "id": "heldout-evidence-07-s17",
+      "taskId": "heldout-evidence-07",
+      "category": "evidence",
+      "split": "heldout",
+      "seed": 17,
+      "sha256": "6d6ba1e40af54a78d84928aefaa4d052dff6e1c2571a4e405db0beab26a633fc"
+    },
+    {
+      "id": "heldout-evidence-07-s43",
+      "taskId": "heldout-evidence-07",
+      "category": "evidence",
+      "split": "heldout",
+      "seed": 43,
+      "sha256": "1a4a558689321b3b7fd2b86003ce389379479116c532348c2078a538aaed66b0"
+    },
+    {
+      "id": "heldout-evidence-07-s89",
+      "taskId": "heldout-evidence-07",
+      "category": "evidence",
+      "split": "heldout",
+      "seed": 89,
+      "sha256": "49bb1e154ae03f1a19b7d6957d0a3ed58f89528d79934bc90166b1199e9852c6"
+    },
+    {
+      "id": "heldout-evidence-08-s17",
+      "taskId": "heldout-evidence-08",
+      "category": "evidence",
+      "split": "heldout",
+      "seed": 17,
+      "sha256": "b0f753566956150632b436ba5e38c4e9bb7e18b8574a4b582246e73e66d1876e"
+    },
+    {
+      "id": "heldout-evidence-08-s43",
+      "taskId": "heldout-evidence-08",
+      "category": "evidence",
+      "split": "heldout",
+      "seed": 43,
+      "sha256": "97e03d387b2e2ecb5b746f72efffb6cf97235df1d52c9846b97c015aeec7c391"
+    },
+    {
+      "id": "heldout-evidence-08-s89",
+      "taskId": "heldout-evidence-08",
+      "category": "evidence",
+      "split": "heldout",
+      "seed": 89,
+      "sha256": "59c57ea3611445bda5dc32455531614e23792ad2bd93767027daf0442b0fc069"
+    },
+    {
+      "id": "heldout-evidence-09-s17",
+      "taskId": "heldout-evidence-09",
+      "category": "evidence",
+      "split": "heldout",
+      "seed": 17,
+      "sha256": "e6b5c578bd008397cc7f8c63b3b3658237e26e644d34e01a827aa95872c1c0e0"
+    },
+    {
+      "id": "heldout-evidence-09-s43",
+      "taskId": "heldout-evidence-09",
+      "category": "evidence",
+      "split": "heldout",
+      "seed": 43,
+      "sha256": "2fd76ef6f409a3881f13255adb0b6e517ae9a5f93fdb5e07cef900d4eddf3827"
+    },
+    {
+      "id": "heldout-evidence-09-s89",
+      "taskId": "heldout-evidence-09",
+      "category": "evidence",
+      "split": "heldout",
+      "seed": 89,
+      "sha256": "b9b4b792516629d84716215ddeb679dc6fb42dde63fd50a81a285ddaf30bed3b"
+    },
+    {
+      "id": "heldout-evidence-10-s17",
+      "taskId": "heldout-evidence-10",
+      "category": "evidence",
+      "split": "heldout",
+      "seed": 17,
+      "sha256": "1c8a03bc0461e6276cc975f7fa5e32de3f5c8decb0d246932c3d7e90ee2f4457"
+    },
+    {
+      "id": "heldout-evidence-10-s43",
+      "taskId": "heldout-evidence-10",
+      "category": "evidence",
+      "split": "heldout",
+      "seed": 43,
+      "sha256": "831d96cedc78127ca8203e4b41221f994bc633c523ab9e294bd84f7d6b88a42e"
+    },
+    {
+      "id": "heldout-evidence-10-s89",
+      "taskId": "heldout-evidence-10",
+      "category": "evidence",
+      "split": "heldout",
+      "seed": 89,
+      "sha256": "b6a269397090a2ba921bcd85fd60ea635dc7068b0e184beb1d668ba4f7ef5c24"
+    },
+    {
+      "id": "heldout-workflow-01-s17",
+      "taskId": "heldout-workflow-01",
+      "category": "workflow",
+      "split": "heldout",
+      "seed": 17,
+      "sha256": "11aeada4c37b200c72e1c4f6d2e1b2d5bd79bef7e4b994eaa3e7959672177736"
+    },
+    {
+      "id": "heldout-workflow-01-s43",
+      "taskId": "heldout-workflow-01",
+      "category": "workflow",
+      "split": "heldout",
+      "seed": 43,
+      "sha256": "2aa57963d01f1930fbda279c5974310d7eee088fc188850bb2de984b3ae3e1e5"
+    },
+    {
+      "id": "heldout-workflow-01-s89",
+      "taskId": "heldout-workflow-01",
+      "category": "workflow",
+      "split": "heldout",
+      "seed": 89,
+      "sha256": "8c6d09c95e8551abc0345da54b561487598cc129061179c5f2eb47a78fc77f07"
+    },
+    {
+      "id": "heldout-workflow-02-s17",
+      "taskId": "heldout-workflow-02",
+      "category": "workflow",
+      "split": "heldout",
+      "seed": 17,
+      "sha256": "6113e223e969678ae35bbb65c6f7073b908c9ae8052bc51633abfb00e86cd647"
+    },
+    {
+      "id": "heldout-workflow-02-s43",
+      "taskId": "heldout-workflow-02",
+      "category": "workflow",
+      "split": "heldout",
+      "seed": 43,
+      "sha256": "c9302f9892800ae7ce72591d35df2149a7e13feb4528b15c088f43fb71dbd0da"
+    },
+    {
+      "id": "heldout-workflow-02-s89",
+      "taskId": "heldout-workflow-02",
+      "category": "workflow",
+      "split": "heldout",
+      "seed": 89,
+      "sha256": "6746b61f35b3220de6786c54b50d83247ba86ff910736eb52f0d0f799a2501f9"
+    },
+    {
+      "id": "heldout-workflow-03-s17",
+      "taskId": "heldout-workflow-03",
+      "category": "workflow",
+      "split": "heldout",
+      "seed": 17,
+      "sha256": "e3a60634eea1986fd8c974d2d99ec8e78d96ec58f0d72c0ed4dc9a01785bcc2a"
+    },
+    {
+      "id": "heldout-workflow-03-s43",
+      "taskId": "heldout-workflow-03",
+      "category": "workflow",
+      "split": "heldout",
+      "seed": 43,
+      "sha256": "fb2b015fb56fccc2bcbefd3f499dd9da24bed36d5e7c750fd7ccdc7ff271f676"
+    },
+    {
+      "id": "heldout-workflow-03-s89",
+      "taskId": "heldout-workflow-03",
+      "category": "workflow",
+      "split": "heldout",
+      "seed": 89,
+      "sha256": "41a211d398586627f076cd8388a7d1af03a8814d76056f03be3f1e06cd299b28"
+    },
+    {
+      "id": "heldout-workflow-04-s17",
+      "taskId": "heldout-workflow-04",
+      "category": "workflow",
+      "split": "heldout",
+      "seed": 17,
+      "sha256": "f1262a37032b5dccbf9db2e4639e95c10de678b28b89784a3772a7c97a7af39e"
+    },
+    {
+      "id": "heldout-workflow-04-s43",
+      "taskId": "heldout-workflow-04",
+      "category": "workflow",
+      "split": "heldout",
+      "seed": 43,
+      "sha256": "9e5aa209e6c15e50968f7b47cb6f9c0d6ed93aec545e358d061017baf1e0c786"
+    },
+    {
+      "id": "heldout-workflow-04-s89",
+      "taskId": "heldout-workflow-04",
+      "category": "workflow",
+      "split": "heldout",
+      "seed": 89,
+      "sha256": "03b263064e18da062d5e32c07063aaf6f74042ae2e6d3b33733f85c74d0a91b5"
+    },
+    {
+      "id": "heldout-workflow-05-s17",
+      "taskId": "heldout-workflow-05",
+      "category": "workflow",
+      "split": "heldout",
+      "seed": 17,
+      "sha256": "884fd48eaa58d9e36eb88bb86c4b4329e637e058e42db5a9dbded7ba691a2e35"
+    },
+    {
+      "id": "heldout-workflow-05-s43",
+      "taskId": "heldout-workflow-05",
+      "category": "workflow",
+      "split": "heldout",
+      "seed": 43,
+      "sha256": "abcb3b822e70ffbf7287fac91156734a77852210ac74a93a3074541a99acf32e"
+    },
+    {
+      "id": "heldout-workflow-05-s89",
+      "taskId": "heldout-workflow-05",
+      "category": "workflow",
+      "split": "heldout",
+      "seed": 89,
+      "sha256": "e5768a1066db80e0a1d540adfa376a025733fdd466d7d3b74d8b1c8194308105"
+    },
+    {
+      "id": "heldout-workflow-06-s17",
+      "taskId": "heldout-workflow-06",
+      "category": "workflow",
+      "split": "heldout",
+      "seed": 17,
+      "sha256": "1001ccca188d8e73500ba76d282acacbc098ae6751910f62cab96e8db92c131a"
+    },
+    {
+      "id": "heldout-workflow-06-s43",
+      "taskId": "heldout-workflow-06",
+      "category": "workflow",
+      "split": "heldout",
+      "seed": 43,
+      "sha256": "48af8017c2b73375eb255ba92bda0876804752eb533dc242a0112002b72488bf"
+    },
+    {
+      "id": "heldout-workflow-06-s89",
+      "taskId": "heldout-workflow-06",
+      "category": "workflow",
+      "split": "heldout",
+      "seed": 89,
+      "sha256": "81cbe83cab80c88ca87383dd828622154744949102ff6d26f381e90b55ceac2f"
+    },
+    {
+      "id": "heldout-workflow-07-s17",
+      "taskId": "heldout-workflow-07",
+      "category": "workflow",
+      "split": "heldout",
+      "seed": 17,
+      "sha256": "946f817a4d7c7d1a796021d5fba652da4171ef0bfdb4ded3d5e5e998e37f7cf7"
+    },
+    {
+      "id": "heldout-workflow-07-s43",
+      "taskId": "heldout-workflow-07",
+      "category": "workflow",
+      "split": "heldout",
+      "seed": 43,
+      "sha256": "0f49a67bea19d177fa82427d09148db9e62e7b6726a3adb34b382fbe73d4bfd6"
+    },
+    {
+      "id": "heldout-workflow-07-s89",
+      "taskId": "heldout-workflow-07",
+      "category": "workflow",
+      "split": "heldout",
+      "seed": 89,
+      "sha256": "1df5b3e7b4a79578dff598158ffdced44680f7836836b86b20379924a3cf1f96"
+    },
+    {
+      "id": "heldout-workflow-08-s17",
+      "taskId": "heldout-workflow-08",
+      "category": "workflow",
+      "split": "heldout",
+      "seed": 17,
+      "sha256": "7ac8ff9e9e15c0dbc9a3b3d255d510d1a04d70f6061e544824e00e420f67ba70"
+    },
+    {
+      "id": "heldout-workflow-08-s43",
+      "taskId": "heldout-workflow-08",
+      "category": "workflow",
+      "split": "heldout",
+      "seed": 43,
+      "sha256": "b004e5863d4c03b181d548992d4ec9f67ffa411a0f6ad03f488a5370c8589bab"
+    },
+    {
+      "id": "heldout-workflow-08-s89",
+      "taskId": "heldout-workflow-08",
+      "category": "workflow",
+      "split": "heldout",
+      "seed": 89,
+      "sha256": "600e8227552da09440ed0d093341b721fcb359ca8cb82124468da385c20fd45b"
+    },
+    {
+      "id": "heldout-workflow-09-s17",
+      "taskId": "heldout-workflow-09",
+      "category": "workflow",
+      "split": "heldout",
+      "seed": 17,
+      "sha256": "d244ab15545a284e0adc543ca74195951f83bfc4600b64a51d88007e08a3b537"
+    },
+    {
+      "id": "heldout-workflow-09-s43",
+      "taskId": "heldout-workflow-09",
+      "category": "workflow",
+      "split": "heldout",
+      "seed": 43,
+      "sha256": "87c52d5e65c02a7e7fd2d10db186ba2deda3e5eeba16bf8dd6a19c74ffc552b3"
+    },
+    {
+      "id": "heldout-workflow-09-s89",
+      "taskId": "heldout-workflow-09",
+      "category": "workflow",
+      "split": "heldout",
+      "seed": 89,
+      "sha256": "4ceac41797a4149c8d1de8493d4c0fea9ef2e41979eabdb4433e4029a540d6c9"
+    },
+    {
+      "id": "heldout-workflow-10-s17",
+      "taskId": "heldout-workflow-10",
+      "category": "workflow",
+      "split": "heldout",
+      "seed": 17,
+      "sha256": "54a89844eaefa350e975ea45106919dfa79ee799d7e56e825a90d86777b785ae"
+    },
+    {
+      "id": "heldout-workflow-10-s43",
+      "taskId": "heldout-workflow-10",
+      "category": "workflow",
+      "split": "heldout",
+      "seed": 43,
+      "sha256": "f49607c68766ea228b6bc4111c71de8e2720cd045c5211383dd29508779e339a"
+    },
+    {
+      "id": "heldout-workflow-10-s89",
+      "taskId": "heldout-workflow-10",
+      "category": "workflow",
+      "split": "heldout",
+      "seed": 89,
+      "sha256": "ec00aec591617c2ba9e4ac0c4b88ce78f9e4ab76a4470f9705c9d2337e47fa5c"
+    },
+    {
+      "id": "heldout-recovery-01-s17",
+      "taskId": "heldout-recovery-01",
+      "category": "recovery",
+      "split": "heldout",
+      "seed": 17,
+      "sha256": "2d212dd89e5e86a913e39024443f2324bb7f89d22d69ec0d0bd02ec8f4dac7b9"
+    },
+    {
+      "id": "heldout-recovery-01-s43",
+      "taskId": "heldout-recovery-01",
+      "category": "recovery",
+      "split": "heldout",
+      "seed": 43,
+      "sha256": "9164d6fe73e564a3cd8f77a487b5554f4261b77b9addc3582444a5d4d0d2a086"
+    },
+    {
+      "id": "heldout-recovery-01-s89",
+      "taskId": "heldout-recovery-01",
+      "category": "recovery",
+      "split": "heldout",
+      "seed": 89,
+      "sha256": "893ca6d4c828b82a2d27ace3c942bcc0278fca61b47f1bef04cd45977305ebc4"
+    },
+    {
+      "id": "heldout-recovery-02-s17",
+      "taskId": "heldout-recovery-02",
+      "category": "recovery",
+      "split": "heldout",
+      "seed": 17,
+      "sha256": "1400561cbc43be09eaba97e6c70f8280ebca24d067f3e3982ba2fe477f81aa4e"
+    },
+    {
+      "id": "heldout-recovery-02-s43",
+      "taskId": "heldout-recovery-02",
+      "category": "recovery",
+      "split": "heldout",
+      "seed": 43,
+      "sha256": "00cba9ac46683ab7bc975934b38cf9c8fc38f01866617ac566bc198c8789c5b9"
+    },
+    {
+      "id": "heldout-recovery-02-s89",
+      "taskId": "heldout-recovery-02",
+      "category": "recovery",
+      "split": "heldout",
+      "seed": 89,
+      "sha256": "1ade03d8b7845258d816cb389355032e4eebe4631d76bee024ce40a84ae2f540"
+    },
+    {
+      "id": "heldout-recovery-03-s17",
+      "taskId": "heldout-recovery-03",
+      "category": "recovery",
+      "split": "heldout",
+      "seed": 17,
+      "sha256": "c919ea1580c0adc628688101455ffb92e98f4df4efdee6d9f09c521f6466b9b8"
+    },
+    {
+      "id": "heldout-recovery-03-s43",
+      "taskId": "heldout-recovery-03",
+      "category": "recovery",
+      "split": "heldout",
+      "seed": 43,
+      "sha256": "db7c21013d449d46c84d117d0010ce8f8c50a6ecdf94409d405aaa6915dca31d"
+    },
+    {
+      "id": "heldout-recovery-03-s89",
+      "taskId": "heldout-recovery-03",
+      "category": "recovery",
+      "split": "heldout",
+      "seed": 89,
+      "sha256": "508e2cde7694232907715f2d46319bd63b2c1822c19fa60183c1012220596869"
+    },
+    {
+      "id": "heldout-recovery-04-s17",
+      "taskId": "heldout-recovery-04",
+      "category": "recovery",
+      "split": "heldout",
+      "seed": 17,
+      "sha256": "c5250df6244f478ea1eb65be234d5bbb4f05b19d6d077f3e66f6d5a8ca133dbb"
+    },
+    {
+      "id": "heldout-recovery-04-s43",
+      "taskId": "heldout-recovery-04",
+      "category": "recovery",
+      "split": "heldout",
+      "seed": 43,
+      "sha256": "27bc8be793cb0e4911b96cfe05fd137d18ad159e4a08886cc8069ad04f185455"
+    },
+    {
+      "id": "heldout-recovery-04-s89",
+      "taskId": "heldout-recovery-04",
+      "category": "recovery",
+      "split": "heldout",
+      "seed": 89,
+      "sha256": "024448fb9e2a44739ef6891bf9674ab6ed9bade13cf27eafb430b5d17ed57744"
+    },
+    {
+      "id": "heldout-recovery-05-s17",
+      "taskId": "heldout-recovery-05",
+      "category": "recovery",
+      "split": "heldout",
+      "seed": 17,
+      "sha256": "19a9cf92085a70e56906ed3658c2b8b4d9120944a39c993fce1097aaeabb9b91"
+    },
+    {
+      "id": "heldout-recovery-05-s43",
+      "taskId": "heldout-recovery-05",
+      "category": "recovery",
+      "split": "heldout",
+      "seed": 43,
+      "sha256": "03fe7df49ef5351d2142d91d9dd390d58303d9caa6859bcc1abcc9ca6cac9206"
+    },
+    {
+      "id": "heldout-recovery-05-s89",
+      "taskId": "heldout-recovery-05",
+      "category": "recovery",
+      "split": "heldout",
+      "seed": 89,
+      "sha256": "0af57db8c4a00851b81568393c7c7388022cfefa4d8d94345681612a201ae288"
+    },
+    {
+      "id": "heldout-visual-01-s17",
+      "taskId": "heldout-visual-01",
+      "category": "visual",
+      "split": "heldout",
+      "seed": 17,
+      "sha256": "c60146ff3e5a935c3207070679017bc127f9822f0fa9bcc33001717f1735ad16"
+    },
+    {
+      "id": "heldout-visual-01-s43",
+      "taskId": "heldout-visual-01",
+      "category": "visual",
+      "split": "heldout",
+      "seed": 43,
+      "sha256": "57f9895b287d894a2241b350e894403b1870c9df7ef137b1d2ff20e1bc9e86af"
+    },
+    {
+      "id": "heldout-visual-01-s89",
+      "taskId": "heldout-visual-01",
+      "category": "visual",
+      "split": "heldout",
+      "seed": 89,
+      "sha256": "9a338b2352d403f3b56193d84031ebbfac20237e721e8336b6db5642b051378c"
+    },
+    {
+      "id": "heldout-visual-02-s17",
+      "taskId": "heldout-visual-02",
+      "category": "visual",
+      "split": "heldout",
+      "seed": 17,
+      "sha256": "c7ddde138c61bc9043516664a4beccb96773bbce1da99ba29b91b88f94f76496"
+    },
+    {
+      "id": "heldout-visual-02-s43",
+      "taskId": "heldout-visual-02",
+      "category": "visual",
+      "split": "heldout",
+      "seed": 43,
+      "sha256": "b3500b68765ea5b3e9257abe408f841e71ec2dbd3033d89c0093ffc696169f4c"
+    },
+    {
+      "id": "heldout-visual-02-s89",
+      "taskId": "heldout-visual-02",
+      "category": "visual",
+      "split": "heldout",
+      "seed": 89,
+      "sha256": "05ca6d65b48dc0db385a92c56d2e2ae5c43a697852f13851970389f1a58d7113"
+    },
+    {
+      "id": "heldout-visual-03-s17",
+      "taskId": "heldout-visual-03",
+      "category": "visual",
+      "split": "heldout",
+      "seed": 17,
+      "sha256": "d66e227f242dd6a911104353da30209a2469182673893e938e9def2e4f7699af"
+    },
+    {
+      "id": "heldout-visual-03-s43",
+      "taskId": "heldout-visual-03",
+      "category": "visual",
+      "split": "heldout",
+      "seed": 43,
+      "sha256": "5775dd1565f3de8bf63e89bf6635c2811181154c48e926f2dd524d5a3b54727b"
+    },
+    {
+      "id": "heldout-visual-03-s89",
+      "taskId": "heldout-visual-03",
+      "category": "visual",
+      "split": "heldout",
+      "seed": 89,
+      "sha256": "eee82b8f8ea3c3e99d7fd5b59db0d927d9e30d38e4724d16a8be762ff603783c"
+    },
+    {
+      "id": "heldout-visual-04-s17",
+      "taskId": "heldout-visual-04",
+      "category": "visual",
+      "split": "heldout",
+      "seed": 17,
+      "sha256": "6269d5e4f94aa2c6446173529f5ab201a363f96acc0b82c20b973823e052eb3b"
+    },
+    {
+      "id": "heldout-visual-04-s43",
+      "taskId": "heldout-visual-04",
+      "category": "visual",
+      "split": "heldout",
+      "seed": 43,
+      "sha256": "ff5464bd562a7a7a162b6ba439830df01938558d7d160efd6f4b650676beb33b"
+    },
+    {
+      "id": "heldout-visual-04-s89",
+      "taskId": "heldout-visual-04",
+      "category": "visual",
+      "split": "heldout",
+      "seed": 89,
+      "sha256": "16d2f0913d3c1c653738325464819cd680beb555d85cf1dbca98d3eb439f0de6"
+    },
+    {
+      "id": "heldout-visual-05-s17",
+      "taskId": "heldout-visual-05",
+      "category": "visual",
+      "split": "heldout",
+      "seed": 17,
+      "sha256": "743595277696045b2896bb79f61430950b6453628601a4eaa1ff84ec3d5e00e2"
+    },
+    {
+      "id": "heldout-visual-05-s43",
+      "taskId": "heldout-visual-05",
+      "category": "visual",
+      "split": "heldout",
+      "seed": 43,
+      "sha256": "370e4be483ba94ce8eaa6b97ca18c9d3298af1cf9d734ea2c42b2a39df704d50"
+    },
+    {
+      "id": "heldout-visual-05-s89",
+      "taskId": "heldout-visual-05",
+      "category": "visual",
+      "split": "heldout",
+      "seed": 89,
+      "sha256": "06b2578113b581bb10007221314762c31da1edf7d30a7ec596b181dd8e3a626a"
+    }
+  ]
+}

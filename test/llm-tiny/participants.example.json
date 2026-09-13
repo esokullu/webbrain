@@ -1,0 +1,41 @@
+{
+  "participants": [
+    {
+      "name": "Compass Tiny v2",
+      "adapter": "compass",
+      "model": "webbrain-one/webbrain-compass-tiny-v2",
+      "base": "http://127.0.0.1:8000/v1"
+    },
+    {
+      "name": "BU-30B-A3B Preview",
+      "adapter": "browser-use",
+      "model": "browser-use/bu-30b-a3b-preview",
+      "base": "http://127.0.0.1:8001/v1"
+    },
+    {
+      "name": "Fara 4B",
+      "adapter": "fara",
+      "model": "microsoft/Fara1.5-4B",
+      "base": "http://127.0.0.1:8002/v1"
+    },
+    {
+      "name": "Fara 9B",
+      "adapter": "fara",
+      "model": "microsoft/Fara1.5-9B",
+      "base": "http://127.0.0.1:8003/v1"
+    },
+    {
+      "name": "Fara 27B",
+      "adapter": "fara",
+      "model": "microsoft/Fara1.5-27B",
+      "base": "http://127.0.0.1:8004/v1"
+    },
+    {
+      "name": "OpenAI-compatible baseline",
+      "adapter": "openai",
+      "model": "replace-with-your-benchmark-model",
+      "base": "https://replace-with-your-openai-compatible-endpoint/v1",
+      "apiKeyEnv": "BENCHMARK_API_KEY"
+    }
+  ]
+}
