@@ -129,7 +129,7 @@ export const WEBGPU_MODEL_PRESETS = Object.freeze([
     supportsVision: false,
   }),
 ]);
-export const WEBGPU_MODEL_NOT_READY_ERROR = `${WEBGPU_MODEL_ID} is not downloaded. Open Settings > Providers > WebGPU or Apocalypse Mode > WebGPU to download it before chatting.`;
+export const WEBGPU_MODEL_NOT_READY_ERROR = `${WEBGPU_COMPASS_TINY_V2_MODEL_ID} is not downloaded. Open Settings > Providers > WebGPU or Apocalypse Mode > WebGPU to download it before chatting.`;
 // Chrome-only selection state. Keep this separate from the synced
 // `visionModel` endpoint so enabling the fallback never overwrites a user's
 // remote vision credentials or sends a Chromium-only provider type to Firefox.
@@ -180,7 +180,7 @@ export async function hasWebgpuVisionCache(modelId = WEBGPU_VISION_MODEL_ID) {
 
 export function normalizeWebgpuModelId(value) {
   let model = String(value || '').trim();
-  if (!model) return WEBGPU_MODEL_ID;
+  if (!model) return WEBGPU_COMPASS_TINY_V2_MODEL_ID;
   if (/^https?:\/\//i.test(model)) {
     let url;
     try {

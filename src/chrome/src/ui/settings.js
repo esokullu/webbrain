@@ -70,6 +70,7 @@ import {
   WEBGPU_VISION_CONSENT_VERSION,
   WEBGPU_VISION_CONSENT_VERSION_KEY,
   WEBGPU_VISION_ENABLED_KEY,
+  normalizeWebgpuModelId,
 } from '../providers/webgpu.js';
 import { AUTO_GROUP_TABS_KEY } from '../tab-group-preference.js';
 
@@ -2765,7 +2766,11 @@ function renderWebgpuDownloadControl(id, state) {
 
 function getDisplayedWebgpuModel(id = 'webgpu') {
   const input = document.querySelector(`input[data-provider="${id}"][data-key="model"]`);
-  return String(input?.value || providersData[id]?.model || '').trim();
+  try {
+    return normalizeWebgpuModelId(input?.value || providersData[id]?.model);
+  } catch {
+    return String(input?.value || providersData[id]?.model || WEBGPU_COMPASS_TINY_V2_MODEL_ID).trim();
+  }
 }
 
 async function refreshWebgpuDownloadControls() {

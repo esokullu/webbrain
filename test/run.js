@@ -62435,6 +62435,7 @@ test('Chrome exposes separate endpoint-free WebGPU text and vision providers', a
     assert.equal(webgpuConfig.dtype, WEBGPU_DTYPE);
     assert.equal(webgpuConfig.contextWindow, 32768);
     const generalProvider = manager._createProvider('webgpu', webgpuConfig);
+    manager.providers.set('webgpu', generalProvider);
     assert.ok(generalProvider instanceof WebGPUProvider);
     assert.equal(generalProvider.promptTier, 'compact');
     assert.equal(new WebGPUProvider({ model: WEBGPU_MODEL_ID }).promptTier, 'compact');
@@ -62462,6 +62463,12 @@ test('Chrome exposes separate endpoint-free WebGPU text and vision providers', a
     assert.equal(new WebGPUProvider({ model: WEBGPU_BONSAI27_MODEL_ID }).dtype, 'q1');
     assert.equal(new WebGPUProvider({ model: WEBGPU_BONSAI27_MODEL_ID }).requiresToolTemplate, false);
     assert.equal(normalizeWebgpuModelId(' custom-owner/custom-model '), 'custom-owner/custom-model');
+    assert.equal(normalizeWebgpuModelId(''), WEBGPU_COMPASS_TINY_V2_MODEL_ID);
+    assert.equal(normalizeWebgpuModelId(null), WEBGPU_COMPASS_TINY_V2_MODEL_ID);
+    assert.equal(normalizeWebgpuModelId('   '), WEBGPU_COMPASS_TINY_V2_MODEL_ID);
+    assert.equal(new WebGPUProvider({}).model, WEBGPU_COMPASS_TINY_V2_MODEL_ID);
+    assert.equal(new WebGPUProvider({ model: '' }).model, WEBGPU_COMPASS_TINY_V2_MODEL_ID);
+    assert.equal(new WebGPUProvider({ model: '   ' }).model, WEBGPU_COMPASS_TINY_V2_MODEL_ID);
     assert.throws(() => new WebGPUProvider({ model: 'not-a-repository' }), /owner\/repository/);
     assert.throws(() => new WebGPUProvider({ model: 'https://example.com/owner/model' }), /huggingface\.co/);
     assert.equal(generalProvider.supportsTools, true);
@@ -62511,6 +62518,12 @@ test('Chrome exposes separate endpoint-free WebGPU text and vision providers', a
     const textDisposed = await generalProvider.dispose();
     assert.deepEqual(textDisposed, { ok: true, disposed: true });
     assert.deepEqual(sentMessages[4], { type: 'webgpu-dispose' });
+
+    await manager.updateProvider('webgpu', { model: 'custom-owner/custom-model' });
+    assert.equal(manager.getAll().webgpu.model, 'custom-owner/custom-model');
+    await manager.updateProvider('webgpu', { model: '' });
+    assert.equal(manager.getAll().webgpu.model, WEBGPU_COMPASS_TINY_V2_MODEL_ID);
+    assert.equal(manager.getAll().webgpu.contextWindow, 32768);
 
     const provider = await manager.getLocalVisionFallbackProvider();
     assert.ok(provider instanceof WebGPUVisionProvider);

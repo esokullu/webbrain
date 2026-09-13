@@ -19,6 +19,7 @@ import {
   WEBGPU_VISION_ENABLED_KEY,
   WEBGPU_VISION_MODEL_ID,
   hasWebgpuVisionCache,
+  normalizeWebgpuModelId,
   webgpuModelDisplayName,
   webgpuModelDtype,
   webgpuModelPreset,
@@ -1848,6 +1849,7 @@ export class ProviderManager {
       configured: id !== WEBBRAIN_CLOUD_PROVIDER_ID && (markConfigured || current.configured === true),
     };
     if (id === 'webgpu' && Object.hasOwn(updates, 'model')) {
+      merged.model = normalizeWebgpuModelId(merged.model);
       const preset = webgpuModelPreset(merged.model);
       if (preset?.contextWindow && !Object.hasOwn(updates, 'contextWindow')) {
         merged.contextWindow = preset.contextWindow;
