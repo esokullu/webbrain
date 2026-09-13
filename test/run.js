@@ -100789,6 +100789,8 @@ test('text tool-call parser is production code with format and allowlist coverag
       ['array on a labeled response line', 'Options:\n[{"name":"click","arguments":{"text":"Yes"}}]'],
       ['bare function inline warning', 'Do not call <function name="click_ax"><param name="ref_id">ref_7</param></function> here.'],
       ['bare function on a labeled line', 'Option A: <function name="click_ax"><param name="ref_id">ref_7</param></function>'],
+      ['bare function with prose header on another line', 'Do not execute this:\n<function name="click_ax"><param name="ref_id">ref_7</param></function>'],
+      ['bare function with trailing prose', '<function name="click_ax"><param name="ref_id">ref_7</param></function>\nis only an example.'],
     ]) {
       assert.deepEqual(
         parser.parseToolCallsFromText(narrated, allowed),

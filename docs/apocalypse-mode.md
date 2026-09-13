@@ -18,14 +18,13 @@ fallback** control in **Settings → Multimodal → Vision** checks WebGPU suppo
 records explicit consent, and starts caching the approximately 810 MB model
 from Hugging Face. The download continues in the background, but screenshot
 operations report its status and never wait for it. Wikipedia archives still
-require their own confirmation. The local **text** model defaults to LFM2.5
-2.6B (about 1.55 GB), and that download starts automatically when Apocalypse
-Mode is enabled. The picker also offers opt-in LFM2.5 1.2B Instruct and
-Thinking presets (about 760 MB each), LFM2.5-VL 1.6B and 3B multimodal presets
-(about 2.3 GB and 4.0 GB), Nanbeige4.2-3B (about 3.1 GB), and Bonsai 27B
-(about 3.8 GB, 16 GB+ RAM/VRAM recommended). Only the default is
-auto-downloaded. The two VL choices support
-image inputs directly when selected as the normal WebGPU provider. Disabling
+require their own confirmation. The local **text** model is Compass Tiny v2.1
+(`webbrain-one/webbrain-compass-tiny-v2.1`, about 1.87 GB, 32k context
+window), and it is the only text preset the picker offers. That download
+starts automatically when Apocalypse Mode is enabled. Once downloaded,
+Compass works without Apocalypse Mode enabled: it is selectable as a chat
+provider under Settings → Providers and through the standalone chat control.
+Disabling
 local vision preserves its cache and any configured remote vision provider.
 
 Archive language is selected independently from WebBrain's interface language.
