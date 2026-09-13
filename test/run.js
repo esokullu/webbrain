@@ -30579,6 +30579,7 @@ test('every bundled skill declares its canonical semantic intents', () => {
     'turkish-deasciifier': ['turkish_deasciify', 'restore_turkish_diacritics', 'fix_turkish_characters', 'ascii_turkish_conversion'],
     'temporary-file-share-litterbox': ['temporary_file_share', 'public_upload_link', 'expiring_file_upload'],
     'humanizer': ['email_reply', 'draft_message', 'compose_prose', 'rewrite_text', 'humanize_writing', 'reply_to_thread'],
+    'phonr-calls': ['outbound_phone_call', 'phone_inquiry', 'phone_call_status', 'phone_call_result', 'phone_call_recording', 'stop_phone_call'],
   };
   for (const [label, prefix, sources, normalizeSkills] of [
     ['chrome', 'src/chrome', PACKAGED_SKILL_SOURCES_CH, normalizeCustomSkillsCh],
@@ -30595,6 +30596,96 @@ test('every bundled skill declares its canonical semantic intents', () => {
       assert.deepEqual(skill.intents, expected[skill.id], `${label}: wrong semantic intents for ${skill.id}`);
     }
   }
+});
+
+test('Phonr is opt-in, loads through the normal skill catalog, and adds no privileged HTTP tools', () => {
+  const contents = [];
+  for (const [label, prefix, sources, defaults, normalize, catalog, prompt, tools] of [
+    ['chrome', 'src/chrome', PACKAGED_SKILL_SOURCES_CH, DEFAULT_SKILL_SOURCES_CH, normalizeCustomSkillsCh, getEligibleSkillCatalogCh, buildCustomSkillsPromptCh, buildSkillToolDefinitionsCh],
+    ['firefox', 'src/firefox', PACKAGED_SKILL_SOURCES_FX, DEFAULT_SKILL_SOURCES_FX, normalizeCustomSkillsFx, getEligibleSkillCatalogFx, buildCustomSkillsPromptFx, buildSkillToolDefinitionsFx],
+  ]) {
+    const source = sources.find(s => s.id === 'phonr-calls');
+    assert.ok(source, `${label}: calling skill missing from packaged catalog`);
+    assert.equal(defaults.some(s => s.id === source.id), false, `${label}: calling skill must require enabling`);
+    const content = fs.readFileSync(path.join(ROOT, prefix, source.path), 'utf8'); contents.push(content);
+    const skills = normalize([{ ...source, sourceType: 'built-in', sourceUrl: source.path, content }]);
+    assert.equal(skills.length, 1); assert.deepEqual(skills[0].tools, []);
+    for (const mode of ['ask', 'act', 'dev']) {
+      for (const tier of ['mid', 'full']) {
+        assert.equal(catalog(skills, { mode, tier })[0]?.id, source.id);
+        assert.equal(prompt(skills, { mode, tier }), '');
+        assert.ok(prompt(skills, { mode, tier, activeSkillIds: new Set([source.id]) }).includes('https://phonr.xyz/v1'));
+        assert.deepEqual(tools(skills, { mode, tier, activeSkillIds: new Set([source.id]) }), []);
+      }
+      assert.deepEqual(catalog(skills, { mode, tier: 'compact' }), []);
+      assert.equal(prompt(skills, { mode, tier: 'compact', activeSkillIds: new Set([source.id]) }), '');
+    }
+    assert.equal(prompt([], { mode: 'act', tier: 'full', activeSkillIds: new Set([source.id]) }), '');
+  }
+  assert.equal(contents[0], contents[1], 'Chrome and Firefox must ship the same calling workflow');
+});
+
+test('Phonr skill examples execute through fetch_url with bearer headers, exact bodies, and stable retry IDs', async () => {
+  const savedFetch = globalThis.fetch;
+  try {
+    for (const [label, prefix, fetchUrl] of [['chrome', 'src/chrome', fetchUrlCh], ['firefox', 'src/firefox', fetchUrlFx]]) {
+      const content = fs.readFileSync(path.join(ROOT, prefix, 'skills/phonr-calls.md'), 'utf8');
+      const fixtures = [...content.matchAll(/```json\s*\n([\s\S]*?)\n```/g)].map(m => JSON.parse(m[1]));
+      const key = 'test-only-phonr-bearer', requestId = 'phonr-skill-test-request-123456', callId = 'e1d8e524-d34a-4ffd-b64e-cd26590af617';
+      let creations = 0, currentCall = null; const requests = [];
+      const jsonResponse = (data, status = 200) => new Response(JSON.stringify(data), { status, headers: { 'Content-Type': 'application/json' } });
+      globalThis.fetch = async (url, init) => {
+        const target = new URL(url); requests.push({ url, init });
+        assert.equal(target.origin, 'https://phonr.xyz'); assert.equal(target.username, ''); assert.equal(target.password, '');
+        assert.equal(init.headers.Authorization, `Bearer ${key}`, `${label}: bearer header not forwarded`);
+        assert.equal(init.redirect, 'manual', `${label}: API credentials must not follow redirects`);
+        assert.equal(init.credentials, 'omit', `${label}: no active-tab cookies belong in this request`);
+        assert.equal(String(url).includes(key), false);
+        const method = init.method || 'GET';
+        if (method === 'POST') assert.equal(init.headers['Content-Type'], 'application/json');
+        if (target.pathname === '/v1/status' && method === 'GET') return jsonResponse({ ready: true, from: '+14155550999', activeCallId: null });
+        if (target.pathname === '/v1/preview' && method === 'POST') {
+          const draft = JSON.parse(init.body); assert.equal(draft.language, 'English');
+          return jsonResponse({ brief: draft, prompt: 'Preview only.' });
+        }
+        if (target.pathname === '/v1/calls' && method === 'POST') {
+          const draft = JSON.parse(init.body);
+          assert.deepEqual(Object.keys(draft).filter(key => !['to', 'purpose', 'language', 'systemMessage'].includes(key)), []);
+          assert.match(draft.to, /^\+[1-9]\d{7,14}$/); assert.ok(draft.purpose.length >= 5);
+          assert.equal(init.headers['Idempotency-Key'], requestId);
+          if (currentCall) { assert.deepEqual(draft, currentCall.brief); return jsonResponse({ call: currentCall }); }
+          creations++; currentCall = { id: callId, requestId, status: 'ringing', terminal: false, brief: draft, result: null };
+          return jsonResponse({ call: currentCall }, 201);
+        }
+        if (target.pathname === '/v1/calls' && method === 'GET') {
+          assert.equal(target.searchParams.get('requestId'), requestId); assert.equal(target.searchParams.get('limit'), '1');
+          return jsonResponse({ calls: currentCall ? [currentCall] : [], total: currentCall ? 1 : 0, nextOffset: null });
+        }
+        if (target.pathname === `/v1/calls/${callId}` && method === 'GET') return jsonResponse({ call: currentCall });
+        if ([`/v1/calls/${callId}/stop`, `/v1/calls/${callId}/reconcile`].includes(target.pathname) && method === 'POST') {
+          assert.deepEqual(JSON.parse(init.body), {});
+          if (target.pathname.endsWith('/stop')) currentCall = { ...currentCall, status: 'completed', terminal: true };
+          return jsonResponse({ call: currentCall });
+        }
+        throw new Error(`Unexpected example API request: ${method} ${target.pathname}`);
+      };
+      let creationArgs;
+      for (const fixture of fixtures) {
+        const args = JSON.parse(JSON.stringify(fixture).replaceAll('PHONR_API_KEY', key).replaceAll('REQUEST_ID', requestId).replaceAll('CALL_ID', callId));
+        const result = await fetchUrl(args.url, args);
+        assert.equal(result.success, true, `${label}: ${args.url}: ${result.error}`);
+        const data = JSON.parse(result.json);
+        if (args.url === 'https://phonr.xyz/v1/calls' && args.method === 'POST') { creationArgs = args; assert.equal(result.status, 201); assert.equal(data.call.id, callId); }
+        if (args.url.endsWith('/stop')) assert.equal(data.call.terminal, true);
+      }
+      const retry = await fetchUrl(creationArgs.url, creationArgs);
+      assert.equal(retry.status, 200); assert.equal(JSON.parse(retry.json).call.id, callId); assert.equal(creations, 1);
+      assert.equal(requests.length, fixtures.length + 1);
+      globalThis.fetch = async () => jsonResponse({ error: { code: 'unauthorized', message: 'Invalid key' } }, 401);
+      const rejected = await fetchUrl('https://phonr.xyz/v1/status', { headers: { Authorization: 'Bearer invalid-test-key' } });
+      assert.equal(rejected.success, false); assert.equal(rejected.status, 401);
+    }
+  } finally { globalThis.fetch = savedFetch; }
 });
 
 test('skill loader exposes only the eligible Mid/Full catalog and Compact has no skill surface', () => {
@@ -107451,6 +107542,7 @@ test('settings exposes custom skills tab and packaged skills resource directory'
     'frankfurter-fx',
     'humanizer',
     'turkish-deasciifier',
+    'phonr-calls',
   ]);
   assert.deepEqual(PACKAGED_SKILL_SOURCES_FX.map((skill) => skill.id), [
     'freeskillz-xyz',
@@ -107463,6 +107555,7 @@ test('settings exposes custom skills tab and packaged skills resource directory'
     'frankfurter-fx',
     'humanizer',
     'turkish-deasciifier',
+    'phonr-calls',
   ]);
   assert.deepEqual(DEFAULT_SKILL_SOURCES_CH.map((skill) => skill.id), [
     'freeskillz-xyz',
