@@ -161,4 +161,4 @@ No provider provisioning, background monitors, or changes to test/llm-tiny.
   console.log(`Results: ${out}`);
 }
 
-if(process.argv[1]&&resolve(process.argv[1])===fileURLToPath(import.meta.url))main().catch(error=>{console.error(error.message);process.exitCode=1;});
+if(process.argv[1]&&resolve(process.argv[1])===fileURLToPath(import.meta.url))main().catch(()=>{console.error('Execution failed. Re-run with safe local debugging to inspect details.');process.exitCode=1;});
