@@ -1,0 +1,20 @@
+{
+  "tableRows": [
+    3,
+    3,
+    15,
+    3
+  ],
+  "headings": [
+    "Comparison 1: the three new runs",
+    "What the responses show",
+    "Complete comparison, including previous runs",
+    "Method and reproducibility"
+  ],
+  "downloadRows": 15,
+  "indexLinks": 1,
+  "mobile": {
+    "viewport": 390,
+    "page": 390
+  }
+}

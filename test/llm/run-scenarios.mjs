@@ -56,6 +56,7 @@ import {
 } from './lib/build-payload.mjs';
 import { scoreVerdict } from './lib/score.mjs';
 import { extractToolCallFromContent as extractLfm2AwareToolCallFromContent } from './lib/content-tool-call-parser.mjs';
+import { loadReplay, replayCase } from './lib/replay-payload.mjs';
 import {
   chatTemplateCompatLabel,
   getChatTemplateCompat,
@@ -98,6 +99,7 @@ Selection:
   --mode ask|act|dev                 Override scenario mode; Dev requires Mid/Full tier
   --tier full|mid|compact            Prompt/tool tier; ignored with --freeze
   --freeze PATH                      Pin system prompt + tools to a snapshot
+  --replay PATH                      Replay saved per-case messages and mode-specific tools
   --unprotected                      Strip wrapper + untrusted-content instructions
 
 Run:
@@ -159,6 +161,8 @@ const MODE_OVERRIDE = args.mode == null ? null : normalizeMode(args.mode);
 // --unprotected: ABLATION. Strip BOTH the untrusted-content wrapper from the
 // seed AND the untrusted-content instructions from the system prompt.
 const UNPROTECTED = !!args.unprotected;
+const REPLAY = loadReplay(args.replay, { browser: BROWSER, tier: TIER,
+  incompatible: isFrozen() || !!MODE_OVERRIDE || UNPROTECTED || CHAT_TEMPLATE_COMPAT.mode !== 'off' });
 
 const onlySet = args.only && args.only !== true
   ? new Set(String(args.only).split(',').map(s => String(parseInt(s, 10)).padStart(3, '0')))
@@ -260,6 +264,8 @@ function safeParse(s) { try { return JSON.parse(s); } catch { return {}; } }
 
 async function runOne(scenario) {
   const mode = MODE_OVERRIDE || normalizeMode(scenario.mode);
+  const replay = replayCase(REPLAY, 'scenarios', scenario.id, MODEL);
+  if (replay?.expected) scenario = { ...scenario, expected: replay.expected };
 
   // A scenario whose mode has no payload at this tier is not a failure of the
   // model — it simply does not apply to the surface under test (Compact Dev is
@@ -267,8 +273,8 @@ async function runOne(scenario) {
   // nothing and report it as skipped so it stays out of every denominator.
   // Freeze mode replays a captured prompt and ignores the tier, so it never
   // skips.
-  if (!isFrozen() && !isRunnableModeTier(mode, TIER)) {
-    const skipped = `${mode} mode has no ${TIER}-tier payload; pass --mode to run this scenario here`;
+  if (replay?.skipped || (!REPLAY && !isFrozen() && !isRunnableModeTier(mode, TIER))) {
+    const skipped = replay?.skipped || `${mode} mode has no ${TIER}-tier payload; pass --mode to run this scenario here`;
     return {
       id: scenario.id,
       category: scenario.category,
@@ -290,10 +296,10 @@ async function runOne(scenario) {
     };
   }
 
-  const payload = buildScenarioPayload({ ...scenario, browser: scenario.browser || BROWSER, mode }, { tier: TIER, unprotected: UNPROTECTED });
+  const payload = replay ? replay.body : buildScenarioPayload({ ...scenario, browser: scenario.browser || BROWSER, mode }, { tier: TIER, unprotected: UNPROTECTED });
   const messages = prepareMessagesForChatTemplate(payload.messages, CHAT_TEMPLATE_COMPAT, { tools: payload.tools });
   const tools = prepareToolsForChatTemplate(payload.tools, CHAT_TEMPLATE_COMPAT);
-  const body = {
+  const body = replay?.body || {
     model: MODEL,
     temperature: isActionMode(mode) ? 0.15 : 0.3,
     max_tokens: 4096,
@@ -367,10 +373,8 @@ async function runOne(scenario) {
     finishReason: response?.choices?.[0]?.finish_reason || null,
     content: msg?.content || null,
     usage: response?.usage || null,
-    request: SAVE_REQUEST ? {
-      messages: body.messages,
-      tools_summary: { count: payload.tools.length, sent: !!tools },
-    } : undefined,
+    response,
+    request: SAVE_REQUEST ? body : undefined,
   };
 }
 
@@ -429,6 +433,7 @@ const summary = {
   unprotected: UNPROTECTED,
   chatTemplateCompat: CHAT_TEMPLATE_COMPAT.mode,
   structuredToolsSent: !CHAT_TEMPLATE_COMPAT.omitStructuredTools,
+  replay: REPLAY?.meta || null,
   freeze: isFrozen() ? {
     path: args.freeze && args.freeze !== true ? args.freeze : (process.env.WB_FREEZE_BASELINE || null),
     sourceRun: getFrozenMeta()?.sourceRun || null,

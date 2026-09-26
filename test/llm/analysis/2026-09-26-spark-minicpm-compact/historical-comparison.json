@@ -1,0 +1,18 @@
+{
+  "note": "Previously published Compact comparison rows, retained without rerunning or regrading. Historical backends, precision, revisions, retries, and concurrency differ. MiniCPM's earlier run is retained alongside the new pinned GGUF run.",
+  "rows": [
+    { "model": "Qwen3.8-27B", "parameters": "27B", "calls": 99, "strict": 17, "loose": 39, "source": "/blog/compact-tool-routing-models-compared" },
+    { "model": "Qwen3.5-4B", "parameters": "4B", "calls": 89, "strict": 16, "loose": 36, "source": "/blog/compact-tool-routing-models-compared" },
+    { "model": "WebBrain Compass Tiny v2", "parameters": "~2.6B", "calls": 94, "strict": 16, "loose": 41, "source": "/blog/webbrain-compass-v2" },
+    { "model": "Qwen3.6-35B-A3B", "parameters": "35B A3B", "calls": 89, "strict": 15, "loose": 42, "source": "/blog/compact-tool-routing-models-compared" },
+    { "model": "Gemma 4 E4B", "parameters": "7.5B", "calls": 90, "strict": 15, "loose": 43, "source": "/blog/compact-tool-routing-models-compared" },
+    { "model": "Nanbeige4.2-3B", "parameters": "4.2B reported", "calls": 89, "strict": 13, "loose": 37, "source": "/blog/compact-tool-routing-models-compared" },
+    { "model": "Gemma 4 12B QAT", "parameters": "12B", "calls": 90, "strict": 12, "loose": 34, "source": "/blog/compact-tool-routing-models-compared" },
+    { "model": "Qwen3.5-2B", "parameters": "2B", "calls": 92, "strict": 11, "loose": 28, "source": "/blog/compact-tool-routing-models-compared" },
+    { "model": "MiniCPM5-2B (earlier run)", "parameters": "~2.6B", "calls": 96, "strict": 9, "loose": 21, "source": "/blog/webbrain-compass-v2", "rawRun": "minicpm5-2b-compact-v2_chrome_minicpm5-2b_compact" },
+    { "model": "Gemma 4 E2B", "parameters": "4.6B", "calls": 74, "strict": 8, "loose": 45, "source": "/blog/compact-tool-routing-models-compared" },
+    { "model": "WebBrain Compass Tiny v1", "parameters": "2.6B", "calls": 81, "strict": 4, "loose": 42, "source": "/blog/compact-tool-routing-models-compared" },
+    { "model": "LFM2.5-2.6B base", "parameters": "2.6B", "calls": 80, "strict": 4, "loose": 34, "source": "/blog/compact-tool-routing-models-compared" },
+    { "model": "Qwen3.5-9B", "parameters": "9B", "calls": 84, "strict": 2, "loose": 12, "source": "/blog/webbrain-compass-tiny-v1" }
+  ]
+}

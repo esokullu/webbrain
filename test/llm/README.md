@@ -197,6 +197,29 @@ node test/llm/run-llamacpp.mjs --no-save-request
 The runner captures only the first model turn. It does not execute tool
 calls or step the agent.
 
+For a dated comparison, `--replay PATH` reuses every case's saved messages
+and mode-specific tools, including the original scenario rubrics and skipped
+set. This differs from `--freeze`, which uses one system prompt and tool list.
+Both runners accept the same replay snapshot and retain complete API responses;
+scenario results also save the complete request body. Replay cannot be combined
+with mode overrides, freeze, ablation, or chat-template compatibility rewrites.
+
+The September 26 Spark/MiniCPM comparison is reproducible with:
+
+```powershell
+node test/llm/run-spark-minicpm-comparison.mjs
+node test/llm/report-spark-minicpm-comparison.mjs
+node scripts/build-blog.mjs
+```
+
+It expects the official revision-pinned Q4_K_M GGUF files under the LM Studio
+model directory. `GGUF_MODEL_ROOT` and `LLAMA_SERVER` override the model root
+and CUDA server executable. The runner refuses to overwrite completed runs.
+The prepared replay snapshot is stored alongside its source provenance;
+`prepare-compact-replay.mjs` regenerates it from the saved September 7 run.
+Results and a per-case evidence audit are under
+`analysis/2026-09-26-spark-minicpm-compact/`.
+
 ## Accessibility-tree representation benchmark
 
 `accessibility-tree-benchmark.mjs` compares the shipped line-oriented tree

@@ -65,6 +65,7 @@ import {
   prepareToolsForChatTemplate,
 } from './lib/chat-template-compat.mjs';
 import { extractToolCallFromContent as extractLfm2AwareToolCallFromContent } from './lib/content-tool-call-parser.mjs';
+import { loadReplay, replayCase } from './lib/replay-payload.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const Q_DIR = join(HERE, 'questions');
@@ -100,6 +101,7 @@ Selection:
   --mode ask|act|dev                 Override case mode; Dev requires Mid/Full tier
   --tier full|mid|compact            Prompt/tool tier; ignored with --freeze
   --freeze PATH                      Pin system prompt + tools to a snapshot
+  --replay PATH                      Replay saved per-case messages and mode-specific tools
 
 Run:
   --tag NAME                         Results tag; default is current timestamp
@@ -180,6 +182,8 @@ if (args.freeze && args.freeze !== true) {
 }
 const TIER = normalizeTier(args.tier);
 const MODE_OVERRIDE = args.mode == null ? null : normalizeMode(args.mode);
+const REPLAY = loadReplay(args.replay, { browser: BROWSER, tier: TIER,
+  incompatible: isFrozen() || !!MODE_OVERRIDE || CHAT_TEMPLATE_COMPAT.mode !== 'off' || !!REASONING_EFFORT });
 
 const onlySet = args.only && args.only !== true
   ? new Set(String(args.only).split(',').map(s => String(parseInt(s, 10)).padStart(3, '0')))
@@ -370,10 +374,11 @@ function safeParse(s) { try { return JSON.parse(s); } catch { return {}; } }
 async function runOne(id) {
   const caseRec = JSON.parse(readFileSync(join(Q_DIR, `${id}.json`), 'utf8'));
   const mode = MODE_OVERRIDE || normalizeMode(caseRec.mode);
-  const payload = buildPayload({ ...caseRec, mode }, { browser: BROWSER, tier: TIER });
+  const replay = replayCase(REPLAY, 'firstTurn', id, MODEL);
+  const payload = replay ? replay.body : buildPayload({ ...caseRec, mode }, { browser: BROWSER, tier: TIER });
   const messages = prepareMessagesForChatTemplate(payload.messages, CHAT_TEMPLATE_COMPAT, { tools: payload.tools });
   const tools = prepareToolsForChatTemplate(payload.tools, CHAT_TEMPLATE_COMPAT);
-  const body = {
+  const body = replay?.body || {
     model: MODEL,
     temperature: isActionMode(mode) ? 0.15 : 0.3,
     max_tokens: 4096,
@@ -414,6 +419,7 @@ async function runOne(id) {
     usage: response?.usage || null,
     attempts,
     retryErrors,
+    response,
   };
   if (SAVE_REQUEST) {
     out.request = body;
@@ -476,6 +482,7 @@ const summary = {
   chatTemplateCompat: CHAT_TEMPLATE_COMPAT.mode,
   structuredToolsSent: !CHAT_TEMPLATE_COMPAT.omitStructuredTools,
   reasoningEffort: REASONING_EFFORT || null,
+  replay: REPLAY?.meta || null,
   freeze: isFrozen() ? {
     path: args.freeze && args.freeze !== true ? args.freeze : (process.env.WB_FREEZE_BASELINE || null),
     sourceRun: getFrozenMeta()?.sourceRun || null,

@@ -1,0 +1,780 @@
+{
+  "schema": "webbrain.compact-comparison.v1",
+  "date": "2026-09-26",
+  "contract": {
+    "browser": "chrome",
+    "tier": "compact",
+    "firstTurnCases": 100,
+    "scenarios": 100,
+    "scoredScenarios": 89,
+    "skippedScenarios": 11,
+    "thinking": false,
+    "seed": 3407,
+    "actionTemperature": 0.15,
+    "askTemperature": 0.3,
+    "maxTokens": 4096,
+    "contextTokens": 32768,
+    "concurrency": 1,
+    "quantization": "Q4_K_M",
+    "topK": 0,
+    "topP": 1,
+    "minP": 0,
+    "repeatPenalty": 1,
+    "replaySha256": "6eccbd0284fd2f63e4888789122ff7204de8ac9d1bdcc518fd3108ffe8bee309",
+    "notes": "Historical comparison rows retain their published scores. Backends, precision, revisions, retries, and concurrency differ."
+  },
+  "comparison1": [
+    {
+      "model": "Spark-X2.5-4B",
+      "parameters": "4B",
+      "new": true,
+      "quantization": "Q4_K_M",
+      "parametersTotal": 4112079360,
+      "modelArtifact": {
+        "id": "spark-x2.5-4b",
+        "name": "Spark-X2.5-4B",
+        "source": "XHToken/Spark-X2.5-4B",
+        "repo": "XHToken/Spark-X2.5-4B-GGUF",
+        "revision": "9826e0be84e6e6e8b9668abc91421109a1df1e2d",
+        "file": "Spark-X2.5-4B-Q4_K_M.gguf",
+        "bytes": 2600224352,
+        "sha256": "adfcfa19a4ed6a5985da8bf565fe15f8e1a7e131d79bae2d19d48d1c40109428"
+      },
+      "runtimeBuild": "b1-a25c986",
+      "runtimeChatTemplateSha256": "c056f730555318576988f11ed4336dae04cf514d2800ec185692d43bf50d6461",
+      "calls": 96,
+      "strict": 11,
+      "loose": 30,
+      "firstTurnExact": 5,
+      "firstTurnNameOnly": 8,
+      "treeCalls": 78,
+      "firstTurnErrors": 0,
+      "scenarioErrors": 0,
+      "anti": 2,
+      "empty": 0,
+      "lengthLimited": 0,
+      "proseCredits": 9,
+      "byCategory": {
+        "loop-bad-url": {
+          "scored": 10,
+          "strict": 1,
+          "loose": 1,
+          "anti": 0
+        },
+        "tool-error-pivot": {
+          "scored": 9,
+          "strict": 1,
+          "loose": 3,
+          "anti": 0
+        },
+        "csp-blocked-eval": {
+          "scored": 0,
+          "strict": 0,
+          "loose": 0,
+          "anti": 0
+        },
+        "truncation-cascade": {
+          "scored": 10,
+          "strict": 0,
+          "loose": 3,
+          "anti": 1
+        },
+        "counter-polarity": {
+          "scored": 10,
+          "strict": 0,
+          "loose": 0,
+          "anti": 1
+        },
+        "stale-refid": {
+          "scored": 10,
+          "strict": 7,
+          "loose": 7,
+          "anti": 0
+        },
+        "mode-boundary": {
+          "scored": 10,
+          "strict": 0,
+          "loose": 1,
+          "anti": 0
+        },
+        "cross-lingual": {
+          "scored": 10,
+          "strict": 2,
+          "loose": 3,
+          "anti": 0
+        },
+        "prompt-injection": {
+          "scored": 8,
+          "strict": 0,
+          "loose": 5,
+          "anti": 0
+        },
+        "injection-control": {
+          "scored": 2,
+          "strict": 0,
+          "loose": 1,
+          "anti": 0
+        },
+        "prompt-injection-unprotected": {
+          "scored": 8,
+          "strict": 0,
+          "loose": 5,
+          "anti": 0
+        },
+        "injection-control-unprotected": {
+          "scored": 2,
+          "strict": 0,
+          "loose": 1,
+          "anti": 0
+        }
+      },
+      "sources": {
+        "first-turn": "test/llm/results/2026-09-26-spark-x2.5-4b-compact-full_chrome_Spark-X2.5-4B_compact",
+        "scenarios": "test/llm/results-scenarios/2026-09-26-spark-x2.5-4b-compact-full_chrome_Spark-X2.5-4B_compact"
+      }
+    },
+    {
+      "model": "MiniCPM5-2B",
+      "parameters": "2.52B",
+      "new": true,
+      "quantization": "Q4_K_M",
+      "parametersTotal": 2516756480,
+      "modelArtifact": {
+        "id": "minicpm5-2b",
+        "name": "MiniCPM5-2B",
+        "source": "openbmb/MiniCPM5-2B",
+        "repo": "openbmb/MiniCPM5-2B-GGUF",
+        "revision": "2079a22f3beaa4e306449978533478fe0522f4b3",
+        "file": "MiniCPM5-2B-Q4_K_M.gguf",
+        "bytes": 1561318368,
+        "sha256": "ec2d5801640099e97d8d7e8003ad4d81f336e757811f03a26173dddf386602fd"
+      },
+      "runtimeBuild": "b1-a25c986",
+      "runtimeChatTemplateSha256": "6e54652d84d698ebb3b7b2172204b6eeafd7f27533e006c8c1ebf8e743a7fd99",
+      "calls": 96,
+      "strict": 9,
+      "loose": 31,
+      "firstTurnExact": 2,
+      "firstTurnNameOnly": 3,
+      "treeCalls": 84,
+      "firstTurnErrors": 0,
+      "scenarioErrors": 0,
+      "anti": 3,
+      "empty": 0,
+      "lengthLimited": 1,
+      "proseCredits": 18,
+      "byCategory": {
+        "loop-bad-url": {
+          "scored": 10,
+          "strict": 1,
+          "loose": 3,
+          "anti": 1
+        },
+        "tool-error-pivot": {
+          "scored": 9,
+          "strict": 2,
+          "loose": 3,
+          "anti": 0
+        },
+        "csp-blocked-eval": {
+          "scored": 0,
+          "strict": 0,
+          "loose": 0,
+          "anti": 0
+        },
+        "truncation-cascade": {
+          "scored": 10,
+          "strict": 0,
+          "loose": 3,
+          "anti": 2
+        },
+        "counter-polarity": {
+          "scored": 10,
+          "strict": 0,
+          "loose": 1,
+          "anti": 0
+        },
+        "stale-refid": {
+          "scored": 10,
+          "strict": 6,
+          "loose": 7,
+          "anti": 0
+        },
+        "mode-boundary": {
+          "scored": 10,
+          "strict": 0,
+          "loose": 3,
+          "anti": 0
+        },
+        "cross-lingual": {
+          "scored": 10,
+          "strict": 0,
+          "loose": 0,
+          "anti": 0
+        },
+        "prompt-injection": {
+          "scored": 8,
+          "strict": 0,
+          "loose": 5,
+          "anti": 0
+        },
+        "injection-control": {
+          "scored": 2,
+          "strict": 0,
+          "loose": 1,
+          "anti": 0
+        },
+        "prompt-injection-unprotected": {
+          "scored": 8,
+          "strict": 0,
+          "loose": 4,
+          "anti": 0
+        },
+        "injection-control-unprotected": {
+          "scored": 2,
+          "strict": 0,
+          "loose": 1,
+          "anti": 0
+        }
+      },
+      "sources": {
+        "first-turn": "test/llm/results/2026-09-26-minicpm5-2b-compact-full_chrome_MiniCPM5-2B_compact",
+        "scenarios": "test/llm/results-scenarios/2026-09-26-minicpm5-2b-compact-full_chrome_MiniCPM5-2B_compact"
+      }
+    },
+    {
+      "model": "Spark-X2.5-1.7B",
+      "parameters": "1.7B",
+      "new": true,
+      "quantization": "Q4_K_M",
+      "parametersTotal": 1707657216,
+      "modelArtifact": {
+        "id": "spark-x2.5-1.7b",
+        "name": "Spark-X2.5-1.7B",
+        "source": "XHToken/Spark-X2.5-1.7B",
+        "repo": "XHToken/Spark-X2.5-1.7B-GGUF",
+        "revision": "1f7fa33b1245c14730da39e125714ad3a327901b",
+        "file": "Spark-X2.5-1.7B-Q4_K_M.gguf",
+        "bytes": 1107457856,
+        "sha256": "902bde2522394954ac17821b3e5fd0df02defbc6944f122253f2580acf0503f4"
+      },
+      "runtimeBuild": "b1-a25c986",
+      "runtimeChatTemplateSha256": "6871ccab3d7305807b472b0ef2e2c31b024c5168452338e8e626b51cb7d58969",
+      "calls": 99,
+      "strict": 9,
+      "loose": 37,
+      "firstTurnExact": 1,
+      "firstTurnNameOnly": 3,
+      "treeCalls": 88,
+      "firstTurnErrors": 0,
+      "scenarioErrors": 0,
+      "anti": 1,
+      "empty": 0,
+      "lengthLimited": 1,
+      "proseCredits": 24,
+      "byCategory": {
+        "loop-bad-url": {
+          "scored": 10,
+          "strict": 1,
+          "loose": 1,
+          "anti": 1
+        },
+        "tool-error-pivot": {
+          "scored": 9,
+          "strict": 3,
+          "loose": 4,
+          "anti": 0
+        },
+        "csp-blocked-eval": {
+          "scored": 0,
+          "strict": 0,
+          "loose": 0,
+          "anti": 0
+        },
+        "truncation-cascade": {
+          "scored": 10,
+          "strict": 0,
+          "loose": 4,
+          "anti": 0
+        },
+        "counter-polarity": {
+          "scored": 10,
+          "strict": 0,
+          "loose": 2,
+          "anti": 0
+        },
+        "stale-refid": {
+          "scored": 10,
+          "strict": 5,
+          "loose": 8,
+          "anti": 0
+        },
+        "mode-boundary": {
+          "scored": 10,
+          "strict": 0,
+          "loose": 3,
+          "anti": 0
+        },
+        "cross-lingual": {
+          "scored": 10,
+          "strict": 0,
+          "loose": 1,
+          "anti": 0
+        },
+        "prompt-injection": {
+          "scored": 8,
+          "strict": 0,
+          "loose": 6,
+          "anti": 0
+        },
+        "injection-control": {
+          "scored": 2,
+          "strict": 0,
+          "loose": 1,
+          "anti": 0
+        },
+        "prompt-injection-unprotected": {
+          "scored": 8,
+          "strict": 0,
+          "loose": 6,
+          "anti": 0
+        },
+        "injection-control-unprotected": {
+          "scored": 2,
+          "strict": 0,
+          "loose": 1,
+          "anti": 0
+        }
+      },
+      "sources": {
+        "first-turn": "test/llm/results/2026-09-26-spark-x2.5-1.7b-compact-full_chrome_Spark-X2.5-1.7B_compact",
+        "scenarios": "test/llm/results-scenarios/2026-09-26-spark-x2.5-1.7b-compact-full_chrome_Spark-X2.5-1.7B_compact"
+      }
+    }
+  ],
+  "completeTable": [
+    {
+      "model": "Qwen3.8-27B",
+      "parameters": "27B",
+      "calls": 99,
+      "strict": 17,
+      "loose": 39,
+      "source": "/blog/compact-tool-routing-models-compared"
+    },
+    {
+      "model": "WebBrain Compass Tiny v2",
+      "parameters": "~2.6B",
+      "calls": 94,
+      "strict": 16,
+      "loose": 41,
+      "source": "/blog/webbrain-compass-v2"
+    },
+    {
+      "model": "Qwen3.5-4B",
+      "parameters": "4B",
+      "calls": 89,
+      "strict": 16,
+      "loose": 36,
+      "source": "/blog/compact-tool-routing-models-compared"
+    },
+    {
+      "model": "Gemma 4 E4B",
+      "parameters": "7.5B",
+      "calls": 90,
+      "strict": 15,
+      "loose": 43,
+      "source": "/blog/compact-tool-routing-models-compared"
+    },
+    {
+      "model": "Qwen3.6-35B-A3B",
+      "parameters": "35B A3B",
+      "calls": 89,
+      "strict": 15,
+      "loose": 42,
+      "source": "/blog/compact-tool-routing-models-compared"
+    },
+    {
+      "model": "Nanbeige4.2-3B",
+      "parameters": "4.2B reported",
+      "calls": 89,
+      "strict": 13,
+      "loose": 37,
+      "source": "/blog/compact-tool-routing-models-compared"
+    },
+    {
+      "model": "Gemma 4 12B QAT",
+      "parameters": "12B",
+      "calls": 90,
+      "strict": 12,
+      "loose": 34,
+      "source": "/blog/compact-tool-routing-models-compared"
+    },
+    {
+      "model": "Spark-X2.5-4B",
+      "parameters": "4B",
+      "new": true,
+      "quantization": "Q4_K_M",
+      "parametersTotal": 4112079360,
+      "modelArtifact": {
+        "id": "spark-x2.5-4b",
+        "name": "Spark-X2.5-4B",
+        "source": "XHToken/Spark-X2.5-4B",
+        "repo": "XHToken/Spark-X2.5-4B-GGUF",
+        "revision": "9826e0be84e6e6e8b9668abc91421109a1df1e2d",
+        "file": "Spark-X2.5-4B-Q4_K_M.gguf",
+        "bytes": 2600224352,
+        "sha256": "adfcfa19a4ed6a5985da8bf565fe15f8e1a7e131d79bae2d19d48d1c40109428"
+      },
+      "runtimeBuild": "b1-a25c986",
+      "runtimeChatTemplateSha256": "c056f730555318576988f11ed4336dae04cf514d2800ec185692d43bf50d6461",
+      "calls": 96,
+      "strict": 11,
+      "loose": 30,
+      "firstTurnExact": 5,
+      "firstTurnNameOnly": 8,
+      "treeCalls": 78,
+      "firstTurnErrors": 0,
+      "scenarioErrors": 0,
+      "anti": 2,
+      "empty": 0,
+      "lengthLimited": 0,
+      "proseCredits": 9,
+      "byCategory": {
+        "loop-bad-url": {
+          "scored": 10,
+          "strict": 1,
+          "loose": 1,
+          "anti": 0
+        },
+        "tool-error-pivot": {
+          "scored": 9,
+          "strict": 1,
+          "loose": 3,
+          "anti": 0
+        },
+        "csp-blocked-eval": {
+          "scored": 0,
+          "strict": 0,
+          "loose": 0,
+          "anti": 0
+        },
+        "truncation-cascade": {
+          "scored": 10,
+          "strict": 0,
+          "loose": 3,
+          "anti": 1
+        },
+        "counter-polarity": {
+          "scored": 10,
+          "strict": 0,
+          "loose": 0,
+          "anti": 1
+        },
+        "stale-refid": {
+          "scored": 10,
+          "strict": 7,
+          "loose": 7,
+          "anti": 0
+        },
+        "mode-boundary": {
+          "scored": 10,
+          "strict": 0,
+          "loose": 1,
+          "anti": 0
+        },
+        "cross-lingual": {
+          "scored": 10,
+          "strict": 2,
+          "loose": 3,
+          "anti": 0
+        },
+        "prompt-injection": {
+          "scored": 8,
+          "strict": 0,
+          "loose": 5,
+          "anti": 0
+        },
+        "injection-control": {
+          "scored": 2,
+          "strict": 0,
+          "loose": 1,
+          "anti": 0
+        },
+        "prompt-injection-unprotected": {
+          "scored": 8,
+          "strict": 0,
+          "loose": 5,
+          "anti": 0
+        },
+        "injection-control-unprotected": {
+          "scored": 2,
+          "strict": 0,
+          "loose": 1,
+          "anti": 0
+        }
+      },
+      "sources": {
+        "first-turn": "test/llm/results/2026-09-26-spark-x2.5-4b-compact-full_chrome_Spark-X2.5-4B_compact",
+        "scenarios": "test/llm/results-scenarios/2026-09-26-spark-x2.5-4b-compact-full_chrome_Spark-X2.5-4B_compact"
+      }
+    },
+    {
+      "model": "Qwen3.5-2B",
+      "parameters": "2B",
+      "calls": 92,
+      "strict": 11,
+      "loose": 28,
+      "source": "/blog/compact-tool-routing-models-compared"
+    },
+    {
+      "model": "Spark-X2.5-1.7B",
+      "parameters": "1.7B",
+      "new": true,
+      "quantization": "Q4_K_M",
+      "parametersTotal": 1707657216,
+      "modelArtifact": {
+        "id": "spark-x2.5-1.7b",
+        "name": "Spark-X2.5-1.7B",
+        "source": "XHToken/Spark-X2.5-1.7B",
+        "repo": "XHToken/Spark-X2.5-1.7B-GGUF",
+        "revision": "1f7fa33b1245c14730da39e125714ad3a327901b",
+        "file": "Spark-X2.5-1.7B-Q4_K_M.gguf",
+        "bytes": 1107457856,
+        "sha256": "902bde2522394954ac17821b3e5fd0df02defbc6944f122253f2580acf0503f4"
+      },
+      "runtimeBuild": "b1-a25c986",
+      "runtimeChatTemplateSha256": "6871ccab3d7305807b472b0ef2e2c31b024c5168452338e8e626b51cb7d58969",
+      "calls": 99,
+      "strict": 9,
+      "loose": 37,
+      "firstTurnExact": 1,
+      "firstTurnNameOnly": 3,
+      "treeCalls": 88,
+      "firstTurnErrors": 0,
+      "scenarioErrors": 0,
+      "anti": 1,
+      "empty": 0,
+      "lengthLimited": 1,
+      "proseCredits": 24,
+      "byCategory": {
+        "loop-bad-url": {
+          "scored": 10,
+          "strict": 1,
+          "loose": 1,
+          "anti": 1
+        },
+        "tool-error-pivot": {
+          "scored": 9,
+          "strict": 3,
+          "loose": 4,
+          "anti": 0
+        },
+        "csp-blocked-eval": {
+          "scored": 0,
+          "strict": 0,
+          "loose": 0,
+          "anti": 0
+        },
+        "truncation-cascade": {
+          "scored": 10,
+          "strict": 0,
+          "loose": 4,
+          "anti": 0
+        },
+        "counter-polarity": {
+          "scored": 10,
+          "strict": 0,
+          "loose": 2,
+          "anti": 0
+        },
+        "stale-refid": {
+          "scored": 10,
+          "strict": 5,
+          "loose": 8,
+          "anti": 0
+        },
+        "mode-boundary": {
+          "scored": 10,
+          "strict": 0,
+          "loose": 3,
+          "anti": 0
+        },
+        "cross-lingual": {
+          "scored": 10,
+          "strict": 0,
+          "loose": 1,
+          "anti": 0
+        },
+        "prompt-injection": {
+          "scored": 8,
+          "strict": 0,
+          "loose": 6,
+          "anti": 0
+        },
+        "injection-control": {
+          "scored": 2,
+          "strict": 0,
+          "loose": 1,
+          "anti": 0
+        },
+        "prompt-injection-unprotected": {
+          "scored": 8,
+          "strict": 0,
+          "loose": 6,
+          "anti": 0
+        },
+        "injection-control-unprotected": {
+          "scored": 2,
+          "strict": 0,
+          "loose": 1,
+          "anti": 0
+        }
+      },
+      "sources": {
+        "first-turn": "test/llm/results/2026-09-26-spark-x2.5-1.7b-compact-full_chrome_Spark-X2.5-1.7B_compact",
+        "scenarios": "test/llm/results-scenarios/2026-09-26-spark-x2.5-1.7b-compact-full_chrome_Spark-X2.5-1.7B_compact"
+      }
+    },
+    {
+      "model": "MiniCPM5-2B",
+      "parameters": "2.52B",
+      "new": true,
+      "quantization": "Q4_K_M",
+      "parametersTotal": 2516756480,
+      "modelArtifact": {
+        "id": "minicpm5-2b",
+        "name": "MiniCPM5-2B",
+        "source": "openbmb/MiniCPM5-2B",
+        "repo": "openbmb/MiniCPM5-2B-GGUF",
+        "revision": "2079a22f3beaa4e306449978533478fe0522f4b3",
+        "file": "MiniCPM5-2B-Q4_K_M.gguf",
+        "bytes": 1561318368,
+        "sha256": "ec2d5801640099e97d8d7e8003ad4d81f336e757811f03a26173dddf386602fd"
+      },
+      "runtimeBuild": "b1-a25c986",
+      "runtimeChatTemplateSha256": "6e54652d84d698ebb3b7b2172204b6eeafd7f27533e006c8c1ebf8e743a7fd99",
+      "calls": 96,
+      "strict": 9,
+      "loose": 31,
+      "firstTurnExact": 2,
+      "firstTurnNameOnly": 3,
+      "treeCalls": 84,
+      "firstTurnErrors": 0,
+      "scenarioErrors": 0,
+      "anti": 3,
+      "empty": 0,
+      "lengthLimited": 1,
+      "proseCredits": 18,
+      "byCategory": {
+        "loop-bad-url": {
+          "scored": 10,
+          "strict": 1,
+          "loose": 3,
+          "anti": 1
+        },
+        "tool-error-pivot": {
+          "scored": 9,
+          "strict": 2,
+          "loose": 3,
+          "anti": 0
+        },
+        "csp-blocked-eval": {
+          "scored": 0,
+          "strict": 0,
+          "loose": 0,
+          "anti": 0
+        },
+        "truncation-cascade": {
+          "scored": 10,
+          "strict": 0,
+          "loose": 3,
+          "anti": 2
+        },
+        "counter-polarity": {
+          "scored": 10,
+          "strict": 0,
+          "loose": 1,
+          "anti": 0
+        },
+        "stale-refid": {
+          "scored": 10,
+          "strict": 6,
+          "loose": 7,
+          "anti": 0
+        },
+        "mode-boundary": {
+          "scored": 10,
+          "strict": 0,
+          "loose": 3,
+          "anti": 0
+        },
+        "cross-lingual": {
+          "scored": 10,
+          "strict": 0,
+          "loose": 0,
+          "anti": 0
+        },
+        "prompt-injection": {
+          "scored": 8,
+          "strict": 0,
+          "loose": 5,
+          "anti": 0
+        },
+        "injection-control": {
+          "scored": 2,
+          "strict": 0,
+          "loose": 1,
+          "anti": 0
+        },
+        "prompt-injection-unprotected": {
+          "scored": 8,
+          "strict": 0,
+          "loose": 4,
+          "anti": 0
+        },
+        "injection-control-unprotected": {
+          "scored": 2,
+          "strict": 0,
+          "loose": 1,
+          "anti": 0
+        }
+      },
+      "sources": {
+        "first-turn": "test/llm/results/2026-09-26-minicpm5-2b-compact-full_chrome_MiniCPM5-2B_compact",
+        "scenarios": "test/llm/results-scenarios/2026-09-26-minicpm5-2b-compact-full_chrome_MiniCPM5-2B_compact"
+      }
+    },
+    {
+      "model": "Gemma 4 E2B",
+      "parameters": "4.6B",
+      "calls": 74,
+      "strict": 8,
+      "loose": 45,
+      "source": "/blog/compact-tool-routing-models-compared"
+    },
+    {
+      "model": "WebBrain Compass Tiny v1",
+      "parameters": "2.6B",
+      "calls": 81,
+      "strict": 4,
+      "loose": 42,
+      "source": "/blog/compact-tool-routing-models-compared"
+    },
+    {
+      "model": "LFM2.5-2.6B base",
+      "parameters": "2.6B",
+      "calls": 80,
+      "strict": 4,
+      "loose": 34,
+      "source": "/blog/compact-tool-routing-models-compared"
+    },
+    {
+      "model": "Qwen3.5-9B",
+      "parameters": "9B",
+      "calls": 84,
+      "strict": 2,
+      "loose": 12,
+      "source": "/blog/webbrain-compass-tiny-v1"
+    }
+  ]
+}
