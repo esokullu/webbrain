@@ -1,7 +1,7 @@
 import { SparkSha256 } from './spark-sha256.js';
 
 export const SPARK_MODEL_ID = 'webbrain-one/webbrain-compass-tiny-xs-v3-onnx';
-export const SPARK_REVISION = '67a2d019a1a713753b692826767269384e9e9b10';
+export const SPARK_REVISION = 'c5cfd97d5ee5a94ca5dc515f09e6103c22fbe36c';
 export const SPARK_CONTEXT = 4096;
 export const SPARK_CACHE = `transformers-spark-xs-v3-${SPARK_REVISION}`;
 // Only data files are downloaded. Executable code always comes from the

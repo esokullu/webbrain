@@ -221,9 +221,10 @@ duplicate request.
 Settings → Providers → WebGPU and Apocalypse Mode → Text Model also offer
 **Compass Tiny XS v3**, based on Spark-X2.5-1.7B. Tiny v2.1 remains the default.
 The XS download is pinned to `webbrain-one/webbrain-compass-tiny-xs-v3-onnx`
-revision `67a2d019a1a713753b692826767269384e9e9b10`. The repo is private;
-save an authorized **Hugging Face read token** in the WebGPU provider card
-before downloading. Apocalypse uses that same saved credential.
+revision `c5cfd97d5ee5a94ca5dc515f09e6103c22fbe36c`. If repository access is
+restricted, save an authorized **Hugging Face read token** in the WebGPU
+provider card before downloading. Apocalypse uses that same saved credential.
+Public downloads need no token.
 
 This is **FP16 storage / FP32 GEMM**, not q4f16. Its native Spark graph has
 28 layers / 56 KV tensors; it must not be loaded through the MiniCPM/Llama
@@ -250,8 +251,8 @@ configuration is excluded from Cloud Sync. Like other local credentials,
 it remains plaintext in extension local storage and may appear in an explicit
 settings backup: keep exports private.
 
-**Noncommercial research only**: this optional private preview retains the
-dataset's WebLINX licensing restriction. It is not commercial-release
+**Noncommercial research only**: this optional preview is restricted to
+noncommercial research use. It is not commercial-release
 clearance and is not selected or downloaded just by installing WebBrain.
 
 Validation: `npm run test:spark-webgpu` covers pinned downloads, credentials,
@@ -276,7 +277,7 @@ Settings and Apocalypse text pickers offer these shipped presets:
 - [`webbrain-one/webbrain-compass-tiny-xs-v3-onnx`](https://huggingface.co/webbrain-one/webbrain-compass-tiny-xs-v3-onnx)
   (native FP16 graph, about 3.96 GB, 4K context), the optional private Spark
   research preview described above. An authorized HF read token is required
-  for its first download.
+  if repository access is restricted.
 
 Enabling Apocalypse Mode starts the selected text model's download. The
 existing shared transfer ownership and Pause/Stop controls apply to both.

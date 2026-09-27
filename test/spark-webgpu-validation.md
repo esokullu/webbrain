@@ -6,8 +6,10 @@ Settings → Providers → WebGPU and Apocalypse Mode → Text Model.
 
 ## Tested package and runtime
 
-- Repository: `webbrain-one/webbrain-compass-tiny-xs-v3-onnx` (private).
-- Revision: `67a2d019a1a713753b692826767269384e9e9b10`.
+- Repository: `webbrain-one/webbrain-compass-tiny-xs-v3-onnx` (private at validation).
+- Current release revision: `c5cfd97d5ee5a94ca5dc515f09e6103c22fbe36c`.
+  Release metadata/history changed on 2026-09-27; the seven tested model,
+  tokenizer and ABI files retain identical byte lengths and SHA-256 hashes.
 - Spark-X2.5-1.7B fine-tune; native FP16 storage / FP32 GEMM graph, not q4f16.
 - Bundled ONNX Runtime Web 1.27.0 and Transformers.js 4.2.0 tokenizer; native
   Jinja template, thinking disabled, greedy decoding, no helper/cloud fallback.
