@@ -95,7 +95,7 @@ class BaseLLMProvider {
 | `gpt4all` | `openai` | local | (loaded model) | Yes (default on) |
 | `local_openai_proxy` | `openai` | local | (required) | Off / manual toggle |
 | `unsloth` | `openai` | local | (required) | Off / manual toggle |
-| `webgpu` (Chromium) | `webgpu` | local | Compass Tiny v2.1 (default), Tiny XS v3 private research preview; experimental custom HF ONNX repos | No |
+| `webgpu` (Chromium) | `webgpu` | local | Compass Tiny v2.1 (default), Tiny XS v3.1 research preview; experimental custom HF ONNX repos | No |
 | `azure_openai` | `azure_openai` | cloud | (deployment) | Manual toggle |
 | `aws_bedrock` | `aws_bedrock` | cloud | (model id) | No |
 | `openai` | `openai` | cloud | `gpt-5.6-terra` | Model-name regex |
@@ -217,26 +217,38 @@ duplicate request.
 
 ### Local Providers
 
-#### Compass Tiny XS v3 private research preview
+#### Compass Tiny XS v3.1 research preview
 
 Settings → Providers → WebGPU and Apocalypse Mode → Text Model also offer
-**Compass Tiny XS v3**, based on Spark-X2.5-1.7B. Tiny v2.1 remains the default.
-The XS download is pinned to `webbrain-one/webbrain-compass-tiny-xs-v3-onnx`
-revision `c5cfd97d5ee5a94ca5dc515f09e6103c22fbe36c`. If repository access is
-restricted, save an authorized **Hugging Face read token** in the WebGPU
-provider card before downloading. Apocalypse uses that same saved credential.
-Public downloads need no token.
+**Compass Tiny XS v3.1**, based on Spark-X2.5-1.7B. Tiny v2.1 remains the
+default. The XS download is pinned to
+`webbrain-one/webbrain-compass-tiny-xs-v3.1-onnx` revision
+`fb269bc28350a646e484b97c25a7ba756c2db83b`. That repository is public, so
+downloads need no token; if access is later restricted, save an authorized
+**Hugging Face read token** in the WebGPU provider card. Apocalypse uses that
+same saved credential.
 
 This is **FP16 storage / FP32 GEMM**, not q4f16. Its native Spark graph has
 28 layers / 56 KV tensors; it must not be loaded through the MiniCPM/Llama
 Transformers.js model pipeline. WebBrain uses its bundled ORT 1.27 and
 Transformers.js 4.2 tokenizer, the package's native Jinja tool template,
-greedy decoding, and no helper model or cloud fallback. The provider presents a
-**32,768 token** context window, matching Compass Tiny v2.1, with at most 2,048
-output tokens. Note that the pinned graph still declares a 4,096 token
-deployment context, so the native runtime rejects prompts past 4,096 rather
-than truncating them; input is never silently truncated. Download size is about
+greedy decoding, and no helper model or cloud fallback. The context window is
+**32,768 tokens**, matching Compass Tiny v2.1, with at most 2,048 output
+tokens; input is never silently truncated. Download size is about
 **3.96 GB**.
+
+Spark-X2.5 uses RoPE rather than learned position embeddings, and the package
+declares `max_position_embeddings` of 1,048,576, so the ONNX graph and its
+external weights are byte-identical across the 4,096, 8,192 and 32,768
+deployment contexts. The deployment context is a property of the pinned
+`graph-abi.json`, which the runtime asserts against `SPARK_CONTEXT` at load
+time; a graph whose declared context does not match is rejected instead of run.
+
+Prompts are prefilled in 512-token chunks, the graph's validated
+`prefillChunkTokens`, rather than in a single full-context pass. One 32k-wide
+prefill would materialise a full-context attention score matrix on each of the
+seven full-attention layers and exhaust GPU memory before generation began.
+
 Hardware needs `shader-f16`, sufficient free GPU memory (weights plus KV and
 temporary buffers), and several GB of transient host memory while ORT loads the
 external weights; package validation used an RTX 5090. Other adapters are not
@@ -278,11 +290,10 @@ Settings and Apocalypse text pickers offer these shipped presets:
   (`<function name="..."><param name="...">...</param></function>`, CDATA-wrapped
   when values contain `<`, `&`, or newlines), which the local fallback parser
   accepts. This remains the default preset.
-- [`webbrain-one/webbrain-compass-tiny-xs-v3-onnx`](https://huggingface.co/webbrain-one/webbrain-compass-tiny-xs-v3-onnx)
-  (native FP16 graph, about 3.96 GB, 32k context with a 4k native graph
-  ceiling), the optional private Spark
-  research preview described above. An authorized HF read token is required
-  if repository access is restricted.
+- [`webbrain-one/webbrain-compass-tiny-xs-v3.1-onnx`](https://huggingface.co/webbrain-one/webbrain-compass-tiny-xs-v3.1-onnx)
+  (native FP16 graph, about 3.96 GB, 32k context, public), the optional
+  noncommercial research preview described above. A Hugging Face read token is
+  only needed if the repository is later made restricted.
 
 Enabling Apocalypse Mode starts the selected text model's download. The
 existing shared transfer ownership and Pause/Stop controls apply to both.

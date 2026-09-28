@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import { SparkSha256 } from '../src/chrome/src/offscreen/spark-sha256.js';
-import { SPARK_MODEL_ID, SPARK_REVISION, SPARK_FILES, SPARK_CACHE, sparkFileUrl, sparkCacheReady, cacheSparkFiles, SparkRuntime } from '../src/chrome/src/offscreen/spark-runtime.js';
+import { SPARK_MODEL_ID, SPARK_REVISION, SPARK_CONTEXT, SPARK_FILES, SPARK_CACHE, sparkFileUrl, sparkCacheReady, cacheSparkFiles, SparkRuntime } from '../src/chrome/src/offscreen/spark-runtime.js';
 import { WebGPUProvider, WEBGPU_TEXT_UI_MODEL_IDS, WEBGPU_COMPASS_TINY_V2_MODEL_ID, webgpuModelPreset } from '../src/chrome/src/providers/webgpu.js';
 import { parseToolCallsFromText } from '../src/chrome/src/agent/tool-call-parser.js';
 
@@ -94,16 +94,19 @@ test('HF download credential goes only to start-download, defaults and context b
   assert.equal(defaults.dtype, 'q4f16');
 });
 
-function mockedRuntime({ badLogits = false, failDecode = false } = {}) {
+function mockedRuntime({ badLogits = false, failDecode = false, promptLength = 0 } = {}) {
   const positions = [], disposed = [];
   class Tensor {
     constructor(type, data, dims) { Object.assign(this, { type, data, dims, location: 'cpu' }); }
     dispose() { disposed.push(this); }
   }
-  const abi = { inputs: ['input_ids', 'position_ids', 'kv'], outputs: ['logits', 'present'], numKvHeads: 2, headDim: 256, vocabSize: 3 };
+  const abi = { inputs: ['input_ids', 'position_ids', 'kv'], outputs: ['logits', 'present'], numKvHeads: 2, headDim: 256, vocabSize: 3, prefillChunkTokens: 512 };
   const tokenizer = {
     apply_chat_template: (messages, options) => { assert.equal(options.enable_thinking, false); return messages[0].content; },
-    encode: text => text === 'too long' ? Array(4096).fill(1) : [1, 2],
+    encode: text => {
+      if (text === 'too long') return Array(SPARK_CONTEXT).fill(1);
+      return promptLength ? Array(promptLength).fill(1) : [1, 2];
+    },
     decode: tokens => tokens.join(','),
   };
   const session = {
@@ -132,10 +135,25 @@ test('native generation is greedy, preserves positional/cache order, stops on EO
 });
 test('overlong prompts and nonfinite/error outputs fail instead of repairing or falling back', async () => {
   const { runtime, positions } = mockedRuntime();
-  await assert.rejects(runtime.generate([{ role: 'user', content: 'too long' }]), /4K/);
+  await assert.rejects(runtime.generate([{ role: 'user', content: 'too long' }]), new RegExp(`${SPARK_CONTEXT}-token`));
   assert.equal(positions.length, 0);
   await assert.rejects(mockedRuntime({ badLogits: true }).runtime.generate([{ role: 'user', content: 'hi' }]), /invalid logits/);
   await assert.rejects(mockedRuntime({ failDecode: true }).runtime.generate([{ role: 'user', content: 'hi' }]), /device lost/);
+});
+test('a long prompt prefills in bounded chunks with contiguous positions, never one full-context pass', async () => {
+  const { runtime, positions } = mockedRuntime({ promptLength: 1200 });
+  const result = await runtime.generate([{ role: 'user', content: 'long' }], { maxTokens: 4 });
+  assert.equal(result.usage.promptTokens, 1200);
+  // 1200 tokens at the graph's 512-token prefill chunk, not a single 1200-wide pass.
+  assert.deepEqual(positions.map(p => p.length), [512, 512, 176]);
+  // Every chunk must continue exactly where the previous one ended, so the KV
+  // cache and RoPE positions stay aligned across the whole prompt.
+  let expected = 0;
+  for (const pass of positions) {
+    assert.deepEqual(pass, Array.from({ length: pass.length }, (_, i) => expected + i));
+    expected += pass.length;
+  }
+  assert.equal(expected, 1200);
 });
 test('existing Spark native tool syntax stays on the normal allowlisted parser and permission path', () => {
   const text = '<tool_call>click_ax<arg_key>ref_id</arg_key><arg_value>ref_7</arg_value></tool_call>';

@@ -13,7 +13,8 @@ export const WEBGPU_LFM25_VL_3B_MODEL_ID = 'LiquidAI/LFM2.5-VL-3B-ONNX';
 export const WEBGPU_NANBEIGE42_3B_MODEL_ID = 'Michionlion/Nanbeige4.2-3B-ONNX-WebGPU';
 export const WEBGPU_MINICPM5_2B_MODEL_ID = 'RASMUS/MiniCPM5-2B-ONNX';
 export const WEBGPU_COMPASS_TINY_V2_MODEL_ID = 'webbrain-one/webbrain-compass-tiny-v2.1';
-export const WEBGPU_COMPASS_TINY_XS_V3_MODEL_ID = 'webbrain-one/webbrain-compass-tiny-xs-v3-onnx';
+export const WEBGPU_COMPASS_TINY_XS_V3_LEGACY_MODEL_ID = 'webbrain-one/webbrain-compass-tiny-xs-v3-onnx';
+export const WEBGPU_COMPASS_TINY_XS_V3_MODEL_ID = 'webbrain-one/webbrain-compass-tiny-xs-v3.1-onnx';
 export const WEBGPU_TEXT_UI_MODEL_IDS = Object.freeze([WEBGPU_COMPASS_TINY_V2_MODEL_ID, WEBGPU_COMPASS_TINY_XS_V3_MODEL_ID]);
 export const WEBGPU_BONSAI27_MODEL_ID = 'prism-ml/Bonsai-27B-gguf';
 export const WEBGPU_DTYPE = 'q4f16';
@@ -123,13 +124,13 @@ export const WEBGPU_MODEL_PRESETS = Object.freeze([
   Object.freeze({
     id: WEBGPU_COMPASS_TINY_XS_V3_MODEL_ID,
     runtime: WEBGPU_RUNTIME_ONNX,
-    label: 'Compass Tiny XS v3 (private research preview)',
+    label: 'Compass Tiny XS v3.1 (private research preview)',
     size: '3.96 GB',
     dtype: 'fp16',
     dtypeLabel: 'FP16 storage / FP32 GEMM',
-    // Matches Compass Tiny v2.1. The pinned Spark graph still declares a 4,096
-    // token deployment context in graph-abi.json, so the native runtime keeps
-    // enforcing that ceiling and rejects longer prompts; see SPARK_CONTEXT.
+    // Same 32k window as Compass Tiny v2.1. Spark-X2.5 uses RoPE rather than
+    // learned position embeddings, so the pinned graph serves 4k, 8k and 32k
+    // from identical weights and the deployment context is the only difference.
     contextWindow: 32768,
     supportsVision: false,
   }),

@@ -10,6 +10,7 @@ import {
   WebGPUProvider,
   WebGPUVisionProvider,
   WEBGPU_COMPASS_TINY_V2_MODEL_ID,
+  WEBGPU_COMPASS_TINY_XS_V3_LEGACY_MODEL_ID,
   WEBGPU_COMPASS_TINY_XS_V3_MODEL_ID,
   WEBGPU_DTYPE,
   WEBGPU_MODEL_ID,
@@ -1051,15 +1052,20 @@ export class ProviderManager {
         contextWindow: 32768,
       };
     }
-    // XS v3 shipped at 4k before the 32k default. Bump untouched XS 4k configs
-    // to 32k so existing preview installs match the preset.
+    // XS v3 shipped as a 4k private preview. v3.1 is the same RoPE graph from
+    // a public repo validated at a 32k deployment context, so point existing
+    // preview installs at it and match the new 32k default. The old repo's
+    // cache is keyed by its own revision and is simply left behind.
     if (migrated.webgpu
-      && String(migrated.webgpu.model || '').trim() === WEBGPU_COMPASS_TINY_XS_V3_MODEL_ID
-      && migrated.webgpu.configured !== true
-      && Number(migrated.webgpu.contextWindow) === 4096) {
+      && String(migrated.webgpu.model || '').trim() === WEBGPU_COMPASS_TINY_XS_V3_LEGACY_MODEL_ID) {
+      const legacy = migrated.webgpu;
       migrated.webgpu = {
-        ...migrated.webgpu,
-        contextWindow: 32768,
+        ...legacy,
+        model: WEBGPU_COMPASS_TINY_XS_V3_MODEL_ID,
+        contextWindow: legacy.configured === true && Number(legacy.contextWindow) > 4096
+          ? Number(legacy.contextWindow)
+          : 32768,
+        configured: false,
       };
     }
     this._migrateUntouchedShippedDefaults(migrated);

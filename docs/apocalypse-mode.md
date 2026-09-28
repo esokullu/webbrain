@@ -20,7 +20,7 @@ from Hugging Face. The download continues in the background, but screenshot
 operations report its status and never wait for it. Wikipedia archives still
 require their own confirmation. The local **text** model is Compass Tiny v2.1
 (`webbrain-one/webbrain-compass-tiny-v2.1`, about 1.87 GB, 32k context
-window), and remains the default text preset. **Compass Tiny XS v3** is an
+window), and remains the default text preset. **Compass Tiny XS v3.1** is an
 optional private, noncommercial research preview in the same picker:
 Spark-X2.5-1.7B, native FP16 / FP32 GEMM, about 3.96 GB, 32k context window
 with a 4k native graph ceiling. It requires
