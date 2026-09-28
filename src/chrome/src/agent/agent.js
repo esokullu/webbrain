@@ -35623,8 +35623,8 @@ If the user has already named or confirmed this exact recipient, do NOT ask agai
     }
 
     // ─── CAPTCHA solver ──────────────────────────────────────────────
-    // A valid saved key is the enable control. Re-check it on every call so
-    // rotating or clearing the key takes effect without a restart.
+    // Re-check consent and the active solver route on every call so changes
+    // take effect without a restart. Cloud browsers route through the broker.
     if (name === 'solve_captcha') {
       let dispatched = false;
       const noDispatchFailure = (error) => ({
@@ -35634,9 +35634,17 @@ If the user has already named or confirmed this exact recipient, do NOT ask agai
         error,
       });
       try {
-        const stored = await chrome.storage.local.get(['capsolverApiKey', 'captchaSolverEnabled']);
+        const stored = await chrome.storage.local.get([
+          'capsolverApiKey', 'captchaSolverEnabled',
+          'webbrainCloudManaged', 'webbrainCloudCapsolverBrokerEnabled',
+        ]);
         const apiKey = normalizeCapsolverApiKey(stored.capsolverApiKey);
-        if (!isCapsolverEnabled(apiKey, stored.captchaSolverEnabled)) {
+        const useCloudBroker = stored.webbrainCloudManaged === true
+          && stored.webbrainCloudCapsolverBrokerEnabled === true;
+        if (stored.captchaSolverEnabled !== true
+            || (stored.webbrainCloudManaged === true
+              ? !useCloudBroker
+              : !isCapsolverEnabled(apiKey, true))) {
           return noDispatchFailure('CapSolver is not enabled with a valid API key. Ask the user to save their key in Settings → General → Advanced, or fall back to asking them to solve the captcha manually.');
         }
 
@@ -35792,7 +35800,7 @@ If the user has already named or confirmed this exact recipient, do NOT ask agai
         }
 
         dispatched = true;
-        const result = await solveCaptcha(apiKey, params);
+        const result = await solveCaptcha(apiKey, params, { useCloudBroker });
 
         // For non-image types, push the token into the page response field
         // unless the caller explicitly opted out.

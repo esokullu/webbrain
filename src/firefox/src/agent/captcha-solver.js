@@ -27,6 +27,7 @@ const API_BASE = 'https://api.capsolver.com';
 const POLL_INTERVAL_MS = 2500;
 const POLL_TIMEOUT_MS = 120_000;
 const DEFAULT_APP_ID = 'B7E57F27-0AD3-434D-A5B7-CF9EE7D093EE';
+const CLOUD_BROKER_URL = 'http://127.0.0.1:17373/capsolver/solve';
 
 async function postJson(path, body) {
   const res = await fetch(`${API_BASE}${path}`, {
@@ -199,13 +200,31 @@ function solutionFor(type, solution) {
   return { token: null, fieldName: null };
 }
 
-export async function solveCaptcha(apiKey, params) {
-  if (!apiKey) throw new Error('No CapSolver API key configured.');
+async function solveWithCloudBroker(task) {
+  const response = await fetch(CLOUD_BROKER_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-WebBrain-CapSolver-Broker': '1' },
+    body: JSON.stringify({ task }),
+  });
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(result.error || 'Cloud CapSolver broker failed.');
+  if (!result.taskId || !result.solution || typeof result.solution !== 'object') {
+    throw new Error('Cloud CapSolver broker returned an invalid result.');
+  }
+  return result;
+}
+
+export async function solveCaptcha(apiKey, params, { useCloudBroker = false } = {}) {
+  if (!apiKey && !useCloudBroker) throw new Error('No CapSolver API key configured.');
   const paramError = captchaParamError(params);
   if (paramError) throw new Error(paramError);
   const task = buildTask(params);
-  const taskId = await createTask(apiKey, task);
-  const solution = await pollTaskResult(apiKey, taskId);
+  const { taskId, solution } = useCloudBroker
+    ? await solveWithCloudBroker(task)
+    : await (async () => {
+      const taskId = await createTask(apiKey, task);
+      return { taskId, solution: await pollTaskResult(apiKey, taskId) };
+    })();
   const meta = solutionFor(params.type, solution);
   return { taskId, solution, ...meta };
 }

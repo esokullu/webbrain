@@ -32620,9 +32620,17 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
         error,
       });
       try {
-        const stored = await browser.storage.local.get(['capsolverApiKey', 'captchaSolverEnabled']);
+        const stored = await browser.storage.local.get([
+          'capsolverApiKey', 'captchaSolverEnabled',
+          'webbrainCloudManaged', 'webbrainCloudCapsolverBrokerEnabled',
+        ]);
         const apiKey = normalizeCapsolverApiKey(stored.capsolverApiKey);
-        if (!isCapsolverEnabled(apiKey, stored.captchaSolverEnabled)) {
+        const useCloudBroker = stored.webbrainCloudManaged === true
+          && stored.webbrainCloudCapsolverBrokerEnabled === true;
+        if (stored.captchaSolverEnabled !== true
+            || (stored.webbrainCloudManaged === true
+              ? !useCloudBroker
+              : !isCapsolverEnabled(apiKey, true))) {
           return noDispatchFailure('CapSolver is not enabled with a valid API key. Ask the user to save their key in Settings → General → Advanced, or fall back to asking them to solve the captcha manually.');
         }
 
@@ -32775,7 +32783,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
         }
 
         dispatched = true;
-        const result = await solveCaptcha(apiKey, params);
+        const result = await solveCaptcha(apiKey, params, { useCloudBroker });
 
         let injection = null;
         if (wantInject && result.fieldName && result.token) {

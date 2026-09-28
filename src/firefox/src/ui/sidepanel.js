@@ -132,7 +132,7 @@ if (globalThis.browser?.storage?.onChanged) {
   const localModels = document.getElementById('ob-local-models');
   const localModelList = document.getElementById('ob-local-model-list');
   const totalSteps = steps.length;
-  const LOCAL_PROVIDER_ORDER = ['unsloth', 'local_openai_proxy', 'jan', 'lmstudio', 'ollama', 'llamacpp', 'vllm', 'sglang', 'localai', 'gpt4all'];
+  const LOCAL_PROVIDER_ORDER = ['unsloth', 'local_openai_proxy', 'jan', 'osaurus', 'lmstudio', 'ollama', 'llamacpp', 'vllm', 'sglang', 'localai', 'gpt4all'];
   let current = 0;
   let localScanStarted = false;
   let localModelChoices = [];
@@ -341,7 +341,7 @@ if (globalThis.browser?.storage?.onChanged) {
           // closed port fails fast. 5s just caps a slow/stalled server. (Kept
           // equal to the Chrome build for parity.)
           const res = await withTimeout(
-            sendToBackground('list_provider_models', { providerId }),
+            sendToBackground('list_provider_models', { providerId, detectServerIdentity: true }),
             5000
           );
           if (res?.ok && Array.isArray(res.models)) {

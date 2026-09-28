@@ -89,13 +89,15 @@ vllm serve your-model --port 8000                     # vLLM    → :8000/v1
 python -m sglang.launch_server --model-path your-model --port 30000
 ```
 
-LM Studio (`:1234/v1`), Jan (`:1337/v1`), LocalAI (`:8080/v1`), and GPT4All
+LM Studio (`:1234/v1`), Osaurus (`:1337/v1`), Jan (`:1337/v1`), LocalAI (`:8080/v1`), and GPT4All
 (`:4891/v1`) work the same way. A generic **Local OpenAI-compatible Proxy** card
 also supports authenticated loopback gateways such as CLIProxyAPI; see the
 [secure subscription proxy setup](docs/providers-and-models.md#subscription-proxy-example-cliproxyapi).
 **Unsloth Studio (Local)** uses the same OpenAI-compatible path with the Studio
 port and `sk-unsloth-` API key configured by the user; see the
 [Unsloth Studio setup](docs/providers-and-models.md#unsloth-studio).
+**Osaurus (Local)** connects to the Mac's Osaurus server with model discovery,
+streaming, and tool calls; see the [Osaurus setup](docs/providers-and-models.md#osaurus).
 Load a model with **at least a 16k-token context window** — 8k works only
 with the Compact tier, and 4k is too small for the system prompt plus tool
 schemas. WebBrain auto-detects the real window for llama.cpp, Ollama, and LM

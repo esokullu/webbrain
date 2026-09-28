@@ -87,6 +87,7 @@ class BaseLLMProvider {
 | `llamacpp` | `llamacpp` | local | (loaded model) | Auto metadata / override |
 | `ollama` | `openai` | local | (loaded model) | Auto via `/api/show` / override |
 | `lmstudio` | `openai` | local | (loaded model) | Auto metadata / override |
+| `osaurus` | `openai` | local | (required) | Off / manual toggle |
 | `jan` | `openai` | local | (loaded model) | Yes (default on) |
 | `vllm` | `openai` | local | (loaded model) | Yes (default on) |
 | `sglang` | `openai` | local | (loaded model) | Yes (default on) |
@@ -121,7 +122,7 @@ WebBrain also ships 79 disabled-by-default provider cards. Most are sourced
 from the OpenCode provider catalog snapshot at commit
 `62e4641235d7847dadc60da37cca8a023dd54fc1`; provider-specific additions use
 their official API documentation. Together with the original cards, Settings
-contains **110 built-in providers on Chromium** and **109 on Firefox**; the
+contains **111 built-in providers on Chromium** and **110 on Firefox**; the
 difference is the Chromium-only in-browser WebGPU runtime.
 
 | IDs |
@@ -304,13 +305,14 @@ URL, localhost server, or OpenAI-compatible endpoint. Firefox does not expose
 the card because its build does not package the Chromium MV3 offscreen/WebGPU
 runtime.
 
-Ten local endpoint providers are enabled by default. The model runtimes need no
+Eleven local endpoint providers are enabled by default. The model runtimes need no
 API key unless the server was started with auth; Unsloth Studio and the generic
 proxy card require their configured client keys:
 
 - **llama.cpp**: `http://localhost:8080` — runs `llama-server -m model.gguf`
 - **Ollama**: `http://localhost:11434/v1` — `ollama serve`, or `ollama launch webbrain --model <model>`
 - **LM Studio**: `http://localhost:1234/v1` — LM Studio's local inference server
+- **Osaurus**: `http://127.0.0.1:1337/v1` — `osaurus serve --port 1337` on macOS
 - **Jan**: `http://localhost:1337/v1` — Jan's local OpenAI-compatible API server
 - **vLLM**: `http://localhost:8000/v1` — vLLM's OpenAI-compatible server
 - **SGLang**: `http://localhost:30000/v1` — SGLang's OpenAI-compatible server
@@ -320,6 +322,24 @@ proxy card require their configured client keys:
   authenticated local gateway; the model and proxy client API key are required
 - **Unsloth Studio**: `http://127.0.0.1:8888/v1` by default, with a configurable
   port — Studio's API URL, loaded model, and generated API key are required
+
+#### Osaurus
+
+Start the Osaurus server on your Mac, then open **Settings → Providers →
+Osaurus (Local)**. Keep `http://127.0.0.1:1337/v1` as the server URL, click
+**Load Models**, select a model, and click **Test Connection**. A model ID is
+required; discovery uses Osaurus's OpenAI-compatible `/v1/models` endpoint.
+Chat, tool calls, and interactive Ask streaming use `/v1/chat/completions`.
+See the [official API guide](https://github.com/osaurus-ai/osaurus/blob/main/docs/OpenAI_API_GUIDE.md).
+
+Local-only loopback access needs no API key. If Osaurus requires authentication
+(including network exposure or relay access), enter its access key under the
+card's **Advanced → API key** section. Osaurus and Jan both default to port
+1337; use different ports if running both and update the corresponding server
+URL. Set **Context window** to the selected model's actual runtime limit.
+Vision starts off; enable **Supports vision** only for a model that accepts
+images. Osaurus can also route to cloud providers, in which case that upstream
+provider receives the request.
 
 #### Unsloth Studio
 
@@ -390,7 +410,7 @@ OLLAMA_ORIGINS="chrome-extension://*,moz-extension://*" ./ollama serve
 
 **Streaming.** Local streaming is primarily a runtime/server capability, not a
 property of the GGUF or other model weights. Interactive Ask streaming is
-enabled for llama.cpp, Ollama, LM Studio, Jan, vLLM, SGLang, current LocalAI,
+enabled for llama.cpp, Ollama, LM Studio, Osaurus, Jan, vLLM, SGLang, current LocalAI,
 and Unsloth Studio
 through their OpenAI-compatible Chat Completions endpoints. Each parser requires
 `[DONE]`; safe network/read, malformed-frame, and premature-EOF failures

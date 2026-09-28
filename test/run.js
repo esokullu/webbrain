@@ -45722,20 +45722,24 @@ test('saving a valid CapSolver key opts in without overriding legacy opt-outs', 
       `${label}: saving a valid CapSolver key should record explicit consent`,
     );
 
-    assert.match(
-      background,
-      new RegExp(`const stored = await ${api}\\.storage\\.local\\.get\\(\\['capsolverApiKey', 'captchaSolverEnabled'\\]\\);[\\s\\S]*?agent\\.captchaSolverEnabled = isCapsolverEnabled\\([\\s\\S]*?stored\\.capsolverApiKey,[\\s\\S]*?stored\\.captchaSolverEnabled,[\\s\\S]*?\\);`),
-      `${label}: background startup should require both a valid key and prior consent`,
+    assert.ok(
+      background.includes(`const stored = await ${api}.storage.local.get([`)
+        && background.includes('isCapsolverEnabled(stored.capsolverApiKey, stored.captchaSolverEnabled)')
+        && background.includes('stored.webbrainCloudManaged === true')
+        && background.includes('stored.webbrainCloudCapsolverBrokerEnabled === true'),
+      `${label}: background startup should require consent and a valid key or managed Cloud broker`,
     );
     assert.match(
       background,
-      /if \(changes\.capsolverApiKey \|\| changes\.captchaSolverEnabled\) \{[\s\S]*?loadCaptchaSolver\(\)[\s\S]*?agent\._refreshSystemPrompts\(\)/,
-      `${label}: key or consent changes should refresh CapSolver availability immediately`,
+      /if \(changes\.capsolverApiKey \|\| changes\.captchaSolverEnabled[\s\S]*?changes\.webbrainCloudCapsolverBrokerEnabled\) \{[\s\S]*?loadCaptchaSolver\(\)[\s\S]*?agent\._refreshSystemPrompts\(\)/,
+      `${label}: key, consent, or broker changes should refresh CapSolver availability immediately`,
     );
-    assert.match(
-      agent,
-      new RegExp(`const stored = await ${api}\\.storage\\.local\\.get\\(\\['capsolverApiKey', 'captchaSolverEnabled'\\]\\);[\\s\\S]*?const apiKey = normalizeCapsolverApiKey\\(stored\\.capsolverApiKey\\);[\\s\\S]*?if \\(!isCapsolverEnabled\\(apiKey, stored\\.captchaSolverEnabled\\)\\)`),
-      `${label}: solve_captcha should revalidate the saved key and consent at dispatch time`,
+    assert.ok(
+      agent.includes(`const stored = await ${api}.storage.local.get([`)
+        && agent.includes('stored.captchaSolverEnabled !== true')
+        && agent.includes('!isCapsolverEnabled(apiKey, true)')
+        && agent.includes('const result = await solveCaptcha(apiKey, params, { useCloudBroker });'),
+      `${label}: solve_captcha should revalidate consent and the direct key when the Cloud broker is absent`,
     );
 
     assert.equal(capsolverConfig.normalizeCapsolverApiKey('  CAP-0123456789abcdefghij  '), 'CAP-0123456789abcdefghij');
@@ -47808,7 +47812,7 @@ test('local provider API keys stay available in a collapsed advanced section', (
       /const OPTIONAL_LOCAL_API_KEY_FIELD = \{[\s\S]*?key: 'apiKey',[\s\S]*?collapsed: true,[\s\S]*?\};/,
       `${label}: local providers should share one optional authentication field`,
     );
-    for (const id of ['llamacpp', 'ollama', 'lmstudio', 'jan', 'vllm', 'sglang', 'localai', 'gpt4all']) {
+    for (const id of ['llamacpp', 'ollama', 'lmstudio', 'osaurus', 'jan', 'vllm', 'sglang', 'localai', 'gpt4all']) {
       const start = settings.indexOf(`${id}: {`);
       assert.notEqual(start, -1, `${label}: ${id} settings missing`);
       const end = settings.indexOf('\n    },', start);
@@ -66880,9 +66884,201 @@ test('subscription OAuth refreshes share in-flight work and retry after failures
   }
 });
 
+test('Osaurus requires a selected model and uses the local Chat Completions contract', () => {
+  for (const PM of [ProviderManagerCh, ProviderManagerFx]) {
+    const manager = new PM();
+    const defaults = manager._defaultConfigs().osaurus;
+    const empty = manager._createProvider('osaurus', defaults);
+    assert.equal(empty.name, 'osaurus');
+    assert.equal(empty.baseUrl, 'http://127.0.0.1:1337/v1');
+    assert.equal(empty.promptTier, 'mid');
+    assert.equal(empty.supportsTools, true);
+    assert.equal(empty.supportsAskStreaming, true);
+    assert.equal(empty.supportsVision, false);
+    assert.throws(() => empty.model, /model is required/);
+
+    const provider = manager._createProvider('osaurus', { ...defaults, model: 'gpt-5-local' });
+    const body = provider._buildChatCompletionsBody([{ role: 'user', content: 'hello' }], { maxTokens: 128 });
+    assert.equal(body.model, 'gpt-5-local');
+    assert.equal(body.max_tokens, 128);
+    assert.equal('max_completion_tokens' in body, false);
+    assert.equal(provider._usesResponsesApi(), false);
+    assert.equal(provider._shouldRequestStreamUsage(), false);
+    assert.equal('Authorization' in provider._headers(), false);
+    assert.equal(manager._createProvider('osaurus', { ...defaults, supportsVision: true }).supportsVision, true);
+  }
+});
+
+test('Osaurus discovers models and handles chat, streaming, tools, and access keys', async () => {
+  const originalFetch = globalThis.fetch;
+  const calls = [];
+  const toolCall = { id: 'call_osaurus', type: 'function', function: { name: 'read_page', arguments: '{}' } };
+  globalThis.fetch = async (url, options = {}) => {
+    const body = options.body ? JSON.parse(options.body) : null;
+    calls.push({ url: String(url), headers: options.headers || {}, body });
+    if (String(url).endsWith('/models')) {
+      return new Response(JSON.stringify({ object: 'list', data: [
+        { id: 'llama-3.2-3b-instruct', owned_by: 'osaurus' },
+        { id: 'foundation', owned_by: 'osaurus' },
+      ] }), { headers: { 'Content-Type': 'application/json' } });
+    }
+    if (body.stream) {
+      const chunks = [
+        { choices: [{ delta: { content: 'Hello' }, finish_reason: null }] },
+        { choices: [{ delta: { tool_calls: [{ index: 0, ...toolCall }] }, finish_reason: null }] },
+        { choices: [{ delta: {}, finish_reason: 'tool_calls' }] },
+      ];
+      return new Response(chunks.map(chunk => `data: ${JSON.stringify(chunk)}\n\n`).join('') + 'data: [DONE]\n\n', {
+        headers: { 'Content-Type': 'text/event-stream' },
+      });
+    }
+    return new Response(JSON.stringify({ choices: [{ message: { role: 'assistant', content: 'Hello', tool_calls: [toolCall] } }] }), {
+      headers: { 'Content-Type': 'application/json' },
+    });
+  };
+  try {
+    for (const PM of [ProviderManagerCh, ProviderManagerFx]) {
+      const manager = new PM();
+      const defaults = manager._defaultConfigs().osaurus;
+      manager.providers.set('osaurus', manager._createProvider('osaurus', defaults));
+      assert.deepEqual(await manager.listProviderModels('osaurus'), {
+        ok: true, models: ['foundation', 'llama-3.2-3b-instruct'],
+      });
+      assert.equal(calls.at(-1).url, `${defaults.baseUrl}/models`);
+      assert.equal('Authorization' in calls.at(-1).headers, false);
+
+      const provider = manager._createProvider('osaurus', {
+        ...defaults, model: 'llama-3.2-3b-instruct', apiKey: 'test-access-key',
+      });
+      manager.providers.set('osaurus', provider);
+      assert.equal((await manager.testProvider('osaurus')).ok, true);
+      const tools = [{ type: 'function', function: { name: 'read_page', parameters: { type: 'object', properties: {} } } }];
+      const result = await provider.chat([{ role: 'user', content: 'Read the page' }], { tools });
+      assert.equal(result.content, 'Hello');
+      assert.deepEqual(result.toolCalls, [toolCall]);
+      assert.equal(calls.at(-1).url, `${defaults.baseUrl}/chat/completions`);
+      assert.equal(calls.at(-1).headers.Authorization, 'Bearer test-access-key');
+      assert.deepEqual(calls.at(-1).body.tools, tools);
+
+      const events = [];
+      for await (const event of provider.chatStream([{ role: 'user', content: 'Hello' }], { tools })) events.push(event);
+      assert.equal(events.filter(event => event.type === 'text').map(event => event.content).join(''), 'Hello');
+      assert.ok(events.some(event => event.type === 'tool_call'));
+      assert.ok(events.some(event => event.type === 'done'));
+      assert.equal(calls.at(-1).body.stream, true);
+      assert.equal('stream_options' in calls.at(-1).body, false);
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('onboarding distinguishes Osaurus and Jan on their shared port in both browsers', async () => {
+  const originalFetch = globalThis.fetch;
+  try {
+    for (const [build, PM] of [['chrome', ProviderManagerCh], ['firefox', ProviderManagerFx]]) {
+      const panel = fs.readFileSync(path.join(ROOT, `src/${build}/src/ui/sidepanel.js`), 'utf8');
+      const orderLiteral = panel.match(/const LOCAL_PROVIDER_ORDER = (\[[^;]+\]);/)[1];
+      const order = Function(`return ${orderLiteral};`)();
+      const start = panel.indexOf('  async function scanLocalModels() {');
+      const end = panel.indexOf('\n  function goTo(', start);
+      assert.ok(start !== -1 && end > start, `${build}: onboarding scan missing`);
+      const scanSource = panel.slice(start, end);
+      const scan = Function('sendToBackground', 'LOCAL_PROVIDER_ORDER', `
+        let localModelChoices = [];
+        const settingsBtn = {}, skipBtn = {}, providerBody = {};
+        const providerList = { classList: { add() {} } }, localModels = providerList;
+        const t = key => key, setProviderStatus = () => {};
+        const providerSortIndex = id => {
+          const index = LOCAL_PROVIDER_ORDER.indexOf(id);
+          return index === -1 ? LOCAL_PROVIDER_ORDER.length : index;
+        };
+        const withTimeout = promise => promise;
+        const showLocalChoices = choices => { localModelChoices = choices; };
+        const showProviderFallback = () => {};
+        ${scanSource}
+        return async () => { await scanLocalModels(); return localModelChoices; };
+      `);
+
+      for (const scenario of [
+        { name: 'local Osaurus', owner: 'osaurus', greeting: '', expected: ['osaurus'], rootCalls: 0 },
+        { name: 'cloud-only Osaurus', owner: 'openai', greeting: 'Osaurus Server is running! 🦕', expected: ['osaurus'], rootCalls: 2 },
+        { name: 'Jan', owner: 'jan', greeting: '', expected: ['jan'], rootCalls: 2 },
+        { name: 'unidentified server', owner: 'unknown', greeting: 'Server ready', expected: ['jan'], rootCalls: 2 },
+        { name: 'separate Jan and Osaurus ports', separatePorts: true, greeting: '', expected: ['jan', 'osaurus'], rootCalls: 1 },
+      ]) {
+        const manager = new PM();
+        const defaults = manager._defaultConfigs();
+        const providers = { jan: defaults.jan, osaurus: { ...defaults.osaurus } };
+        if (scenario.separatePorts) providers.osaurus.baseUrl = 'http://127.0.0.1:1444/v1';
+        for (const [id, config] of Object.entries(providers)) manager.providers.set(id, manager._createProvider(id, config));
+        let rootCalls = 0;
+        globalThis.fetch = async url => {
+          const parsed = new URL(url);
+          if (parsed.pathname === '/v1/models') {
+            const owner = scenario.separatePorts ? (parsed.port === '1444' ? 'osaurus' : 'jan') : scenario.owner;
+            return new Response(JSON.stringify({ object: 'list', data: [{ id: 'text-model', owned_by: owner }] }), {
+              headers: { 'Content-Type': 'application/json' },
+            });
+          }
+          assert.equal(parsed.pathname, '/');
+          rootCalls++;
+          return new Response(scenario.greeting, { status: scenario.greeting ? 200 : 404 });
+        };
+        const requests = [];
+        const send = async (action, message) => {
+          if (action === 'get_providers') return { providers, active: 'jan' };
+          assert.equal(action, 'list_provider_models');
+          requests.push(message);
+          return manager.listProviderModels(message.providerId, {
+            detectServerIdentity: message.detectServerIdentity === true,
+          });
+        };
+        const choices = await scan(send, order)();
+        assert.deepEqual(choices.map(choice => choice.providerId), scenario.expected, `${build}: ${scenario.name}`);
+        assert.ok(requests.every(request => request.detectServerIdentity === true));
+        assert.equal(rootCalls, scenario.rootCalls, `${build}: ${scenario.name} identity probes`);
+        if (scenario.expected[0] === 'osaurus') {
+          assert.equal(manager.providers.get(choices[0].providerId).supportsVision, false, `${build}: Osaurus vision default`);
+        }
+      }
+      const background = fs.readFileSync(path.join(ROOT, `src/${build}/src/background.js`), 'utf8');
+      assert.match(background, /case 'list_provider_models':[\s\S]*?detectServerIdentity: msg\.detectServerIdentity === true/);
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('Osaurus identity checks preserve manual model loading and configured providers', async () => {
+  const originalFetch = globalThis.fetch;
+  try {
+    for (const PM of [ProviderManagerCh, ProviderManagerFx]) {
+      const manager = new PM();
+      const defaults = manager._defaultConfigs();
+      let rootCalls = 0;
+      globalThis.fetch = async url => {
+        if (!String(url).endsWith('/models')) rootCalls++;
+        return new Response(JSON.stringify({ data: [{ id: 'explicit-model', owned_by: 'unknown' }] }));
+      };
+      for (const id of ['jan', 'osaurus']) {
+        manager.providers.set(id, manager._createProvider(id, defaults[id]));
+        assert.deepEqual(await manager.listProviderModels(id), { ok: true, models: ['explicit-model'] });
+        manager.providers.set(id, manager._createProvider(id, { ...defaults[id], configured: true }));
+        assert.deepEqual(await manager.listProviderModels(id, { detectServerIdentity: true }), {
+          ok: true, models: ['explicit-model'],
+        });
+      }
+      assert.equal(rootCalls, 0, 'explicit provider configuration should not require server detection');
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test('categoryFor: local family', () => {
   for (const PM of [ProviderManagerCh, ProviderManagerFx]) {
-    for (const id of ['llamacpp', 'ollama', 'lmstudio', 'jan', 'vllm', 'sglang', 'localai', 'gpt4all', 'local_openai_proxy', 'unsloth']) {
+    for (const id of ['llamacpp', 'ollama', 'lmstudio', 'osaurus', 'jan', 'vllm', 'sglang', 'localai', 'gpt4all', 'local_openai_proxy', 'unsloth']) {
       assert.equal(PM.categoryFor(id, { type: id === 'llamacpp' ? 'llamacpp' : 'openai' }), 'local');
     }
     assert.equal(PM.categoryFor('custom_llama_cpp', { type: 'llamacpp' }), 'local');
@@ -68211,7 +68407,7 @@ test('listProviderModels sends saved API keys for auth-enabled OpenAI-compatible
 
   try {
     for (const PM of [ProviderManagerCh, ProviderManagerFx]) {
-      for (const id of ['jan', 'vllm', 'sglang', 'localai', 'gpt4all', 'local_openai_proxy', 'unsloth']) {
+      for (const id of ['osaurus', 'jan', 'vllm', 'sglang', 'localai', 'gpt4all', 'local_openai_proxy', 'unsloth']) {
         const mgr = new PM();
         const config = {
           ...mgr._defaultConfigs()[id],
@@ -69369,7 +69565,7 @@ test('extended provider catalog is complete, mirrored, safe, and excluded-provid
     ['firefox', ProviderManagerFx, 'src/firefox'],
   ]) {
     const defaults = new PM()._defaultConfigs();
-    const expectedDefaultCount = label === 'chrome' ? 110 : 109;
+    const expectedDefaultCount = label === 'chrome' ? 111 : 110;
     assert.equal(
       Object.keys(defaults).length,
       expectedDefaultCount,

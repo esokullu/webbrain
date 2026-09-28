@@ -80,7 +80,7 @@ import {
 const WEBBRAIN_CLOUD_PROVIDER_ID = 'webbrain_cloud';
 const WEBBRAIN_CLOUD_PROVIDER_LABEL = 'WebBrain Compass';
 const DUPLICATE_PROVIDER_SUFFIX = '__duplicate';
-const LOCAL_MODEL_LIST_PROVIDER_IDS = ['llamacpp', 'ollama', 'lmstudio', 'jan', 'vllm', 'sglang', 'localai', 'gpt4all', 'local_openai_proxy', 'unsloth'];
+const LOCAL_MODEL_LIST_PROVIDER_IDS = ['llamacpp', 'ollama', 'lmstudio', 'osaurus', 'jan', 'vllm', 'sglang', 'localai', 'gpt4all', 'local_openai_proxy', 'unsloth'];
 const WEBBRAIN_CLOUD_CONTEXT_WINDOW = 1000000;
 const WEBBRAIN_CLOUD_LEGACY_CONTEXT_WINDOW = 256000;
 const WEBBRAIN_DEVICE_GUID_KEY = 'webbrainDeviceGuid';
@@ -551,6 +551,20 @@ export class ProviderManager {
         supportsAskStreaming: true,
         visionMode: 'auto',
         visionDetection: null,
+        enabled: true,
+      },
+      osaurus: {
+        type: 'openai',
+        category: 'local',
+        label: 'Osaurus (Local)',
+        providerName: 'osaurus',
+        requiresModel: true,
+        baseUrl: 'http://127.0.0.1:1337/v1',
+        model: '',
+        contextWindow: 16384,
+        apiKey: '',
+        supportsAskStreaming: true,
+        supportsVision: false,
         enabled: true,
       },
       jan: {
@@ -1263,7 +1277,7 @@ export class ProviderManager {
   static categoryFor(id, config) {
     if (config && config.category) return config.category;
     if (config?.type === 'llamacpp' || config?.type === 'webgpu') return 'local';
-    if (['llamacpp', 'ollama', 'lmstudio', 'jan', 'vllm', 'sglang', 'localai', 'gpt4all', 'local_openai_proxy', 'unsloth', 'webgpu'].includes(id)) return 'local';
+    if (['llamacpp', 'ollama', 'lmstudio', 'osaurus', 'jan', 'vllm', 'sglang', 'localai', 'gpt4all', 'local_openai_proxy', 'unsloth', 'webgpu'].includes(id)) return 'local';
     if (ROUTER_PROVIDER_IDS.includes(id)) return 'router';
     return 'cloud';
   }
@@ -2308,11 +2322,11 @@ export class ProviderManager {
 
   /**
    * Fetch selectable models for local providers. Ollama uses its native
-   * /api/tags endpoint; llama.cpp, LM Studio, Jan, vLLM, SGLang, LocalAI,
+   * /api/tags endpoint; llama.cpp, LM Studio, Osaurus, Jan, vLLM, SGLang, LocalAI,
    * GPT4All, Unsloth Studio, and generic local proxies use
    * OpenAI-compatible /v1/models.
    */
-  async listProviderModels(id) {
+  async listProviderModels(id, { detectServerIdentity = false } = {}) {
     const provider = this.providers.get(id);
     if (!provider) return { ok: false, error: 'Provider not found' };
     const definitionId = this._providerDefinitionId(id, provider.config);
@@ -2384,6 +2398,13 @@ export class ProviderManager {
           continue;
         }
         const data = await res.json();
+        // Jan and Osaurus share port 1337. Successful OpenAI model discovery
+        // alone cannot identify which server answered an unconfigured card.
+        if (detectServerIdentity && provider.config.configured !== true
+            && ['jan', 'osaurus'].includes(definitionId)) {
+          const isOsaurus = await this._isOsaurusDiscoveryServer(data, candidate.requestBaseUrl, headers);
+          if (isOsaurus !== (definitionId === 'osaurus')) return { ok: true, models: [] };
+        }
         const models = this._extractModelIds(definitionId, data);
         const result = { ok: true, models };
         if (candidate.configBaseUrl !== observedBaseUrl) {
@@ -2409,6 +2430,28 @@ export class ProviderManager {
       }
     }
     return firstFailure || { ok: false, error: 'Failed to load models' };
+  }
+
+  async _isOsaurusDiscoveryServer(data, requestBaseUrl, headers) {
+    if (Array.isArray(data?.data) && data.data.some(model =>
+      String(model?.owned_by || '').trim().toLowerCase() === 'osaurus'
+    )) return true;
+
+    // A cloud-only Osaurus catalog may contain only upstream owners. Its
+    // public root greeting identifies the server without depending on models.
+    const root = requestBaseUrl.replace(/\/v1$/i, '');
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 1500);
+    try {
+      const response = await fetchWithFallback(`${root}/`, {
+        method: 'GET', headers, signal: controller.signal, timeoutMs: 1500,
+      });
+      return response.ok && (await response.text()).trim().startsWith('Osaurus Server is running!');
+    } catch {
+      return false;
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   async listOllamaModels(id) {

@@ -1080,15 +1080,16 @@ async function loadCustomSkills() {
 }
 const customSkillsReady = loadCustomSkills();
 
-// A valid key plus explicit consent enables CapSolver. Requiring the existing
-// boolean preserves legacy profiles that saved a key while the old switch was
-// off; pressing Save Key in the new UI sets consent to true.
+// Local browsers require a valid key and explicit consent. Managed Cloud
+// browsers use the broker flag and never use a CapSolver key from storage.
 async function loadCaptchaSolver() {
-  const stored = await chrome.storage.local.get(['capsolverApiKey', 'captchaSolverEnabled']);
-  agent.captchaSolverEnabled = isCapsolverEnabled(
-    stored.capsolverApiKey,
-    stored.captchaSolverEnabled,
-  );
+  const stored = await chrome.storage.local.get([
+    'capsolverApiKey', 'captchaSolverEnabled',
+    'webbrainCloudManaged', 'webbrainCloudCapsolverBrokerEnabled',
+  ]);
+  agent.captchaSolverEnabled = stored.webbrainCloudManaged === true
+    ? stored.captchaSolverEnabled === true && stored.webbrainCloudCapsolverBrokerEnabled === true
+    : isCapsolverEnabled(stored.capsolverApiKey, stored.captchaSolverEnabled);
 }
 loadCaptchaSolver();
 
@@ -1308,7 +1309,8 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
     }
     refreshPrompts = true;
   }
-  if (changes.capsolverApiKey || changes.captchaSolverEnabled) {
+  if (changes.capsolverApiKey || changes.captchaSolverEnabled
+      || changes.webbrainCloudManaged || changes.webbrainCloudCapsolverBrokerEnabled) {
     loadCaptchaSolver()
       .then(() => agent._refreshSystemPrompts())
       .catch((error) => console.warn('[WebBrain] CapSolver setting could not be refreshed', error));
@@ -4119,7 +4121,9 @@ async function handleMessage(msg, sender) {
     }
 
     case 'list_provider_models': {
-      return await providerManager.listProviderModels(msg.providerId);
+      return await providerManager.listProviderModels(msg.providerId, {
+        detectServerIdentity: msg.detectServerIdentity === true,
+      });
     }
 
     case 'list_ollama_models': {

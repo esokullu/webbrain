@@ -364,9 +364,14 @@ encrypts it in the browser with AES-256-GCM. Its key is derived from the sync
 password with PBKDF2-HMAC-SHA-256 (600,000 iterations). The password and derived
 key are retained in memory only for the browser session.
 
-WebBrain Compass receives only ciphertext and cryptographic/version metadata. It
-cannot decrypt the vault or recover a forgotten password. Authentication uses a
-separate email-approved, scoped token; the billing device GUID alone cannot read
+WebBrain Compass receives ciphertext, cryptographic/version metadata, and three
+counts supplied by the extension with each vault upload: configured portable
+providers, saved memory records, and whether the freeform profile text is
+nonempty (0 or 1). These counts support the authenticated admin stats page;
+provider names, memory text, profile text, and API keys remain inside the
+encrypted vault. Older vaults have unknown counts until a newer extension syncs.
+WebBrain Compass cannot decrypt the vault or recover a forgotten password.
+Authentication uses a separate email-approved, scoped token; the billing device GUID alone cannot read
 a vault. Sync is off by default, local writes continue while locked or offline,
 and chat history, traces, tasks, permissions, and extraction queues are excluded.
 

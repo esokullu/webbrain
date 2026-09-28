@@ -8,6 +8,7 @@ Most brand marks come from [Lobe Icons](https://github.com/lobehub/lobe-icons)
 | openai, anthropic, gemini, ollama, lmstudio, openrouter, groq, mistral, deepseek, xai, huggingface, fireworks, together, cloudflare, nvidia, azure_openai, aws_bedrock, minimax, kimi, alibaba (qwen), vllm, pollinations | Lobe Icons |
 | llamacpp | Jan app asset (brand mark used for llama.cpp) |
 | jan | Jan official app icon |
+| osaurus | [Osaurus official logo](https://github.com/osaurus-ai/osaurus/blob/main/App/osaurus/Assets.xcassets/osaurus-logo.imageset/osaurus-logo-black.svg) (`osaurus-ai/osaurus`, MIT) |
 | localai | LocalAI official logo (`mudler/LocalAI`) |
 | gpt4all | Simple mark (not an official GPT4All brand asset) |
 | local_openai_proxy | WebBrain-authored generic proxy mark |

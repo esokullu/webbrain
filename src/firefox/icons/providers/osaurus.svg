@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" fill="none" preserveAspectRatio="xMidYMid meet">
+  <defs>
+    <style>
+      .st0 {
+        fill: none;
+        stroke: #000000;
+        stroke-miterlimit: 10;
+        stroke-width: 16px;
+      }
+    </style>
+  </defs>
+  <g>
+    <g>
+      <line class="st0" x1="98.2" y1="191.2" x2="98.2" y2="166" />
+      <path class="st0" d="M61.6,164.1s-21.5,10.4-49.2-17.1v-.2c39.1-.2,60.1-35.9,60.1-35.9" />
+    </g>
+    <path
+      class="st0"
+      d="M61.6,191.2v-35.8c0-42.8,16.7-63.6,58.1-63.6v-43.9s-.5-29.4,34.1-29.7,34.4,15,34.4,33.7c0,18.8-9.4,27.4-22.5,32.1v29.8c0,14.2-6.2,27.8-16.9,37.2l-17.1,14.9v25.2"
+    />
+  </g>
+  <circle cx="155.8" cy="51.4" r="7.8" fill="#000000" stroke="none" />
+</svg>

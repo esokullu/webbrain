@@ -250,7 +250,7 @@ const pinCoachmarkDismissed = (async function initPinCoachmark() {
   const localModels = document.getElementById('ob-local-models');
   const localModelList = document.getElementById('ob-local-model-list');
   const totalSteps = steps.length;
-  const LOCAL_PROVIDER_ORDER = ['unsloth', 'local_openai_proxy', 'jan', 'lmstudio', 'ollama', 'llamacpp', 'vllm', 'sglang', 'localai', 'gpt4all'];
+  const LOCAL_PROVIDER_ORDER = ['unsloth', 'local_openai_proxy', 'jan', 'osaurus', 'lmstudio', 'ollama', 'llamacpp', 'vllm', 'sglang', 'localai', 'gpt4all'];
   let current = 0;
   let localScanStarted = false;
   let localModelChoices = [];
@@ -462,7 +462,7 @@ const pinCoachmarkDismissed = (async function initPinCoachmark() {
           // service-worker dynamic import in providers/manager.js, since fixed;
           // the old 2.5s was also too tight for a cold proxy.)
           const res = await withTimeout(
-            sendToBackground('list_provider_models', { providerId }),
+            sendToBackground('list_provider_models', { providerId, detectServerIdentity: true }),
             5000
           );
           if (res?.ok && Array.isArray(res.models)) {

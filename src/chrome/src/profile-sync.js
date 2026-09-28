@@ -68,6 +68,16 @@ function portableVault(vault, fallbackActiveProvider = '') {
   };
 }
 
+export function profileVaultSummary(vault) {
+  const providers = portableProviders(vault?.providers || {});
+  return {
+    version: 1,
+    provider_count: Object.values(providers).filter(config => config?.configured === true).length,
+    memory_count: normalizeUserMemoryStore(vault?.memory).records.length,
+    profile_count: String(vault?.profile?.text || '').trim() ? 1 : 0,
+  };
+}
+
 export async function deriveProfileSyncKey(password, salt, iterations = ITERATIONS) {
   const material = await crypto.subtle.importKey('raw', enc.encode(password), 'PBKDF2', false, ['deriveKey']);
   return crypto.subtle.deriveKey({ name: 'PBKDF2', hash: 'SHA-256', salt, iterations }, material,
@@ -325,7 +335,7 @@ export class ProfileSyncManager {
     const encrypted = await encryptProfileVault(local, password, runEnvelope ? { vaultId: runEnvelope.vaultId, salt: unb64(runEnvelope.kdf.salt), iterations: runEnvelope.kdf.iterations, key: runKey } : {});
     if (generation !== this.sessionGeneration || this.password !== password) throw new Error('Cloud Sync was locked');
     this.key = encrypted.key; this.envelope = encrypted.envelope;
-    try { const put = await this.request('/vault', { method: 'PUT', headers: this.revision != null ? { 'If-Match': String(this.revision) } : {}, body: JSON.stringify({ envelope: encrypted.envelope }) }); this.revision = put.body.revision; }
+    try { const put = await this.request('/vault', { method: 'PUT', headers: this.revision != null ? { 'If-Match': String(this.revision) } : {}, body: JSON.stringify({ envelope: encrypted.envelope, summary: profileVaultSummary(local) }) }); this.revision = put.body.revision; }
     catch (e) { if (e.status === 409) { this.revision = null; return this.runSync(); } throw e; }
     this.status = 'current'; return this.state();
   }
@@ -340,7 +350,7 @@ export class ProfileSyncManager {
         const put = await this.request('/vault', {
           method: 'PUT',
           headers: { 'If-Match': String(this.revision) },
-          body: JSON.stringify({ envelope: encrypted.envelope }),
+          body: JSON.stringify({ envelope: encrypted.envelope, summary: profileVaultSummary(local) }),
         });
         if (generation !== this.sessionGeneration) return this.state();
         this.password = nextPassword;
@@ -366,7 +376,7 @@ export class ProfileSyncManager {
       if (this.revision == null) { try { const current = await this.request('/vault'); this.revision = current.body.revision; } catch (error) { if (error.status !== 404) throw error; } }
       const encrypted = await encryptProfileVault(local, password);
       try {
-        const put = await this.request('/vault', { method: 'PUT', headers: this.revision != null ? { 'If-Match': String(this.revision) } : {}, body: JSON.stringify({ envelope: encrypted.envelope }) });
+        const put = await this.request('/vault', { method: 'PUT', headers: this.revision != null ? { 'If-Match': String(this.revision) } : {}, body: JSON.stringify({ envelope: encrypted.envelope, summary: profileVaultSummary(local) }) });
         if (generation !== this.sessionGeneration) return this.state();
         this.password = password; this.key = encrypted.key; this.envelope = encrypted.envelope; this.revision = put.body.revision; this.status = 'current'; return this.state();
       } catch (error) { if (error.status !== 409 || attempt === 1) throw error; this.revision = null; }
