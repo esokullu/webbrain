@@ -127,7 +127,10 @@ export const WEBGPU_MODEL_PRESETS = Object.freeze([
     size: '3.96 GB',
     dtype: 'fp16',
     dtypeLabel: 'FP16 storage / FP32 GEMM',
-    contextWindow: 4096,
+    // Matches Compass Tiny v2.1. The pinned Spark graph still declares a 4,096
+    // token deployment context in graph-abi.json, so the native runtime keeps
+    // enforcing that ceiling and rejects longer prompts; see SPARK_CONTEXT.
+    contextWindow: 32768,
     supportsVision: false,
   }),
   Object.freeze({
@@ -333,7 +336,7 @@ export class WebGPUProvider extends WebGPUOffscreenProvider {
       model,
       device: 'webgpu',
       dtype,
-      ...(model === WEBGPU_COMPASS_TINY_XS_V3_MODEL_ID ? { contextWindow: Math.min(4096, Math.max(1024, Number(config.contextWindow) || 4096)) } : {}),
+      ...(model === WEBGPU_COMPASS_TINY_XS_V3_MODEL_ID ? { contextWindow: Math.min(32768, Math.max(1024, Number(config.contextWindow) || 32768)) } : {}),
       promptTier: config.promptTier || 'compact',
       supportsVision: webgpuModelSupportsVision(model),
       supportsAskStreaming: false,

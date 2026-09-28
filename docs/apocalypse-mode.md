@@ -22,7 +22,8 @@ require their own confirmation. The local **text** model is Compass Tiny v2.1
 (`webbrain-one/webbrain-compass-tiny-v2.1`, about 1.87 GB, 32k context
 window), and remains the default text preset. **Compass Tiny XS v3** is an
 optional private, noncommercial research preview in the same picker:
-Spark-X2.5-1.7B, native FP16 / FP32 GEMM, about 3.96 GB, 4K context. It requires
+Spark-X2.5-1.7B, native FP16 / FP32 GEMM, about 3.96 GB, 32k context window
+with a 4k native graph ceiling. It requires
 an authorized HF read token saved in Settings → Providers → WebGPU for the
 initial download; inference is local and has no cloud fallback. See
 [provider details](providers-and-models.md#compass-tiny-xs-v3-private-research-preview)

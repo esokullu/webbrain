@@ -231,9 +231,12 @@ This is **FP16 storage / FP32 GEMM**, not q4f16. Its native Spark graph has
 28 layers / 56 KV tensors; it must not be loaded through the MiniCPM/Llama
 Transformers.js model pipeline. WebBrain uses its bundled ORT 1.27 and
 Transformers.js 4.2 tokenizer, the package's native Jinja tool template,
-greedy decoding, and no helper model or cloud fallback. Input plus output is
-bounded to **4,096 tokens**, with at most 2,048 output tokens; input is never
-silently truncated by the native runtime. Download size is about **3.96 GB**.
+greedy decoding, and no helper model or cloud fallback. The provider presents a
+**32,768 token** context window, matching Compass Tiny v2.1, with at most 2,048
+output tokens. Note that the pinned graph still declares a 4,096 token
+deployment context, so the native runtime rejects prompts past 4,096 rather
+than truncating them; input is never silently truncated. Download size is about
+**3.96 GB**.
 Hardware needs `shader-f16`, sufficient free GPU memory (weights plus KV and
 temporary buffers), and several GB of transient host memory while ORT loads the
 external weights; package validation used an RTX 5090. Other adapters are not
@@ -276,7 +279,8 @@ Settings and Apocalypse text pickers offer these shipped presets:
   when values contain `<`, `&`, or newlines), which the local fallback parser
   accepts. This remains the default preset.
 - [`webbrain-one/webbrain-compass-tiny-xs-v3-onnx`](https://huggingface.co/webbrain-one/webbrain-compass-tiny-xs-v3-onnx)
-  (native FP16 graph, about 3.96 GB, 4K context), the optional private Spark
+  (native FP16 graph, about 3.96 GB, 32k context with a 4k native graph
+  ceiling), the optional private Spark
   research preview described above. An authorized HF read token is required
   if repository access is restricted.
 

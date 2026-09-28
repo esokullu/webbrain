@@ -46,7 +46,7 @@ test('pinned readiness checks every required file, precision and no main revisio
   assert.equal(await sparkCacheReady(cache), false);
   assert.match(sparkFileUrl('tokenizer.json'), new RegExp(SPARK_REVISION));
   assert.equal(webgpuModelPreset(SPARK_MODEL_ID).dtype, 'fp16');
-  assert.equal(webgpuModelPreset(SPARK_MODEL_ID).contextWindow, 4096);
+  assert.equal(webgpuModelPreset(SPARK_MODEL_ID).contextWindow, 32768);
   assert.deepEqual(WEBGPU_TEXT_UI_MODEL_IDS, [WEBGPU_COMPASS_TINY_V2_MODEL_ID, SPARK_MODEL_ID]);
 });
 
@@ -77,7 +77,10 @@ test('cached files are reused offline and cancellation cannot mark a package rea
 
 test('HF download credential goes only to start-download, defaults and context bounds remain safe', async () => {
   const provider = new WebGPUProvider({ model: SPARK_MODEL_ID, contextWindow: 32768, hfToken: 'test-secret' });
-  assert.equal(provider.config.contextWindow, 4096);
+  assert.equal(provider.config.contextWindow, 32768);
+  assert.equal(new WebGPUProvider({ model: SPARK_MODEL_ID }).config.contextWindow, 32768);
+  assert.equal(new WebGPUProvider({ model: SPARK_MODEL_ID, contextWindow: 131072 }).config.contextWindow, 32768);
+  assert.equal(new WebGPUProvider({ model: SPARK_MODEL_ID, contextWindow: 64 }).config.contextWindow, 1024);
   assert.equal(provider.maxOutputTokens, 2048);
   assert.equal(new WebGPUProvider({ model: SPARK_MODEL_ID, maxOutputTokens: 64 }).maxOutputTokens, 64);
   const requests = [];

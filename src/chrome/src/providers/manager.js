@@ -1051,6 +1051,17 @@ export class ProviderManager {
         contextWindow: 32768,
       };
     }
+    // XS v3 shipped at 4k before the 32k default. Bump untouched XS 4k configs
+    // to 32k so existing preview installs match the preset.
+    if (migrated.webgpu
+      && String(migrated.webgpu.model || '').trim() === WEBGPU_COMPASS_TINY_XS_V3_MODEL_ID
+      && migrated.webgpu.configured !== true
+      && Number(migrated.webgpu.contextWindow) === 4096) {
+      migrated.webgpu = {
+        ...migrated.webgpu,
+        contextWindow: 32768,
+      };
+    }
     this._migrateUntouchedShippedDefaults(migrated);
     // The OpenCode entry is editable, so only replace the retired shipped
     // model while it still points at the official Zen endpoint. In particular,
@@ -1966,7 +1977,7 @@ export class ProviderManager {
       }
     }
     if (id === 'webgpu' && merged.model === WEBGPU_COMPASS_TINY_XS_V3_MODEL_ID) {
-      merged.contextWindow = Math.min(4096, Math.max(1024, Number(merged.contextWindow) || 4096));
+      merged.contextWindow = Math.min(32768, Math.max(1024, Number(merged.contextWindow) || 32768));
       merged.maxOutputTokens = Math.min(2048, Math.max(1, Number(merged.maxOutputTokens) || 2048));
       merged.dtype = 'fp16';
     }
