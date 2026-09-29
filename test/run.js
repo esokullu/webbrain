@@ -48607,13 +48607,13 @@ test('clarify tool auto-timeout is configurable and mirrored across browsers', (
     assert.match(agent, /onUpdate\('clarify_timeout_extended'/, `${label}: renewed deadlines should be published to the UI`);
     assert.match(agent, /timeoutSec === 0 \? 'auto' : 'timeout'/, `${label}: Instant should use source=auto; waited timeout uses source=timeout`);
     assert.match(agent, /source: autoSource/, `${label}: clarify_auto / settle should pass auto or timeout via autoSource`);
-    assert.match(agent, /timedOutAffirmative/, `${label}: waited affirmative timeout should be accepted`);
+    assert.match(agent, /source === 'timeout'/, `${label}: waited timeout should keep the non-confirmation tool note`);
     assert.match(agent, /source === 'auto'/, `${label}: Instant auto-approve should get a non-warning tool note`);
     assert.match(agent, /intentionally configured unattended auto-approve/, `${label}: Instant note should treat auto-approve as intentional`);
     assert.match(agent, /onUpdate\('clarify_auto'/, `${label}: agent should emit clarify_auto for UI lock`);
     assert.match(agent, /timeoutSec >= 0/, `${label}: Instant (0) and positive waits should arm auto-select; Off (-1) waits forever`);
-    assert.match(agent, /NOT a real user confirmation/, `${label}: non-affirmative timeout tool note should deny user-confirmation status`);
-    assert.match(agent, /_clarificationAuthorizationBlock/, `${label}: non-affirmative waited timeout should arm a structural authorization guard`);
+    assert.match(agent, /NOT a real user confirmation/, `${label}: timeout tool note should deny user-confirmation status`);
+    assert.match(agent, /_clarificationAuthorizationBlock/, `${label}: waited timeout should arm a structural authorization guard`);
     assert.match(agent, /requiresExplicitConfirmation: !authorized/, `${label}: clarify results should expose machine-readable authorization state`);
     assert.match(agent, /authorizationSource: 'timeout'/, `${label}: blocked actions should identify the timeout authorization source`);
     // Permission / form confirm prompts reuse clarify plumbing but must not
@@ -48626,9 +48626,9 @@ test('clarify tool auto-timeout is configurable and mirrored across browsers', (
     assert.doesNotMatch(submitMatch[0], /timeoutSec|setTimeout/, `${label}: form-submit prompts must not auto-timeout`);
 
     assert.match(tools, /options\[0\] is auto-selected|options\[0\] is selected/, `${label}: clarify tool schema should document auto-select of first option`);
-    assert.match(tools, /safe_first/, `${label}: system prompts should document safe_first timeout authorization`);
+    assert.match(tools, /source=timeout/, `${label}: system prompts should treat timeout answers as non-confirmations`);
     assert.match(tools, /source=auto/, `${label}: system prompts should document Instant source=auto`);
-    assert.match(tools, /safe_first makes that selection apply|safe_first is true/, `${label}: prompts should document structured safe_first timeout authorization`);
+    assert.match(tools, /source=timeout is not user approval|source=timeout \(waited timeout|not source=timeout waited/, `${label}: prompts should qualify real clarify answers vs waited timeouts`);
 
     assert.match(scheduler, /pending\.timeoutSec/, `${label}: scheduled pendingClarify should persist timeoutSec`);
     assert.match(scheduler, /pending\.deadlineTs/, `${label}: scheduled pendingClarify should persist deadlineTs`);
@@ -48775,17 +48775,6 @@ test('clarify result distinguishes waited timeout from user and Instant authoriz
     assert.equal(waitedTimeout.requiresExplicitConfirmation, true, `${AgentClass.name}: timeout did not require an explicit answer`);
     assert.equal(agent._clarificationAuthorizationGuards.get(tabId)?.authorized, false, `${AgentClass.name}: timeout guard was not armed`);
 
-    const guardedSafeFirst = await agent.executeTool(
-      tabId,
-      'clarify',
-      { question: 'Continue browsing?', options: ['Continue browsing', 'Stop'], safe_first: true },
-      (type, data) => {
-        if (type === 'clarify') agent.submitClarifyResponse(tabId, data.clarifyId, 'Continue browsing', 'timeout');
-      },
-    );
-    assert.equal(guardedSafeFirst.authorized, false, `${AgentClass.name}: later safe_first timeout cleared an existing guard`);
-    assert.equal(agent._clarificationAuthorizationGuards.get(tabId)?.authorized, false, `${AgentClass.name}: later safe_first timeout removed an existing guard`);
-
     const userReply = await agent.executeTool(
       tabId,
       'clarify',
@@ -48798,121 +48787,6 @@ test('clarify result distinguishes waited timeout from user and Instant authoriz
     assert.equal(userReply.requiresExplicitConfirmation, false, `${AgentClass.name}: direct reply kept the timeout warning`);
     assert.equal(agent._clarificationAuthorizationGuards.has(tabId), false, `${AgentClass.name}: direct reply did not clear the timeout guard`);
 
-    const blankOptionTimeout = await agent.executeTool(
-      tabId,
-      'clarify',
-      { question: 'Continue?', options: [' '], safe_first: true },
-      (type, data) => {
-        if (type === 'clarify') agent.submitClarifyResponse(tabId, data.clarifyId, '', 'timeout');
-      },
-    );
-    assert.equal(blankOptionTimeout.authorized, false, `${AgentClass.name}: whitespace-only safe_first option was accepted`);
-    assert.equal(agent._clarificationAuthorizationGuards.get(tabId)?.authorized, false, `${AgentClass.name}: whitespace-only option did not arm a timeout guard`);
-
-    await agent._recordClarificationAuthorization(tabId, 'user');
-    const invisibleOptionTimeout = await agent.executeTool(
-      tabId,
-      'clarify',
-      { question: 'Continue?', options: ['\u200B'], safe_first: true },
-      (type, data) => {
-        if (type === 'clarify') agent.submitClarifyResponse(tabId, data.clarifyId, '\u200B', 'timeout');
-      },
-    );
-    assert.equal(invisibleOptionTimeout.authorized, false, `${AgentClass.name}: invisible safe_first option was accepted`);
-
-    await agent._recordClarificationAuthorization(tabId, 'user');
-    const brailleBlankOptionTimeout = await agent.executeTool(
-      tabId,
-      'clarify',
-      { question: 'Continue?', options: ['\u2800'], safe_first: true },
-      (type, data) => {
-        if (type === 'clarify') agent.submitClarifyResponse(tabId, data.clarifyId, '\u2800', 'timeout');
-      },
-    );
-    assert.equal(brailleBlankOptionTimeout.authorized, false, `${AgentClass.name}: braille blank safe_first option was accepted`);
-
-    for (const filler of ['\u115F', '\u1160', '\u3164', '\uFFA0']) {
-      await agent._recordClarificationAuthorization(tabId, 'user');
-      const fillerTimeout = await agent.executeTool(
-        tabId,
-        'clarify',
-        { question: 'Continue?', options: [filler], safe_first: true },
-        (type, data) => {
-          if (type === 'clarify') agent.submitClarifyResponse(tabId, data.clarifyId, filler, 'timeout');
-        },
-      );
-      assert.equal(fillerTimeout.authorized, false, `${AgentClass.name}: U+${filler.codePointAt(0).toString(16)} filler safe_first option was accepted`);
-      assert.equal(agent._clarificationAuthorizationGuards.get(tabId)?.authorized, false, `${AgentClass.name}: filler timeout did not arm a guard`);
-    }
-
-    await agent._recordClarificationAuthorization(tabId, 'user');
-    const emojiOptionTimeout = await agent.executeTool(
-      tabId,
-      'clarify',
-      { question: 'Continue?', options: ['👩‍💻 Continue', 'Stop'], safe_first: true },
-      (type, data) => {
-        if (type === 'clarify') agent.submitClarifyResponse(tabId, data.clarifyId, '👩‍💻 Continue', 'timeout');
-      },
-    );
-    assert.equal(emojiOptionTimeout.authorized, true, `${AgentClass.name}: visible ZWJ emoji safe_first option was rejected`);
-
-    await agent._recordClarificationAuthorization(tabId, 'user');
-    const promotedOptionTimeout = await agent.executeTool(
-      tabId,
-      'clarify',
-      { question: 'Delete everything?', options: [' ', 'Yes, delete them'], safe_first: true },
-      (type, data) => {
-        if (type === 'clarify') agent.submitClarifyResponse(tabId, data.clarifyId, 'Yes, delete them', 'timeout');
-      },
-    );
-    assert.equal(promotedOptionTimeout.authorized, false, `${AgentClass.name}: safe_first authorized a later promoted option`);
-
-    await agent._recordClarificationAuthorization(tabId, 'user');
-    const truncatedInvisibleOptionTimeout = await agent.executeTool(
-      tabId,
-      'clarify',
-      { question: 'Delete everything?', options: [`${'\u200B'.repeat(200)}Yes`, 'Yes, delete them'], safe_first: true },
-      (type, data) => {
-        if (type === 'clarify') agent.submitClarifyResponse(tabId, data.clarifyId, 'Yes, delete them', 'timeout');
-      },
-    );
-    assert.equal(truncatedInvisibleOptionTimeout.authorized, false, `${AgentClass.name}: truncated invisible option promoted a later safe_first choice`);
-
-    await agent._recordClarificationAuthorization(tabId, 'user');
-    const affirmativeTimeout = await agent.executeTool(
-      tabId,
-      'clarify',
-      { question: 'Continue?', options: ['Yes', 'No'], safe_first: true },
-      (type, data) => {
-        if (type === 'clarify') agent.submitClarifyResponse(tabId, data.clarifyId, 'Yes', 'timeout');
-      },
-    );
-    assert.equal(affirmativeTimeout.source, 'timeout', `${AgentClass.name}: safe_first timeout source was lost`);
-    assert.equal(affirmativeTimeout.authorized, true, `${AgentClass.name}: timed-out safe_first Yes was not accepted`);
-    assert.equal(affirmativeTimeout.requiresExplicitConfirmation, false, `${AgentClass.name}: timed-out safe_first Yes still required confirmation`);
-    assert.equal(agent._clarificationAuthorizationGuards.has(tabId), false, `${AgentClass.name}: timed-out safe_first Yes left a timeout guard armed`);
-
-    const unsafeTimeout = await agent.executeTool(
-      tabId,
-      'clarify',
-      { question: 'Delete everything?', options: ['Yes, delete them', 'No, keep them'] },
-      (type, data) => {
-        if (type === 'clarify') agent.submitClarifyResponse(tabId, data.clarifyId, 'Yes, delete them', 'timeout');
-      },
-    );
-    assert.equal(unsafeTimeout.authorized, false, `${AgentClass.name}: timed-out destructive Yes without safe_first was accepted`);
-    assert.equal(agent._clarificationAuthorizationGuards.get(tabId)?.authorized, false, `${AgentClass.name}: unsafe timeout left no guard armed`);
-
-    const emptyOptionsTimeout = await agent.executeTool(
-      tabId,
-      'clarify',
-      { question: 'Continue?', safe_first: true },
-      (type, data) => {
-        if (type === 'clarify') agent.submitClarifyResponse(tabId, data.clarifyId, '(no response - timed out)', 'timeout');
-      },
-    );
-    assert.equal(emptyOptionsTimeout.authorized, false, `${AgentClass.name}: safe_first without options was accepted`);
-
     agent.clarifyTimeoutSec = 0;
     const instant = await agent.executeTool(
       tabId,
@@ -48923,17 +48797,6 @@ test('clarify result distinguishes waited timeout from user and Instant authoriz
     assert.equal(instant.source, 'auto', `${AgentClass.name}: Instant did not use source=auto`);
     assert.equal(instant.authorized, true, `${AgentClass.name}: configured Instant mode was not authorized`);
     assert.equal(agent._clarificationAuthorizationGuards.has(tabId), false, `${AgentClass.name}: Instant unexpectedly armed the timeout guard`);
-
-    const unscopedTabId = tabId + 100;
-    await agent._recordClarificationAuthorization(unscopedTabId, 'timeout');
-    agent.conversationIds.set(unscopedTabId, `conv_${unscopedTabId}`);
-    assert.equal(
-      await agent._recordClarificationAuthorization(unscopedTabId, 'timeout', true),
-      false,
-      `${AgentClass.name}: safe_first cleared an unscoped timeout guard after conversation creation`,
-    );
-    assert.equal(agent._clarificationAuthorizationGuards.get(unscopedTabId)?.authorized, false,
-      `${AgentClass.name}: unscoped timeout guard was removed after conversation creation`);
   }
 });
 

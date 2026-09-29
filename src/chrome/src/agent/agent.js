@@ -16719,16 +16719,14 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     return await this._recordClarificationAuthorization(tabId, 'timeout');
   }
 
-  async _recordClarificationAuthorization(tabId, source, safeFirst = false) {
+  async _recordClarificationAuthorization(tabId, source) {
     const normalizedSource = source === 'timeout' ? 'timeout' : (source === 'auto' ? 'auto' : 'user');
-    const conversationId = this.conversationIds.get(tabId) || null;
-    const previous = this._clarificationAuthorizationGuards.get(tabId);
-    const priorTimeoutGuard = previous?.source === 'timeout'
-      && previous?.authorized === false
-      && (!previous?.conversationId || previous.conversationId === conversationId);
-    const timedOutAffirmative = normalizedSource === 'timeout' && safeFirst === true && !priorTimeoutGuard;
-    if (normalizedSource === 'timeout' && !timedOutAffirmative) {
-      const blockedAttempts = priorTimeoutGuard
+    if (normalizedSource === 'timeout') {
+      const conversationId = this.conversationIds.get(tabId) || null;
+      const previous = this._clarificationAuthorizationGuards.get(tabId);
+      const blockedAttempts = previous?.source === 'timeout'
+        && previous?.authorized === false
+        && previous?.conversationId === conversationId
         ? Math.max(0, Number(previous.blockedAttempts) || 0)
         : 0;
       this._clarificationAuthorizationGuards.set(tabId, {
@@ -16748,7 +16746,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     // the structural authorization guard. Await deletions too so an explicit
     // response cannot revive a stale guard after restart.
     if (this.conversations.has(tabId)) await this._persistNow(tabId);
-    return normalizedSource !== 'timeout' || timedOutAffirmative;
+    return normalizedSource !== 'timeout';
   }
 
   _prepareClarificationAuthorizationForRun(tabId) {
@@ -33851,13 +33849,9 @@ If the user has already named or confirmed this exact recipient, do NOT ask agai
       if (!question) {
         return { success: false, error: 'clarify: `question` is required (a single sentence asking the user something specific).' };
       }
-      const rawOptions = Array.isArray(args?.options) ? args.options.slice(0, 4) : [];
-      const normalizedOptions = rawOptions.map(s => String(s).trim().slice(0, 200));
-      const hasVisibleOptionContent = option => /[\p{L}\p{N}\p{P}\p{S}]/u.test(option.replace(/[\p{Default_Ignorable_Code_Point}\u2800]/gu, ''));
-      const options = normalizedOptions.every(hasVisibleOptionContent)
-        ? normalizedOptions
+      const options = Array.isArray(args?.options)
+        ? args.options.map(s => String(s).slice(0, 200)).filter(Boolean).slice(0, 4)
         : [];
-      const safeFirst = args?.safe_first === true && options.length > 0;
       const reason = args?.reason ? String(args.reason).slice(0, 300) : null;
       const purpose = args?.purpose === 'research_escalation'
         ? 'research_escalation'
@@ -33902,7 +33896,6 @@ If the user has already named or confirmed this exact recipient, do NOT ask agai
           deadlineTs: 0,
           restartTimeout: null,
           onUpdate,
-          safeFirst,
         };
         // Arm auto-select when Instant (0) or a positive wait; Off (-1) waits forever.
         // Instant uses source=auto (user intentionally set auto-approve, e.g. headless).
@@ -33958,9 +33951,10 @@ If the user has already named or confirmed this exact recipient, do NOT ask agai
       }
 
       const response = await responsePromise;
-      const settledEntry = tabPending.get(clarifyId);
-      const entrySafeFirst = settledEntry?.safeFirst === true;
-      this._clearClarifyTimer(settledEntry);
+      {
+        const entry = tabPending.get(clarifyId);
+        this._clearClarifyTimer(entry);
+      }
       tabPending.delete(clarifyId);
       if (tabPending.size === 0) this._pendingClarifications.delete(tabId);
 
@@ -33970,7 +33964,7 @@ If the user has already named or confirmed this exact recipient, do NOT ask agai
       }
       const answer = String(response?.answer || '').trim();
       const source = response?.source || 'user';
-      const authorized = await this._recordClarificationAuthorization(tabId, source, entrySafeFirst);
+      const authorized = await this._recordClarificationAuthorization(tabId, source);
       // A blocked recipient guard instructs the model to ask the user who the
       // message is for. Bind a real human answer back to the guard so that
       // instruction can succeed; without this the user authorizes, the guard
@@ -33979,7 +33973,7 @@ If the user has already named or confirmed this exact recipient, do NOT ask agai
       // nothing, matching how research escalation treats those sources below.
       // Every clarification outcome (human answer, timeout, auto) must consume
       // the staged recipient consent so a later unrelated clarify does not inherit it.
-      this._bindClarifiedMessageRecipient(tabId, answer, source, { question, options, reason, purpose, safeFirst: entrySafeFirst });
+      this._bindClarifiedMessageRecipient(tabId, answer, source, { question, options, reason, purpose });
       this._recordSocialPublicationClarification(tabId, clarificationGuard, question, answer, source);
       const explicitResearchApproval = isResearchEscalation
         && source !== 'timeout'
@@ -33994,9 +33988,8 @@ If the user has already named or confirmed this exact recipient, do NOT ask agai
         : null;
       let note;
       if (source === 'timeout') {
-        note = authorized
-          ? 'This answer was auto-selected because the clarify timeout elapsed with no user reply (source=timeout). The selected affirmative answer applies; continue the task without re-asking the same question.'
-          : 'This answer was AUTO-SELECTED because the clarify timeout elapsed with no user reply (source=timeout). It is NOT a real user confirmation. Continue only with the safe default path; do NOT treat this as approval for irreversible, costly, or destructive actions — re-ask via clarify or stop if the next step is high-risk. Put the safe/default choice first in options next time.';
+        // Passive wait expired — not deliberate auto-approve.
+        note = 'This answer was AUTO-SELECTED because the clarify timeout elapsed with no user reply (source=timeout). It is NOT a real user confirmation. Continue only with the safe default path; do NOT treat this as approval for irreversible, costly, or destructive actions — re-ask via clarify or stop if the next step is high-risk. Put the safe/default choice first in options next time.';
       } else if (source === 'auto') {
         // Settings Instant auto-approve (headless / unattended). User policy — proceed.
         note = 'This answer was auto-selected because Clarify timeout is set to Instant (source=auto). The user intentionally configured unattended auto-approve; treat this answer as the chosen default and continue the task. Do not re-ask the same question. Put the intended default first in options when Instant mode may be on.';
