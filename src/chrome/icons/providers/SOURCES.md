@@ -12,7 +12,7 @@ Most brand marks come from [Lobe Icons](https://github.com/lobehub/lobe-icons)
 | localai | LocalAI official logo (`mudler/LocalAI`) |
 | gpt4all | Simple mark (not an official GPT4All brand asset) |
 | local_openai_proxy, webgpu | WebBrain-authored generic local-runtime marks |
-| ods | WebBrain-authored text mark for ODS (not an official ODS brand asset) |
+| ods | [Official ODS product logo](https://osmantic.com/assets/images/products/ods-logo.png) (Osmantic) |
 | unsloth | Unsloth official `images/unsloth logo only.png` (`unslothai/unsloth`), vectorized |
 | sglang | SGLang official `logo_square` (`sgl-project/sglang`) |
 | webbrain_cloud | WebBrain extension icon |

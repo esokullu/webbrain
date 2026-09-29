@@ -14,7 +14,7 @@ export const PROVIDER_ICON_FILES = {
   webbrain_cloud: 'webbrain_cloud.png',
   llamacpp: 'llamacpp.svg',
   ollama: 'ollama.svg',
-  ods: 'ods.svg',
+  ods: 'ods.png',
   lmstudio: 'lmstudio.svg',
   osaurus: 'osaurus.svg',
   jan: 'jan.png',

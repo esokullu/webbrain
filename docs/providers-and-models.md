@@ -584,7 +584,7 @@ Used by Tab Recorder for Whisper transcription. Falls back through configured pr
 2. Create a provider class only when the wire protocol differs from the
    existing OpenAI, Anthropic, Azure, Bedrock, or Vertex adapters.
 3. Add a factory case and import when a new class is required.
-4. Add and attribute an SVG under `icons/providers/`.
+4. Add and attribute an SVG or PNG under `icons/providers/`.
 5. Mirror code, icon, UI, and tests to Firefox.
 
 ### For OpenAI-compatible providers
