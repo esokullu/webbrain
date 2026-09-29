@@ -41,12 +41,10 @@ request contains only ordinary model-download metadata; screenshots, page
 content, and conversation data are not included. The downloaded files are
 cached by the browser, and both general text/tool inference and screenshot
 inference stay on-device. The optional noncommercial Tiny XS v3.1 text preset
-downloads from a public repository and needs no credential; an explicitly saved
-Hugging Face read token, if one is set, is used solely to fetch its pinned
-data files. It is never attached to inference, prompts, page content, a
-configurable endpoint or a URL. This local WebGPU configuration is excluded
-from Cloud Sync; local storage and explicit settings backups can contain the
-plaintext credential and should be kept private. Public presets need no token.
+works the same way against its own public pinned repository: WebBrain sends no
+`Authorization` header, and Settings has no Hugging Face credential field, so
+there is no download secret to store, sync or export. This local WebGPU
+configuration is excluded from Cloud Sync.
 
 ### Which provider receives the data?
 

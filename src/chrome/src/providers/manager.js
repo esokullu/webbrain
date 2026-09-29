@@ -94,7 +94,7 @@ const OPENCODE_LEGACY_DEFAULT_MODEL = 'ring-2.6-1t-free';
 const SUPPORTED_PROVIDER_TYPES = new Set(['llamacpp', 'webgpu', 'openai', 'azure_openai', 'aws_bedrock', 'anthropic', 'anthropic_oauth', 'vertex_anthropic']);
 const SAFE_PROVIDER_ID_RE = /^[A-Za-z0-9_-]+$/;
 const ROUTER_PROVIDER_IDS = ['openrouter', 'cloudflare', 'nvidia', 'groq', 'huggingface', 'fireworks', 'together'];
-const PROVIDER_CREDENTIAL_KEYS = ['apiKey', 'accessKeyId', 'secretAccessKey', 'sessionToken', 'hfToken'];
+const PROVIDER_CREDENTIAL_KEYS = ['apiKey', 'accessKeyId', 'secretAccessKey', 'sessionToken'];
 const PROVIDER_COST_KEYS = [
   'inputCostPerMillionUsd',
   'cacheReadCostPerMillionUsd',
@@ -411,6 +411,16 @@ export class ProviderManager {
     // token bundle here — otherwise a previously-signed-in user's raw
     // access/refresh tokens would sit in storage with no UI path to clear them.
     if (hadLegacyClaudeSubscription) await signOutClaude();
+    // The WebGPU card no longer offers a Hugging Face read token — the pinned
+    // Compass Tiny XS package is public and downloaded anonymously. Purge any
+    // value an older build persisted so no plaintext credential is left in
+    // storage or in an explicit settings backup with no UI path to clear it.
+    for (const config of Object.values(configs)) {
+      if (Object.hasOwn(config, 'hfToken')) {
+        delete config.hfToken;
+        providerStateMigrated = true;
+      }
+    }
     if (configs[WEBBRAIN_CLOUD_PROVIDER_ID]) {
       configs[WEBBRAIN_CLOUD_PROVIDER_ID].deviceGuid = await this._getDeviceGuid(data[WEBBRAIN_DEVICE_GUID_KEY]);
       configs[WEBBRAIN_CLOUD_PROVIDER_ID].helpImproveWebBrain = data[HELP_IMPROVE_WEBBRAIN_KEY] !== false;

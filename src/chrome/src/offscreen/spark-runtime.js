@@ -28,7 +28,7 @@ export async function sparkCacheReady(cacheStorage = globalThis.caches) {
   return true;
 }
 
-export async function cacheSparkFiles({ token = '', signal, progress = () => {}, fetchFile = globalThis.fetch, cacheStorage = globalThis.caches } = {}) {
+export async function cacheSparkFiles({ signal, progress = () => {}, fetchFile = globalThis.fetch, cacheStorage = globalThis.caches } = {}) {
   if (!cacheStorage) throw new Error('Browser Cache Storage is required for Tiny XS v3.1.');
   const cache = await cacheStorage.open(SPARK_CACHE);
   for (const file of SPARK_FILES) progress({ status: 'initiate', file: file.path, loaded: 0, total: file.bytes });
@@ -42,14 +42,12 @@ export async function cacheSparkFiles({ token = '', signal, progress = () => {},
       continue;
     }
     progress({ status: 'initiate', file: file.path, loaded: 0, total: file.bytes });
-    // Browser fetch strips Authorization on cross-origin HF storage redirects.
-    // Never send this credential to a configurable endpoint or in a URL.
-    const response = await fetchFile(url, {
-      credentials: 'omit', signal,
-      headers: token.trim() ? { Authorization: `Bearer ${token.trim()}` } : {},
-    });
+    // Anonymous download. The pinned public repository needs no credential, and
+    // browser fetch strips Authorization on cross-origin HF storage redirects,
+    // so a token could not survive the redirect anyway.
+    const response = await fetchFile(url, { credentials: 'omit', signal });
     if (!response.ok || !response.body) {
-      throw new Error(`Tiny XS v3.1 download failed (HTTP ${response.status}). Public downloads need no token; if access is restricted, save an authorized HF read token in Settings > Providers > WebGPU.`);
+      throw new Error(`Tiny XS v3.1 download failed (HTTP ${response.status}). The pinned Hugging Face repository is public and needs no credential; retry, or report this if it persists.`);
     }
     const hash = new SparkSha256();
     let loaded = 0;

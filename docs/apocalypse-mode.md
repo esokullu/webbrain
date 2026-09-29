@@ -23,9 +23,9 @@ require their own confirmation. The local **text** model is Compass Tiny v2.1
 window), and remains the default text preset. **Compass Tiny XS v3.1** is an
 optional private, noncommercial research preview in the same picker:
 Spark-X2.5-1.7B, native FP16 / FP32 GEMM, about 3.96 GB, 32k context window
-with a 4k native graph ceiling. It requires
-an authorized HF read token saved in Settings → Providers → WebGPU for the
-initial download; inference is local and has no cloud fallback. See
+with a 4k native graph ceiling. Its pinned Hugging Face repository is public, so
+the initial download is anonymous and needs no saved credential; inference is
+local and has no cloud fallback. See
 [provider details](providers-and-models.md#compass-tiny-xs-v3-private-research-preview)
 for the pinned revision, hardware requirements and cache behavior. Switching
 presets preserves cached files and transfer ownership; Pause/Stop target the

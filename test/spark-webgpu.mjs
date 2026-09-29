@@ -50,19 +50,17 @@ test('pinned readiness checks every required file, precision and no main revisio
   assert.deepEqual(WEBGPU_TEXT_UI_MODEL_IDS, [WEBGPU_COMPASS_TINY_V2_MODEL_ID, SPARK_MODEL_ID]);
 });
 
-test('private downloads fail closed on 401 and truncated/corrupt bytes; credentials never in URLs', async () => {
+test('pinned downloads fail closed on 401 and truncated/corrupt bytes, and stay anonymous', async () => {
   for (const mode of ['401', 'truncated', 'corrupt']) {
     const cache = fakeCacheStorage();
-    const token = 'test-only-not-a-real-secret';
     const fetchFile = async (url, options) => {
       assert.equal(url, sparkFileUrl('tokenizer.json'));
       assert.equal(options.credentials, 'omit');
-      assert.equal(options.headers.Authorization, `Bearer ${token}`);
-      assert.ok(!url.includes(token));
+      assert.ok(!options.headers?.Authorization, 'anonymous download must not send a credential');
       return mode === '401' ? new Response('', { status: 401 })
         : new Response(mode === 'corrupt' ? new Uint8Array(SPARK_FILES[0].bytes) : new Uint8Array(10));
     };
-    await assert.rejects(cacheSparkFiles({ cacheStorage: cache, fetchFile, token }), mode === '401' ? /HTTP 401/ : /integrity/);
+    await assert.rejects(cacheSparkFiles({ cacheStorage: cache, fetchFile }), mode === '401' ? /HTTP 401/ : /integrity/);
     assert.equal(cache.entries.size, 0);
   }
 });
@@ -75,8 +73,8 @@ test('cached files are reused offline and cancellation cannot mark a package rea
   await assert.rejects(cacheSparkFiles({ cacheStorage: cache, signal: controller.signal }), /abort/i);
 });
 
-test('HF download credential goes only to start-download, defaults and context bounds remain safe', async () => {
-  const provider = new WebGPUProvider({ model: SPARK_MODEL_ID, contextWindow: 32768, hfToken: 'test-secret' });
+test('no download credential is dispatched, and default and context bounds remain safe', async () => {
+  const provider = new WebGPUProvider({ model: SPARK_MODEL_ID, contextWindow: 32768 });
   assert.equal(provider.config.contextWindow, 32768);
   assert.equal(new WebGPUProvider({ model: SPARK_MODEL_ID }).config.contextWindow, 32768);
   assert.equal(new WebGPUProvider({ model: SPARK_MODEL_ID, contextWindow: 131072 }).config.contextWindow, 32768);
@@ -87,8 +85,8 @@ test('HF download credential goes only to start-download, defaults and context b
   provider._dispatch = async payload => { requests.push(payload); return payload.type === 'webgpu-download-status' ? { ready: true } : { content: 'hello' }; };
   await provider.startDownload();
   await provider.chat([{ role: 'user', content: 'hello' }]);
-  assert.equal(requests[0].hfToken, 'test-secret');
-  assert.ok(requests.slice(1).every(request => !JSON.stringify(request).includes('test-secret')));
+  assert.ok(!JSON.stringify(requests[0]).includes('hfToken'), 'the download start must carry no credential');
+  assert.deepEqual(Object.keys(requests[0]).sort(), ['device', 'dtype', 'model', 'requireTools', 'runtime', 'type']);
   const defaults = new WebGPUProvider();
   assert.equal(defaults.model, WEBGPU_COMPASS_TINY_V2_MODEL_ID);
   assert.equal(defaults.dtype, 'q4f16');

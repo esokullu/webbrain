@@ -445,8 +445,6 @@ export class WebGPUProvider extends WebGPUOffscreenProvider {
       device: this.device,
       dtype: target.dtype,
       requireTools: target.requireTools,
-      // Download credential only; never attach it to a chat request.
-      ...(target.model === WEBGPU_COMPASS_TINY_XS_V3_MODEL_ID ? { hfToken: String(this.config.hfToken || '') } : {}),
     });
     if (!response || response.error) {
       throw new Error(response?.error || `Unable to download ${webgpuModelDisplayName(target.model)}.`);

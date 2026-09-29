@@ -3226,7 +3226,6 @@ function renderProviders() {
             `${option.label} — ${option.id}${option.supportsVision ? ` — ${t('st.provider.field.supports_vision')}` : ''}`,
           ])),
         },
-        { key: 'hfToken', labelKey: 'st.provider.field.hf_read_token', type: 'password', placeholder: 'Optional HF read token for Tiny XS v3.1; download only' },
         WEBGPU_CONTEXT_WINDOW_FIELD,
         PROMPT_TIER_FIELD,
       ],

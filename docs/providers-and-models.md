@@ -223,10 +223,8 @@ Settings → Providers → WebGPU and Apocalypse Mode → Text Model also offer
 **Compass Tiny XS v3.1**, based on Spark-X2.5-1.7B. Tiny v2.1 remains the
 default. The XS download is pinned to
 `webbrain-one/webbrain-compass-tiny-xs-v3.1-onnx` revision
-`fb269bc28350a646e484b97c25a7ba756c2db83b`. That repository is public, so
-downloads need no token; if access is later restricted, save an authorized
-**Hugging Face read token** in the WebGPU provider card. Apocalypse uses that
-same saved credential.
+`fb269bc28350a646e484b97c25a7ba756c2db83b`. That repository is public, so the
+download is anonymous and carries no credential in Settings or Apocalypse Mode.
 
 This is **FP16 storage / FP32 GEMM**, not q4f16. Its native Spark graph has
 28 layers / 56 KV tensors; it must not be loaded through the MiniCPM/Llama
@@ -261,17 +259,16 @@ JavaScript is executed. Pause retains complete verified files; an interrupted
 file restarts from byte zero on Resume. Stop & remove deletes this model's
 cache without deleting Tiny v2.1. Readiness requires every pinned file, so a
 completion marker alone cannot hide a missing file. Cached inference needs
-no Hugging Face access or token. The credential is sent only to fixed HF
-download URLs, never to chat, prompts or a model endpoint; WebGPU provider
-configuration is excluded from Cloud Sync. Like other local credentials,
-it remains plaintext in extension local storage and may appear in an explicit
-settings backup: keep exports private.
+no Hugging Face access at all. Downloads are anonymous: each request goes to
+the fixed HF URL above with no `Authorization` header, and the WebGPU card has
+no download credential to store or export. WebGPU provider configuration is
+excluded from Cloud Sync.
 
 **Noncommercial research only**: this optional preview is restricted to
 noncommercial research use. It is not commercial-release
 clearance and is not selected or downloaded just by installing WebBrain.
 
-Validation: `npm run test:spark-webgpu` covers pinned downloads, credentials,
+Validation: `npm run test:spark-webgpu` covers pinned anonymous downloads,
 cache completeness, native graph feeds, failure cleanup and tool parsing.
 The opt-in `npm run test:spark-webgpu:browser` exercises the actual extension
 worker on the GPU with a local pinned bundle. See the repository's
@@ -292,8 +289,7 @@ Settings and Apocalypse text pickers offer these shipped presets:
   accepts. This remains the default preset.
 - [`webbrain-one/webbrain-compass-tiny-xs-v3.1-onnx`](https://huggingface.co/webbrain-one/webbrain-compass-tiny-xs-v3.1-onnx)
   (native FP16 graph, about 3.96 GB, 32k context, public), the optional
-  noncommercial research preview described above. A Hugging Face read token is
-  only needed if the repository is later made restricted.
+  noncommercial research preview described above, downloaded anonymously.
 
 Enabling Apocalypse Mode starts the selected text model's download. The
 existing shared transfer ownership and Pause/Stop controls apply to both.

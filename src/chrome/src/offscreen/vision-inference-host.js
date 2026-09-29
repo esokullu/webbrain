@@ -376,7 +376,6 @@ function startExclusiveTextDownload(message) {
       device: message.device,
       dtype: message.dtype,
       requireTools: message.requireTools === true,
-      ...(message.hfToken ? { hfToken: message.hfToken } : {}),
     }, { exclusive: true, runtime: message.runtime });
   });
   textDownloadStartChain = operation.catch(() => {});

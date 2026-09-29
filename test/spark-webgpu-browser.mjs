@@ -2,7 +2,7 @@
 // already-tested local release bytes instead of downloading another 4 GB.
 // Fixture transport populates the extension-origin cache using the production
 // byte / SHA-256 verifier. Then the real offscreen worker loads the native graph.
-// Live private-HF authentication is covered separately, not claimed by this test.
+// The pinned public package is fetched anonymously; no HF credential is used or tested.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
@@ -30,7 +30,7 @@ await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
 const fixtureOrigin = `http://127.0.0.1:${server.address().port}`;
 const profile = await fsp.mkdtemp(path.join(os.tmpdir(), 'webbrain-xs-webgpu-'));
 let context;
-const evidence = { model: SPARK_MODEL_ID, revision: SPARK_REVISION, fixtureTransport: 'pinned local bytes through production cache verifier; no live HF authentication test', checks: [] };
+const evidence = { model: SPARK_MODEL_ID, revision: SPARK_REVISION, fixtureTransport: 'pinned local bytes through the production cache verifier over an anonymous request', checks: [] };
 try {
   const extension = path.join(root, 'src/chrome');
   context = await chromium.launchPersistentContext(profile, {
@@ -70,14 +70,14 @@ try {
   const card = page.locator('[data-model-for="webgpu"]');
   await card.selectOption(SPARK_MODEL_ID);
   assert.equal(await page.locator('input[data-provider="webgpu"][data-key="contextWindow"]').inputValue(), '4096');
-  await page.locator('input[data-provider="webgpu"][data-key="hfToken"]').fill('test-only-fixture-token');
+  assert.equal(await page.locator('input[data-provider="webgpu"][data-key="hfToken"]').count(), 0);
   await page.locator('.btn-save[data-provider="webgpu"]').click();
   await page.waitForFunction(async model => (await chrome.storage.local.get('providers')).providers?.webgpu?.model === model, SPARK_MODEL_ID);
   assert.equal(await page.evaluate(async () => (await chrome.storage.local.get('providers')).providers.webgpu.maxOutputTokens), 2048);
-  evidence.checks.push('Settings XS selection, 4K context, saved optional download credential');
+  evidence.checks.push('Settings XS selection, 4K context, no download credential field');
   // Ordinary chat defaults must not be switched by configuring a local model.
   assert.notEqual(await page.evaluate(async () => (await chrome.storage.local.get('activeProvider')).activeProvider), 'webgpu');
-  console.log('Verifying and caching pinned local package (not a live HF auth test)');
+  console.log('Verifying and caching the pinned local package');
   const cached = await page.evaluate(async origin => {
     const { cacheSparkFiles, sparkCacheReady, SPARK_FILES, sparkFileUrl } = await import('../offscreen/spark-runtime.js');
     const requests = [];
@@ -111,13 +111,8 @@ try {
   }
   assert.equal(status?.ready, true);
   evidence.checks.push('offscreen worker reports the complete verified package ready');
-  await page.evaluate(async () => {
-    const { providers } = await chrome.storage.local.get('providers');
-    delete providers.webgpu.hfToken;
-    await chrome.runtime.sendMessage({ target: 'background', action: 'update_provider', providerId: 'webgpu', config: { hfToken: '' } });
-  });
   await context.route('https://huggingface.co/**', route => route.abort());
-  console.log('Generating with cached package, no token / HF access');
+  console.log('Generating with cached package, no HF access');
   const generated = await page.evaluate(async model => {
     const { WebGPUProvider } = await import('../providers/webgpu.js');
     const provider = new WebGPUProvider({ model });

@@ -964,7 +964,7 @@ async function downloadTextModel(payload, { onStarted } = {}) {
     if (modelId === SPARK_MODEL_ID) {
       if (dtype !== 'fp16') throw new Error('Tiny XS v3 requires FP16 precision.');
       await cacheSparkFiles({
-        token: String(payload?.hfToken || ''), signal: controller.signal,
+        signal: controller.signal,
         fetchFile: nativeFetch, progress: event => postProgress(modelId, event),
       });
     }
