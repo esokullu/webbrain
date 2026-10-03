@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { resolve } from 'node:path';
+import { resolve, sep } from 'node:path';
 import { chromium, firefox } from 'playwright';
 import vm from 'node:vm';
 
@@ -126,7 +126,7 @@ for (const [build, engine] of [['chrome', chromium], ['firefox', firefox]]) {
         if (path === '/') return route.fulfill({ contentType: 'text/html', body: '<!doctype html>' });
         if (path === '/src/ui/export-harness.js') return route.fulfill({ contentType: 'text/javascript', body: harness });
         const file = resolve(`src/${build}`, '.' + path);
-        if (!file.startsWith(resolve(`src/${build}`) + '/')) return route.abort();
+        if (!file.startsWith(resolve(`src/${build}`) + sep)) return route.abort();
         await route.fulfill({ contentType: 'text/javascript', body: await readFile(file) });
       });
       const writer = await context.newPage();
@@ -223,7 +223,7 @@ for (const [build, engine] of [['chrome', chromium], ['firefox', firefox]]) {
         const path = new URL(route.request().url()).pathname;
         if (path === '/') return route.fulfill({ contentType: 'text/html', body: '<!doctype html>' });
         const file = resolve(`src/${build}`, '.' + path);
-        if (!file.startsWith(resolve(`src/${build}`) + '/')) return route.abort();
+        if (!file.startsWith(resolve(`src/${build}`) + sep)) return route.abort();
         await route.fulfill({ contentType: 'text/javascript', body: await readFile(file) });
       });
       await page.goto('http://trace-test.local/');

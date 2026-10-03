@@ -33,6 +33,7 @@ import {
 } from '../../src/chrome/src/selection-shortcut-i18n.js';
 import { registerRichTextToolbarFixtures } from './rich-text-toolbar.mjs';
 import { registerMessageRecipientNavigationFixtures } from './message-recipient-navigation.mjs';
+import { registerInteractionReviewRegressions } from './interaction-review-regressions.mjs';
 
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -684,7 +685,7 @@ test('press_keys rechecks its deadline after recipient validation', async (page)
         #composer { position: fixed; bottom: 20px; left: 280px; width: 360px; height: 80px; }
       </style>
       <h1 id="recipient">Alice</h1>
-      <textarea id="composer" aria-label="Message composer"></textarea>
+      <textarea id="composer" aria-label="Message composer">Hello Alice</textarea>
     `, browserKind);
     const binding = await page.evaluate(() => new Promise((resolve) => {
       const composer = document.getElementById('composer');
@@ -754,7 +755,7 @@ test('click rechecks its deadline after recipient validation', async (page) => {
       </style>
       <h1 id="recipient">Alice</h1>
       <form id="message-form">
-        <textarea id="composer" aria-label="Message composer"></textarea>
+        <textarea id="composer" aria-label="Message composer">Hello Alice</textarea>
         <button id="send" type="button">Send</button>
       </form>
       <script>
@@ -5313,6 +5314,7 @@ test('Firefox: type_text rejects disabled indexed text input fallback', async (p
 
 
 registerMessageRecipientNavigationFixtures({ test, firefoxTest, setupContentHtml, call, Agent, FirefoxAgent });
+registerInteractionReviewRegressions({ test, firefoxTest, setupContentHtml, call, Agent, FirefoxAgent });
 
 registerRichTextToolbarFixtures({
   test,

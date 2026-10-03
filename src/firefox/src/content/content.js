@@ -1539,6 +1539,48 @@
     } catch { /* leave other observable roots cacheable */ }
   }
 
+  // Text preference and recipient preflight must use the control that can
+  // actually receive the click, including when the label is a passive child.
+  function _isEligibleTextClickTarget(el) {
+    try {
+      const control = _resolveInteractiveAncestor(el) || el;
+      const r = control.getBoundingClientRect();
+      if (r.width < 1 || r.height < 1) return false;
+      if (control.disabled === true || control.matches?.(':disabled')
+          || control.getAttribute?.('aria-disabled') === 'true') return false;
+      const hit = _shadowAwareElementFromPoint(
+        Math.round(r.left + r.width / 2),
+        Math.round(r.top + r.height / 2),
+      );
+      return !!hit && (hit === control || control.contains?.(hit) || hit.contains?.(control));
+    } catch {
+      return false;
+    }
+  }
+
+  function _primaryClickText(el) {
+    const tag = String(el.tagName || '').toLowerCase();
+    if (tag === 'textarea') return '';
+    if (tag === 'input') {
+      const type = String(el.getAttribute?.('type') || 'text').toLowerCase();
+      return /^(button|submit|reset)$/.test(type) ? String(el.value || '').trim().toLowerCase() : '';
+    }
+    return String(el.innerText || '').trim().toLowerCase();
+  }
+
+  // A painted passive label is not a competing control. Collapse primary
+  // labels to their actionable owner before dispatch and preflight choose it.
+  function _preferredPrimaryTextClickMatch(matches) {
+    const controls = new Map();
+    for (const match of matches) {
+      if (match.primary !== true) continue;
+      const actionable = _resolveInteractiveAncestor(match.e) || match.e;
+      if (!_isInteractive(actionable) || !_isEligibleTextClickTarget(actionable)) continue;
+      if (!controls.has(actionable)) controls.set(actionable, match);
+    }
+    return controls.size === 1 ? [...controls.values()][0] : null;
+  }
+
   const _textCandidateCache = new WeakMap();
   function _clickTextCandidates(scope) {
     _observeDomRevisionRoot(document);
@@ -1607,10 +1649,14 @@
     const list = [];
     for (const e of all) {
       const text = _normTxt(e);
-      if (text) list.push({ e, txt: text });
+      const primaryText = _primaryClickText(e);
+      if (text) list.push({ e, txt: text, primary: !!primaryText && text === primaryText });
+      if (primaryText && primaryText !== text) list.push({ e, txt: primaryText, primary: true });
+      // Secondary needles (primary: false): in ambiguity resolution a
+      // visible-text match on a different control must not lose to them.
       for (const attr of ['aria-label', 'title', 'placeholder', 'data-tooltip']) {
         const value = String(e.getAttribute?.(attr) || '').trim().toLowerCase();
-        if (value && value !== text) list.push({ e, txt: value });
+        if (value && value !== text) list.push({ e, txt: value, primary: false });
       }
     }
     _textCandidateCache.set(cacheScope, { revision, list });
@@ -2110,7 +2156,10 @@
         const collapsedByAncestor = new Map();
         for (const match of matches) {
           const actionable = _resolveInteractiveAncestor(match.e) || match.e;
-          if (!collapsedByAncestor.has(actionable)) collapsedByAncestor.set(actionable, match);
+          if (!collapsedByAncestor.has(actionable)
+              || (match.primary === true && collapsedByAncestor.get(actionable).primary !== true)) {
+            collapsedByAncestor.set(actionable, match);
+          }
         }
         if (collapsedByAncestor.size < matches.length) matches = [...collapsedByAncestor.values()];
         if (matches.length === 1) {
@@ -2119,25 +2168,24 @@
         }
       }
       if (!el && matches.length > 1) {
+        // Prefer a unique visible caption only when its actionable owner can
+        // receive the click. Passive text and attribute-only names retain the
+        // existing interactive-target and ambiguity rules.
+        const entry = _preferredPrimaryTextClickMatch(matches);
+        if (entry) {
+          el = _resolveInteractiveAncestor(entry.e) || entry.e;
+          textResolvedExact = (usedMode === 'exact');
+          matches = [entry];
+        }
+      }
+      if (!el && matches.length > 1) {
         // Prefer interactive elements over passive children (label, span, etc.)
         const interactiveMatches = matches.filter(m => _isInteractive(m.e));
         if (interactiveMatches.length === 1) {
           matches = interactiveMatches;
         } else {
-          const hitTargetPool = (interactiveMatches.length > 1 ? interactiveMatches : matches).filter(m => {
-            try {
-              const r = m.e.getBoundingClientRect();
-              if (r.width < 1 || r.height < 1) return false;
-              if (m.e.disabled === true || m.e.getAttribute?.('aria-disabled') === 'true') return false;
-              const hit = _shadowAwareElementFromPoint(
-                Math.round(r.left + r.width / 2),
-                Math.round(r.top + r.height / 2),
-              );
-              return !!hit && (hit === m.e || m.e.contains?.(hit) || hit.contains?.(m.e));
-            } catch {
-              return false;
-            }
-          });
+          const hitTargetPool = (interactiveMatches.length > 1 ? interactiveMatches : matches)
+            .filter(m => _isEligibleTextClickTarget(m.e));
           if (hitTargetPool.length === 1) {
             el = _resolveInteractiveAncestor(hitTargetPool[0].e) || hitTargetPool[0].e;
             textResolvedExact = (usedMode === 'exact');
@@ -4524,6 +4572,16 @@
     }
   }
 
+  const _MESSAGE_COMMIT_LABEL_RE = new RegExp(
+    '(?:^|[^\\p{L}])(?:send|enviar|envoyer|invia|senden|verzenden|gönder|отправить|送信|发送|發送|보내|إرسال|ارسال)(?:[^\\p{L}]|$)',
+    'iu',
+  );
+
+  function _hasMessageCommitName(value) {
+    const text = String(value ?? '').replace(/\s+/g, ' ').trim();
+    return !!text && _MESSAGE_COMMIT_LABEL_RE.test(text);
+  }
+
   function _probeMessageRecipientGuard(params = {}) {
     try {
       const tool = String(params.tool || '');
@@ -4733,9 +4791,15 @@
             let matches = candidates.filter(({ txt }) => mode === 'exact' ? txt === needle
               : mode === 'prefix' ? txt.startsWith(needle)
                 : mode === 'contains' ? txt.includes(needle) : false);
-            // Dispatch prefers the sole interactive match over passive labels.
-            // Multiple interactive matches must still stop at this match tier.
+            // Dispatch prefers the sole visible-text match over an
+            // attribute-derived needle on a different control, then the sole
+            // interactive match over passive labels. Multiple matches of the
+            // same tier must still stop at this match tier.
             if (matches.length > 1) {
+              const eligibleMatches = matches.filter(({ e }) => _isEligibleTextClickTarget(e));
+              if (eligibleMatches.length) matches = eligibleMatches;
+              const primaryMatch = _preferredPrimaryTextClickMatch(matches);
+              if (primaryMatch) matches = [primaryMatch];
               const interactiveMatches = matches.filter(({ e }) => _isInteractive(e));
               if (interactiveMatches.length === 1) matches = interactiveMatches;
             }
@@ -4777,14 +4841,6 @@
         ? (twitterComposers.length === 1 ? twitterComposers[0] : null)
         : composerCandidates[0] || null;
       const layoutCandidateRect = layoutCandidate?.getBoundingClientRect?.();
-      // A recipient/search field can be the only focused editable while the
-      // real composer is temporarily hidden. Never promote an upper-page
-      // editable into the message composer merely because it is focused.
-      const layoutComposer = layoutCandidate
-        && (!viewportHeight || layoutCandidateRect?.bottom >= viewportHeight * 0.5)
-        ? layoutCandidate
-        : null;
-
       const independentScrollableRegion = (el, excluded) => {
         let node = el || null;
         while (node && node !== document.body) {
@@ -5123,6 +5179,34 @@
         return editors.length === 1;
       };
 
+      // A recipient/search field can be the only focused editable while the
+      // real composer is temporarily hidden. Focus alone is not compose proof.
+      // Upper-page dialogs also contain search and filter fields. Exempt a
+      // message-body editor from the position rule only when its own dialog
+      // exposes a send control or a verified LinkedIn public-post control.
+      const dialogSelector = 'dialog,[role="dialog"],[role="alertdialog"],[aria-modal="true"]';
+      const layoutDialog = layoutCandidate?.closest?.(dialogSelector);
+      // Empty Gmail drafts can have a disabled Send button. Their dedicated
+      // body editor is compose evidence; a generic filter textarea is not.
+      const verifiedGmailBody = params.adapterName === 'gmail'
+        && layoutCandidate?.matches?.('[contenteditable="true"][role="textbox"]')
+        && (layoutCandidate.getAttribute('g_editable') === 'true'
+          || !!layoutDialog?.querySelector?.('input[name="subjectbox"]'));
+      const layoutInComposeDialog = !!layoutDialog
+        && !verifiedNavigationEditable(layoutCandidate)
+        && layoutCandidate.matches?.('textarea,[contenteditable="true"],[role="textbox"]:not(input)')
+        && Array.from(layoutDialog.querySelectorAll('button,[role="button"],input[type="submit"],input[type="button"],[data-action]'))
+          .some(control => visible(control) && control.closest(dialogSelector) === layoutDialog
+            && ((_hasMessageCommitName(control.getAttribute('aria-label') || control.value || control.innerText || control.textContent)
+                && (_isEligibleTextClickTarget(control) || verifiedGmailBody))
+              || verifiedLinkedInPublicPostControl(control)));
+      const layoutComposer = layoutCandidate
+        && (layoutInComposeDialog
+          || !viewportHeight
+          || layoutCandidateRect?.bottom >= viewportHeight * 0.5)
+        ? layoutCandidate
+        : null;
+
       let composer = null;
       let messageSend = null;
       const discordManagementTarget = tool === 'press_keys' && String(args.key) === 'Enter'
@@ -5229,14 +5313,27 @@
           );
           const composerSetup = params.adapterName === 'gmail'
             && /^(?:reply|reply all|forward)$/i.test(actionLabel);
-          const messageCommit = /(?:^|[^\p{L}])(?:send|enviar|envoyer|invia|senden|verzenden|gönder|отправить|送信|发送|發送|보내|إرسال|ارسال)(?:[^\p{L}]|$)/iu
-            .test(actionLabel);
+          const messageCommit = _hasMessageCommitName(actionLabel);
           const messagingSurface = (() => {
             try {
               return !!control.closest?.('[class*="msg-"],[class*="messaging"],[id*="messaging"],[data-messaging],[data-test-messaging],[role="log"]');
             } catch { return false; }
           })();
-          if (!composerSetup && !messageCommit && !messagingSurface) {
+          // Known compose surfaces and unverified composer openers stay protected.
+          // Ordinary feed/profile controls do not become message actions merely
+          // because LinkedIn's navigation classifier has no matching route.
+          const composeDialog = _composedClosestElement(control, 'dialog,[role="dialog"],[role="alertdialog"]');
+          const linkedInComposeSurface = params.adapterName === 'linkedin' && (
+            /^start a post$/i.test(actionLabel)
+            || /^\/(?:messaging(?:\/|$)|sharing\/compose(?:\/|$))/.test(location.pathname)
+            || !!_composedClosestElement(control, '.share-box,[class*="msg-"],[class*="messaging"],[id*="messaging"],[data-messaging],[data-test-messaging],[role="log"]')
+            || (composeDialog && Array.from(composeDialog.querySelectorAll('[contenteditable="true"],textarea')).some(visible))
+          );
+          const linkedInUnverified = linkedInComposeSurface && (
+            control.matches?.('button,[role="button"],input[type="submit"],input[type="button"],[data-action]') === true
+            || (control.matches?.('a[href]') === true && linkedInNavigation === 'none')
+          );
+          if (!composerSetup && !linkedInUnverified && !messageCommit && !messagingSurface) {
             return {
               success: true,
               messageSend: false,
@@ -5244,6 +5341,19 @@
               composerAvailable: false,
               nonMessagingTarget: true,
               reasonCode: 'non_messaging_target',
+              identityCandidates: [],
+            };
+          }
+          if (linkedInUnverified) {
+            // No reasonCode: the agent maps a LinkedIn composer-less failure
+            // to its own contract (message_send_classification_inconclusive,
+            // retryable: false, "no message composer" guidance). Naming a
+            // reason here would override that contract.
+            return {
+              success: true,
+              messageSend: null,
+              conclusive: false,
+              composerAvailable: false,
               identityCandidates: [],
             };
           }

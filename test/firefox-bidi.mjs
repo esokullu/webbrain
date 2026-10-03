@@ -81,16 +81,22 @@ test('installer and native launcher preserve Firefox message framing and command
     const install = spawnSync(process.execPath, ['firefox-companion/install.mjs', directory], { encoding: 'utf8' });
     assert.equal(install.status, 0, install.stderr);
     const manifest = JSON.parse(await readFile(join(directory, 'one.webbrain.bidi.json'), 'utf8'));
+    // On Windows the wrapper is a .cmd batch file, which Node cannot spawn
+    // directly (CreateProcess EINVAL); route it through cmd.exe the same way
+    // Firefox does. POSIX wrappers are executable scripts and spawn directly.
+    const spawnHost = input => process.platform === 'win32'
+      ? spawnSync(process.env.ComSpec || 'cmd.exe', ['/c', manifest.path], { input, timeout: 5000 })
+      : spawnSync(manifest.path, [], { input, timeout: 5000 });
     assert.deepEqual(manifest.allowed_extensions, ['webbrain@esokullu.com']);
     const message = Buffer.from(JSON.stringify({ id: 12, command: 'script.evaluate', expression: 'arbitrary code' }));
     const header = Buffer.alloc(4); header.writeUInt32LE(message.length);
-    const result = spawnSync(manifest.path, [], { input: Buffer.concat([header, message]), timeout: 5000 });
+    const result = spawnHost(Buffer.concat([header, message]));
     assert.equal(result.status, 0, result.stderr?.toString());
     assert.equal(result.stdout.readUInt32LE(0), result.stdout.length - 4);
     assert.deepEqual(JSON.parse(result.stdout.subarray(4)), { id: 12, error: 'Unknown companion command' });
     const rejected = Buffer.from(JSON.stringify({id:13,command:'perform',runId:id(),action:'click',payload:{}}));
     const rejectedHeader = Buffer.alloc(4); rejectedHeader.writeUInt32LE(rejected.length);
-    const rejectedResult = spawnSync(manifest.path, [], {input:Buffer.concat([rejectedHeader,rejected]),timeout:5000});
+    const rejectedResult = spawnHost(Buffer.concat([rejectedHeader, rejected]));
     assert.equal(rejectedResult.status,0,rejectedResult.stderr?.toString());
     const failure = JSON.parse(rejectedResult.stdout.subarray(4));
     assert.equal(failure.id,13);

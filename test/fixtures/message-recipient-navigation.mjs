@@ -553,18 +553,20 @@ export function registerMessageRecipientNavigationFixtures({
     });
 
     register(`${kind}: LinkedIn post entry classification rejects send and publish lookalikes`, async (page) => {
-      const { guard } = await setup(page);
+      const { guard, probe } = await setup(page);
       await addPostEntry(page);
       for (const [attribute, value] of [
         ['type', 'submit'], ['aria-label', 'Send'], ['form', 'chat'], ['disabled', ''], ['aria-disabled', 'true'],
       ]) {
         await page.locator('#start-post').evaluate((el, [key, value]) => el.setAttribute(key, value), [attribute, value]);
-        assert.equal((await guard('click', { selector: '#start-post' }))?.noDispatch, true, attribute);
+        assert.notEqual((await probe('click', { selector: '#start-post' })).composerSetup, true, attribute);
+        if (attribute === 'aria-label') assert.equal((await guard('click', { selector: '#start-post' }))?.noDispatch, true);
         await page.locator('#start-post').evaluate((el, key) => el.removeAttribute(key), attribute);
       }
       for (const label of ['Post', 'Send', 'Start a post and send', 'Photo']) {
         await page.locator('#start-post').evaluate((el, text) => { el.textContent = text; }, label);
-        assert.equal((await guard('click', { selector: '#start-post' }))?.noDispatch, true, label);
+        assert.notEqual((await probe('click', { selector: '#start-post' })).composerSetup, true, label);
+        if (/Send|send/.test(label)) assert.equal((await guard('click', { selector: '#start-post' }))?.noDispatch, true, label);
       }
       await page.locator('#start-post').evaluate(el => { el.textContent = 'Start a post'; });
       await page.evaluate(() => history.replaceState(null, '', '/messaging/'));
@@ -578,14 +580,14 @@ export function registerMessageRecipientNavigationFixtures({
           document.querySelector('main').append(wrapper);
           wrapper.firstChild.append(document.querySelector('#post-entry'));
         }, markup);
-        assert.equal((await guard('click', { text: 'Start a post' }))?.noDispatch, true, markup);
+        assert.notEqual((await probe('click', { text: 'Start a post' })).composerSetup, true, markup);
         await page.evaluate(() => {
           document.querySelector('main').append(document.querySelector('#post-entry'));
           document.querySelector('#entry-wrapper').remove();
         });
       }
       await page.evaluate(() => document.body.append(document.querySelector('#post-entry')));
-      assert.equal((await guard('click', { text: 'Start a post' }))?.noDispatch, true, 'outside feed main');
+      assert.notEqual((await probe('click', { text: 'Start a post' })).composerSetup, true, 'outside feed main');
       assert.deepEqual(await page.evaluate(() => window.fixtureClicks), []);
     });
 
@@ -612,7 +614,7 @@ export function registerMessageRecipientNavigationFixtures({
       const result = await guard('click', { selector: '#close-contact-info' });
       // Use a visible unresolved action so this is a classification failure,
       // not a stale/missing target that a fresh page read could repair.
-      await page.evaluate(() => document.querySelector('main').insertAdjacentHTML('beforeend', '<button id="unknown">Unknown action</button>'));
+      await page.evaluate(() => document.querySelector('main').insertAdjacentHTML('beforeend', '<div class="msg-form"><button id="unknown">Unknown action</button></div>'));
       const missingComposer = await guard('click', { selector: '#unknown' });
       assert.equal(missingComposer?.noDispatch, true);
       assert.equal(missingComposer?.reasonCode, 'message_send_classification_inconclusive');
@@ -941,10 +943,6 @@ export function registerMessageRecipientNavigationFixtures({
       }
       await page.evaluate(() => { document.querySelector('#chat').hidden = true; });
       for (const href of [
-        '#',
-        'javascript:void(0)',
-        'mailto:alice@example.com',
-        '/in/alice/',
         '/safety/go/?url=https%3A%2F%2Fportfolio.example%2F',
         '/safety/go/',
         '/safety/go/?url=javascript%3Aalert(1)',

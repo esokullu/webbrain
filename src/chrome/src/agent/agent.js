@@ -40001,7 +40001,12 @@ If the user has already named or confirmed this exact recipient, do NOT ask agai
           error: `Unsupported key "${key}". Supported keys: ${SUPPORTED_KEYS.join(', ')}.`,
         };
       }
-      const keyProgressBefore = String(key).startsWith('Arrow')
+      // The provisional progress annotation only applies to the unguarded
+      // speculative path (the Instagram carousel fix). A dispatch bound to a
+      // revalidated focused target keeps its pre-annotation contract: the
+      // consume already proved the exact editor, so "page did not change"
+      // must not be reported as a failed dispatch.
+      const keyProgressBefore = String(key).startsWith('Arrow') && !dispatchBinding?.token
         ? await this._keyProgressSnapshot(tabId, earlyCdpAbortSignal)
         : '';
       throwIfEarlyCdpAborted();
@@ -40074,10 +40079,12 @@ If the user has already named or confirmed this exact recipient, do NOT ask agai
           throwIfEarlyCdpAborted();
         }
 
+        const cdpKeyResponse = { success: true, dispatched: true, method: 'cdp-key', key, repeat };
+        if (guardedTargetConsumed) return cdpKeyResponse;
         return await this._verifyProvisionalKeyProgress(
           tabId,
           key,
-          { success: true, dispatched: true, method: 'cdp-key', key, repeat },
+          cdpKeyResponse,
           keyProgressBefore,
           earlyCdpAbortSignal,
         );

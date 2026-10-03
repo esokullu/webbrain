@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { readFile } from 'node:fs/promises';
-import { resolve } from 'node:path';
+import { resolve, sep } from 'node:path';
 import { chromium, firefox } from 'playwright';
 
 for (const [build, engine] of [['chrome', chromium], ['firefox', firefox]]) {
@@ -31,7 +31,7 @@ for (const [build, engine] of [['chrome', chromium], ['firefox', firefox]]) {
         const path = new URL(route.request().url()).pathname;
         if (path === '/') return route.fulfill({ contentType: 'text/html', body: '<!doctype html>' });
         const file = resolve(`src/${build}`, '.' + path);
-        if (!file.startsWith(resolve(`src/${build}`) + '/')) return route.abort();
+        if (!file.startsWith(resolve(`src/${build}`) + sep)) return route.abort();
         await route.fulfill({ contentType: 'text/javascript', body: await readFile(file) });
       });
       await page.goto('http://jev-trace.local/');
