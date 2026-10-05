@@ -51,6 +51,35 @@ export function registerInteractionReviewRegressions({
       }
     });
 
+    register(`${kind}: text preflight cannot approve a passive match over an ineligible send control`, async page => {
+      await setupContentHtml(page, `<!doctype html>
+        <button id="send" aria-disabled="true" aria-label="Send message">Continue</button>
+        <div id="label" tabindex="0">Continue</div>`, kind);
+      await page.evaluate(() => {
+        window.fixtureClicks = [];
+        document.querySelector('#send').addEventListener('click', () => window.fixtureClicks.push('send'));
+        document.querySelector('#label').addEventListener('click', () => window.fixtureClicks.push('label'));
+      });
+      const args = { text: 'Continue', textMatch: 'exact' };
+      const probe = await call(page, 'probe_message_recipient_guard', { tool: 'click', args, adapterName: 'gmail' });
+      assert.equal(probe.messageSend, null, JSON.stringify(probe));
+      assert.equal(probe.conclusive, false, JSON.stringify(probe));
+      assert.equal((await call(page, 'click', args)).success, true);
+      assert.deepEqual(await page.evaluate(() => window.fixtureClicks), ['send']);
+    });
+
+    register(`${kind}: visible text does not override an interactive accessible-name match`, async page => {
+      await setupContentHtml(page, `<!doctype html>
+        <a id="link" href="/follow">Follow</a>
+        <button id="button" aria-label="Follow">★</button>`, kind);
+      const args = { text: 'Follow', textMatch: 'exact' };
+      const probe = await call(page, 'probe_message_recipient_guard', { tool: 'click', args, adapterName: 'gmail' });
+      assert.equal(probe.conclusive, false, JSON.stringify(probe));
+      const clicked = await call(page, 'click', args);
+      assert.equal(clicked.success, false, JSON.stringify(clicked));
+      assert.match(clicked.error, /ambiguous/i);
+    });
+
     register(`${kind}: LinkedIn ordinary browsing remains available without a composer`, async page => {
       await page.route('**/*', route => route.fulfill({ contentType: 'text/html', body: '<!doctype html>' }));
       await page.goto('https://www.linkedin.com/feed/');
@@ -120,12 +149,15 @@ export function registerInteractionReviewRegressions({
         const probe = await call(page, 'probe_message_recipient_guard', {
           tool: 'click', args, adapterName: 'gmail',
         });
-        assert.equal(probe.messageSend, false, JSON.stringify({ variant, probe }));
-        assert.equal(probe.conclusive, true, JSON.stringify({ variant, probe }));
+        assert.notEqual(probe.messageSend, true, JSON.stringify({ variant, probe }));
         const clicked = await call(page, 'click', args);
+        if (variant === 'enabled') {
+          assert.equal(clicked.success, false, JSON.stringify({ variant, clicked }));
+          assert.match(clicked.error, /ambiguous/i);
+          continue;
+        }
         assert.equal(clicked.success, true, JSON.stringify({ variant, clicked }));
-        assert.deepEqual(await page.evaluate(() => window.fixtureClicks),
-          [variant === 'enabled' ? 'primary' : 'glyph'], variant);
+        assert.deepEqual(await page.evaluate(() => window.fixtureClicks), ['glyph'], variant);
       }
     });
 

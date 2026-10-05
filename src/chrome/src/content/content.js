@@ -1614,7 +1614,15 @@
       if (!_isInteractive(actionable) || !_isEligibleTextClickTarget(actionable)) continue;
       if (!controls.has(actionable)) controls.set(actionable, match);
     }
-    return controls.size === 1 ? [...controls.values()][0] : null;
+    if (controls.size !== 1) return null;
+    const [actionable, match] = controls.entries().next().value;
+    // A visible caption wins only over passive text. A distinct interactive
+    // element with the same accessible name remains an explicit ambiguity.
+    for (const candidate of matches) {
+      const owner = _resolveInteractiveAncestor(candidate.e) || candidate.e;
+      if (owner !== actionable && _isInteractive(owner)) return null;
+    }
+    return match;
   }
 
   const _textCandidateCache = new WeakMap();
@@ -5708,12 +5716,18 @@
             // interactive match over passive labels. Multiple matches of the
             // same tier must still stop at this match tier.
             if (matches.length > 1) {
-              const eligibleMatches = matches.filter(({ e }) => _isEligibleTextClickTarget(e));
-              if (eligibleMatches.length) matches = eligibleMatches;
               const primaryMatch = _preferredPrimaryTextClickMatch(matches);
               if (primaryMatch) matches = [primaryMatch];
               const interactiveMatches = matches.filter(({ e }) => _isInteractive(e));
               if (interactiveMatches.length === 1) matches = interactiveMatches;
+              else {
+                const hitTargetPool = (interactiveMatches.length > 1 ? interactiveMatches : matches)
+                  .filter(({ e }) => _isEligibleTextClickTarget(e));
+                if (hitTargetPool.length === 1) matches = hitTargetPool;
+                else if (hitTargetPool.length > 1 && hitTargetPool.length < matches.length) {
+                  matches = hitTargetPool;
+                }
+              }
             }
             if (matches.length === 1) target = _resolveInteractiveAncestor(matches[0].e);
             if (matches.length) break;
@@ -6254,7 +6268,7 @@
           const linkedInComposeSurface = params.adapterName === 'linkedin' && (
             /^start a post$/i.test(actionLabel)
             || /^\/(?:messaging(?:\/|$)|sharing\/compose(?:\/|$))/.test(location.pathname)
-            || !!_composedClosestElement(control, '.share-box,[class*="msg-"],[class*="messaging"],[id*="messaging"],[data-messaging],[data-test-messaging],[role="log"]')
+            || !!_composedClosestElement(control, `.share-box,${_MESSAGING_SURFACE_SELECTOR}`)
             || (composeDialog && Array.from(composeDialog.querySelectorAll('[contenteditable="true"],textarea')).some(visible))
           );
           const linkedInUnverified = linkedInComposeSurface && (
