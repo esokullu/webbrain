@@ -1,9 +1,55 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import vm from 'node:vm';
 import { FirefoxBidiClient } from '../src/firefox/src/bidi/client.js';
 import { BidiSession } from '../firefox-companion/session.mjs';
+import { pageFeedbackMethods } from '../src/firefox/src/agent/page-feedback.js';
 
 const id = () => crypto.randomUUID();
+
+test('uploads register input dispatches with the extension monitor', async () => {
+  const tab = 955, owner = { ...pageFeedbackMethods, isRunning: () => true, _checkAbort: () => false };
+  const guard = { documentToken: 'file-document', revision: 0, operationId: 'upload' };
+  const registrations = [];
+  const client = new FirefoxBidiClient({ tabs: { sendMessage: async (_tab, message) => {
+    registrations.push(message.params); return { guard };
+  } } });
+  client.runs.set(tab, { runId: id(), bound: true });
+  client.request = async (_command, args) => { assert.deepEqual(args.payload.pageFeedbackGuard, guard); return { success: true }; };
+  await owner._beginPageFeedbackRun(tab, 'interactive');
+  try {
+    await client.perform(tab, 'upload', { selector: '#file' });
+    assert.equal(registrations.length, 1);
+    assert.equal(registrations[0].kind, 'input');
+    assert.equal(registrations[0].navigationCandidate, false);
+  } finally { owner._finishPageFeedbackRun(tab); }
+});
+
+test('an unfocused upload marks the file input instead of the active control', async () => {
+  const session = new BidiSession(), runId = id(), attributes = new Map(), focusedAttributes = new Map();
+  const guard = { documentToken: 'file-document', revision: 0, operationId: 'upload' };
+  const token = id(), focused = { setAttribute: (name, value) => focusedAttributes.set(name, value) };
+  const el = { isConnected: true, tagName: 'INPUT', type: 'file', files: [],
+    getRootNode: () => ({ activeElement: focused }),
+    getAttribute: name => name === 'data-webbrain-bidi' ? token : attributes.get(name),
+    removeAttribute: name => attributes.delete(name), setAttribute: (name, value) => attributes.set(name, value) };
+  session.runs.set(runId, { context: 'tab' });
+  session.locate = async () => ({ context: 'tab', node: { sharedId: 'file' } });
+  session.call = async (_match, declaration, args = []) => ({ result: { value: vm.runInNewContext(`(${declaration})`, {
+    document: { documentElement: { getAttribute: () => 'file-document:0' } },
+  })(el, ...args.map(arg => arg.value)) } });
+  session.send = async method => {
+    if (method === 'input.setFiles') {
+      assert.equal(JSON.parse(attributes.get('data-webbrain-native-action')).kind, 'input');
+      assert.equal(focusedAttributes.has('data-webbrain-native-action'), false);
+      el.files = [{ name: 'test.txt', size: 1 }];
+    }
+    return {};
+  };
+  try {
+    assert.equal((await session.perform(runId, 'upload', { token, base64: 'eA==', filename: 'test.txt', pageFeedbackGuard: guard })).success, true);
+  } finally { await session.close(); }
+});
 test('connection loss cannot fall through to synthetic input', async () => {
   let messages = 0;
   const client = new FirefoxBidiClient({ tabs: { sendMessage() { messages++; } } });

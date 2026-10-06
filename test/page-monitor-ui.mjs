@@ -4,6 +4,7 @@ import { test } from 'node:test';
 import { chromium, firefox } from 'playwright';
 import { CDPClient } from '../src/chrome/src/cdp/cdp-client.js';
 import { pageFeedbackMethods } from '../src/chrome/src/agent/page-feedback.js';
+import { BidiSession } from '../firefox-companion/session.mjs';
 
 const read = (build, file) => fs.readFileSync(new URL(`../src/${build}/src/${file}`, import.meta.url), 'utf8');
 const html = `<!doctype html><style>
@@ -443,6 +444,38 @@ for (const [build, engine] of [['chrome', chromium], ['firefox', firefox]]) {
       assert.notEqual(await page.evaluate(() => document.documentElement.getAttribute('data-webbrain-page-revision')),
         `${guard.documentToken}:${guard.revision}`);
     } finally { await browser.close(); }
+  });
+
+  test(`${build}: native uploads target an unfocused file input without hiding user input`, async () => {
+    const { browser, page } = await fixture(engine, build);
+    const session = new BidiSession(), runId = crypto.randomUUID(), token = crypto.randomUUID();
+    session.runs.set(runId, { context: 'tab' });
+    session.locate = async () => ({ context: 'tab', node: { sharedId: 'upload' } });
+    session.call = async (_match, declaration, args = []) => ({ result: { value: await page.evaluate(({ declaration, args }) =>
+      (0, eval)(`(${declaration})`)(document.getElementById('upload'), ...args.map(arg => arg.value)), { declaration, args }) } });
+    session.send = async (method, params) => {
+      if (method === 'input.setFiles') await page.locator('#upload').setInputFiles(params.files);
+      return {};
+    };
+    try {
+      await page.evaluate(token => {
+        const input = document.createElement('input'); input.id = 'upload'; input.type = 'file';
+        input.setAttribute('data-webbrain-bidi', token); document.body.append(input);
+      }, token);
+      await page.waitForTimeout(200);
+      await page.locator('#field').focus();
+      const guard = await page.evaluate(() => {
+        deliver('page_monitor_prepare', { operationId: 'upload', tool: 'upload_file', selector: '#upload' });
+        deliver('page_monitor_dispatch', { operationId: 'upload', kind: 'input', selector: '#upload', navigationCandidate: false });
+        feedback = []; return lastMonitorResponse.guard;
+      });
+      assert.equal((await session.perform(runId, 'upload', { token, base64: 'eA==', filename: 'test.txt', pageFeedbackGuard: guard })).success, true);
+      await page.waitForTimeout(200);
+      assert.equal((await page.evaluate(() => feedback)).some(event => event.source !== 'agent'), false);
+      assert.equal(await page.evaluate(() => document.activeElement.id), 'field');
+      await page.keyboard.insertText('human');
+      assert.ok((await page.evaluate(() => feedback)).some(event => event.kind === 'input' && event.source === 'user'));
+    } finally { await session.close(); await browser.close(); }
   });
 
   test(`${build}: navigation notes are plain text, deduplicated and survive history restoration`, async () => {

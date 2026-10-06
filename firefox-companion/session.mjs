@@ -238,13 +238,13 @@ export class BidiSession {
       const guard = payload.pageFeedbackGuard;
       if (!guard) return; // Compatibility with clients without page monitoring.
       const marker = JSON.stringify({ ...guard, kind, sequence: ++nativeSequence });
-      const checked = await this.call(match, `(el, fence, marker, kind) => {
+      const checked = await this.call(match, `(el, fence, marker, kind, action) => {
         if (!el.isConnected || document.documentElement.getAttribute('data-webbrain-page-revision') !== fence) return false;
-        const target = kind === 'input' ? el.getRootNode().activeElement || el : el;
+        const target = kind === 'input' && action !== 'upload' ? el.getRootNode().activeElement || el : el;
         target.setAttribute('data-webbrain-native-action', marker);
         return true;
       }`, [{ type: 'string', value: `${guard.documentToken}:${guard.revision}` },
-        { type: 'string', value: marker }, { type: 'string', value: kind }]);
+        { type: 'string', value: marker }, { type: 'string', value: kind }, { type: 'string', value: action }]);
       if (checked.result?.value !== true) {
         const error = new Error('Page changed during native preparation; no further input sent');
         error.code = 'page_feedback_pending'; throw error;

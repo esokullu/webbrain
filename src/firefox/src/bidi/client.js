@@ -143,7 +143,7 @@ export class FirefoxBidiClient {
     if (this.runs.get(tabId) !== owner || owner.disconnected || owner.signal?.aborted) throw new Error('Run stopped');
     const pageFeedbackGuard = await beforePageAgentDispatch(this.api, tabId, {
       kind: action === 'navigate' ? 'navigate' : action === 'scroll' ? 'scroll'
-        : ['type', 'field', 'key'].includes(action) ? 'input' : 'click',
+        : ['type', 'field', 'key', 'upload'].includes(action) ? 'input' : 'click',
       ...(payload.point ? { x: payload.point.x, y: payload.point.y } : {}),
       selector: payload.selector, ref_id: payload.ref_id, frameId: payload.frameId || 0,
       navigationCandidate: ['click', 'checked'].includes(action),

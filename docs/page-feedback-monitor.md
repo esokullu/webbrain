@@ -47,6 +47,8 @@ Steer or grant authorization. Enter and Alt+Enter retain their existing behavior
   cover interventions during asynchronous preparation.
 - Both Chrome upload paths check feedback after preparation, immediately before
   attaching files. A skipped attachment retains its undispatched outcome.
+- Firefox companion uploads register as input and place their native marker on
+  the file input, preserving attribution when a different control holds focus.
 - Runtime observations use nonce-delimited `page_feedback` untrusted data. They
   do not enter the trusted text-steering authorization path. Screenshots follow
   the current capture, vision-routing and budget policies.
