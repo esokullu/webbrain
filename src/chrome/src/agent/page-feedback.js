@@ -51,7 +51,7 @@ export async function beforePageAgentDispatch(api, tabId, details = {}) {
   }
   owner.operationFrames.get(owner.operationId)?.add(Number(details.frameId) || 0);
   const { prepareMonitor = false, ...dispatchDetails } = details;
-  const operationId = owner.operationId || token();
+  const operationId = dispatchDetails.operationId || owner.operationId || token();
   const monitorParams = { ...dispatchDetails, runToken: owner.runToken, operationId };
   let acknowledgement;
   let preparationAcknowledgement;
@@ -178,9 +178,19 @@ export const pageFeedbackMethods = {
         || !['user', 'agent', 'page', 'unknown'].includes(feedback.source)) return { accepted: false, reason: 'invalid-observation' };
     frame.seq = seq;
     if (feedback.source === 'agent') {
-      if (feedback.operation === 'click') run.navigation = { at: Date.now(), url: '', kind: 'click',
-        frameId: feedback.navigationTarget === '_top' ? 0 : frameId,
-        operationId: dispatchOwners.get(tabId)?.operationId || '' };
+      if (feedback.operation === 'click') {
+        let url = '';
+        try {
+          const destination = new URL(String(feedback.navigationUrl || ''));
+          if (['http:', 'https:'].includes(destination.protocol) && !destination.username && !destination.password
+              && destination.href.length <= 2000) {
+            url = destination.href;
+          }
+        } catch { /* Clicks without a safe, concrete destination cannot correlate navigation. */ }
+        run.navigation = url ? { at: Date.now(), url, kind: 'click',
+          frameId: feedback.navigationTarget === '_top' ? 0 : frameId,
+          operationId: dispatchOwners.get(tabId)?.operationId || '' } : null;
+      }
       return { accepted: true };
     }
     const item = { kind: feedback.kind, source: feedback.source, frameId,
@@ -222,9 +232,10 @@ export const pageFeedbackMethods = {
       || qualifiers.includes('from_address_bar');
     const navigation = run.navigation;
     const redirect = qualifiers.some(q => /redirect$/.test(q));
-    const sameNavigation = !navigation?.redirectChain
-      ? (!navigation?.url || navigation.url === details.url || redirect)
-      : redirect && !!navigation.documentId && navigation.documentId === details.documentId;
+    const sameNavigation = navigation?.redirectChain
+      ? redirect && !!navigation.documentId && navigation.documentId === details.documentId
+      : (!!navigation?.url && navigation.url === details.url)
+        || (navigation?.kind === 'navigate' && navigation.history && qualifiers.includes('forward_back'));
     const agentNavigation = !explicit && navigation && navigation.frameId === frameId && Date.now() - navigation.at < 10000
       && (!qualifiers.includes('forward_back') || navigation.history)
       && sameNavigation;

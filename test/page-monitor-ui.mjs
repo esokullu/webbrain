@@ -123,6 +123,52 @@ test('Chrome AX preparation attributes actual scrolling without claiming field i
   } finally { await browser.close(); }
 });
 
+test('Chrome full-page capture marks temporary scrolling without suppressing a later page scroll', async () => {
+  const { browser, page } = await fixture(chromium, 'chrome');
+  const tabId = 88001;
+  const previousChrome = globalThis.chrome, previousBrowser = globalThis.browser;
+  const monitorApi = { tabs: {
+    get: async id => ({ id, url: 'https://monitor.test/start' }),
+    sendMessage: async (_tab, message) => {
+      if (message?.target !== 'content') return { ready: true };
+      await page.evaluate(({ action, params }) => deliver(action, params), { action: message.action, params: message.params || {} });
+      return page.evaluate(() => window.lastMonitorResponse || { ready: true });
+    },
+  }, webNavigation: { getAllFrames: async () => [{ frameId: 0 }] } };
+  globalThis.chrome = monitorApi;
+  globalThis.browser = monitorApi;
+  const agent = Object.assign({ _pageFeedbackRuns: new Map(), isRunning: () => true, _checkAbort: () => false,
+    _hasPendingPageFeedback(tab) { return (this._pageFeedbackRuns.get(tab)?.events.size || 0) > 0; } }, pageFeedbackMethods);
+  let session;
+  try {
+    await agent._beginPageFeedbackRun(tabId, 'interactive');
+    const run = agent._pageFeedbackRuns.get(tabId);
+    await page.evaluate(token => { window.monitorRunToken = token; deliver('page_monitor_state'); }, run.token);
+    await page.waitForTimeout(30);
+    const client = new CDPClient();
+    session = await page.context().newCDPSession(page);
+    client.sendCommand = (_tab, method, params) => session.send(method, params);
+    const captureState = {};
+    await page.evaluate(() => { feedback = []; });
+    await client._scrollForFullPageCapture(tabId, 0, 600, captureState);
+    await client._finishFullPageCaptureScroll(tabId, captureState);
+    await page.waitForTimeout(250);
+    assert.equal((await page.evaluate(() => feedback)).some(event => event.kind === 'scroll'), false,
+      'The CDP scroll used by full-page capture must be attributed to the active agent run');
+
+    await page.evaluate(() => { feedback = []; window.scrollTo(0, 900); });
+    await page.waitForFunction(() => feedback.some(event => event.kind === 'scroll'));
+    assert.ok((await page.evaluate(() => feedback)).some(event => event.kind === 'scroll' && event.source !== 'agent'),
+      'A later unmarked page scroll must remain visible to the monitor');
+  } finally {
+    if (session) await session.detach().catch(() => {});
+    if (agent._pageFeedbackRuns.has(tabId)) agent._finishPageFeedbackRun(tabId);
+    if (previousChrome === undefined) delete globalThis.chrome; else globalThis.chrome = previousChrome;
+    if (previousBrowser === undefined) delete globalThis.browser; else globalThis.browser = previousBrowser;
+    await browser.close();
+  }
+});
+
 test('Chrome: unrelated layout shifts during an agent operation stay observable', async () => {
   const { browser, page } = await fixture(chromium, 'chrome');
   try {
@@ -1232,8 +1278,9 @@ for (const [build, engine] of [['chrome', chromium], ['firefox', firefox]]) {
           feedback = [];
         }, { target, id });
         await child.locator(`#${id}`).click();
-        assert.ok((await child.evaluate(() => feedback)).some(event => event.source === 'agent' && event.navigationTarget === '_top'),
-          `${target} navigation must carry the compatible top-frame target`);
+        assert.ok((await child.evaluate(() => feedback)).some(event => event.source === 'agent'
+          && event.navigationTarget === '_top' && event.navigationUrl === 'https://monitor.test/destination'),
+        `${target} navigation must carry its safe destination and compatible top-frame target`);
       }
       await page.waitForTimeout(200);
       await page.evaluate(() => {

@@ -742,10 +742,20 @@
       const marker = { userAt: op.userAt };
       agentTurn = marker;
       if (op.navigationCandidate && ['click', 'pointerdown'].includes(event.type)) {
-        const link = event.composedPath().find(node => node instanceof Element && node.matches('a[href],area[href]'));
+        const path = event.composedPath();
+        const link = path.find(node => node instanceof Element && node.matches('a[href],area[href]'));
+        const submitter = path.find(node => node instanceof Element && node.matches('button,input[type="submit"],input[type="image"]') && node.form);
         const navigationTarget = (link?.getAttribute('target') || el?.form?.getAttribute('target')
           || (link && document.querySelector('base[target]')?.getAttribute('target')) || '').toLowerCase();
+        let navigationUrl = '';
+        try {
+          const rawUrl = link?.href || (submitter?.form ? submitter.formAction || submitter.form.action : '');
+          const destination = new URL(rawUrl, document.baseURI);
+          if (['http:', 'https:'].includes(destination.protocol) && !destination.username && !destination.password
+              && destination.href.length <= 2000) navigationUrl = destination.href;
+        } catch { /* Non-web and malformed targets are not navigation correlations. */ }
         send({ kind: 'activity', source: 'agent', operation: 'click',
+          ...(navigationUrl ? { navigationUrl } : {}),
           ...(navigationTarget === '_top' || (navigationTarget === '_parent' && window.parent === window.top)
             ? { navigationTarget: '_top' } : {}) });
       }

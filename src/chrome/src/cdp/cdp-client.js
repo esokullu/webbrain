@@ -2346,6 +2346,32 @@ export class CDPClient {
    *   captureBounds:{x:number,y:number,width:number,height:number}
    * }>} Capture bounds are CSS pixels in top-page coordinates.
    */
+  async _scrollForFullPageCapture(tabId, x, y, captureState) {
+    const guard = await beforePageAgentDispatch(globalThis.chrome, tabId, {
+      kind: 'scroll', scrollIntoView: true, fenceOnly: true,
+      ...(captureState.operationId ? { operationId: captureState.operationId } : {}),
+    });
+    if (guard?.operationId) captureState.operationId = guard.operationId;
+    if (guard?.runToken) captureState.runToken = guard.runToken;
+    const result = await this.evaluateFunction(tabId, `function (pageGuard, x, y) {
+      ${SELECTOR_SCROLL_DISPATCH_SOURCE}
+      if (!beforeSelectorScroll(document.documentElement, pageGuard)) return { scrolled: false, pageFeedbackPending: true };
+      window.scrollTo(x, y);
+      return { scrolled: true };
+    }`, [guard || null, x, y]);
+    const value = result?.result?.value;
+    throwIfPageFeedbackPending(value);
+    if (value?.scrolled !== true) throw new Error('Could not scroll the page for full-page capture');
+  }
+
+  async _finishFullPageCaptureScroll(tabId, captureState) {
+    if (!captureState.runToken || !captureState.operationId || !hasPageAgentDispatchOwner(tabId)) return;
+    try {
+      await globalThis.chrome?.tabs?.sendMessage(tabId, { target: 'content', action: 'page_monitor_finish',
+        params: { runToken: captureState.runToken, operationId: captureState.operationId } }, { frameId: 0 });
+    } catch { /* The page may have navigated or the run may have ended. */ }
+  }
+
   async captureFullPageScreenshot(tabId, options = {}) {
     await this.sendCommand(tabId, 'Page.enable');
     const metrics = await this.sendCommand(tabId, 'Page.getLayoutMetrics');
@@ -2374,6 +2400,7 @@ export class CDPClient {
     let contentGrowths = 0;
     let captureBoundsFrozen = false;
     let infiniteScrollWarningAdded = false;
+    const captureState = {};
     const addInfiniteScrollWarning = () => {
       if (infiniteScrollWarningAdded) return;
       infiniteScrollWarningAdded = true;
@@ -2420,7 +2447,7 @@ export class CDPClient {
       ) {
         const bottomY = contentY + Math.max(0, contentHeight - tileHeight);
         const targetY = Math.min(contentY + discoveryOffsetY, bottomY);
-        await this.evaluate(tabId, `window.scrollTo(${contentX}, ${targetY})`);
+        await this._scrollForFullPageCapture(tabId, contentX, targetY, captureState);
         await new Promise(resolve => setTimeout(resolve, FULL_PAGE_SCROLL_SETTLE_MS));
         const grew = updateContentBounds(await this.sendCommand(tabId, 'Page.getLayoutMetrics'));
         const updatedBottomY = contentY + Math.max(0, contentHeight - tileHeight);
@@ -2446,7 +2473,7 @@ export class CDPClient {
           }
           const clipX = contentX + x;
           const clipY = contentY + y;
-          await this.evaluate(tabId, `window.scrollTo(${clipX}, ${clipY})`);
+          await this._scrollForFullPageCapture(tabId, clipX, clipY, captureState);
           await new Promise(resolve => setTimeout(resolve, FULL_PAGE_SCROLL_SETTLE_MS));
           // The page can still grow during the capture pass. Expand the loop
           // bounds before sizing this tile so a newly moved footer is included,
@@ -2503,7 +2530,12 @@ export class CDPClient {
         },
       };
     } finally {
-      await this.evaluate(tabId, `window.scrollTo(${originalScrollX}, ${originalScrollY})`).catch(() => {});
+      try {
+        if (!captureState.runToken || hasPageAgentDispatchOwner(tabId)) {
+          await this._scrollForFullPageCapture(tabId, originalScrollX, originalScrollY, captureState);
+        }
+      } catch { /* Preserve the user's new position if the page changed during capture. */ }
+      await this._finishFullPageCaptureScroll(tabId, captureState);
     }
   }
 

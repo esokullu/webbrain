@@ -411,13 +411,27 @@ for (const build of ['chrome', 'firefox']) {
       for (const frameId of [0, 3, 2]) agent.observePageNavigation({ tabId: tab, frameId,
         url: `https://example.com/frame-${frameId}`, transitionType: 'link' }, 'history');
       const events = [...agent._pageFeedbackRuns.get(tab).events.values()];
-      assert.deepEqual(events.map(event => event.frameId), [0, 3], 'Main and sibling changes must survive child-click correlation');
+      assert.deepEqual(events.map(event => event.frameId), [0, 3, 2], 'A click without a known destination cannot suppress any navigation');
       agent._pageFeedbackRuns.get(tab).events.clear();
-      child.send({ kind: 'activity', source: 'agent', operation: 'click', navigationTarget: '_top' });
+      child.send({ kind: 'activity', source: 'agent', operation: 'click', navigationTarget: '_top',
+        navigationUrl: 'https://example.com/top' });
       agent.observePageNavigation({ tabId: tab, frameId: 0, url: 'https://example.com/top', transitionType: 'link' }, 'history');
-      assert.equal(agent._hasPendingPageFeedback(tab), false, 'An explicit _top click can correlate top-frame navigation');
+      assert.equal(agent._hasPendingPageFeedback(tab), false, 'An explicit _top click can correlate its exact top-frame destination');
       agent.observePageNavigation({ tabId: tab, frameId: 3, url: 'https://example.com/sibling', transitionType: 'link' }, 'history');
       assert.equal(agent._hasPendingPageFeedback(tab), true, 'A declared top target must still preserve sibling changes');
+      agent._pageFeedbackRuns.get(tab).events.clear();
+      child.send({ kind: 'activity', source: 'agent', operation: 'click', navigationUrl: 'https://example.com/expected' });
+      agent.observePageNavigation({ tabId: tab, frameId: 2, url: 'https://example.com/unrelated', transitionType: 'link' }, 'history');
+      assert.equal(agent._hasPendingPageFeedback(tab), true, 'A same-frame navigation to a different URL remains visible');
+      agent._pageFeedbackRuns.get(tab).events.clear();
+      child.send({ kind: 'activity', source: 'agent', operation: 'click', navigationUrl: 'https://example.com/expected' });
+      agent.observePageNavigation({ tabId: tab, frameId: 2, url: 'https://example.com/unrelated-redirect', transitionType: 'link',
+        transitionQualifiers: ['server_redirect'] }, 'history');
+      assert.equal(agent._hasPendingPageFeedback(tab), true, 'Redirect qualifiers cannot turn an unrelated destination into an agent navigation');
+      agent._pageFeedbackRuns.get(tab).events.clear();
+      child.send({ kind: 'activity', source: 'agent', operation: 'click', navigationTarget: '_top', navigationUrl: 'javascript:alert(1)' });
+      agent.observePageNavigation({ tabId: tab, frameId: 0, url: 'https://example.com/safe', transitionType: 'link' }, 'history');
+      assert.equal(agent._hasPendingPageFeedback(tab), true, 'Non-web click targets cannot correlate browser navigation');
     } finally { agent._releaseRunEntry(tab); }
   });
 
@@ -704,7 +718,7 @@ for (const build of ['chrome', 'firefox']) {
     await agent._claimRunEntry(tab, 'interactive');
     try {
       let binding = bind(agent, tab);
-      binding.send({ kind: 'activity', source: 'agent', operation: 'click' });
+      binding.send({ kind: 'activity', source: 'agent', operation: 'click', navigationUrl: 'https://example.com/destination' });
       agent.observePageNavigation({ tabId: tab, frameId: 0, documentId: 'agent-document',
         url: 'https://example.com/destination', transitionType: 'link' }, 'committed');
       assert.equal(agent._hasPendingPageFeedback(tab), false, 'The click-caused commit is correlated');
@@ -719,9 +733,17 @@ for (const build of ['chrome', 'firefox']) {
       binding.send({ kind: 'activity', source: 'agent', operation: 'click' });
       agent.observePageNavigation({ tabId: tab, frameId: 0, documentId: 'redirected-document',
         url: 'https://example.com/final', transitionType: 'link', transitionQualifiers: ['server_redirect'] }, 'committed');
-      assert.equal(agent._hasPendingPageFeedback(tab), false, 'An identified redirect is part of the click navigation');
-      assert.equal(agent._pageFeedbackRuns.get(tab).navigation.documentId, 'redirected-document');
-      agent.observePageNavigation({ tabId: tab, frameId: 0, documentId: 'redirected-document',
+      assert.equal(agent._hasPendingPageFeedback(tab), true, 'An uncorrelated redirect remains visible even after an agent click');
+      assert.equal(agent._pageFeedbackRuns.get(tab).navigation, null);
+
+      agent._pageFeedbackRuns.get(tab).events.clear();
+      binding = bind(agent, tab, 0, 'redirected-document', 'content-redirected');
+      binding.send({ kind: 'activity', source: 'agent', operation: 'click', navigationUrl: 'https://example.com/redirect-start' });
+      agent.observePageNavigation({ tabId: tab, frameId: 0, documentId: 'redirect-chain-document',
+        url: 'https://example.com/redirect-start', transitionType: 'link', transitionQualifiers: ['server_redirect'] }, 'committed');
+      assert.equal(agent._hasPendingPageFeedback(tab), false, 'An exact click destination can start a redirect chain');
+      assert.equal(agent._pageFeedbackRuns.get(tab).navigation.documentId, 'redirect-chain-document');
+      agent.observePageNavigation({ tabId: tab, frameId: 0, documentId: 'redirect-chain-document',
         url: 'https://example.com/final-two', transitionType: 'link', transitionQualifiers: ['client_redirect'] }, 'committed');
       assert.equal(agent._hasPendingPageFeedback(tab), false, 'Redirect continuation stays on its exact document');
       agent.observePageNavigation({ tabId: tab, frameId: 0, documentId: 'later-navigation',
