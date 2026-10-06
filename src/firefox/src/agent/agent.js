@@ -123,6 +123,7 @@ import {
   visionGenerationOptions,
 } from '../providers/provider-compatibility.js';
 import { resolveMaxOutputTokens } from '../providers/context-windows.js';
+import { generateImage } from './fal-media.js';
 import { extractFirstJsonObject } from './json-extract.js';
 import { repairAssistantDisplayText, sanitizeText as sanitizePlannerText } from './text-sanitize.js';
 import { emptyOutputFailureMessage, modelOutputDiagnostics } from './model-output-diagnostics.js';
@@ -27906,6 +27907,9 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
 
   _isExecutionMutationEvidence(name, args = {}, capabilities = []) {
     if (name === 'chrome_web_store_upload' || name === 'chrome_web_store_publish') return true;
+    // Generation creates paid media; its result verifies that mutation without
+    // opting the tool into the fetch_url/research_url /allow-api override.
+    if (name === 'generate_image') return true;
     const mutationCapabilities = new Set([
       Capability.NAVIGATE,
       Capability.CLICK,
@@ -32842,6 +32846,9 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     if (name === 'fetch_url') {
       const result = await fetchUrl(args.url, args, { tabId, signal: executionContext?._contentActionAbortSignal });
       return await this._restrictedDomainScreenshotFallback(tabId, name, args.url, result);
+    }
+    if (name === 'generate_image') {
+      return await generateImage(args, { signal: executionContext?._contentActionAbortSignal });
     }
     if (name === 'read_page_source') {
       const result = await readPageSource(args.url, args, { tabId, signal: executionContext?._contentActionAbortSignal });

@@ -40,6 +40,8 @@ import {
   getClaudeOAuthStatus,
 } from './providers/oauth-claude.js';
 import { getBalance as capsolverGetBalance } from './agent/captcha-solver.js';
+import { isCapsolverEnabled } from './agent/capsolver-config.js';
+import { testImageGenProvider } from './agent/fal-media.js';
 import { CAPTCHA_SETTINGS_KEYS, getCaptchaProviders } from './agent/captcha-provider-config.js';
 import { getAdditionalCaptchaBalance } from './agent/captcha-additional-providers.js';
 import { getTwoCaptchaBalance } from './agent/two-captcha.js';
@@ -4129,6 +4131,10 @@ async function handleMessage(msg, sender) {
 
     case 'test_transcription_provider': {
       return await providerManager.testTranscriptionProvider();
+    }
+
+    case 'test_image_gen_provider': {
+      return await testImageGenProvider();
     }
 
     case 'test_system_one': {

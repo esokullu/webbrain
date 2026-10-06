@@ -45,8 +45,14 @@ export class AnthropicProvider extends BaseLLMProvider {
 
   _prepareRequestBody(body, options = {}, _stream = false) {
     const prepared = this._mergeConfiguredRequestBody(body, options);
-    const thinkingType = prepared.thinking?.type;
-    if (thinkingType === 'disabled') {
+    const opus55 = /^claude-opus-5-5(?:$|[-_.@])/.test(String(this.model || '').toLowerCase());
+    let thinkingType = prepared.thinking?.type;
+    if (opus55 && ['disabled', 'enabled'].includes(thinkingType)) {
+      // Opus 5.5 has mandatory adaptive thinking; effort controls its budget.
+      delete prepared.thinking;
+      prepared.output_config = { ...prepared.output_config, effort: 'low' };
+      thinkingType = undefined;
+    } else if (thinkingType === 'disabled') {
       // A per-call disable must fully replace configured adaptive/manual fields.
       prepared.thinking = { type: 'disabled' };
     } else if (thinkingType === 'adaptive') {
@@ -54,7 +60,10 @@ export class AnthropicProvider extends BaseLLMProvider {
     }
 
     const forcedToolChoice = ['any', 'tool'].includes(prepared.tool_choice?.type);
-    if (thinkingType === 'enabled' && forcedToolChoice) {
+    if (opus55 && forcedToolChoice) {
+      // Opus 5.5 accepts only auto or none tool choice.
+      prepared.tool_choice = { type: 'auto' };
+    } else if (thinkingType === 'enabled' && forcedToolChoice) {
       // Manual extended thinking rejects forced tool choice. Preserve the
       // agent's explicit tool contract and disable thinking for this call.
       delete prepared.thinking;
@@ -105,6 +114,9 @@ export class AnthropicProvider extends BaseLLMProvider {
 
   _convertToolChoice(toolChoice) {
     if (!toolChoice || toolChoice === 'auto') return undefined;
+    if (/^claude-opus-5-5(?:$|[-_.@])/.test(String(this.model || '').toLowerCase())) {
+      return { type: 'auto' };
+    }
     if (toolChoice === 'required') return { type: 'any' };
     const name = toolChoice?.function?.name || toolChoice?.name;
     if (name) return { type: 'tool', name };

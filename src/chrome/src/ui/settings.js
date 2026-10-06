@@ -88,7 +88,7 @@ const SUBSCRIPTION_GUIDE_PRODUCTS = Object.freeze({
 
 // Version shown in the subtitle. Kept here so it only needs one update per
 // release; the subtitle string itself is translated.
-const EXT_VERSION = '39.1.0';
+const EXT_VERSION = '39.1.1';
 
 const providersContainer = document.getElementById('providers');
 const displaySettings = document.getElementById('display-settings');
@@ -170,6 +170,13 @@ const btnSaveTranscription = document.getElementById('btn-save-transcription');
 const btnTestTranscription = document.getElementById('btn-test-transcription');
 const btnClearTranscription = document.getElementById('btn-clear-transcription');
 const transcriptionTestResult = document.getElementById('test-transcription');
+// Generative media (fal.ai) — assistive model, stored as `imageGenModel = { apiKey, model }`.
+const imageGenApiKeyInput = document.getElementById('image-gen-api-key');
+const imageGenModelInput = document.getElementById('image-gen-model');
+const btnSaveImageGen = document.getElementById('btn-save-image-gen');
+const btnTestImageGen = document.getElementById('btn-test-image-gen');
+const btnClearImageGen = document.getElementById('btn-clear-image-gen');
+const imageGenTestResult = document.getElementById('test-image-gen');
 const btnTestVision = document.getElementById('btn-test-vision');
 const btnClearVision = document.getElementById('btn-clear-vision');
 const visionTestResult = document.getElementById('test-vision');
@@ -723,6 +730,12 @@ async function init() {
   if (transcriptionModelInput) transcriptionModelInput.value = transcription.model || '';
   updateMultimodalDetectedProvider('vision');
   updateMultimodalDetectedProvider('transcription');
+
+  // Load generative media (fal.ai) config. Used by the generate_image agent tool.
+  const imageGenStored = await chrome.storage.local.get(['imageGenModel']);
+  const imageGen = imageGenStored.imageGenModel || {};
+  if (imageGenApiKeyInput) imageGenApiKeyInput.value = imageGen.apiKey || '';
+  if (imageGenModelInput) imageGenModelInput.value = imageGen.model || '';
 
   // Load profile (auto-fill bio + throwaway password)
   const profileStored = await chrome.storage.local.get(['profileEnabled', 'profileText']);
@@ -1851,6 +1864,83 @@ if (btnClearTranscription) {
 
 transcriptionBaseUrlInput?.addEventListener('input', () => updateMultimodalDetectedProvider('transcription'));
 
+// --- Generative Media (fal.ai) ---
+//
+// Same UX as the transcription override. Stored in chrome.storage.local under
+// `imageGenModel = { apiKey, model }`. Consumed by the `generate_image` agent
+// tool (agent/fal-media.js), which submits to fal.ai's queue API.
+
+function showImageGenResult(className, text, color = '') {
+  if (!imageGenTestResult) return;
+  imageGenTestResult.className = `test-result show${className ? ` ${className}` : ''}`;
+  imageGenTestResult.textContent = text;
+  imageGenTestResult.style.color = color || '';
+  return imageGenTestResult;
+}
+
+function flashImageGenResult(className, text) {
+  const resultEl = showImageGenResult(className, text);
+  if (resultEl) setTimeout(() => resultEl.classList.remove('show'), 2000);
+}
+
+if (btnSaveImageGen) {
+  btnSaveImageGen.addEventListener('click', async () => {
+    const apiKey = imageGenApiKeyInput.value.trim();
+    const model = imageGenModelInput.value.trim();
+
+    if (!apiKey && !model) {
+      await chrome.storage.local.remove('imageGenModel');
+      flashImageGenResult('ok', t('st.imagegen.cleared'));
+      return;
+    }
+
+    await chrome.storage.local.set({
+      imageGenModel: { apiKey, model },
+    });
+    flashImageGenResult('ok', t('st.imagegen.saved'));
+  });
+}
+
+if (btnTestImageGen) {
+  btnTestImageGen.addEventListener('click', async () => {
+    const apiKey = imageGenApiKeyInput.value.trim();
+    const model = imageGenModelInput.value.trim();
+
+    if (!apiKey || !model) {
+      const resultEl = showImageGenResult('fail', t('st.imagegen.fill_required'));
+      if (resultEl) setTimeout(() => resultEl.classList.remove('show'), 2500);
+      return;
+    }
+
+    // Persist before testing so the background handler sees the values.
+    await chrome.storage.local.set({
+      imageGenModel: { apiKey, model },
+    });
+
+    showImageGenResult('', t('st.imagegen.testing'), 'var(--text2)');
+
+    try {
+      const res = await sendToBackground('test_image_gen_provider');
+      if (res?.ok) {
+        showImageGenResult('ok', t('st.imagegen.connected', { model: res.model || model }));
+      } else {
+        showImageGenResult('fail', t('st.imagegen.failed', { error: res?.error || 'Unknown error' }));
+      }
+    } catch (e) {
+      showImageGenResult('fail', t('st.imagegen.failed', { error: e.message }));
+    }
+  });
+}
+
+if (btnClearImageGen) {
+  btnClearImageGen.addEventListener('click', async () => {
+    imageGenApiKeyInput.value = '';
+    imageGenModelInput.value = '';
+    await chrome.storage.local.remove('imageGenModel');
+    flashImageGenResult('ok', t('st.imagegen.cleared'));
+  });
+}
+
 // --- Profile auto-fill ---
 let profileSyncChallenge = null;
 function showProfileSyncResult(ok, text) { if (!profileSyncResult) return; profileSyncResult.className = `test-result show ${ok ? 'ok' : 'fail'}`; profileSyncResult.textContent = text; }
@@ -1891,6 +1981,7 @@ async function reloadProfileSyncData() {
     WEBGPU_VISION_ENABLED_KEY,
     WEBGPU_VISION_CONSENT_VERSION_KEY,
     'transcriptionModel',
+    'imageGenModel',
   ]);
   if (profileEnabledToggle) profileEnabledToggle.checked = !!stored.profileEnabled;
   if (profileTextArea) profileTextArea.value = stored.profileText || '';
@@ -1908,6 +1999,9 @@ async function reloadProfileSyncData() {
   if (transcriptionApiKeyInput) transcriptionApiKeyInput.value = transcription.apiKey || '';
   if (transcriptionModelInput) transcriptionModelInput.value = transcription.model || '';
   updateMultimodalDetectedProvider('transcription');
+  const imageGen = stored.imageGenModel || {};
+  if (imageGenApiKeyInput) imageGenApiKeyInput.value = imageGen.apiKey || '';
+  if (imageGenModelInput) imageGenModelInput.value = imageGen.model || '';
   await loadUserMemorySettings();
   const res = await sendToBackground('get_providers');
   providersData = res.providers;
@@ -3122,7 +3216,7 @@ function renderProviders() {
         { key: 'model', labelKey: 'st.provider.field.model', type: 'text', placeholder: 'gpt-5.6-terra',
           suggestions: [
             'gpt-6-luna-pro',
-            'gpt-6-sol',
+            'gpt-6.1-sol',
             'gpt-6-astra',
             'gpt-5.6-terra',
             'gpt-5.6-sol',
@@ -3183,7 +3277,7 @@ function renderProviders() {
       fields: [
         { key: 'apiKey', labelKey: 'st.provider.field.api_key', type: 'password', placeholder: 'sk-ant-...' },
         { key: 'model', labelKey: 'st.provider.field.model', type: 'text', placeholder: 'claude-opus-5',
-          suggestions: ['claude-fable-5', 'claude-opus-5', 'claude-sonnet-5', 'claude-haiku-4-5'] },
+          suggestions: ['claude-fable-5', 'claude-opus-5-5', 'claude-opus-5', 'claude-sonnet-5', 'claude-haiku-4-5'] },
         { key: 'baseUrl', labelKey: 'st.provider.field.api_base_url', type: 'text', placeholder: 'https://api.anthropic.com' },
         ...CACHE_AWARE_COST_ESTIMATE_FIELDS,
       ],

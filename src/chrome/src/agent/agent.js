@@ -129,6 +129,7 @@ import {
   visionGenerationOptions,
 } from '../providers/provider-compatibility.js';
 import { resolveMaxOutputTokens } from '../providers/context-windows.js';
+import { generateImage } from './fal-media.js';
 import { extractFirstJsonObject } from './json-extract.js';
 import { repairAssistantDisplayText, sanitizeText as sanitizePlannerText } from './text-sanitize.js';
 import { emptyOutputFailureMessage, modelOutputDiagnostics } from './model-output-diagnostics.js';
@@ -30287,6 +30288,9 @@ If the user has already named or confirmed this exact recipient, do NOT ask agai
 
   _isExecutionMutationEvidence(name, args = {}, capabilities = []) {
     if (name === 'chrome_web_store_upload' || name === 'chrome_web_store_publish') return true;
+    // Generation creates paid media; its result verifies that mutation without
+    // opting the tool into the fetch_url/research_url /allow-api override.
+    if (name === 'generate_image') return true;
     const mutationCapabilities = new Set([
       Capability.NAVIGATE,
       Capability.CLICK,
@@ -36363,6 +36367,9 @@ If the user has already named or confirmed this exact recipient, do NOT ask agai
     }
     if (name === 'fetch_url') {
       return await fetchUrl(args.url, args, { tabId, signal: executionContext?._contentActionAbortSignal });
+    }
+    if (name === 'generate_image') {
+      return await generateImage(args, { signal: executionContext?._contentActionAbortSignal });
     }
     if (name === 'read_page_source') {
       return await readPageSource(args.url, args, { tabId, signal: executionContext?._contentActionAbortSignal });

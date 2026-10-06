@@ -18,7 +18,7 @@ export const OPENROUTER_ROUTING_VARIANTS = Object.freeze(['standard', 'nitro', '
 // Shared base vision sniff (provider-agnostic). OpenAICompatibleProvider exposes
 // it via _modelNameSniffedVision so vendor subclasses (e.g. DeepSeek) can extend
 // it without duplicating the explicit-override precedence in supportsVision.
-const BASE_VISION_MODEL_PATTERN = /gpt-4o|gpt-4\.1|gpt-4-turbo|gpt-5|gpt-6-(?:luna-pro|sol|astra)(?:$|[-_.:/])|claude|gemini|grok|minimax-m3|kimi-k(?:-?3|2\.[5-9])|llava|qwen.*vl|qwen2.*vl|qwen3.*vl|qwen3\.[5-9]|qwen3p8-27b|pixtral|llama.*vision|gemma.*vision|gemma-?[34]|step-3/;
+const BASE_VISION_MODEL_PATTERN = /gpt-4o|gpt-4\.1|gpt-4-turbo|gpt-5|gpt-6(?:\.1)?-(?:luna-pro|sol|astra)(?:$|[-_.:/])|claude|gemini|grok|minimax-m3|kimi-k(?:-?3|2\.[5-9])|llava|qwen.*vl|qwen2.*vl|qwen3.*vl|qwen3\.[5-9]|qwen3p8-27b|pixtral|llama.*vision|gemma.*vision|gemma-?[34]|step-3/;
 export function baseModelNameSniffedVision(model) {
   return BASE_VISION_MODEL_PATTERN.test(String(model || ''));
 }
@@ -279,11 +279,12 @@ export function shouldUseOpenAIResponsesApi(config = {}) {
     return /^(muse-spark|gpt-5|claude|gemini|grok)(?:$|[-_.\/])/.test(model);
   }
   if (!isOfficialOpenAIConfig(config)) return false;
-  // GPT-5.6 needs Responses for reliable reasoning/tool replay. GPT-5 Pro,
-  // GPT-5.2 Pro, GPT-5.4 Pro, and GPT-5.5 Pro are Responses-only. Proxies and
-  // compatible providers keep their existing Chat Completions wire format even
-  // when they reuse an OpenAI model id.
+  // GPT-5.6 and GPT-6.1 Sol need Responses for reliable reasoning/tool replay.
+  // GPT-5 Pro, GPT-5.2 Pro, GPT-5.4 Pro, and GPT-5.5 Pro are Responses-only.
+  // Proxies and compatible providers keep their existing Chat Completions wire
+  // format even when they reuse an OpenAI model id.
   return /^gpt-5\.6(?:$|-(?:sol|terra|luna)(?:$|-))/.test(model)
+    || /^gpt-6\.1-sol(?:$|[-_.:])/.test(model)
     || /^gpt-5(?:\.(?:2|4|5))?-pro(?:$|-\d{4}-\d{2}-\d{2}$)/.test(model);
 }
 
@@ -327,9 +328,9 @@ export function requiresOpenAIDefaultTemperature(config = {}) {
   const providerName = clean(config.providerName);
   const model = clean(config.model);
   if (providerName === 'openrouter') {
-    return /(?:^|\/)openai\/gpt-6-(?:luna-pro|sol|astra)(?:$|[-_.\/:])/.test(model);
+    return /(?:^|\/)openai\/gpt-6(?:\.1)?-(?:luna-pro|sol|astra)(?:$|[-_.\/:])/.test(model);
   }
-  return isOfficialOpenAIConfig(config) && /^gpt-6-(?:luna-pro|sol|astra)(?:$|[-_.:])/.test(model);
+  return isOfficialOpenAIConfig(config) && /^gpt-6(?:\.1)?-(?:luna-pro|sol|astra)(?:$|[-_.:])/.test(model);
 }
 
 export function supportsOpenAIAskStreaming(config = {}) {

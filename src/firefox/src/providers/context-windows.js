@@ -279,7 +279,7 @@ export function inferContextWindow(config = {}) {
   if (!model) return DEFAULT_CLOUD_CONTEXT_WINDOW;
 
   // OpenAI
-  if (/(?:^|\/)gpt-6-(?:luna-pro|sol|astra)(?:[.\-:]|$)/.test(model)) return 1050000;
+  if (/(?:^|\/)gpt-6(?:\.1)?-(?:luna-pro|sol|astra)(?:[.\-:]|$)/.test(model)) return 1050000;
   if (/^gpt-5\.6(?:[.\-]|$)/.test(model) || model.includes('/gpt-5.6')) return 1050000;
   if (model.includes('gpt-5.5-pro')) return 1050000;
   if (/^gpt-5(?:[.\-]|$)/.test(model) || model.includes('/gpt-5')) return 400000;
@@ -353,6 +353,7 @@ export function inferMaxOutputTokens(config = {}) {
   if (!model) return null;
 
   // OpenAI and router slugs
+  if (/^gpt-6(?:\.1)?-(?:luna-pro|sol|astra)(?:[.\-:]|$)/.test(model) || model.includes('/gpt-6.1-sol')) return 128000;
   if (/^gpt-5(?:[.\-]|$)/.test(model) || model.includes('/gpt-5')) return 128000;
   if (/(?:^|\/)o[1-4](?:[.\-]|$)/.test(model)) return 100000;
   if (model.includes('gpt-4.1')) return 32768;
