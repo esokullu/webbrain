@@ -22,17 +22,17 @@ cd mcp-server && npm install && npm run build
 
 ## Connect the browser
 
-> **Chromium first.** Chrome, Edge, Brave, Opera, Vivaldi run the bridge from the extension's **offscreen document** (`src/chrome/src/offscreen/cloud-bridge.js`). Firefox has no offscreen document, so `src/firefox/src/cloud-bridge.js` runs it in the background page, configured under **Settings → Cloud Bridge**; it has not yet been verified against this MCP server on a real Firefox install.
+> **Chromium first.** Chrome, Edge, Brave, Opera, Vivaldi run the bridge from the extension's **offscreen document** (`src/chrome/src/offscreen/cloud-bridge.js`). Firefox has no offscreen document, so `src/firefox/src/cloud-bridge.js` runs it in the background page, configured under the same **Settings → Bridge** tab; it has not yet been verified against this MCP server on a real Firefox install.
 >
 > This server does not use the optional browser-approval handshake (token, `connection_pending` / `connection_approved`). Without a token the extension behaves exactly as before. See [Cloud Bridge browser approval](../docs/cloud-bridge-browser-approval.md) for backends that want it.
 
 The MCP server hosts the listener; the extension dials out to it. A Manifest V3 extension cannot listen on a socket, so the direction is fixed.
 
 1. Install the [WebBrain extension](https://webbrain.one) and open your browser.
-2. In **WebBrain → Settings → General → Advanced → MCP**, set the URL to `ws://127.0.0.1:17374/extension` and enable it.
+2. In **WebBrain → Settings → Bridge**, set the URL to `ws://127.0.0.1:17374/extension` and enable it.
 3. Ask your MCP client to call `webbrain_connection` to confirm.
 
-> **One bridge at a time.** The extension holds exactly one outbound bridge socket. Pointing it here means it is *not* pointed at WebBrain Cloud (`17373`) or the LM Studio plugin (`17375`). Switch it under **Settings → General → Advanced → MCP**.
+> **One bridge at a time.** The extension holds exactly one outbound bridge socket. Pointing it here means it is *not* pointed at WebBrain Cloud (`17373`) or the LM Studio plugin (`17375`). Switch it under **Settings → Bridge**.
 
 ## Register with a client
 
@@ -82,7 +82,7 @@ npm start
 ```
 
 After it is running, enable `ws://127.0.0.1:17374/extension` under **WebBrain →
-Settings → General → Advanced → MCP**. Ask the MCP client to call
+Settings → Bridge**. Ask the MCP client to call
 `webbrain_connection` to verify the complete connection.
 
 ## Troubleshooting

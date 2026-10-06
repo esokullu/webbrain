@@ -88,7 +88,7 @@ const SUBSCRIPTION_GUIDE_PRODUCTS = Object.freeze({
 
 // Version shown in the subtitle. Kept here so it only needs one update per
 // release; the subtitle string itself is translated.
-const EXT_VERSION = '39.0.0';
+const EXT_VERSION = '39.1.0';
 
 const providersContainer = document.getElementById('providers');
 const displaySettings = document.getElementById('display-settings');
@@ -137,10 +137,6 @@ const tracingToggle = document.getElementById('toggle-tracing');
 const losslessTracingToggle = document.getElementById('toggle-lossless-tracing');
 const strictSecretToggle = document.getElementById('toggle-strict-secret');
 const allowLocalNetworkToggle = document.getElementById('toggle-allow-local-network');
-const cloudBridgeToggle = document.getElementById('toggle-cloud-bridge');
-const cloudBridgeUrlInput = document.getElementById('input-cloud-bridge-url');
-const cloudBridgeStatus = document.getElementById('cloud-bridge-status');
-const cloudBridgeStatusText = document.getElementById('cloud-bridge-status-text');
 const scheduledTasksToggle = document.getElementById('toggle-scheduled-tasks');
 const scheduledConfirmToggle = document.getElementById('toggle-scheduled-confirm');
 const visionBaseUrlInput = document.getElementById('vision-base-url');
@@ -471,11 +467,6 @@ const MAX_AGENT_STEPS_DEFAULT = 130;
 const MAX_AGENT_STEPS_UNLIMITED_SENTINEL = 200;
 const PLAN_BEFORE_ACT_MODES = new Set(['try', 'strict', 'off']);
 const PLAN_REVIEW_MODES = new Set(['confidence', 'always', 'never']);
-const CLOUD_BRIDGE_ENABLED_KEY = 'webbrainCloudBridgeEnabled';
-const CLOUD_BRIDGE_URL_KEY = 'webbrainCloudBridgeUrl';
-const DEFAULT_CLOUD_BRIDGE_URL = 'ws://127.0.0.1:17374/extension';
-let cloudBridgeStatusPollTimer = null;
-let cloudBridgeStatusRequestPending = false;
 // Product default: auto-approve plans at 75% confidence to reduce review stops.
 // Planner prompt still tells the LLM to reserve 90%+ for straightforward plans;
 // that intentional gap keeps model scoring conservative without over-pausing.
@@ -512,203 +503,6 @@ function updatePlanReviewConfidenceUI() {
 function normalizeCostAmount(value, fallback = DEFAULT_COST_ALLOWANCE_USD) {
   const n = Number(value);
   return Number.isFinite(n) && n >= 0 ? n : fallback;
-}
-
-function normalizeCloudBridgeSettingsUrl(value) {
-  const url = new URL(String(value || DEFAULT_CLOUD_BRIDGE_URL));
-  const host = url.hostname.toLowerCase();
-  if (url.protocol !== 'ws:' || !['127.0.0.1', 'localhost', '::1', '[::1]'].includes(host)) {
-    throw new Error(t('st.display.cloud_bridge.invalid_url'));
-  }
-  return url.href;
-}
-
-function setCloudBridgeStatus(state, message) {
-  if (!cloudBridgeStatus || !cloudBridgeStatusText) return;
-  cloudBridgeStatus.dataset.state = state;
-  cloudBridgeStatusText.textContent = message;
-}
-
-function renderCloudBridgeStatus(status = {}) {
-  if (!cloudBridgeToggle?.checked || status.enabled === false) {
-    setCloudBridgeStatus('disabled', t('st.display.cloud_bridge.status_disabled'));
-    return;
-  }
-  if (status.connected) {
-    setCloudBridgeStatus('connected', t('st.display.cloud_bridge.status_connected'));
-    return;
-  }
-  if (status.lastError === 'WebSocket error') {
-    setCloudBridgeStatus('waiting', t('st.display.cloud_bridge.status_unreachable', {
-      url: status.url || cloudBridgeUrlInput?.value || DEFAULT_CLOUD_BRIDGE_URL,
-    }));
-    return;
-  }
-  if (status.lastError) {
-    setCloudBridgeStatus('error', t('st.display.cloud_bridge.status_error', { error: status.lastError }));
-    return;
-  }
-  if (Number(status.reconnectAttempt) > 0) {
-    setCloudBridgeStatus('waiting', t('st.display.cloud_bridge.status_reconnecting', {
-      attempt: status.reconnectAttempt,
-    }));
-    return;
-  }
-  setCloudBridgeStatus('waiting', t('st.display.cloud_bridge.status_connecting'));
-}
-
-function validateCloudBridgeUrl({ report = false } = {}) {
-  if (!cloudBridgeUrlInput) return '';
-  try {
-    const normalized = normalizeCloudBridgeSettingsUrl(cloudBridgeUrlInput.value);
-    cloudBridgeUrlInput.setCustomValidity('');
-    cloudBridgeUrlInput.removeAttribute('aria-invalid');
-    return normalized;
-  } catch (error) {
-    const message = error?.message || t('st.display.cloud_bridge.invalid_url');
-    cloudBridgeUrlInput.setCustomValidity(message);
-    cloudBridgeUrlInput.setAttribute('aria-invalid', 'true');
-    setCloudBridgeStatus('error', message);
-    if (report) cloudBridgeUrlInput.reportValidity();
-    return '';
-  }
-}
-
-function setCloudBridgeControlsBusy(busy) {
-  if (cloudBridgeToggle) cloudBridgeToggle.disabled = busy;
-  if (cloudBridgeUrlInput) cloudBridgeUrlInput.disabled = busy;
-  const setting = document.getElementById('cloud-bridge-setting');
-  if (busy) setting?.setAttribute('aria-busy', 'true');
-  else setting?.removeAttribute('aria-busy');
-}
-
-async function refreshCloudBridgeStatus() {
-  if (!cloudBridgeToggle?.checked || cloudBridgeUrlInput?.getAttribute('aria-invalid') === 'true' || document.hidden || cloudBridgeStatusRequestPending) return;
-  cloudBridgeStatusRequestPending = true;
-  try {
-    renderCloudBridgeStatus(await sendToBackground('cloud_bridge_status'));
-  } catch (error) {
-    setCloudBridgeStatus('error', t('st.display.cloud_bridge.status_error', { error: error.message }));
-  } finally {
-    cloudBridgeStatusRequestPending = false;
-  }
-}
-
-function startCloudBridgeStatusPolling() {
-  if (cloudBridgeStatusPollTimer) return;
-  cloudBridgeStatusPollTimer = setInterval(refreshCloudBridgeStatus, 2000);
-  document.addEventListener('visibilitychange', () => {
-    if (!document.hidden) refreshCloudBridgeStatus();
-  });
-}
-
-async function saveCloudBridgeUrl() {
-  const normalized = validateCloudBridgeUrl({ report: true });
-  if (!normalized) return;
-  cloudBridgeUrlInput.value = normalized;
-  try {
-    await chrome.storage.local.set({ [CLOUD_BRIDGE_URL_KEY]: normalized });
-    if (!cloudBridgeToggle.checked) {
-      renderCloudBridgeStatus({ enabled: false });
-      return;
-    }
-    renderCloudBridgeStatus(await sendToBackground('cloud_bridge_start', { url: normalized }));
-  } catch (error) {
-    setCloudBridgeStatus('error', t('st.display.cloud_bridge.status_error', { error: error.message }));
-  }
-}
-
-async function toggleCloudBridge() {
-  if (!cloudBridgeToggle || !cloudBridgeUrlInput) return;
-  if (!cloudBridgeToggle.checked) {
-    setCloudBridgeControlsBusy(true);
-    try {
-      await chrome.storage.local.set({ [CLOUD_BRIDGE_ENABLED_KEY]: false });
-      await sendToBackground('cloud_bridge_stop').catch(() => null);
-      renderCloudBridgeStatus({ enabled: false });
-    } catch (error) {
-      cloudBridgeToggle.checked = true;
-      setCloudBridgeStatus('error', t('st.display.cloud_bridge.status_error', { error: error.message }));
-    } finally {
-      setCloudBridgeControlsBusy(false);
-    }
-    return;
-  }
-
-  const normalized = validateCloudBridgeUrl({ report: true });
-  if (!normalized) {
-    cloudBridgeToggle.checked = false;
-    return;
-  }
-  cloudBridgeUrlInput.value = normalized;
-  setCloudBridgeControlsBusy(true);
-  try {
-    await chrome.storage.local.set({
-      [CLOUD_BRIDGE_ENABLED_KEY]: true,
-      [CLOUD_BRIDGE_URL_KEY]: normalized,
-    });
-    renderCloudBridgeStatus(await sendToBackground('cloud_bridge_start', { url: normalized }));
-  } catch (error) {
-    cloudBridgeToggle.checked = false;
-    await chrome.storage.local.set({ [CLOUD_BRIDGE_ENABLED_KEY]: false }).catch(() => {});
-    setCloudBridgeStatus('error', t('st.display.cloud_bridge.status_error', { error: error.message }));
-  } finally {
-    setCloudBridgeControlsBusy(false);
-  }
-}
-
-async function initCloudBridgeSettings(stored) {
-  if (!cloudBridgeToggle || !cloudBridgeUrlInput) return;
-  cloudBridgeToggle.checked = stored[CLOUD_BRIDGE_ENABLED_KEY] === true;
-  cloudBridgeUrlInput.value = stored[CLOUD_BRIDGE_URL_KEY] || DEFAULT_CLOUD_BRIDGE_URL;
-
-  const normalized = validateCloudBridgeUrl();
-  if (normalized) cloudBridgeUrlInput.value = normalized;
-  if (cloudBridgeToggle.checked && normalized) {
-    try {
-      renderCloudBridgeStatus(await sendToBackground('cloud_bridge_start', { url: normalized }));
-    } catch (error) {
-      setCloudBridgeStatus('error', t('st.display.cloud_bridge.status_error', { error: error.message }));
-    }
-  } else if (normalized) {
-    renderCloudBridgeStatus({ enabled: false });
-  }
-
-  cloudBridgeToggle.addEventListener('change', () => {
-    toggleCloudBridge().catch((error) => {
-      setCloudBridgeStatus('error', t('st.display.cloud_bridge.status_error', { error: error.message }));
-    });
-  });
-  cloudBridgeUrlInput.addEventListener('input', () => {
-    cloudBridgeUrlInput.setCustomValidity('');
-    cloudBridgeUrlInput.removeAttribute('aria-invalid');
-  });
-  cloudBridgeUrlInput.addEventListener('change', () => {
-    saveCloudBridgeUrl().catch((error) => {
-      setCloudBridgeStatus('error', t('st.display.cloud_bridge.status_error', { error: error.message }));
-    });
-  });
-  cloudBridgeUrlInput.addEventListener('keydown', (event) => {
-    if (event.key !== 'Enter') return;
-    event.preventDefault();
-    cloudBridgeUrlInput.blur();
-  });
-  document.addEventListener('wb-locale-changed', () => {
-    if (cloudBridgeToggle.checked) refreshCloudBridgeStatus();
-    else renderCloudBridgeStatus({ enabled: false });
-  });
-  chrome.storage.onChanged.addListener((changes, area) => {
-    if (area !== 'local') return;
-    if (changes[CLOUD_BRIDGE_URL_KEY]?.newValue) {
-      cloudBridgeUrlInput.value = changes[CLOUD_BRIDGE_URL_KEY].newValue;
-    }
-    if (changes[CLOUD_BRIDGE_ENABLED_KEY]) {
-      cloudBridgeToggle.checked = changes[CLOUD_BRIDGE_ENABLED_KEY].newValue === true;
-      if (cloudBridgeToggle.checked) refreshCloudBridgeStatus();
-      else renderCloudBridgeStatus({ enabled: false });
-    }
-  });
-  startCloudBridgeStatusPolling();
 }
 
 function formatUsd(value) {
@@ -806,7 +600,7 @@ async function init() {
   chrome.storage.local.remove(['authToken', 'authEmail', 'authDefaultModel']).catch(() => {});
 
   // Load display settings
-  const stored = await chrome.storage.local.get(['verboseMode', 'composerDeliveryMode', 'selectionShortcutEnabled', 'pdfViewerEnabled', AUTO_GROUP_TABS_KEY, 'helpImproveWebBrain', 'screenshotFallback', 'maxAgentSteps', 'autoScreenshot', 'useSiteAdapters', 'researchEscalationEnabled', 'researchEscalationEngine', 'voiceInputEnabled', 'alwaysAllowApiMutations', 'apiMutationObserverEnabled', 'webMcpEnabled', 'openaiAskStreamingEnabled', 'planBeforeActMode', 'planBeforeAct', 'planReviewMode', 'planReviewConfidenceThreshold', DOWNLOAD_DIRECTORY_STORAGE_KEY, 'notifySound', 'completionConfetti', 'completionFlashTab', 'tracingEnabled', 'losslessTrace', 'strictSecretMode', 'agentAllowLocalNetwork', CLOUD_BRIDGE_ENABLED_KEY, CLOUD_BRIDGE_URL_KEY, 'scheduledTasksEnabled', 'scheduledRequireConsequentialConfirmation', 'systemOneEnabled', 'systemOneWatchEnabled', 'systemOneCompletionEnabled', 'systemOneFastClassifications', 'systemOneFastBrowser', 'systemOneWatchThreshold', 'systemOneCompletionThreshold', 'typesafeApiKey', 'providerFilter', 'requestTimeoutMs', 'clarifyTimeoutSec', 'clarifyTimeoutSemanticsV2', 'costAllowanceSessionUsd', 'costAllowanceTotalUsd', 'meteredProviderCostSpentUsd', 'screenshotRedaction', 'imageDetail', 'maxScreenshotsPerTurn', 'maxImageDimension']);
+  const stored = await chrome.storage.local.get(['verboseMode', 'composerDeliveryMode', 'selectionShortcutEnabled', 'pdfViewerEnabled', AUTO_GROUP_TABS_KEY, 'helpImproveWebBrain', 'screenshotFallback', 'maxAgentSteps', 'autoScreenshot', 'useSiteAdapters', 'researchEscalationEnabled', 'researchEscalationEngine', 'voiceInputEnabled', 'alwaysAllowApiMutations', 'apiMutationObserverEnabled', 'webMcpEnabled', 'openaiAskStreamingEnabled', 'planBeforeActMode', 'planBeforeAct', 'planReviewMode', 'planReviewConfidenceThreshold', DOWNLOAD_DIRECTORY_STORAGE_KEY, 'notifySound', 'completionConfetti', 'completionFlashTab', 'tracingEnabled', 'losslessTrace', 'strictSecretMode', 'agentAllowLocalNetwork', 'scheduledTasksEnabled', 'scheduledRequireConsequentialConfirmation', 'systemOneEnabled', 'systemOneWatchEnabled', 'systemOneCompletionEnabled', 'systemOneFastClassifications', 'systemOneFastBrowser', 'systemOneWatchThreshold', 'systemOneCompletionThreshold', 'typesafeApiKey', 'providerFilter', 'requestTimeoutMs', 'clarifyTimeoutSec', 'clarifyTimeoutSemanticsV2', 'costAllowanceSessionUsd', 'costAllowanceTotalUsd', 'meteredProviderCostSpentUsd', 'screenshotRedaction', 'imageDetail', 'maxScreenshotsPerTurn', 'maxImageDimension']);
   if (typeof stored.providerFilter === 'string' && ['all','active','local','cloud','router'].includes(stored.providerFilter)) {
     providerFilter = stored.providerFilter;
   }
@@ -899,7 +693,8 @@ async function init() {
   if (allowLocalNetworkToggle) {
     allowLocalNetworkToggle.checked = stored.agentAllowLocalNetwork === true; // off by default
   }
-  await initCloudBridgeSettings(stored);
+  // Bridge (MCP + Cloud Bridge + WebMCP) lives in Settings → Bridge.
+  // settings-cloud-bridge.js is the sole owner of webbrainCloudBridge* keys.
   if (scheduledTasksToggle) {
     scheduledTasksToggle.checked = stored.scheduledTasksEnabled !== false; // on by default
   }

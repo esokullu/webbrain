@@ -148,10 +148,10 @@ After adding the config, restart the MCP client. On startup, it spawns `npx -y @
 The MCP server alone is not enough — you need the WebBrain extension installed and pointed at it:
 
 1. Install the [WebBrain extension](https://webbrain.one) in Chrome, Edge, Brave, Opera, or Vivaldi and open the browser.
-2. In **WebBrain → Settings → General → Advanced → MCP**, set the URL to `ws://127.0.0.1:17374/extension` and enable it.
+2. In **WebBrain → Settings → Bridge**, set the URL to `ws://127.0.0.1:17374/extension` and enable it.
 3. Restart your MCP client (or just restart the MCP server process) and ask the client to call `webbrain_connection` to verify.
 
-The extension holds exactly one outbound bridge socket. Pointing it here means it is *not* pointed at WebBrain Cloud (port `17373`) or the LM Studio plugin (port `17375`). Switch it under **Settings → General → Advanced → MCP** when you need to change destinations.
+The extension holds exactly one outbound bridge socket. Pointing it here means it is *not* pointed at WebBrain Cloud (port `17373`) or the LM Studio plugin (port `17375`). Switch it under **Settings → Bridge** when you need to change destinations.
 
 <div class="callout">
 **Network binding is loopback-only.** The listener binds `127.0.0.1` only. Anything that can reach this port can drive your signed-in browser — never expose it to a network or container bridge. The shipping extension sends no shared secret, so treat the port as trusted-local.

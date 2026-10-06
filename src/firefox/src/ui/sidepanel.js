@@ -2565,8 +2565,13 @@ function syncComposerDeliveryState() {
   const sendLabel = isProcessing
     ? (composerDeliveryMode === 'steer' ? 'sp.steer.title' : 'sp.queue.send')
     : 'sp.btn.send';
-  sendBtn.title = t(sendLabel);
-  sendBtn.setAttribute('aria-label', t(sendLabel));
+  // In steer mode the send button steers, so also advertise the opposite
+  // action. Composed from existing keys so every locale already has both halves.
+  const sendTitle = sendLabel === 'sp.steer.title'
+    ? `${t('sp.steer.title')} · ${t('sp.queue.send')} (Alt+Shift+Enter)`
+    : t(sendLabel);
+  sendBtn.title = sendTitle;
+  sendBtn.setAttribute('aria-label', sendTitle);
   sendBtn.dataset.i18nTitle = sendLabel;
 }
 
@@ -14169,9 +14174,15 @@ inputEl.addEventListener('keydown', (e) => {
       return;
     }
   }
-  if (e.key === 'Enter' && !e.shiftKey) {
+  if (e.key === 'Enter' && (!e.shiftKey || (e.altKey && isProcessing))) {
     e.preventDefault();
-    sendMessage(e.altKey && isProcessing ? { __deliveryMode: 'immediate' } : {});
+    // Alt+Enter always steers the running task; Alt+Shift+Enter is its mirror
+    // and always queues, even when steering is the default delivery mode.
+    if (e.altKey && e.shiftKey && isProcessing) {
+      sendMessage({ __deliveryMode: 'queue' });
+    } else {
+      sendMessage(e.altKey && isProcessing ? { __deliveryMode: 'immediate' } : {});
+    }
   }
 });
 

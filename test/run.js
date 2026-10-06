@@ -50992,7 +50992,7 @@ test('sidepanel queued composer messages expose edit and delete controls', () =>
     assert.match(panel, /queued-message-edit/, `${label}: queued item should render an edit button`);
     assert.match(panel, /queued-message-delete/, `${label}: queued item should render a delete button`);
     assert.match(panel, /queuedMessagesEl\?\.addEventListener\('click', \(e\) => \{[\s\S]*?e\.target\.closest\('button\[data-queue-action\]\[data-queue-id\]'\);[\s\S]*?editQueuedComposerMessage\(currentTabId, queueId\);[\s\S]*?\}\);/, `${label}: queued edit button clicks should call the edit helper`);
-    assert.match(panel, /inputEl\.addEventListener\('keydown', \(e\) => \{[\s\S]*?if \(e\.isComposing \|\| e\.keyCode === 229\) return;[\s\S]*?if \(handleSlashCommandKeydown\(e\)\) return;[\s\S]*?const isPlainArrow = !e\.altKey && !e\.ctrlKey && !e\.metaKey && !e\.shiftKey;[\s\S]*?if \(e\.key === 'ArrowUp' && editLastQueuedComposerMessageForCurrentTab\(\)\) \{[\s\S]*?e\.preventDefault\(\);[\s\S]*?return;[\s\S]*?\}[\s\S]*?if \(e\.key === 'Enter' && !e\.shiftKey\)/, `${label}: plain ArrowUp should edit queued messages before history and Enter handling`);
+    assert.match(panel, /inputEl\.addEventListener\('keydown', \(e\) => \{[\s\S]*?if \(e\.isComposing \|\| e\.keyCode === 229\) return;[\s\S]*?if \(handleSlashCommandKeydown\(e\)\) return;[\s\S]*?const isPlainArrow = !e\.altKey && !e\.ctrlKey && !e\.metaKey && !e\.shiftKey;[\s\S]*?if \(e\.key === 'ArrowUp' && editLastQueuedComposerMessageForCurrentTab\(\)\) \{[\s\S]*?e\.preventDefault\(\);[\s\S]*?return;[\s\S]*?\}[\s\S]*?if \(e\.key === 'Enter' && \(!e\.shiftKey \|\| \(e\.altKey && isProcessing\)\)\)/, `${label}: plain ArrowUp should edit queued messages before history and Enter handling`);
     const drainStart = panel.indexOf('function drainQueuedComposerMessageForCurrentTab()');
     const drainEnd = panel.indexOf('function renderClearedConversationForTab', drainStart);
     assert.notEqual(drainStart, -1, `${label}: queued composer drain helper should exist`);
@@ -51018,6 +51018,33 @@ test('sidepanel queued composer messages expose edit and delete controls', () =>
     assert.match(css, /\.queued-message-action/, `${label}: queued message controls should be styled`);
     assert.match(locale, /'sp\.queue\.edit': 'Edit queued message'/, `${label}: queued edit label should have an English fallback`);
     assert.match(locale, /'sp\.queue\.delete': 'Delete queued message'/, `${label}: queued delete label should have an English fallback`);
+  }
+});
+
+test('sidepanel Alt+Shift+Enter always queues mid-run messages', () => {
+  for (const [label, panelRel, localeRel] of [
+    ['chrome', 'src/chrome/src/ui/sidepanel.js', 'src/chrome/src/ui/locales/en.js'],
+    ['firefox', 'src/firefox/src/ui/sidepanel.js', 'src/firefox/src/ui/locales/en.js'],
+  ]) {
+    const panel = fs.readFileSync(path.join(ROOT, panelRel), 'utf8');
+    const locale = fs.readFileSync(path.join(ROOT, localeRel), 'utf8');
+    assert.match(
+      panel,
+      /if \(e\.altKey && e\.shiftKey && isProcessing\) \{[\s\S]*?sendMessage\(\{ __deliveryMode: 'queue' \}\);/,
+      `${label}: Alt+Shift+Enter should force queue delivery while a run is processing`,
+    );
+    assert.match(
+      panel,
+      /__deliveryMode === 'immediate'[\s\S]*?__deliveryMode !== 'queue' && composerDeliveryMode === 'steer'[\s\S]*?return enqueueQueuedComposerMessage\(tabId, text\);/,
+      `${label}: forced queue delivery should bypass the steer default and enqueue`,
+    );
+    assert.match(
+      panel,
+      /const sendTitle = sendLabel === 'sp\.steer\.title'[\s\S]*?t\('sp\.steer\.title'\)[\s\S]*?t\('sp\.queue\.send'\)[\s\S]*?Alt\+Shift\+Enter/,
+      `${label}: steer-mode send button should advertise the queue shortcut`,
+    );
+    assert.match(locale, /'sp\.steer\.title': 'Steer the current task \(Alt\+Enter\)'/, `${label}: steer tooltip should keep its English fallback`);
+    assert.match(locale, /'sp\.queue\.send': 'Queue message'/, `${label}: queue label should keep its English fallback`);
   }
 });
 
@@ -62927,59 +62954,97 @@ test('inspect_event_listeners resolves marked ref targets through CDP and always
   }
 });
 
-test('MCP bridge settings are Chromium-only, live under Advanced, and keep setup guidance in sync', () => {
+test('MCP bridge settings are Chromium-only, live under Bridge, and keep setup guidance in sync', async () => {
   const chromeHtml = fs.readFileSync(path.join(ROOT, 'src/chrome/src/ui/settings.html'), 'utf8');
   const chromeSettings = fs.readFileSync(path.join(ROOT, 'src/chrome/src/ui/settings.js'), 'utf8');
+  const chromeBridgeSettings = fs.readFileSync(path.join(ROOT, 'src/chrome/src/ui/settings-cloud-bridge.js'), 'utf8');
   const chromeLocale = fs.readFileSync(path.join(ROOT, 'src/chrome/src/ui/locales/en.js'), 'utf8');
   const firefoxHtml = fs.readFileSync(path.join(ROOT, 'src/firefox/src/ui/settings.html'), 'utf8');
   const firefoxSettings = fs.readFileSync(path.join(ROOT, 'src/firefox/src/ui/settings.js'), 'utf8');
+  const firefoxBridgeSettings = fs.readFileSync(path.join(ROOT, 'src/firefox/src/ui/settings-cloud-bridge.js'), 'utf8');
   const firefoxLocale = fs.readFileSync(path.join(ROOT, 'src/firefox/src/ui/locales/en.js'), 'utf8');
 
   const generalStart = chromeHtml.indexOf('<section class="tab-panel" data-panel="display"');
   const providersStart = chromeHtml.indexOf('<section class="tab-panel active" data-panel="providers"', generalStart);
   const generalPanel = chromeHtml.slice(generalStart, providersStart);
   const advancedStart = generalPanel.indexOf('<details class="advanced-settings">');
-  const bridgeStart = generalPanel.indexOf('id="cloud-bridge-setting"');
+  const bridgePanelStart = chromeHtml.indexOf('<section class="tab-panel" data-panel="cloudbridge"');
+  const bridgePanel = chromeHtml.slice(bridgePanelStart);
   assert.notEqual(generalStart, -1, 'Chrome General settings panel missing');
   assert.notEqual(advancedStart, -1, 'Chrome General settings should include Advanced');
-  assert.ok(bridgeStart > advancedStart, 'MCP should live inside General > Advanced');
-  assert.match(generalPanel, /id="toggle-cloud-bridge"/, 'Chrome Advanced should expose the bridge toggle');
-  assert.match(generalPanel, /id="input-cloud-bridge-url"/, 'Chrome Advanced should expose the bridge URL');
-  assert.match(generalPanel, /id="cloud-bridge-status"[^>]*role="status"[^>]*aria-live="polite"/, 'bridge status should be announced accessibly');
-  assert.doesNotMatch(generalPanel, /id="toggle-cloud-bridge"\s+checked/, 'MCP must default off');
+  assert.notEqual(bridgePanelStart, -1, 'Chrome Bridge panel missing');
+  assert.doesNotMatch(generalPanel, /id="cloud-bridge-setting"|id="toggle-cloud-bridge"|id="input-cloud-bridge-url"|id="toggle-webmcp"/, 'Bridge controls should not live inside General > Advanced');
+  assert.match(bridgePanel, /id="cb-enabled"/, 'Bridge tab should expose the bridge toggle');
+  assert.match(bridgePanel, /id="cb-url"/, 'Bridge tab should expose the bridge URL');
+  assert.match(bridgePanel, /data-cb-preset="ws:\/\/127\.0\.0\.1:17373\/extension"/, 'Bridge tab should offer the Cloud preset');
+  assert.match(bridgePanel, /data-cb-preset="ws:\/\/127\.0\.0\.1:17374\/extension"/, 'Bridge tab should offer the MCP preset');
+  assert.match(bridgePanel, /data-cb-preset="ws:\/\/127\.0\.0\.1:17375\/extension"/, 'Bridge tab should offer the LM Studio preset');
+  assert.match(bridgePanel, /id="cb-preset-custom"/, 'Bridge tab should offer a Custom pill for manual URLs');
+  assert.match(bridgePanel, /class="cb-preset-pill"/, 'Bridge presets should be pill-shaped buttons');
+  assert.ok(!/cb-preset-pill"[^>]*>[^<]*·/.test(bridgePanel), 'Bridge pill labels should not contain port numbers');
+  assert.match(bridgePanel, />MCP</, 'Bridge pill labels should use plain destination names');
+  assert.match(bridgePanel, /data-i18n-title="st\.cb\.preset_mcp_hint"/, 'Bridge pills should explain their destination on hover');
+  assert.match(bridgePanel, /id="cb-approval-details"/, 'Bridge approval fields should hide behind progressive disclosure');
+  assert.match(bridgePanel, /id="toggle-webmcp"/, 'Bridge tab should expose the WebMCP toggle');
+  assert.match(bridgePanel, /id="toggle-webmcp"\s+checked/, 'WebMCP must default on in Bridge tab');
+  assert.match(bridgePanel, /id="cb-status"[^>]*role="status"[^>]*aria-live="polite"/, 'bridge status should be announced accessibly');
+  assert.doesNotMatch(bridgePanel, /id="cb-enabled"\s+checked/, 'MCP must default off');
   assert.match(chromeHtml, /prefers-reduced-motion: reduce[\s\S]*cloud-bridge-status/, 'waiting animation should respect reduced-motion preferences');
   assert.match(chromeHtml, /href="https:\/\/www\.webbrain\.one\/docs\/mcp\/"[^>]*target="_blank"[^>]*rel="noopener noreferrer"/, 'MCP setting should link to the setup guide safely');
 
   assert.doesNotMatch(firefoxHtml, /cloud-bridge-setting|toggle-cloud-bridge|input-cloud-bridge-url/, 'Firefox should not show unsupported bridge controls');
+  assert.match(firefoxHtml, /data-cb-preset="ws:\/\/127\.0\.0\.1:17373\/extension"/, 'Firefox Bridge tab should offer the Cloud preset');
+  assert.match(firefoxHtml, /data-cb-preset="ws:\/\/127\.0\.0\.1:17374\/extension"/, 'Firefox Bridge tab should offer the MCP preset');
+  assert.match(firefoxHtml, /data-cb-preset="ws:\/\/127\.0\.0\.1:17375\/extension"/, 'Firefox Bridge tab should offer the LM Studio preset');
+  assert.match(firefoxHtml, /id="cb-approval-details"/, 'Firefox approval fields should hide behind progressive disclosure');
   assert.doesNotMatch(firefoxSettings, /webbrainCloudBridgeEnabled|webbrainCloudBridgeUrl|cloud_bridge_status/, 'Firefox settings should not wire the Chromium bridge');
   assert.doesNotMatch(firefoxLocale, /st\.display\.cloud_bridge/, 'Firefox should not ship copy for an unavailable setting');
 
-  assert.match(chromeSettings, /const CLOUD_BRIDGE_ENABLED_KEY = 'webbrainCloudBridgeEnabled';/, 'Chrome settings should use the runtime bridge enable key');
-  assert.match(chromeSettings, /const CLOUD_BRIDGE_URL_KEY = 'webbrainCloudBridgeUrl';/, 'Chrome settings should use the runtime bridge URL key');
-  assert.match(chromeSettings, /const DEFAULT_CLOUD_BRIDGE_URL = 'ws:\/\/127\.0\.0\.1:17374\/extension';/, 'MCP should default to its local listener');
-  assert.match(chromeSettings, /cloudBridgeToggle\.checked = stored\[CLOUD_BRIDGE_ENABLED_KEY\] === true/, 'bridge should hydrate only explicit opt-in');
-  assert.match(chromeSettings, /sendToBackground\('cloud_bridge_start', \{ url: normalized \}\)/, 'bridge controls should start the configured endpoint');
-  assert.match(chromeSettings, /sendToBackground\('cloud_bridge_stop'\)/, 'bridge controls should stop the endpoint');
-  assert.match(chromeSettings, /sendToBackground\('cloud_bridge_status'\)/, 'bridge controls should report live connection status');
-  const saveUrlStart = chromeSettings.indexOf('async function saveCloudBridgeUrl()');
-  const toggleStart = chromeSettings.indexOf('async function toggleCloudBridge()', saveUrlStart);
-  const saveUrlBody = chromeSettings.slice(saveUrlStart, toggleStart);
-  assert.doesNotMatch(saveUrlBody, /setCloudBridgeControlsBusy|cloudBridgeToggle\.disabled/, 'URL blur saves must not disable and cancel the pending bridge-toggle click');
-  assert.match(chromeSettings, /status\.lastError === 'WebSocket error'[\s\S]*status_unreachable/, 'generic WebSocket failures should explain that the local bridge is unreachable');
-  assert.match(chromeSettings, /url\.protocol !== 'ws:'[\s\S]*127\.0\.0\.1[\s\S]*localhost[\s\S]*\[::1\]/, 'settings should reject non-loopback bridge URLs before saving');
-  assert.match(chromeLocale, /'st\.display\.cloud_bridge\.label': 'MCP'/, 'Chrome English MCP label missing');
-  assert.match(chromeLocale, /Connect one local controller to this Chromium profile using port 17374\./, 'MCP copy should explain the local listener');
-  assert.doesNotMatch(chromeLocale, /'st\.display\.cloud_bridge\.desc':[^\n]*(?:WebBrain Cloud|WebBrain Compass)/, 'MCP description should not mention WebBrain Cloud or Compass');
-  for (const filename of fs.readdirSync(path.join(ROOT, 'src/chrome/src/ui/locales')).filter((name) => name.endsWith('.js'))) {
-    const locale = fs.readFileSync(path.join(ROOT, 'src/chrome/src/ui/locales', filename), 'utf8');
-    assert.match(locale, /'st\.display\.cloud_bridge\.label': 'MCP'/, `${filename}: MCP title should stay language-neutral`);
-    assert.match(locale, /'st\.display\.cloud_bridge\.url_placeholder': 'ws:\/\/127\.0\.0\.1:17374\/extension'/, `${filename}: MCP placeholder should use the MCP listener`);
-    assert.doesNotMatch(locale, /'st\.display\.cloud_bridge\.desc':[^\n]*(?:WebBrain Cloud|WebBrain Compass|LM Studio|17373|17375)/, `${filename}: MCP description should mention only the MCP destination`);
+  assert.doesNotMatch(chromeSettings, /CLOUD_BRIDGE_ENABLED_KEY|CLOUD_BRIDGE_URL_KEY|initCloudBridgeSettings/, 'Bridge keys should live in settings-cloud-bridge.js, not settings.js');
+  assert.match(chromeBridgeSettings, /enabled: 'webbrainCloudBridgeEnabled'/, 'Bridge tab should use the runtime bridge enable key');
+  assert.match(chromeBridgeSettings, /url: 'webbrainCloudBridgeUrl'/, 'Bridge tab should use the runtime bridge URL key');
+  assert.match(chromeBridgeSettings, /ws:\/\/127\.0\.0\.1:17374\/extension/, 'MCP should default to its local listener');
+  assert.match(chromeBridgeSettings, /send\('cloud_bridge_start', \{ url/, 'bridge controls should start the configured endpoint');
+  assert.match(chromeBridgeSettings, /send\('cloud_bridge_stop'\)/, 'bridge controls should stop the endpoint');
+  assert.match(chromeBridgeSettings, /send\('cloud_bridge_status'\)/, 'bridge controls should report live connection status');
+  assert.match(chromeBridgeSettings, /data-cb-preset/, 'bridge presets should fill the URL from quick-select chips');
+  assert.match(chromeBridgeSettings, /markCustomPill/, 'manual URL edits should stay on the Custom pill');
+  assert.match(chromeBridgeSettings, /cb-approval-details/, 'approval fields should auto-open when a token is stored');
+  assert.match(chromeBridgeSettings, /url\.protocol !== 'ws:'[\s\S]*127\.0\.0\.1[\s\S]*localhost[\s\S]*\[::1\]/, 'settings should reject non-loopback bridge URLs before saving');
+  const chromeBridgeCopy = await import(pathToFileURL(path.join(ROOT, 'src/chrome/src/ui/locales/cloud-bridge-copy.mjs')).href);
+  const firefoxBridgeCopy = await import(pathToFileURL(path.join(ROOT, 'src/firefox/src/ui/locales/cloud-bridge-copy.mjs')).href);
+  const bridgeDefaultKeys = Object.keys(chromeBridgeCopy.default).sort();
+  assert.deepEqual(Object.keys(firefoxBridgeCopy.default).sort(), bridgeDefaultKeys, 'Chrome and Firefox Bridge copy should define identical keys');
+  assert.equal(chromeBridgeCopy.default['st.cb.preset_mcp'], 'MCP', 'MCP pill label should stay language-neutral');
+  assert.equal(chromeBridgeCopy.default['st.cb.preset_lmstudio'], 'LM Studio', 'LM Studio pill label should stay language-neutral');
+  assert.match(chromeBridgeCopy.default['st.cb.preset_mcp_hint'], /17374/, 'MCP hint should explain the local listener');
+  assert.doesNotMatch(chromeBridgeCopy.default['st.cb.preset_mcp_hint'], /Compass/, 'MCP hint should not mention Compass');
+  const bridgePlaceholders = (value) => [...String(value).matchAll(/\{(\w+)\}/g)].map((match) => match[1]).sort();
+  const expectedBridgeLocales = ['ar', 'bn', 'de', 'es', 'fa', 'fr', 'he', 'hi', 'id', 'ja', 'ko', 'ms', 'nl', 'pl', 'pt', 'ru', 'th', 'tl', 'tr', 'uk', 'vi', 'zh'];
+  for (const [copyLabel, copy] of [['chrome', chromeBridgeCopy], ['firefox', firefoxBridgeCopy]]) {
+    assert.deepEqual(Object.keys(copy.cloudBridgeTranslations).sort(), expectedBridgeLocales, `${copyLabel}: Bridge translations should cover every locale`);
+    for (const code of expectedBridgeLocales) {
+      const table = copy.cloudBridgeTranslations[code];
+      assert.deepEqual(Object.keys(table).sort(), bridgeDefaultKeys, `${copyLabel}: Bridge translations for ${code} should define every key`);
+      for (const key of bridgeDefaultKeys) {
+        assert.deepEqual(bridgePlaceholders(table[key]), bridgePlaceholders(chromeBridgeCopy.default[key]), `${copyLabel}: Bridge ${code}:${key} must preserve interpolation placeholders`);
+      }
+      assert.equal(table['st.cb.preset_mcp'], 'MCP', `${copyLabel}: ${code} MCP pill label should stay language-neutral`);
+      assert.equal(table['st.cb.preset_lmstudio'], 'LM Studio', `${copyLabel}: ${code} LM Studio pill label should stay language-neutral`);
+    }
+  }
+  const bridgeKeyRefs = (source) => [...source.matchAll(/(?:data-i18n(?:-title)?="|t\(\s*['"])(st\.cb\.[a-z_]+|st\.tab\.cloudbridge)['"]/g)].map((match) => match[1]);
+  for (const [surfaceLabel, source] of [['chrome settings', chromeHtml + chromeBridgeSettings], ['firefox settings', firefoxHtml + firefoxBridgeSettings]]) {
+    const referenced = new Set(bridgeKeyRefs(source));
+    assert.ok(referenced.size > 0, `${surfaceLabel} should reference localized Bridge copy`);
+    for (const key of referenced) {
+      assert.ok(bridgeDefaultKeys.includes(key), `${surfaceLabel} references unknown Bridge key ${key}`);
+    }
   }
 
   for (const rel of ['README.md', 'mcp-server/README.md', 'lmstudio-plugin/README.md']) {
     const readme = fs.readFileSync(path.join(ROOT, rel), 'utf8');
-    assert.match(readme, /Settings → General → Advanced → MCP/, `${rel}: bridge setup path should match the Chromium UI`);
+    assert.match(readme, /Settings → Bridge/, `${rel}: bridge setup path should match the Chromium UI`);
   }
   const rootReadme = fs.readFileSync(path.join(ROOT, 'README.md'), 'utf8');
   const mcpReadme = fs.readFileSync(path.join(ROOT, 'mcp-server/README.md'), 'utf8');
@@ -62992,7 +63057,7 @@ test('MCP bridge settings are Chromium-only, live under Advanced, and keep setup
   const mcpIndex = fs.readFileSync(path.join(ROOT, 'mcp-server/src/index.ts'), 'utf8');
   const lmBridge = fs.readFileSync(path.join(ROOT, 'lmstudio-plugin/src/util/bridgeClient.ts'), 'utf8');
   for (const [label, source] of [['MCP error', mcpBridge], ['MCP connection', mcpIndex], ['LM Studio connection', lmBridge]]) {
-    assert.match(source, /Settings → General → Advanced → MCP/, `${label}: runtime setup guidance should match the UI`);
+    assert.match(source, /Settings → Bridge/, `${label}: runtime setup guidance should match the UI`);
   }
   const offscreenBridge = fs.readFileSync(path.join(ROOT, 'src/chrome/src/offscreen/cloud-bridge.js'), 'utf8');
   assert.match(offscreenBridge, /MCP URL must use ws:\/\/ on localhost\./, 'visible URL validation should use the MCP setting name');
@@ -63006,7 +63071,7 @@ test('MCP bridge settings are Chromium-only, live under Advanced, and keep setup
   ];
   for (const [label, rel] of namingSurfaces) {
     const source = fs.readFileSync(path.join(ROOT, rel), 'utf8');
-    assert.match(source, /General → Advanced → MCP/, `${label}: setup path should match the Chromium UI`);
+    assert.match(source, /Settings → Bridge/, `${label}: setup path should match the Chromium UI`);
     assert.doesNotMatch(source, /General → Advanced → Cloud bridge/, `${label}: retired setting name should not remain`);
   }
 });
@@ -63018,7 +63083,7 @@ test('Experimental WebMCP is Chrome-only, on by default, and present in default 
   const background = fs.readFileSync(path.join(ROOT, 'src/chrome/src/background.js'), 'utf8');
   const locale = fs.readFileSync(path.join(ROOT, 'src/chrome/src/ui/locales/en.js'), 'utf8');
 
-  assert.match(html, /id="toggle-webmcp"/, 'Chrome Advanced settings should expose the toggle');
+  assert.match(html, /id="toggle-webmcp"/, 'Chrome Bridge tab should expose the toggle');
   assert.match(html, /id="toggle-webmcp"\s+checked/, 'WebMCP must default on');
   assert.doesNotMatch(firefoxHtml, /id="toggle-webmcp"/, 'Firefox should not show an unsupported toggle');
   assert.match(settings, /webMcpToggle\.checked = stored\.webMcpEnabled !== false/, 'setting should default on unless explicitly disabled');

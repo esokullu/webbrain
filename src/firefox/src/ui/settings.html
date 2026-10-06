@@ -764,6 +764,33 @@
     }
     .btn-secondary:hover { background: rgba(255,255,255,0.05); }
 
+    .cb-presets {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-top: 12px;
+    }
+    .cb-preset-pill {
+      border: 1px solid var(--border);
+      background: var(--bg3);
+      color: var(--text2);
+      border-radius: 999px;
+      padding: 9px 18px;
+      font-size: 12px;
+      font-weight: 700;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: background 0.15s, color 0.15s, border-color 0.15s;
+    }
+    .cb-preset-pill:hover { color: var(--text); border-color: var(--accent); }
+    .cb-preset-pill.active {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: #fff;
+    }
+    .cb-preset-pill.active:hover { color: #fff; }
+    .cb-preset-pill:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
     .loaded-model-dialog {
       position: fixed;
       inset: 0;
@@ -2371,20 +2398,31 @@
           <span class="toggle-slider"></span>
         </label>
       </div>
-      <label class="cloud-bridge-url-field" for="cb-url">
+      <div class="cb-presets" id="cb-presets" role="group" data-i18n-aria-label="st.cb.preset_label">
+        <button class="cb-preset-pill" type="button" data-cb-preset="ws://127.0.0.1:17373/extension" data-i18n="st.cb.preset_cloud" data-i18n-title="st.cb.preset_cloud_hint" aria-pressed="false">Cloud</button>
+        <button class="cb-preset-pill" type="button" data-cb-preset="ws://127.0.0.1:17374/extension" data-i18n="st.cb.preset_mcp" data-i18n-title="st.cb.preset_mcp_hint" aria-pressed="false">MCP</button>
+        <button class="cb-preset-pill" type="button" data-cb-preset="ws://127.0.0.1:17375/extension" data-i18n="st.cb.preset_lmstudio" data-i18n-title="st.cb.preset_lmstudio_hint" aria-pressed="false">LM Studio</button>
+        <button class="cb-preset-pill" type="button" id="cb-preset-custom" data-i18n="st.cb.preset_custom" data-i18n-title="st.cb.preset_custom_hint" aria-pressed="false">Custom</button>
+      </div>
+      <label class="cloud-bridge-url-field" for="cb-url" style="margin-top:12px;">
         <span class="cloud-bridge-url-label" data-i18n="st.cb.url"></span>
         <input class="setting-input" type="text" id="cb-url" inputmode="url" autocomplete="off" spellcheck="false" placeholder="ws://127.0.0.1:17374/extension">
       </label>
-      <label class="cloud-bridge-url-field" for="cb-token" style="margin-top:12px;">
-        <span class="cloud-bridge-url-label" data-i18n="st.cb.token"></span>
-        <input class="setting-input" type="password" id="cb-token" autocomplete="off" spellcheck="false">
-      </label>
-      <div class="setting-desc" style="margin-top:4px;" data-i18n="st.cb.token_hint"></div>
-      <label class="cloud-bridge-url-field" for="cb-browser-id" style="margin-top:12px;">
-        <span class="cloud-bridge-url-label" data-i18n="st.cb.browser_name"></span>
-        <input class="setting-input" type="text" id="cb-browser-id" autocomplete="off" spellcheck="false" maxlength="64">
-      </label>
-      <div class="setting-desc" style="margin-top:12px;"><span data-i18n="st.cb.installation_id"></span> <code id="cb-installation-id">—</code></div>
+      <details class="advanced-settings" id="cb-approval-details" style="margin-top:12px;">
+        <summary data-i18n="st.cb.approval_summary"></summary>
+        <div class="advanced-settings-body">
+          <label class="cloud-bridge-url-field" for="cb-token">
+            <span class="cloud-bridge-url-label" data-i18n="st.cb.token"></span>
+            <input class="setting-input" type="password" id="cb-token" autocomplete="off" spellcheck="false">
+          </label>
+          <div class="setting-desc" style="margin-top:4px;" data-i18n="st.cb.token_hint"></div>
+          <label class="cloud-bridge-url-field" for="cb-browser-id" style="margin-top:12px;">
+            <span class="cloud-bridge-url-label" data-i18n="st.cb.browser_name"></span>
+            <input class="setting-input" type="text" id="cb-browser-id" autocomplete="off" spellcheck="false" maxlength="64">
+          </label>
+          <div class="setting-desc" style="margin-top:12px;"><span data-i18n="st.cb.installation_id"></span> <code id="cb-installation-id">—</code></div>
+        </div>
+      </details>
       <div class="btn-row" style="margin-top:14px;">
         <button class="btn-secondary" id="cb-test" data-i18n="st.cb.test"></button>
       </div>

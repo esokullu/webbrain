@@ -12,7 +12,7 @@ background (cloud-runs.js)  --cloud-bridge-start {url, token, browserId, install
 flowchart LR
   subgraph Browser["User's browser (Chrome)"]
     direction TB
-    S["Settings → Cloud Bridge<br/>URL · token · browser name"]
+    S["Settings → Bridge<br/>URL · token · browser name"]
     ST[("chrome.storage.local<br/>url, token, browserId, installationId")]
     BG["Background (cloud-runs.js)<br/>reads config, runs cloud_*"]
     OFF["Offscreen (cloud-bridge.js)<br/>WebSocket + approval state"]
@@ -49,7 +49,7 @@ Keys in `chrome.storage.local` (the existing mechanism; the URL and enable toggl
 | `webbrainCloudBridgeBrowserId` | Backend-visible name; defaults to the installation id |
 | `webbrainCloudBridgeInstallationId` | Generated once (`crypto.randomUUID()`) |
 
-All of these are editable in **Settings → Cloud Bridge**: enable toggle, backend URL, token, browser name (`browserId`), the read-only installation ID, and a **Save & test connection** button. The test saves the form, (re)starts the bridge and reports one of: backend unreachable, connected (no approval needed), waiting for approval, approved, or rejected (with the reason).
+All of these are editable in **Settings → Bridge**: enable toggle, backend URL, token, browser name (`browserId`), the read-only installation ID, and a **Save & test connection** button. The test saves the form, (re)starts the bridge and reports one of: backend unreachable, connected (no approval needed), waiting for approval, approved, or rejected (with the reason).
 
 To try it end to end: run `node examples/cloud-bridge-approval-server.mjs --token dev-token`, enter `dev-token` in the tab, press **Save & test connection** (status: waiting for approval), then type `approve` in the server terminal (status: approved) or `reject`.
 

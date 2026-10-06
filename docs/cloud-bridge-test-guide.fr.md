@@ -10,7 +10,7 @@ Guide pas à pas pour installer l'extension en mode développeur et tester la fe
 flowchart LR
   subgraph Browser["Navigateur de l'utilisateur (Chrome)"]
     direction TB
-    S["Settings → Cloud Bridge<br/>URL · token · nom du navigateur"]
+    S["Settings → Bridge<br/>URL · token · nom du navigateur"]
     ST[("chrome.storage.local<br/>url, token, browserId, installationId")]
     BG["Background (cloud-runs.js)<br/>lit la config, exécute les cloud_*"]
     OFF["Offscreen (cloud-bridge.js)<br/>socket WebSocket + état d'approbation"]

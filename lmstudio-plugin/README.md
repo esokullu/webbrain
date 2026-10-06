@@ -112,7 +112,7 @@ Firefox, `browser_task` will always return the not-connected response.
 `fetch_url` and `research_url` are unaffected and work everywhere.
 
 1. Install the extension and open your browser.
-2. In **WebBrain → Settings → General → Advanced → MCP**, set the URL to
+2. In **WebBrain → Settings → Bridge**, set the URL to
    `ws://127.0.0.1:17375/extension` and enable it.
 3. Ask the model to call `browser_status` to confirm.
 

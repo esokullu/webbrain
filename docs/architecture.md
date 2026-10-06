@@ -854,7 +854,7 @@ OS file pickers. Firefox WebExtensions provide no equivalent native-dialog API;
 those dialogs still require manual handling in Firefox.
 
 WebMCP is an experimental Chrome-only fast path that is on by default. The
-user can disable **Experimental WebMCP** under Settings → General → Advanced;
+user can disable **Experimental WebMCP** under Settings → Bridge;
 when disabled, neither WebMCP tool schemas nor WebMCP prompt guidance enter model
 requests. When enabled, `list_webmcp_tools` is
 available in Ask, Act, and Dev; `execute_webmcp_tool` is restricted to Act/Dev

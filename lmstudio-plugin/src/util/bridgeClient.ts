@@ -257,7 +257,7 @@ export class BridgeClient {
       "No WebBrain browser extension is connected, so browser tools are unavailable. " +
       `This plugin is listening on ${this.url}. To connect: install the WebBrain ` +
       "extension (https://webbrain.one) on a Chromium browser — Chrome, Edge, Brave, " +
-      "Opera or Vivaldi — open it, then set WebBrain → Settings → General → Advanced → MCP to " +
+      "Opera or Vivaldi — open it, then set WebBrain → Settings → Bridge to " +
       `${this.url} and enable it. The extension holds one bridge at a time, so it ` +
       "cannot also be pointed at WebBrain Cloud (17373) or the MCP server (17374). " +
       "Firefox cannot host the bridge at all: that build has no offscreen document. " +

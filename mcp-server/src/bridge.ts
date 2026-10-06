@@ -281,7 +281,7 @@ export class WebBrainBridge {
     if (!socket || !this.isConnected()) {
       throw new BridgeError(
         "No WebBrain extension is connected. Open the browser, then set " +
-          "WebBrain → Settings → General → Advanced → MCP to " +
+          "WebBrain → Settings → Bridge to " +
           `ws://127.0.0.1:${config.bridgePort}${config.bridgePath} and enable it.`,
       );
     }

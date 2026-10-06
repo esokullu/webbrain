@@ -10802,7 +10802,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
           denied: true,
           noDispatch: true,
           featureDisabled: true,
-          error: 'Experimental WebMCP is disabled. Enable it in Settings → General → Advanced before using WebMCP tools.',
+          error: 'Experimental WebMCP is disabled. Enable it in Settings → Bridge before using WebMCP tools.',
         },
       };
     }
@@ -34401,7 +34401,7 @@ If the user has already named or confirmed this exact recipient, do NOT ask agai
           denied: true,
           noDispatch: true,
           featureDisabled: true,
-          error: 'Experimental WebMCP is disabled. Enable it in Settings → General → Advanced before using WebMCP tools.',
+          error: 'Experimental WebMCP is disabled. Enable it in Settings → Bridge before using WebMCP tools.',
         };
       }
       try {
@@ -34424,7 +34424,7 @@ If the user has already named or confirmed this exact recipient, do NOT ask agai
           dispatched: false,
           noDispatch: true,
           featureDisabled: true,
-          error: 'Experimental WebMCP is disabled. Enable it in Settings → General → Advanced before using WebMCP tools.',
+          error: 'Experimental WebMCP is disabled. Enable it in Settings → Bridge before using WebMCP tools.',
         };
       }
       try {
