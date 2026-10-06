@@ -43,6 +43,7 @@ import {
 import { getBalance as capsolverGetBalance } from './agent/captcha-solver.js';
 import { isCapsolverEnabled } from './agent/capsolver-config.js';
 import { testImageGenProvider } from './agent/fal-media.js';
+import { IMAGE_GEN_MODEL_KEY } from './agent/media-config.js';
 import { CAPTCHA_SETTINGS_KEYS, getCaptchaProviders } from './agent/captcha-provider-config.js';
 import { getAdditionalCaptchaBalance } from './agent/captcha-additional-providers.js';
 import { getTwoCaptchaBalance } from './agent/two-captcha.js';
@@ -198,6 +199,7 @@ const scheduler = new ScheduledJobManager({
     await customSkillsReady;
     await alwaysAllowApiMutationsReady;
     await strictSecretModeReady;
+    await imageGenConfigReady;
     if (providerManager.providers.size === 0) await providerManager.load();
   },
   sendUpdate: (tabId, type, data) => {
@@ -485,6 +487,12 @@ async function loadStrictSecretMode() {
   agent.strictSecretMode = stored?.strictSecretMode === true;
 }
 const strictSecretModeReady = loadStrictSecretMode().catch(() => {});
+
+async function loadImageGenConfig() {
+  const stored = await browser.storage.local.get(IMAGE_GEN_MODEL_KEY).catch(() => ({}));
+  agent.setImageGenConfig(stored?.[IMAGE_GEN_MODEL_KEY]);
+}
+const imageGenConfigReady = loadImageGenConfig();
 
 async function loadProfile() {
   const stored = await browser.storage.local.get(['profileEnabled', 'profileText']);
@@ -1082,7 +1090,7 @@ browser.runtime.onStartup?.addListener?.(async () => {
 });
 
 // Listen for setting changes
-browser.storage.onChanged.addListener((changes) => {
+browser.storage.onChanged.addListener((changes, areaName) => {
   if (changes.wbLocale) {
     selectionShortcutLocale = normalizeSelectionShortcutLocale(changes.wbLocale.newValue);
     createContextMenus().catch(() => {});
@@ -1099,6 +1107,9 @@ browser.storage.onChanged.addListener((changes) => {
     agent.autoScreenshot = changes.autoScreenshot.newValue;
   }
   let refreshPrompts = false;
+  if (areaName === 'local' && changes[IMAGE_GEN_MODEL_KEY]) {
+    agent.setImageGenConfig(changes[IMAGE_GEN_MODEL_KEY].newValue);
+  }
   if (changes[ALWAYS_ALLOW_API_MUTATIONS_KEY]) {
     const value = changes[ALWAYS_ALLOW_API_MUTATIONS_KEY].newValue;
     agent.setAlwaysAllowApiMutations(value === undefined || value === true);
@@ -2506,7 +2517,7 @@ async function handleMessage(msg, sender) {
     }
     // Hydrate agent toggles and prompt add-ons once at boot (not per message);
     // onChanged keeps them in sync afterward.
-    await Promise.all([planBeforeActReady, planReviewReady, customSkillsReady, userMemoryReady]);
+    await Promise.all([planBeforeActReady, planReviewReady, customSkillsReady, userMemoryReady, imageGenConfigReady]);
     await alwaysAllowApiMutationsReady;
     await strictSecretModeReady;
     await screenshotRedactionReady;
@@ -3254,6 +3265,7 @@ async function handleMessage(msg, sender) {
         loadResearchEscalation(),
         loadScreenshotRedaction(),
         loadStrictSecretMode(),
+        loadImageGenConfig(),
         loadProfile(),
         syncAgentUserMemoryFromStorage(),
         loadCustomSkills(),

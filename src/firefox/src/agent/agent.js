@@ -4,7 +4,7 @@ import { redactSystemOneText, wrapSystemOneData } from './systemone-evidence.js'
 import { createSystemOneJudge, isSystemOneResponseContractError, systemOneFailureReason, SYSTEM_ONE_COST_PROVIDER } from './systemone-judge.js';
 import { firefoxBidi } from '../bidi/client.js';
 import { SOCIAL_PLATFORMS, socialPublicationApiPlatform, normalizePublicationContract, publicationProgress, exactPublicationText, publicationMediaMatches, publicationContractMessages, publicationAuditMessages, publicationAuditAccepted } from './social-publish-contract.js';
-import { AGENT_TOOLS, AGENT_TOOL_NAMES, RESERVED_AGENT_TOOL_NAMES, getToolsForMode, SYSTEM_PROMPT_ASK, SYSTEM_PROMPT_ACT, SYSTEM_PROMPT_ACT_COMPACT, SYSTEM_PROMPT_ACT_MID, SYSTEM_PROMPT_DEV_APPENDIX } from './tools.js';
+import { AGENT_TOOLS, AGENT_TOOL_NAMES, RESERVED_AGENT_TOOL_NAMES, getToolsForMode, SYSTEM_PROMPT_ASK, SYSTEM_PROMPT_ACT, SYSTEM_PROMPT_ACT_COMPACT, SYSTEM_PROMPT_ACT_MID, SYSTEM_PROMPT_GENERATIVE_MEDIA, SYSTEM_PROMPT_DEV_APPENDIX } from './tools.js';
 import { validateToolArguments } from './tool-arguments.js';
 import { isSessionQuotaError, serializeConversationForSession, SESSION_CONVERSATION_BUDGET_BYTES, SESSION_CONVERSATION_RETRY_BUDGET_BYTES } from './conversation-persistence.js';
 import { formatErrorMessage } from '../error-format.js';
@@ -124,7 +124,7 @@ import {
 } from '../providers/provider-compatibility.js';
 import { resolveMaxOutputTokens } from '../providers/context-windows.js';
 import { generateImage, readMediaConfig } from './generative-media.js';
-import { mediaPermissionUrl, validateMediaConfig } from './media-config.js';
+import { GENERATIVE_MEDIA_SETUP_NOTE, isImageGenConfigured, mediaPermissionUrl, validateMediaConfig } from './media-config.js';
 import { extractFirstJsonObject } from './json-extract.js';
 import { repairAssistantDisplayText, sanitizeText as sanitizePlannerText } from './text-sanitize.js';
 import { emptyOutputFailureMessage, modelOutputDiagnostics } from './model-output-diagnostics.js';
@@ -871,6 +871,9 @@ export class Agent extends LoopDetector {
     // the user. The API key is read at call time from browser.storage.
     this.captchaSolverEnabled = false;
     this.captchaProviderIds = [];
+    // Only advertise media generation after valid settings have hydrated.
+    // Keep credentials in storage; tool execution re-reads and validates them.
+    this.imageGenConfigured = false;
     this._captchaGateStates = new Map(); // tabId -> { key, status, publicGate, challengeFrameId? }
     this._cloudflareManagedChallenges = new Map(); // tabId -> sanitized response-backed interstitial state
     this._cloudflareManagedChallengeTransitions = new Map(); // tabId -> serialized transition promise
@@ -5779,6 +5782,8 @@ export class Agent extends LoopDetector {
       requestId: String(runOptions.detachedRequestId || ''),
       messages: [],
       acceptedIds: new Set(),
+      revision: 0,
+      authorizedRevision: 0,
       onUpdate,
     });
   }
@@ -5798,6 +5803,9 @@ export class Agent extends LoopDetector {
     if (!run.acceptedIds.has(id)) {
       run.acceptedIds.add(id);
       run.messages.push({ id, text: text.trim() });
+      // A reviewed plan belongs to the task before this correction. Wake the
+      // planner so it can review the new revision without approving stale work.
+      this._cancelPendingPlans(tabId, 'superseded by steering');
       // A cached fast-path action was prepared before this correction.
       const session = this._jevSessions?.get(tabId);
       if (session) { session.disabled = true; session.queue = []; }
@@ -5806,7 +5814,12 @@ export class Agent extends LoopDetector {
   }
 
   _hasPendingSteering(tabId) {
-    return !!this._steeringRuns.get(tabId)?.messages.length || this._hasPendingPageFeedback(tabId);
+    return !!this._steeringRuns.get(tabId)?.messages.length;
+  }
+
+  _hasUnvalidatedSteering(tabId) {
+    const run = this._steeringRuns.get(tabId);
+    return !!run && (run.messages.length > 0 || run.revision > run.authorizedRevision);
   }
 
   _applyPendingSteering(tabId, messages, onUpdate) {
@@ -5815,12 +5828,169 @@ export class Agent extends LoopDetector {
     // Only consume at model/tool boundaries, after all tool results are present.
     // Human corrections stay ordinary user messages; no page context is added.
     for (const item of run.messages.splice(0)) {
+      const priorBinding = this._activeTaskBinding(messages);
+      const parentTaskKey = this._progressTaskKeyForText(priorBinding.text);
+      const guard = this._planExecutionGuards.get(tabId);
+      const submitted = this._completionSubmitStates.get(tabId);
+      const priorSubmission = guard?.steeringPriorSubmission || priorBinding.priorSubmission
+        || (submitted?.dispatched ? submitted : null)
+        || (Object.keys(guard?.socialPublication?.outcomes || {}).length
+          ? { dispatched: true, publicationOutcomes: guard.socialPublication.outcomes } : null);
       this._recordSocialPublicationSteering(tabId, item.text);
-      messages.push({ role: 'user', content: item.text });
+      messages.push({ role: 'user', content: item.text, webbrainSteering: {
+        requestId: run.requestId, messageId: item.id, revision: ++run.revision, parentTaskKey,
+        // A durable attempt receipt is separate from revised completion proof.
+        ...(priorSubmission ? { priorSubmission: structuredClone(priorSubmission) } : {}),
+      } });
       onUpdate('steering_applied', item);
+      this._traceSteeringRevision(tabId, 'steering_applied', { revision: run.revision, messageId: item.id });
     }
     this._persist(tabId);
     return true;
+  }
+
+  _traceSteeringRevision(tabId, note, extra) {
+    const runId = this.currentRunId.get(tabId);
+    if (runId) {
+      try { Promise.resolve(trace.recordNote(runId, 0, note, extra)).catch(() => {}); } catch {}
+    }
+  }
+
+  _steeringGateSuperseded(tabId, runOptions) {
+    return runOptions.steeringRevision != null && (
+      this._steeringRuns.get(tabId)?.revision !== runOptions.steeringRevision
+      || this._hasPendingSteering(tabId)
+    );
+  }
+
+  async _revalidatePendingSteering(tabId, messages, onUpdate, mode, costState, runId, runOptions = {}) {
+    const run = this._steeringRuns.get(tabId);
+    if (!run) return null;
+    this._applyPendingSteering(tabId, messages, onUpdate);
+    if (run.revision === run.authorizedRevision) return null;
+    if (!this._isActionMode(mode) || this._isStandaloneChatRun(runOptions)) {
+      run.authorizedRevision = run.revision;
+      return { changed: true };
+    }
+    // A revision never inherits success counters or dispatch authorization.
+    // Keep actual attempts separately: resetting a guard must not make a sent
+    // message, an uncertain submit, or a publication eligible to run again.
+    const previous = this._planExecutionGuards.get(tabId);
+    const submitted = this._completionSubmitStates.get(tabId);
+    const priorSubmission = previous?.steeringPriorSubmission
+      || (submitted?.dispatched ? submitted : null)
+      || this._activeTaskBinding(messages).priorSubmission || null;
+    const attemptedPublication = previous?.socialPublication
+      && Object.keys(previous.socialPublication.outcomes || {}).length
+      ? previous.socialPublication : null;
+    while (!this._checkAbort(tabId)) {
+      this._applyPendingSteering(tabId, messages, onUpdate);
+      const revision = run.revision;
+      const enriched = { role: 'user', content: this._activeTaskBinding(messages).text };
+      const revisionOptions = {
+        ...runOptions, steeringRevision: revision, trustedContinuation: false,
+        recommendedAction: null,
+      };
+      const readState = this.readCompletenessStates.get(tabId);
+      const pageUrl = await this._currentUrl(tabId);
+      if (this._checkAbort(tabId) || this._steeringRuns.get(tabId) !== run) break;
+      if (run.revision !== revision || this._hasPendingSteering(tabId)) continue;
+      const adapterName = getActiveAdapter(pageUrl)?.name || '';
+      // A plan or load_skill activates tools for that revision only. Rebuild
+      // the current site's automatic baseline, excluding the old task's
+      // recommended action, before the revised planner can choose new skills.
+      this._resetActiveSkillsForRun(tabId, { refreshPrompt: false });
+      this.lastSeenAdapter.set(tabId, adapterName);
+      this._preactivateNyTimesSkillForRun(tabId, mode);
+      this._preactivateHumanizerSkillForRun(tabId, mode);
+      this._refreshSystemPromptForTab(tabId, mode);
+      if (readState) {
+        // Let this revision's planner establish its own read obligation.
+        // Keep run ownership for teardown, but discard earlier coverage and
+        // obligations, including ones armed by a superseded planner result.
+        this.readCompletenessStates.set(tabId, createReadCompletenessState(
+          readState.runToken, false, isCommunicationThreadContext(pageUrl, adapterName), adapterName,
+        ));
+      }
+      const gate = await this._maybeRunPlannerGate(
+        tabId, messages, enriched, onUpdate, mode, costState, runId, null, revisionOptions,
+      );
+      if (this._checkAbort(tabId) || this._steeringRuns.get(tabId) !== run) break;
+      if (run.revision !== revision || this._hasPendingSteering(tabId)) continue;
+      run.authorizedRevision = revision;
+      this._traceSteeringRevision(tabId, 'steering_revalidated', {
+        revision, requestKind: gate.requestKind, proceed: gate.proceed, reason: gate.reason || null,
+      });
+      if (!gate.proceed) return { changed: true, gate, enriched };
+      this._completionSubmitStates.delete(tabId);
+      const guard = this._startPlanExecutionGuard(tabId, mode, gate, revisionOptions);
+      guard.steeringPriorSubmission = priorSubmission;
+      if (priorSubmission || attemptedPublication) guard.evidenceTaskKey = guard.taskKey;
+      guard.socialPublicationSteering = previous?.socialPublicationSteering || null;
+      guard.socialPublicationClarifications = previous?.socialPublicationClarifications || [];
+      if (attemptedPublication) {
+        guard.socialPublication = attemptedPublication;
+        this._invalidateSocialPublicationContract(guard);
+      }
+      this._setResponseLanguagePolicy(tabId, gate.responseLanguagePolicy, runOptions.locale || 'en', {
+        approvedPlanLanguageOverride: gate.responseLanguageApprovedPlanOverride === true,
+      });
+      if (!gate.responseOnly) await this._ensureProgressSessionForCurrentTask(tabId, {
+        provider: this._activeProvider(tabId), costState,
+        progressLedgerPolicy: gate.progressLedgerPolicy, progressAction: gate.progressAction,
+        expectedItems: gate.expectedItems,
+      });
+      // The system prompt is rebuilt by the new guard. Clear the old approved
+      // plan even when only intent classification is enabled for this revision.
+      if (!gate.approvedScratchpadText && previous?.approvedPlanText) {
+        const scratchIdx = this._findScratchpadIndex(messages);
+        if (scratchIdx >= 0) this._scratchpadWrite(tabId, {
+          replace: true,
+          text: this._extractScratchpadBody(messages[scratchIdx].content)
+            .replace(previous.approvedPlanText, '').trim(),
+        });
+      }
+      this._persist(tabId);
+      return { changed: true, gate, enriched };
+    }
+    return { changed: true, gate: { proceed: false, reason: 'cancelled', message: '[Stopped by user]' } };
+  }
+
+  _steeringPriorSubmissionBlock(tabId, name, args, detectedSubmit) {
+    if (!this._planExecutionGuards.get(tabId)?.steeringPriorSubmission) return null;
+    const resolvedNonSubmit = detectedSubmit?.resolvedNavigationTarget === true
+      || detectedSubmit?.resolvedEditableTarget === true
+      || detectedSubmit?.resolvedNonSubmitTarget === true;
+    if (!isNetworkMutation(name, args) && name !== 'chrome_web_store_publish'
+        && !(detectedSubmit?.isSubmit || (!resolvedNonSubmit && this._isFormValidationCandidate(name, args)))) return null;
+    return {
+      success: false, blocked: true, noDispatch: true, dispatched: false,
+      steeringPriorSubmission: true,
+      error: 'A submission was already attempted before the user revised this task. Inspect its result before proceeding; do not repeat or replace that submission in this run. Report the verified effect and any remaining revised work with outcome partial or failed.',
+    };
+  }
+
+  async _steeringBoundaryOutcome(tabId, messages, onUpdate, mode, provider, costState, runId, runOptions) {
+    const refresh = await this._revalidatePendingSteering(tabId, messages, onUpdate, mode, costState, runId, runOptions);
+    if (!refresh?.gate) return refresh;
+    if (!refresh.gate.proceed) return {
+      changed: true, terminal: true, content: refresh.gate.message || 'More information is required.',
+      status: refresh.gate.reason || 'cancelled',
+    };
+    if (refresh.gate.responseOnly) {
+      const capture = {};
+      const response = await this._completeResponseOnlyTurn(
+        tabId, messages, onUpdate, provider, costState, runId, runOptions, refresh.enriched, null, capture,
+      );
+      // A correction received during a context-only answer supersedes that
+      // answer exactly like an ordinary in-flight model response.
+      if (this._hasPendingSteering(tabId)) {
+        onUpdate('text', { content: '', replace: true });
+        return { changed: true };
+      }
+      return { changed: true, terminal: true, ...response, capture };
+    }
+    return { changed: true };
   }
 
   _finishSteeringRun(tabId) {
@@ -5829,6 +5999,27 @@ export class Agent extends LoopDetector {
     if (run?.messages.length) {
       run.onUpdate('steering_queued', { messages: run.messages });
     }
+  }
+
+  async _completeInitialResponseOnlyTurn(tabId, messages, onUpdate, mode, provider, costState, runId, runOptions, gate, enriched, priorMessages) {
+    let revalidated = false;
+    while (gate.proceed && gate.responseOnly) {
+      const capture = {};
+      const response = await this._completeResponseOnlyTurn(
+        tabId, messages, onUpdate, provider, costState, runId, runOptions, enriched, priorMessages, capture,
+      );
+      if (!this._hasPendingSteering(tabId)) return { gate, response, capture, revalidated };
+      onUpdate('text', { content: '', replace: true });
+      const refresh = await this._revalidatePendingSteering(
+        tabId, messages, onUpdate, mode, costState, runId, runOptions,
+      );
+      if (refresh?.gate) {
+        gate = refresh.gate;
+        revalidated = true;
+      }
+      enriched = refresh?.enriched || { role: 'user', content: this._activeTaskBinding(messages).text };
+    }
+    return { gate, revalidated };
   }
 
   activeRunState(tabId) {
@@ -8794,7 +8985,12 @@ export class Agent extends LoopDetector {
     const toolCounts = new Map();
     let lastAssistantText = '';
     let lastToolCall = null;
-    for (const m of messages) {
+    const binding = this._activeTaskBinding(messages);
+    // Earlier attempts remain in history, but this handoff describes the
+    // latest authorized revision rather than quoting its superseded answer.
+    const summaryMessages = binding.updates?.some(update => update.kind === 'steering')
+      ? messages.slice(binding.index + 1) : messages;
+    for (const m of summaryMessages) {
       if (m.role === 'assistant') {
         if (Array.isArray(m.tool_calls)) {
           for (const tc of m.tool_calls) {
@@ -10948,7 +11144,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
         onUpdate('warning', { message: 'Stopped by user.' });
         return { action: 'abort', value };
       }
-      if (this._hasPendingSteering(tabId)) {
+      if (this._hasPendingSteering(tabId) || this._hasPendingPageFeedback(tabId)) {
         this._appendSyntheticToolResults(tabId, toolCalls, toolIndex, messages, onUpdate, step, () => ({
           success: false, skipped: true, dispatched: false, noDispatch: true,
           pageFeedbackPending: this._hasPendingPageFeedback(tabId),
@@ -11316,7 +11512,8 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
           reason: 'submit the configured Chrome Web Store release for review',
         };
       }
-      const workflowPreSubmitBlock = await this._conditionalGithubCommitTransition(tabId, fnName, fnArgs, detectedSubmitAction)
+      const workflowPreSubmitBlock = this._steeringPriorSubmissionBlock(tabId, fnName, fnArgs, detectedSubmitAction)
+        || await this._conditionalGithubCommitTransition(tabId, fnName, fnArgs, detectedSubmitAction)
         || await this._workflowPreSubmitDispatchBlock(
         tabId, fnName, fnArgs, detectedSubmitAction, provider,
       );
@@ -11924,7 +12121,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
           this._throwIfAborted(abortSignal);
           // Permission, checkpoint and preflight waits can receive a correction.
           // Recheck after all preparation, before marking or invoking dispatch.
-          if (this._hasPendingSteering(tabId)) return { steered: true };
+            if (this._hasPendingSteering(tabId) || this._hasPendingPageFeedback(tabId)) return { steered: true };
           if (!pipelineToolbarPreflight.block && !socialDispatchBlock) callState.invoked = true;
           const pipelineRawToolResult = pipelineToolbarPreflight.block || socialDispatchBlock || await this.executeTool(
             tabId,
@@ -18179,20 +18376,46 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     // boundaries unambiguous when this composite is later embedded in the
     // trusted recovery anchor or hashed as execution evidence authority, and
     // the flat shape keeps it bounded across an arbitrarily long chain.
-    const requestText = this._progressTaskTextKey(taskText).slice(0, 1600);
+    const requestText = carriesPriorBinding && priorBinding.updates
+      ? taskText : this._progressTaskTextKey(taskText).slice(0, 1600);
     const answers = [...carriedAnswers, answerText]
       .map(answer => this._progressTaskTextKey(answer).slice(0, CLARIFICATION_ANSWER_CHARS))
       .filter(Boolean)
       .slice(-CLARIFICATION_ANSWER_LIMIT);
+    const updates = carriesPriorBinding && priorBinding.updates
+      ? [...priorBinding.updates, { kind: 'clarification', text: answerText }]
+      : null;
     const text = `User task clarified by the latest answer: ${JSON.stringify({
       request: requestText,
       answers,
+      ...(updates ? { updates } : {}),
     })}`;
     const pinnedIndices = [...carriedPinnedIndices, taskIndex, clarificationIndex, answerIndex]
       .filter(index => index >= 0)
       .filter((index, position, all) => all.indexOf(index) === position)
       .sort((a, b) => a - b);
-    return { index: answerIndex, taskIndex, clarificationIndex, text, requestText, answers, pinnedIndices };
+    return { index: answerIndex, taskIndex, clarificationIndex, text, requestText, answers, pinnedIndices,
+      ...(updates ? { updates } : {}),
+      ...(carriesPriorBinding && priorBinding.priorSubmission ? { priorSubmission: priorBinding.priorSubmission } : {}) };
+  }
+
+  _steeringTaskBinding(messages, index) {
+    const message = messages[index];
+    const metadata = message?.webbrainSteering;
+    if (!metadata?.requestId || !metadata.messageId || !Number.isInteger(metadata.revision)
+        || metadata.revision < 1 || !metadata.parentTaskKey) return null;
+    const prior = this._activeTaskBinding(messages.slice(0, index));
+    if (!prior.text || metadata.parentTaskKey !== this._progressTaskKeyForText(prior.text)) return null;
+    const updates = [...(prior.updates || (prior.answers || []).map(text => ({ kind: 'clarification', text }))),
+      { kind: 'steering', text: this._plannerUserAuthoredText(message) }];
+    const requestText = prior.requestText || prior.text;
+    return {
+      index, taskIndex: prior.taskIndex, clarificationIndex: -1, requestText,
+      answers: prior.answers || [], updates,
+      priorSubmission: metadata.priorSubmission?.dispatched === true ? metadata.priorSubmission : prior.priorSubmission || null,
+      text: `User task revised by steering: ${JSON.stringify({ request: requestText, updates })}`,
+      pinnedIndices: [...prior.pinnedIndices, index],
+    };
   }
 
   // Return the latest genuine task-bearing user turn, not a synthetic runtime
@@ -18208,6 +18431,8 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       if (this._isAgentInjectedUserMessage(message)) continue;
       const text = this._plannerUserAuthoredText(message);
       if (!text) continue;
+      const steered = this._steeringTaskBinding(messages, i);
+      if (steered) return steered;
       const clarification = this._plannerClarificationTaskBinding(messages, i);
       if (clarification) return clarification;
       const normalized = text.toLowerCase();
@@ -18545,7 +18770,10 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       : null;
     const submittedUserMessage = this._standalonePersistedUserMessage(enriched, runOptions);
     if (submittedUserMessage !== enriched) runOptions._standalonePersistedUserMessage = submittedUserMessage;
-    messages.push(submittedUserMessage);
+    // Steering's actual user messages are already durable. Its composite is
+    // planner input only; recording it as another user turn would replace the
+    // original request and break the revision's authority chain.
+    if (runOptions.steeringRevision == null) messages.push(submittedUserMessage);
     if (runOptions?.selectionGroundingScopeStarted === true) {
       this._finalizeSelectionGroundingScope(tabId, messages, submittedUserMessage);
     }
@@ -18565,7 +18793,8 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       }
       return { proceed: true, requestKind: 'execute', requiresStateChange: false };
     }
-    const fastPathPlan = this._recommendedActionFastPathPlan(runOptions);
+    const fastPathPlan = runOptions.steeringRevision == null
+      ? this._recommendedActionFastPathPlan(runOptions) : null;
     if (fastPathPlan) {
       this.plannerFollowUpSkipTabs.delete(tabId);
       const approvedScratchpadText = this._formatRecommendedActionFastPathScratchpad(fastPathPlan);
@@ -18596,7 +18825,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     const historyDigest = this._buildPlannerHistoryDigest(priorMessages);
     const followUpContext = this._buildPlannerFollowUpContext(priorMessages);
     let gate;
-    if (this._shouldSkipPlannerForShortFollowUp(tabId, priorMessages, enriched, plannerMode)) {
+    if (runOptions.steeringRevision == null && this._shouldSkipPlannerForShortFollowUp(tabId, priorMessages, enriched, plannerMode)) {
       this.plannerFollowUpSkipTabs.delete(tabId);
       gate = await this._runPlannerIntentGate(
         tabId, enriched, onUpdate, costState, runId, historyDigest, tabInfo, mode, runOptions, followUpContext,
@@ -18610,6 +18839,11 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
         : await this._runPlannerIntentGate(
           tabId, enriched, onUpdate, costState, runId, historyDigest, tabInfo, mode, runOptions, followUpContext,
         );
+    }
+    if (this._steeringGateSuperseded(tabId, runOptions)) return { proceed: false, steeringSuperseded: true };
+    if (runOptions.steeringRevision == null && this._hasPendingSteering(tabId)) {
+      const refresh = await this._revalidatePendingSteering(tabId, messages, onUpdate, mode, costState, runId, runOptions);
+      if (refresh?.gate) return refresh.gate;
     }
     if (runOptions?.trustedContinuation === true
         && gate?.proceed
@@ -18656,7 +18890,17 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     }
 
     if (gate.approvedScratchpadText) {
-      const scratchResult = this._scratchpadWrite(tabId, { text: gate.approvedScratchpadText });
+      let scratchText = gate.approvedScratchpadText;
+      if (runOptions.steeringRevision != null) {
+        const scratchIdx = this._findScratchpadIndex(messages);
+        const previousPlan = this._planExecutionGuards.get(tabId)?.approvedPlanText || '';
+        if (scratchIdx >= 0) scratchText =
+          this._extractScratchpadBody(messages[scratchIdx].content).replace(previousPlan, '').trim()
+          + '\n\n' + scratchText;
+      }
+      const scratchResult = this._scratchpadWrite(tabId, {
+        text: scratchText, replace: runOptions.steeringRevision != null,
+      });
       if (!scratchResult?.success) {
         onUpdate('warning', { message: scratchResult?.error || 'Could not pin plan to scratchpad.' });
       } else {
@@ -18918,6 +19162,10 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
   }
 
   _plannerActContinuation(runOptions, onUpdate, runId = null, reason = 'invalid_output') {
+    if (runOptions.steeringRevision != null) return {
+      proceed: false, reason: 'planner_error', requestKind: 'respond',
+      message: `WebBrain could not revalidate the revised task (${reason}). No further actions were dispatched.`,
+    };
     const message = this._plannerIntentFailureMessage(runOptions);
     onUpdate('warning', {
       code: 'planner_failed_continue_act',
@@ -18971,14 +19219,14 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     };
   }
 
-  _plannerRequestFailure(error, onUpdate, provider = null) {
+  _plannerRequestFailure(error, onUpdate, provider = null, steering = false) {
     const detail = sanitizePlannerText(
       formatErrorMessage(error, { fallback: 'Unknown planner request error.' }),
       500,
       { collapseWhitespace: true },
     );
     const detailSentence = /[.!?]$/.test(detail) ? detail : `${detail}.`;
-    const message = `Planner request failed before a valid response was available: ${detailSentence} No tools ran.`;
+    const message = `Planner request failed before a valid response was available: ${detailSentence} ${steering ? 'No further actions were dispatched after steering.' : 'No tools ran.'}`;
     const failureKind = plannerRequestFailureKind(detail);
     onUpdate('warning', {
       code: 'planner_request_failed',
@@ -19000,14 +19248,14 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     };
   }
 
-  _plannerPostValidationFailure(error, onUpdate) {
+  _plannerPostValidationFailure(error, onUpdate, steering = false) {
     const detail = sanitizePlannerText(
       formatErrorMessage(error, { fallback: 'Unknown plan processing error.' }),
       500,
       { collapseWhitespace: true },
     );
     const detailSentence = /[.!?]$/.test(detail) ? detail : `${detail}.`;
-    const message = `A valid plan was produced, but WebBrain could not safely finish plan review or prepare the plan for execution: ${detailSentence} No tools ran.`;
+    const message = `A valid plan was produced, but WebBrain could not safely finish plan review or prepare the plan for execution: ${detailSentence} ${steering ? 'No further actions were dispatched after steering.' : 'No tools ran.'}`;
     onUpdate('warning', {
       code: 'planner_processing_failed',
       message,
@@ -19430,7 +19678,10 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     const recheckOnly = runOptions?.plannerIntentRecheckOnly === true;
     const provider = this.providerManager.getActive();
     const plannerMessages = buildPlannerIntentMessages(enriched, tabUrl, tabTitle, historyDigest, {
+      steering: runOptions.steeringRevision != null,
       noThink: this._plannerPrefersNoThinkPrompt(provider),
+      imageGenConfigured: this.imageGenConfigured,
+      tier: this._resolvePromptTier(provider),
       scheduledResume: runOptions?.scheduledResume === true,
       locale,
       priorUserTask: followUpContext.priorUserTask,
@@ -19543,6 +19794,9 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
           ? this._plannerIntentRecheckFallback()
           : this._plannerActContinuation(runOptions, onUpdate, runId, 'inconsistent_intent');
       }
+      if (this._hasPendingSteering(tabId) || this._steeringGateSuperseded(tabId, runOptions)) {
+        return { proceed: false, steeringSuperseded: true };
+      }
       await this._tracePlannerCompletionRequirementCorrection(runId, plan, 'intent');
       if (plan.request_kind === 'respond') {
         return {
@@ -19631,9 +19885,10 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
             });
           } catch {}
         }
-        return this._plannerPostValidationFailure(e, onUpdate);
+        return this._plannerPostValidationFailure(e, onUpdate, runOptions.steeringRevision != null);
       }
       await this._tracePlannerAttemptFailure(runId, 'intent', 2, e);
+      if (runOptions.steeringRevision != null) return this._plannerRequestFailure(e, onUpdate, provider, true);
       return this._plannerActContinuation(runOptions, onUpdate, runId, 'request_error');
     }
   }
@@ -19656,7 +19911,10 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     const tier = this._resolvePromptTier();
     const skillCatalog = this._skillCatalog(conversationMode, tier);
     const plannerMessages = buildPlannerMessages(enriched, tabUrl, tabTitle, historyDigest, {
+      steering: runOptions.steeringRevision != null,
       noThink: this._plannerPrefersNoThinkPrompt(provider),
+      imageGenConfigured: this.imageGenConfigured,
+      tier,
       scheduledResume: runOptions?.scheduledResume === true,
       allowApi: this.isApiMutationsAllowed(tabId),
       skillCatalog,
@@ -19719,6 +19977,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       if (this._checkAbort(tabId)) {
         return { proceed: false, message: '[Stopped by user]' };
       }
+      if (this._steeringGateSuperseded(tabId, runOptions)) return { proceed: false, steeringSuperseded: true };
       let consistencyRepairKind = null;
       let plan = parsePlanFromContent(result.content, plannerParseOptions);
       // Retry whenever the first attempt yields no parseable plan — empty
@@ -19780,15 +20039,20 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
         return { proceed: false, message: '[Stopped by user]' };
       }
       if (!plan) {
+        if (runOptions.steeringRevision != null) return this._plannerActContinuation(runOptions, onUpdate, runId, 'invalid_output');
         return this._normalizePlanBeforeActMode(plannerMode) === 'strict'
           ? this._strictPlannerFailure(onUpdate)
           : this._plannerActContinuation(runOptions, onUpdate, runId, 'invalid_output');
       }
       hasValidPlannerResponse = true;
       if (this._plannerIntentUnresolvedConsistencyIssue(plan, consistencyRepairKind, followUpContext)) {
+        if (runOptions.steeringRevision != null) return this._plannerActContinuation(runOptions, onUpdate, runId, 'inconsistent_intent');
         return this._normalizePlanBeforeActMode(plannerMode) === 'strict'
           ? this._strictPlannerFailure(onUpdate)
           : this._plannerActContinuation(runOptions, onUpdate, runId, 'inconsistent_intent');
+      }
+      if (this._hasPendingSteering(tabId) || this._steeringGateSuperseded(tabId, runOptions)) {
+        return { proceed: false, steeringSuperseded: true };
       }
       await this._tracePlannerCompletionRequirementCorrection(runId, plan, 'planner');
       if (this._shouldRecheckReadOnlyFollowUpIntent(plan, historyDigest, followUpContext)) {
@@ -19900,10 +20164,16 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
           ...this._plannerProgressLedgerGateFields(plan),
         };
       }
+      if (this._hasPendingSteering(tabId) || this._steeringGateSuperseded(tabId, runOptions)) {
+        return { proceed: false, steeringSuperseded: true };
+      }
       const choice = await this._waitForPlanReview(tabId, planId, plan, markdown, onUpdate, verboseMarkdown);
 
       if (this._checkAbort(tabId)) {
         return { proceed: false, message: '[Stopped by user]' };
+      }
+      if (this._hasPendingSteering(tabId) || this._steeringGateSuperseded(tabId, runOptions)) {
+        return { proceed: false, steeringSuperseded: true };
       }
       if (choice?.cancelled || choice?.action === 'reject') {
         return { proceed: false, message: 'Task cancelled — plan was not approved.' };
@@ -20022,9 +20292,10 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
             });
           } catch {}
         }
-        return this._plannerPostValidationFailure(e, onUpdate);
+        return this._plannerPostValidationFailure(e, onUpdate, runOptions.steeringRevision != null);
       }
       await this._tracePlannerAttemptFailure(runId, 'planner', 2, e);
+      if (runOptions.steeringRevision != null) return this._plannerRequestFailure(e, onUpdate, provider, true);
       return this._normalizePlanBeforeActMode(plannerMode) === 'strict'
         ? (plannerRequestInFlight
           ? this._plannerRequestFailure(e, onUpdate, provider)
@@ -20418,6 +20689,9 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     }
     const stopped = this._consumeContextOnlyAbort(tabId, messages, onUpdate);
     if (stopped) return stopped;
+    // An accepted correction supersedes this answer before it reaches the
+    // transcript, UI, persistence, or voluntary generation sharing.
+    if (this._hasPendingSteering(tabId)) return { content: '', status: 'steering_superseded' };
     if (!finalResponse) {
       status = 'empty_output';
       finalResponse = 'I could not generate a usable response from the existing conversation context.';
@@ -23204,7 +23478,14 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     const tier = this._resolvePromptTier();
     if (tier === 'compact') return SYSTEM_PROMPT_ACT_COMPACT;
     if (tier === 'mid') return SYSTEM_PROMPT_ACT_MID;
-    return SYSTEM_PROMPT_ACT;
+    return `${SYSTEM_PROMPT_ACT}\n\n${this.imageGenConfigured ? SYSTEM_PROMPT_GENERATIVE_MEDIA : GENERATIVE_MEDIA_SETUP_NOTE}`;
+  }
+
+  setImageGenConfig(config) {
+    const next = isImageGenConfigured(config);
+    if (this.imageGenConfigured === next) return;
+    this.imageGenConfigured = next;
+    this._refreshSystemPrompts();
   }
 
   /**
@@ -23331,6 +23612,9 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
         { form: tier === 'compact' ? 'brief' : 'full' },
       );
       if (workflowPolicy) prompt += `\n\n${workflowPolicy}`;
+      if (this._planExecutionGuards.get(tabId)?.steeringPriorSubmission) {
+        prompt += '\n\n[The user revised this task after a submission or publication attempt. Inspect and report its existing effect before continuing. Do not repeat or replace that submission; report partial or failed if revised work cannot be completed without another submission.]';
+      }
     }
 
     if (this.researchEscalationEnabled) {
@@ -27775,6 +28059,9 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       approvedPlanText,
       evidenceTaskKey: carryMatches ? carried.evidenceTaskKey : '',
       taskDrifted: false,
+      steeringPriorSubmission: carryMatches && carried.steeringPriorSubmission
+        ? structuredClone(carried.steeringPriorSubmission)
+        : structuredClone(this._activeTaskBinding(this.conversations.get(tabId) || []).priorSubmission || null),
       approvedPlan: this._hasApprovedExecutionPlan(this.conversations.get(tabId) || []),
       // Only the app-owned Continue action can carry verified evidence from
       // the immediately preceding run; ordinary user turns always start at 0.
@@ -28162,6 +28449,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       || guard.successfulConsequentialToolCalls > 0
       || guard.pendingDownloadIds.length > 0
       || guard.verifiedSubmissionEvidence === true
+      || !!guard.steeringPriorSubmission
       || !!guard.workflowTerminalEvidence
       || !!guard.workflowLedgerReconciliation
       || !!guard.workflowInventoryEvidence
@@ -28199,6 +28487,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
         pendingDownloadIds: [...guard.pendingDownloadIds],
         successfulRequiredSchedulingToolCalls: guard.successfulRequiredSchedulingToolCalls,
         verifiedSubmissionEvidence: guard.verifiedSubmissionEvidence === true,
+        steeringPriorSubmission: guard.steeringPriorSubmission ? structuredClone(guard.steeringPriorSubmission) : null,
         socialPublication: guard.socialPublication ? structuredClone(guard.socialPublication) : null,
         socialPublicationClarifications: structuredClone(guard.socialPublicationClarifications || []),
         socialPublicationSteering: guard.socialPublicationSteering ? structuredClone(guard.socialPublicationSteering) : null,
@@ -29365,7 +29654,9 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     // answer stay adjacent to the task they refine, so compaction cannot turn a
     // short answer fragment into an independent task.
     const taskAuthorityNotice = activeTask
-      ? (activeTaskBinding.clarificationIndex >= 0
+      ? (activeTaskBinding.updates
+        ? 'The original request and ordered genuine user corrections pinned above together are the CURRENT ACTIVE TASK. Later corrections supersede earlier instructions they change; unrelated earlier tasks remain context only.'
+        : activeTaskBinding.clarificationIndex >= 0
         ? 'The planner clarification context and genuine user answer pinned above together are the CURRENT ACTIVE TASK. Earlier user tasks outside that clarified chain are context only and do not regain authority.'
         : 'The latest genuine user task pinned above is the CURRENT ACTIVE TASK. Earlier user tasks, including the original task, are context only and do not regain authority.')
       : 'The original user task pinned above remains the CURRENT ACTIVE TASK.';
@@ -30044,6 +30335,19 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
   _emergencyTrimModelCopy(messages) {
     const modelCopy = messages.map(message => ({ ...message }));
     this._emergencyTrim(modelCopy);
+    // Linked corrections hash their parent task, so even wrapped source in
+    // that authority must stay verbatim across further overflow retries.
+    if (this._activeTaskBinding(messages).pinnedIndices.length > 1) return modelCopy;
+    // A selected-text request can itself contain the oversized source.
+    // Trim only wrapped page data in this disposable model view, retaining
+    // the surrounding user instructions and the complete saved transcript.
+    for (const message of modelCopy) {
+      if (message.role !== 'user' || typeof message.content !== 'string') continue;
+      message.content = message.content.replace(
+        /<untrusted_page_content\b[^>]*>[\s\S]*?<\/untrusted_page_content\b[^>]*>/g,
+        wrapper => wrapper.length > 5000 ? this._truncatePreservingUntrustedWrapper(wrapper, 5000) : wrapper,
+      );
+    }
     return modelCopy;
   }
 
@@ -30333,6 +30637,12 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       originalTask = m;
       break;
     }
+    const taskBinding = this._activeTaskBinding(messages);
+    // Authorized corrections must survive even outside the recent window,
+    // without the truncation applied to intermediate tool results.
+    const pinnedTasks = taskBinding.pinnedIndices.map(index => messages[index]).filter(Boolean);
+    if (originalTask && !pinnedTasks.includes(originalTask)) pinnedTasks.unshift(originalTask);
+    const pinnedTaskSet = new Set(pinnedTasks);
     const scheduledResumeIdx = this._findLatestScheduledResumeIndex(messages);
     const scheduledResumeMsg = scheduledResumeIdx >= 0 && messages[scheduledResumeIdx] !== originalTask
       ? messages[scheduledResumeIdx]
@@ -30346,7 +30656,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     const progressIdx = this._findProgressLedgerIndex(messages);
     const progressMsg = progressIdx >= 0 ? messages[progressIdx] : null;
     const keepLast = 6; // keep only 6 most recent messages
-    const recent = messages.slice(-keepLast).filter(m => m !== scheduledResumeMsg && !this._isScheduledResumeTurn(m.content) && !this._isPinnedAgentStateMessage(m));
+    const recent = messages.slice(-keepLast).filter(m => !pinnedTaskSet.has(m) && m !== scheduledResumeMsg && !this._isScheduledResumeTurn(m.content) && !this._isPinnedAgentStateMessage(m));
 
     // Drop any leading `tool` messages whose requesting assistant turn fell
     // outside the kept window. Both OpenAI-compatible and Anthropic APIs reject
@@ -30373,16 +30683,16 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
 
     const notice = {
       role: 'user',
-      content: '[Context was too large for the model. Older intermediate steps were removed, but your ORIGINAL TASK is pinned above — keep working on it based on the most recent state you can see.]',
+      content: '[Context was too large for the model. Older intermediate steps were removed, but the active request and ordered genuine user corrections are pinned above. Apply the latest corrections and keep working from the most recent state.]',
     };
     const ack = {
       role: 'assistant',
-      content: 'Understood, some earlier context was trimmed. I\'ll continue with what I have.',
+      content: 'Understood. I\'ll continue the active request with its latest corrections and recent state.',
     };
 
     messages.length = 0;
     messages.push(systemMsg);
-    if (originalTask) messages.push(originalTask);
+    messages.push(...pinnedTasks);
     if (scheduledResumeMsg) messages.push(scheduledResumeMsg);
     if (scratchpadMsg) messages.push(scratchpadMsg);
     if (memoryMsg) messages.push(memoryMsg);
@@ -35974,7 +36284,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     const sourceBoundAttachments = selectionOnly ? [] : attachments;
     if (sourceBoundAttachments && sourceBoundAttachments.length) {
       const attachmentToolNames = new Set(
-        getToolsForMode(mode, { tier: provider.promptTier })
+        getToolsForMode(mode, { tier: provider.promptTier, imageGenConfigured: this.imageGenConfigured })
           .map(tool => tool?.function?.name)
           .filter(Boolean),
       );
@@ -36028,7 +36338,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       );
     }
 
-    const gateOutcome = await this._maybeRunPlannerGate(
+    let gateOutcome = await this._maybeRunPlannerGate(
       tabId, messages, enriched, onUpdate, mode, costState, runId, plannerTabInfo, runOptions,
     );
     if (!gateOutcome.proceed) {
@@ -36045,28 +36355,38 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
         || gateOutcome.responseLanguageApprovedPlanOverride === true,
       trustedContinuation: runOptions?.trustedContinuation === true,
     });
+    // The initial planner can authorize steering before response-only handling.
+    let initialTaskRevalidated = (this._steeringRuns.get(tabId)?.authorizedRevision || 0) > 0;
     if (gateOutcome.responseOnly === true) {
-      const responseOnlyShareCapture = {};
-      const responseOnly = await this._completeResponseOnlyTurn(
-        tabId, messages, onUpdate, provider, costState, runId,
-        runOptions, enriched, sourceBoundPriorMessages, responseOnlyShareCapture,
+      const responseOutcome = await this._completeInitialResponseOnlyTurn(
+        tabId, messages, onUpdate, mode, provider, costState, runId,
+        runOptions, gateOutcome, enriched, sourceBoundPriorMessages,
       );
-      finalResponse = responseOnly.content;
-      _traceStatus = responseOnly.status;
-      // Response-only turns do call the model (source-grounded + pruned
-      // inside _generateContextOnlyResponse). Only mark shareable on success,
-      // keeping the exact request (with the context-only system prompt).
-      if (responseOnly.status === 'done') {
-        shareHadProviderCompletion = true;
-        shareRawResponse = responseOnlyShareCapture.response;
-        if (Array.isArray(responseOnlyShareCapture.request) && responseOnlyShareCapture.request.length) {
-          currentNonStreamRequestMessages = responseOnlyShareCapture.request;
-        }
+      gateOutcome = responseOutcome.gate;
+      initialTaskRevalidated ||= responseOutcome.revalidated;
+      if (!gateOutcome.proceed) {
+        _traceStatus = gateOutcome.reason === 'plan_only' ? 'plan_only_output' : gateOutcome.reason || 'cancelled';
+        return (finalResponse = gateOutcome.message || 'More information is required.');
       }
-      return finalResponse;
+      const { response: responseOnly, capture: responseOnlyShareCapture } = responseOutcome;
+      if (responseOnly) {
+        finalResponse = responseOnly.content;
+        _traceStatus = responseOnly.status;
+        // Response-only turns do call the model (source-grounded + pruned
+        // inside _generateContextOnlyResponse). Only mark shareable on success,
+        // keeping the exact request (with the context-only system prompt).
+        if (responseOnly.status === 'done') {
+          shareHadProviderCompletion = true;
+          shareRawResponse = responseOnlyShareCapture.response;
+          if (Array.isArray(responseOnlyShareCapture.request) && responseOnlyShareCapture.request.length) {
+            currentNonStreamRequestMessages = responseOnlyShareCapture.request;
+          }
+        }
+        return finalResponse;
+      }
     }
     if (this._consumeSelectionGroundingRestoration(tabId, enriched)) this._persist(tabId);
-    this._startPlanExecutionGuard(tabId, mode, gateOutcome, runOptions);
+    if (!initialTaskRevalidated) this._startPlanExecutionGuard(tabId, mode, gateOutcome, runOptions);
 
     if (this._isActionMode(mode) && !selectionOnly && !standaloneChatRun) {
       await this._ensureProgressSessionForCurrentTask(tabId, {
@@ -36084,6 +36404,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     let tools = getToolsForMode(mode, {
       strictSecretMode: this.strictSecretMode,
       tier,
+      imageGenConfigured: this.imageGenConfigured,
       accessibilityTreeMaxChars: readWindow.treePageChars,
       skillLoaderTool: this._skillLoaderDefinition(mode, tier),
       skillTools,
@@ -36261,7 +36582,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       );
     }
 
-    const recommendedFirstTool = await this._maybeExecuteRecommendedActionFirstTool(
+    const recommendedFirstTool = initialTaskRevalidated ? null : await this._maybeExecuteRecommendedActionFirstTool(
       tabId, runOptions, messages, onUpdate, provider, allowedToolNames, toolSchemas,
     );
     if (recommendedFirstTool?.action === 'return') {
@@ -36292,7 +36613,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     // consider this run. Failures/cancels are still excluded via _traceStatus.
     shareHadProviderCompletion = true;
 
-    while (steps < this.maxSteps) {
+    while (steps < this.maxSteps || this._hasUnvalidatedSteering(tabId)) {
       // Each turn's raw provider text belongs to that turn only: reset so a
       // non-terminal final-text pass can never pair stale output with a later
       // tool-batch result in the shared record.
@@ -36305,6 +36626,27 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
         break;
       }
 
+      const steeringOutcome = await this._steeringBoundaryOutcome(
+        tabId, messages, onUpdate, mode, provider, costState, runId, runOptions,
+      );
+      if (steeringOutcome?.changed) {
+        // Replace the superseded final turn with one freshly authorized turn.
+        if (steps >= this.maxSteps) steps--;
+        forceCompletionVerificationTurn = false;
+        allowCompletionFailureTurn = false;
+        forceCompletionDoneAfterVerification = false;
+        forceCompletionDoneTurn = false;
+      }
+      if (steeringOutcome?.terminal) {
+        if (steeringOutcome.capture) {
+          shareRawResponse = steeringOutcome.capture.response;
+          currentNonStreamRequestMessages = steeringOutcome.capture.request;
+        }
+        finalResponse = steeringOutcome.content;
+        _traceStatus = steeringOutcome.status;
+        break;
+      }
+
       if (steps > 0 && !selectionOnly && !standaloneChatRun) {
         await this._maybeReinjectAdapter(tabId, messages);
       }
@@ -36313,6 +36655,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       tools = getToolsForMode(mode, {
         strictSecretMode: this.strictSecretMode,
         tier,
+        imageGenConfigured: this.imageGenConfigured,
         accessibilityTreeMaxChars: readWindow.treePageChars,
         skillLoaderTool: this._skillLoaderDefinition(mode, tier),
         skillTools,
@@ -36360,7 +36703,8 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
 
       steps++;
       lastTraceStep = steps;
-      await this._applyPendingRunFeedback(tabId, messages, onUpdate);
+      await this._applyPendingPageFeedback(tabId, messages, onUpdate);
+      if (this._hasPendingSteering(tabId)) { steps--; continue; }
       onUpdate('thinking', { step: steps });
       if (runId) trace.recordStepStart(runId, steps, {});
 
@@ -36536,7 +36880,8 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
         break;
       }
 
-      if (steps < this.maxSteps && await this._applyPendingRunFeedback(tabId, messages, onUpdate)) {
+      if ((steps < this.maxSteps && await this._applyPendingPageFeedback(tabId, messages, onUpdate))
+          || this._applyPendingSteering(tabId, messages, onUpdate)) {
         onUpdate('text', { content: '', replace: true });
         continue;
       }
@@ -36592,8 +36937,9 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
         const batchResult = await this._executeToolBatch(
           tabId, result.toolCalls, messages, onUpdate, provider, assistantToolContent, allowedToolNames, steps, runOptions, toolSchemas
         );
-        if (['continue', 'return'].includes(batchResult.action) && !batchResult.status && steps < this.maxSteps
-            && await this._applyPendingRunFeedback(tabId, messages, onUpdate)) {
+        if (['continue', 'return'].includes(batchResult.action) && !batchResult.status
+            && ((steps < this.maxSteps && await this._applyPendingPageFeedback(tabId, messages, onUpdate))
+              || this._applyPendingSteering(tabId, messages, onUpdate))) {
           onUpdate('text', { content: '', replace: true });
           continue;
         }
@@ -37188,7 +37534,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       );
     }
 
-    const gateOutcome = await this._maybeRunPlannerGate(
+    let gateOutcome = await this._maybeRunPlannerGate(
       tabId, messages, enriched, onUpdate, mode, costState, runId, plannerTabInfo, runOptions,
     );
     if (!gateOutcome.proceed) {
@@ -37205,23 +37551,33 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
         || gateOutcome.responseLanguageApprovedPlanOverride === true,
       trustedContinuation: runOptions?.trustedContinuation === true,
     });
+    // The initial planner can authorize steering before response-only handling.
+    let initialTaskRevalidated = (this._steeringRuns.get(tabId)?.authorizedRevision || 0) > 0;
     if (gateOutcome.responseOnly === true) {
-      const responseOnlyShareCapture = {};
-      const responseOnly = await this._completeResponseOnlyTurn(
-        tabId, messages, onUpdate, provider, costState, runId,
-        runOptions, enriched, sourceBoundPriorMessages, responseOnlyShareCapture,
+      const responseOutcome = await this._completeInitialResponseOnlyTurn(
+        tabId, messages, onUpdate, mode, provider, costState, runId,
+        runOptions, gateOutcome, enriched, sourceBoundPriorMessages,
       );
-      if (responseOnly.status === 'done') {
-        shareHadProviderCompletion = true;
-        shareRawResponse = responseOnlyShareCapture.response;
-        if (Array.isArray(responseOnlyShareCapture.request) && responseOnlyShareCapture.request.length) {
-          currentStreamRequestMessages = responseOnlyShareCapture.request;
-        }
+      gateOutcome = responseOutcome.gate;
+      initialTaskRevalidated ||= responseOutcome.revalidated;
+      if (!gateOutcome.proceed) {
+        const status = gateOutcome.reason === 'plan_only' ? 'plan_only_output' : gateOutcome.reason || 'cancelled';
+        return finish(gateOutcome.message || 'More information is required.', status);
       }
-      return finish(responseOnly.content, responseOnly.status);
+      const { response: responseOnly, capture: responseOnlyShareCapture } = responseOutcome;
+      if (responseOnly) {
+        if (responseOnly.status === 'done') {
+          shareHadProviderCompletion = true;
+          shareRawResponse = responseOnlyShareCapture.response;
+          if (Array.isArray(responseOnlyShareCapture.request) && responseOnlyShareCapture.request.length) {
+            currentStreamRequestMessages = responseOnlyShareCapture.request;
+          }
+        }
+        return finish(responseOnly.content, responseOnly.status);
+      }
     }
     if (this._consumeSelectionGroundingRestoration(tabId, enriched)) this._persist(tabId);
-    this._startPlanExecutionGuard(tabId, mode, gateOutcome, runOptions);
+    if (!initialTaskRevalidated) this._startPlanExecutionGuard(tabId, mode, gateOutcome, runOptions);
 
     if (this._isActionMode(mode) && !selectionOnly && !standaloneChatRun) {
       await this._ensureProgressSessionForCurrentTask(tabId, {
@@ -37239,6 +37595,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     let tools = getToolsForMode(mode, {
       strictSecretMode: this.strictSecretMode,
       tier,
+      imageGenConfigured: this.imageGenConfigured,
       accessibilityTreeMaxChars: readWindow.treePageChars,
       skillLoaderTool: this._skillLoaderDefinition(mode, tier),
       skillTools,
@@ -37272,7 +37629,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     // currentStreamRequestMessages is declared at the top of this function so
     // pre-loop exits (e.g. response-only turns) can capture their request.
 
-    const recommendedFirstTool = await this._maybeExecuteRecommendedActionFirstTool(
+    const recommendedFirstTool = initialTaskRevalidated ? null : await this._maybeExecuteRecommendedActionFirstTool(
       tabId, runOptions, messages, onUpdate, provider, allowedToolNames, toolSchemas,
     );
     if (recommendedFirstTool?.action === 'return') {
@@ -37295,7 +37652,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     // Past local-only fast paths: the streaming loop below calls the provider.
     shareHadProviderCompletion = true;
 
-    while (steps < this.maxSteps) {
+    while (steps < this.maxSteps || this._hasUnvalidatedSteering(tabId)) {
       // See the non-streaming loop: raw provider text must not survive into
       // a later turn's shared record.
       shareRawResponse = null;
@@ -37307,6 +37664,26 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
         return finish(content, 'cancelled');
       }
 
+      const steeringOutcome = await this._steeringBoundaryOutcome(
+        tabId, messages, onUpdate, mode, provider, costState, runId, runOptions,
+      );
+      if (steeringOutcome?.changed) {
+        // Replace the superseded final turn with one freshly authorized turn.
+        if (steps >= this.maxSteps) steps--;
+        pendingVisionFallbackMessages = null;
+        forceCompletionVerificationTurn = false;
+        allowCompletionFailureTurn = false;
+        forceCompletionDoneAfterVerification = false;
+        forceCompletionDoneTurn = false;
+      }
+      if (steeringOutcome?.terminal) {
+        if (steeringOutcome.capture) {
+          shareRawResponse = steeringOutcome.capture.response;
+          currentStreamRequestMessages = steeringOutcome.capture.request;
+        }
+        return finish(steeringOutcome.content, steeringOutcome.status);
+      }
+
       if (steps > 0 && !selectionOnly && !standaloneChatRun) {
         await this._maybeReinjectAdapter(tabId, messages);
       }
@@ -37315,6 +37692,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       tools = getToolsForMode(mode, {
         strictSecretMode: this.strictSecretMode,
         tier,
+        imageGenConfigured: this.imageGenConfigured,
         accessibilityTreeMaxChars: readWindow.treePageChars,
         skillLoaderTool: this._skillLoaderDefinition(mode, tier),
         skillTools,
@@ -37362,7 +37740,8 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
 
       steps++;
       lastTraceStep = steps;
-      await this._applyPendingRunFeedback(tabId, messages, onUpdate);
+      await this._applyPendingPageFeedback(tabId, messages, onUpdate);
+      if (this._hasPendingSteering(tabId)) { steps--; continue; }
       onUpdate('thinking', { step: steps });
       if (runId) trace.recordStepStart(runId, steps, {});
       let traceStepClosed = false;
@@ -37507,7 +37886,8 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
           toolCalls: streamedToolCalls,
         }));
 
-        if (steps < this.maxSteps && await this._applyPendingRunFeedback(tabId, messages, onUpdate)) {
+        if ((steps < this.maxSteps && await this._applyPendingPageFeedback(tabId, messages, onUpdate))
+            || this._applyPendingSteering(tabId, messages, onUpdate)) {
           onUpdate('text', { content: '', replace: true });
           continue;
         }
@@ -37550,8 +37930,9 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
           const batchResult = await this._executeToolBatch(
             tabId, toolCalls, messages, onUpdate, provider, fullText, allowedToolNames, steps, runOptions, toolSchemas
           );
-          if (['continue', 'return'].includes(batchResult.action) && !batchResult.status && steps < this.maxSteps
-              && await this._applyPendingRunFeedback(tabId, messages, onUpdate)) {
+        if (['continue', 'return'].includes(batchResult.action) && !batchResult.status
+            && ((steps < this.maxSteps && await this._applyPendingPageFeedback(tabId, messages, onUpdate))
+              || this._applyPendingSteering(tabId, messages, onUpdate))) {
             onUpdate('text', { content: '', replace: true });
             continue;
           }

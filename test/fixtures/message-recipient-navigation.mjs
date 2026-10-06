@@ -52,6 +52,263 @@ export function registerMessageRecipientNavigationFixtures({
       return { agent, guard, probe };
     };
 
+    const setupMessageHistory = async page => {
+      await page.route('**/*', route => route.fulfill({ contentType: 'text/html', body: '<!doctype html>' }));
+      await page.goto('https://www.linkedin.com/messaging/thread/example/');
+      await setupContentHtml(page, `<!doctype html><style>
+        body { margin:0; font:16px sans-serif } button { padding:8px }
+        #rail { position:absolute;left:30px;top:30px;width:270px;height:500px;list-style:none;padding:0 }
+        #rail li { height:90px } #rail h3 { margin:0;padding:10px;height:30px }
+        #history { position:absolute;left:350px;top:80px;width:400px;height:340px;overflow:auto }
+        #preview { width:220px;height:140px } #preview img { width:190px;height:100px }
+        #composer { position:absolute;left:350px;top:430px;width:400px;height:200px }
+        textarea { width:300px;height:70px } #viewer { position:fixed;left:330px;top:80px;width:420px;height:320px;background:white;border:2px solid black;z-index:10 }
+      </style><ul id="rail" aria-label="Conversation List" class="msg-conversations-container__conversations-list">
+        <li id="row" tabindex="0" aria-label="Ipek conversation"><h3 id="row-label">Ipek conversation</h3><button id="row-options" type="button"><span id="row-options-label">Conversation options</span></button></li>
+      </ul><div id="history" class="msg-s-message-list" role="log">
+        <div class="msg-s-event-listitem"><h4>Ipek</h4>
+          <button id="preview" type="button" aria-label="Click or press enter to display in the image preview">
+            <img id="preview-image" alt="Event invitation" src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7">
+          </button>
+        </div>
+      </div><form id="composer" class="msg-form"><h2>Conversation with Ipek</h2>
+        <textarea aria-label="Write a message">Existing unsent draft</textarea><button id="send" type="button">Send</button>
+      </form><div id="viewer" role="dialog" aria-modal="true" hidden><h2>Ipek's workshop invitation</h2>
+        <p>Browser workshop. October 8, 2026. 14:00–15:00. Europe/Istanbul.</p><button id="close-viewer" type="button">Close preview</button>
+      </div>`, kind);
+      await page.evaluate(() => {
+        document.querySelector('#preview').addEventListener('click', () => { document.querySelector('#viewer').hidden = false; });
+        document.querySelector('#close-viewer').addEventListener('click', () => { document.querySelector('#viewer').hidden = true; });
+        window.sentMessages = 0;
+        document.querySelector('#send').addEventListener('click', () => { window.sentMessages++; });
+      });
+      const agent = new AgentClass({ getActive: () => ({ supportsVision: false }) });
+      agent.conversations.set(1, [{ role: 'system', content: 'sys' }, { role: 'user', content: 'Read Ipek’s event invitation.' }]);
+      agent._startPlanExecutionGuard(1, 'act', { requiresStateChange: false, requiresSubmission: false });
+      agent._messageRecipientContentProbe = (_, params) => call(page, 'probe_message_recipient_guard', params);
+      return { agent, guard: (tool, args) => agent._messageRecipientGuardBlock(1, tool, args, page.url()) };
+    };
+
+    register(`${kind}: steering after a submission permits verified social recovery controls`, async page => {
+      await page.route('**/*', route => route.fulfill({ contentType: 'text/html', body: '<!doctype html>' }));
+      for (const [url, label, publishId] of [
+        ['https://x.com/compose/post', 'Close', 'tweetButton'],
+        ['https://bsky.app/', 'Cancel', 'composerPublishBtn'],
+        ['https://bsky.app/', 'Keep editing', 'composerPublishBtn'],
+      ]) {
+        await page.goto(url);
+        await setupContentHtml(page, `<!doctype html><div role="dialog">
+          <div role="textbox" contenteditable="true">Existing draft</div>
+          <button id="recover" type="button" aria-label="${label}"><span id="recover-label">${label}</span></button>
+          <button id="publish" type="button" data-testid="${publishId}">Post</button>
+          <button id="unknown" type="button">Other action</button>
+        </div>`, kind);
+        await page.evaluate(() => {
+          window.recoveryClicks = 0; window.publishClicks = 0;
+          document.querySelector('#recover').onclick = () => window.recoveryClicks++;
+          document.querySelector('#publish').onclick = () => window.publishClicks++;
+        });
+        const agent = new AgentClass({ getActive: () => ({ supportsVision: false }) });
+        agent.conversations.set(1, [{ role: 'system', content: 'sys' }, { role: 'user', content: 'Inspect the previous publication.' }]);
+        const guard = agent._startPlanExecutionGuard(1, 'act', { requiresStateChange: true });
+        guard.steeringPriorSubmission = { dispatched: true, observedAfterSubmit: false };
+        const probe = (tool, args) => page.evaluate(({ source, tool, args }) =>
+          Function('return (' + source + ')')()(tool, args), { source: AgentClass._submitActionProbe.toString(), tool, args });
+        const tree = await call(page, 'get_accessibility_tree', { filter: 'visible', maxChars: 20000 });
+        const ref = new RegExp(`button "${label}" \\[([^\\]]+)\\]`).exec(tree.pageContent)?.[1];
+        assert.ok(ref, tree.pageContent);
+        const point = await page.locator('#recover').evaluate(el => {
+          const rect = el.getBoundingClientRect(); return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
+        });
+        for (const [tool, args] of [
+          ['click', { selector: '#recover-label' }], ['click', { text: label, textMatch: 'exact' }],
+          ['click_ax', { ref_id: ref }], ['click', point],
+        ]) {
+          const detected = await probe(tool, args);
+          assert.equal(detected?.resolvedNonSubmitTarget, true, `${label}/${tool}: real target is safe`);
+          assert.equal(agent._steeringPriorSubmissionBlock(1, tool, args, detected), null, `${label}/${tool}`);
+          assert.equal((await call(page, tool, args)).success, true);
+        }
+        for (const selector of ['#publish', '#unknown', '#missing']) {
+          const args = { selector };
+          assert.equal(agent._steeringPriorSubmissionBlock(1, 'click', args, await probe('click', args))?.noDispatch, true, selector);
+        }
+        assert.deepEqual(await page.evaluate(() => [window.recoveryClicks, window.publishClicks]), [4, 0]);
+      }
+    });
+
+    register(`${kind}: LinkedIn history previews and native conversation rows are not sends`, async page => {
+      const { guard } = await setupMessageHistory(page);
+      const tree = await call(page, 'get_accessibility_tree', { filter: 'visible', maxChars: 20000 });
+      const previewRef = /button "Click or press enter to display in the image preview" \[([^\]]+)\]/.exec(tree.pageContent)?.[1];
+      const sendRef = /button "Send" \[([^\]]+)\]/.exec(tree.pageContent)?.[1];
+      assert.ok(previewRef, tree.pageContent);
+      assert.ok(sendRef, tree.pageContent);
+      const rect = await page.locator('#preview').evaluate(el => { const r=el.getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2}; });
+      for (const [tool, args] of [
+        ['click', { selector: '#preview' }], ['click', { text: 'Click or press enter to display in the image preview' }],
+        ['click_ax', { ref_id: previewRef }], ['click', rect], ['click', { selector: '#preview-image' }],
+        ['click', { selector: '#row' }], ['click', { selector: '#row-label' }], ['click', { text: 'Ipek conversation' }],
+      ]) assert.equal(await guard(tool, args), null, JSON.stringify({tool,args}));
+      for (const selector of ['#row-options', '#row-options-label', '#send']) {
+        assert.equal((await guard('click', { selector }))?.noDispatch, true, selector);
+      }
+      const sendPoint = await page.locator('#send').evaluate(el => {const r=el.getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2};});
+      for (const [tool,args] of [['click',{text:'Send'}],['click_ax',{ref_id:sendRef}],['click',sendPoint]]) {
+        assert.equal((await guard(tool,args))?.noDispatch,true,JSON.stringify({tool,args}));
+      }
+      await page.locator('#row-options').evaluate(el => {el.style='position:absolute;left:0;top:0;width:270px;height:90px';});
+      assert.equal((await guard('click',{selector:'#row'}))?.noDispatch,true,'row center over nested action');
+      await page.locator('textarea').focus();
+      assert.equal((await guard('press_keys', { key: 'Enter' }))?.noDispatch, true);
+      assert.equal(await page.evaluate(() => window.sentMessages), 0);
+    });
+
+    register(`${kind}: localized LinkedIn attachment viewers open across selector, text, AX, and coordinate targeting`, async page => {
+      const { guard } = await setupMessageHistory(page);
+      for (const label of ['Görsel önizlemesinde görüntülemek için tıklayın veya Enter tuşuna basın',
+        'Cliquez ou appuyez sur Entrée pour afficher un aperçu de l’image',
+        'Clique ou pressione Enter para exibir na visualização da imagem']) {
+        await page.locator('#preview').evaluate((el, label) => el.setAttribute('aria-label', label), label);
+        const tree = await call(page, 'get_accessibility_tree', { filter: 'visible', maxChars: 20000 });
+        const ref = tree.pageContent.split('\n').find(line => line.includes(`button "${label}"`))?.match(/\[([^\]]+)\]/)?.[1];
+        assert.ok(ref, tree.pageContent);
+        const point = await page.locator('#preview').evaluate(el => {
+          const r = el.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+        });
+        for (const [tool, args] of [['click', { selector: '#preview' }], ['click', { text: label, textMatch: 'exact' }],
+          ['click_ax', { ref_id: ref }], ['click', point], ['click', { selector: '#preview-image' }]]) {
+          assert.equal(await guard(tool, args), null, `${label}/${tool}`);
+          assert.equal((await call(page, tool, args)).success, true);
+          assert.equal(await page.locator('#viewer').isVisible(), true);
+          await page.locator('#close-viewer').click();
+        }
+      }
+      assert.equal(await page.evaluate(() => window.sentMessages), 0);
+    });
+
+    register(`${kind}: form-free LinkedIn previews need no explicit button type`, async page => {
+      for (const tag of ['button', 'div']) {
+        const { guard } = await setupMessageHistory(page);
+        await page.evaluate(tag => {
+          const original = document.querySelector('#preview');
+          original.removeAttribute('type');
+          if (tag === 'div') {
+            const control = document.createElement('div');
+            for (const attribute of original.attributes) control.setAttribute(attribute.name, attribute.value);
+            control.setAttribute('role', 'button'); control.tabIndex = 0;
+            control.append(...original.childNodes); original.replaceWith(control);
+            control.onclick = () => { document.querySelector('#viewer').hidden = false; };
+          }
+        }, tag);
+        const tree = await call(page, 'get_accessibility_tree', { filter: 'visible', maxChars: 20000 });
+        const ref = /button "Click or press enter to display in the image preview" \[([^\]]+)\]/.exec(tree.pageContent)?.[1];
+        assert.ok(ref, tree.pageContent);
+        const point = await page.locator('#preview').evaluate(el => {
+          const r = el.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+        });
+        for (const [tool, args] of [['click', { selector: '#preview' }], ['click', { text: 'Click or press enter to display in the image preview' }],
+          ['click_ax', { ref_id: ref }], ['click', point]]) {
+          assert.equal(await guard(tool, args), null, `${tag}/${tool}`);
+          assert.equal((await call(page, tool, args)).success, true);
+          assert.equal(await page.locator('#viewer').isVisible(), true);
+          await page.locator('#close-viewer').click();
+        }
+        assert.equal(await page.evaluate(() => window.sentMessages), 0);
+      }
+    });
+
+    register(`${kind}: LinkedIn preview lookalikes and hidden or occluded images stay protected`, async page => {
+      const { guard } = await setupMessageHistory(page);
+      for (const change of ['no-image', 'composer', 'hidden', 'transparent', 'ancestor-transparent', 'occluded', 'disabled', 'commit-label', 'commit-text',
+        'localized-send', 'submit', 'external-form', 'outside-history', 'small-icon', 'menu', 'image-hidden']) {
+        await page.evaluate(change => {
+          const button=document.querySelector('#preview');
+          window.originalPreview=button.cloneNode(true);
+          if(change==='no-image')button.querySelector('img').remove();
+          if(change==='composer')document.querySelector('#composer').append(button);
+          if(change==='hidden')button.hidden=true;
+          if(change==='transparent')button.style.opacity='0';
+          if(change==='ancestor-transparent')button.parentElement.style.opacity='0';
+          if(change==='disabled')button.disabled=true;
+          if(change==='commit-label')button.title='Send';
+          if(change==='commit-text'){button.title='View image';button.append('Send');}
+          if(change==='localized-send')button.setAttribute('aria-label','Gönder');
+          if(change==='submit')button.type='submit';
+          if(change==='external-form'){button.removeAttribute('type');button.setAttribute('form','composer');}
+          if(change==='outside-history')document.body.append(button);
+          if(change==='small-icon')button.querySelector('img').style='width:20px;height:20px';
+          if(change==='menu')button.setAttribute('aria-haspopup','menu');
+          if(change==='image-hidden')button.querySelector('img').style.visibility='hidden';
+          if(change==='occluded') {
+            const cover=document.createElement('div');cover.id='cover';
+            cover.style='position:fixed;left:350px;top:80px;width:400px;height:340px;z-index:20;background:white';document.body.append(cover);
+          }
+        }, change);
+        assert.equal((await guard('click', { selector:'#preview' }))?.noDispatch, true, change);
+        await page.evaluate(() => {
+          document.querySelector('#preview').remove(); document.querySelector('.msg-s-event-listitem').append(window.originalPreview);
+          document.querySelector('.msg-s-event-listitem').style.opacity='';
+          document.querySelector('#cover')?.remove();
+        });
+      }
+      await page.evaluate(() => {document.querySelector('#viewer').hidden=false;});
+      assert.equal((await guard('click', {selector:'#preview'}))?.noDispatch,true,'background image behind modal');
+    });
+
+    register(`${kind}: Ipek steering replays a message invitation into exactly one calendar event`, async page => {
+      const { agent, guard } = await setupMessageHistory(page);
+      agent._persist = () => {}; agent._persistSubmittedTurn = async () => {};
+      agent._getTabUrlTitle = async () => ({tabUrl:page.url(),tabTitle:'Messaging'});
+      agent._ensureProgressSessionForCurrentTask = async () => {};
+      agent._plannerMode = () => 'off';
+      agent._runPlannerIntentGate = async (_tab,enriched) => {
+        assert.match(enriched.content,/Add this event to my Google Calendar/); assert.match(enriched.content,/Ipek/);
+        return {proceed:true,requestKind:'execute',requiresStateChange:true,requiresSubmission:true};
+      };
+      agent.conversations.set(1,[{role:'system',content:'sys'},{role:'user',content:'Add this event to my Google Calendar.'}]);
+      agent._startPlanExecutionGuard(1,'act',{requiresStateChange:true,requiresSubmission:true});
+      agent._beginSteeringRun(1,()=>{},{detachedRequestId:'replay'});
+      agent._runningTabs.add(1);
+      assert.equal(agent.steerMessage(1,'Use Ipek’s message',{requestId:'replay',messageId:'ipek'}).accepted,true);
+      const refresh=await agent._revalidatePendingSteering(1,agent.conversations.get(1),()=>{},'act',null,null,{});
+      assert.equal(refresh.gate.proceed,true);
+      await page.evaluate(() => {
+        const recent=document.createElement('div');recent.style.height='500px';recent.textContent='Emre: a recent photo';
+        document.querySelector('#history').append(recent);
+        document.querySelector('#history').scrollTop=10000;
+      });
+      assert.equal((await guard('click',{selector:'#preview'}))?.noDispatch,true,'earlier invitation must be brought into view');
+      const scrolled=await call(page,'scroll',{direction:'up',amount:700,x:550,y:250});
+      assert.equal(scrolled.success,true,JSON.stringify(scrolled));
+      assert.equal(await guard('click',{selector:'#preview'}),null);
+      assert.equal((await call(page,'click',{selector:'#preview'})).success,true);
+      const invitation=await call(page,'get_page_info_cdp',{});
+      assert.match(JSON.stringify(invitation),/Browser workshop/);
+      assert.match(JSON.stringify(invitation),/October 8, 2026/);
+      assert.match(JSON.stringify(invitation),/Europe\/Istanbul/);
+      await page.goto('https://calendar.google.com/calendar/u/0/r');
+      await setupContentHtml(page, `<!doctype html><form>
+        <input id="title" aria-label="Event title"><input id="date" aria-label="Date"><input id="start" aria-label="Start time">
+        <input id="end" aria-label="End time"><input id="zone" aria-label="Time zone"><button id="save" type="button">Save</button>
+      </form><div id="confirmation" role="status"></div>`,kind);
+      await page.evaluate(() => {
+        window.savedEvents=[];
+        document.querySelector('#save').addEventListener('click',()=>{
+          window.savedEvents.push(Object.fromEntries(['title','date','start','end','zone'].map(key=>[key,document.getElementById(key).value])));
+          document.querySelector('#confirmation').textContent='Event saved';
+        });
+      });
+      for(const [key,text] of Object.entries({title:'Browser workshop',date:'2026-10-08',start:'14:00',end:'15:00',zone:'Europe/Istanbul'})) {
+        assert.equal((await call(page,'type',{selector:'#'+key,text,clear:true})).success,true);
+      }
+      assert.equal((await call(page,'click',{selector:'#save'})).success,true);
+      assert.deepEqual(await page.evaluate(()=>window.savedEvents),[{title:'Browser workshop',date:'2026-10-08',start:'14:00',end:'15:00',zone:'Europe/Istanbul'}]);
+      assert.match(JSON.stringify(await call(page,'get_page_info_cdp',{})),/Event saved/);
+      assert.equal(agent._planExecutionGuards.get(1).taskDrifted,false);
+      agent._finishSteeringRun(1);agent._runningTabs.delete(1);
+    });
+
     register(`${kind}: X sent DM completes with the open composer and exact outgoing delivery evidence`, async (page) => {
       const { agent } = await setup(page);
       const url = 'https://x.com/i/chat/123-456';

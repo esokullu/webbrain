@@ -8,6 +8,9 @@ function byteLength(value) {
 }
 
 function capText(value, maxChars, marker, state) {
+  // Authority-bearing text must retain the exact parent-task hash. Its data
+  // URLs are part of that text; quota handling may fail, but cannot rewrite it.
+  if (maxChars === Infinity) return String(value || '');
   const sanitized = String(value || '').replace(DATA_URL_RE, () => {
     state.compacted = true;
     return '[embedded binary data omitted from session recovery]';
@@ -62,6 +65,9 @@ function sanitizeContent(message, state, caps) {
       state.compacted = true;
       return { type: 'text', text: attachmentPlaceholder(message, 'document') };
     }
+    if (caps.textChars === Infinity && block?.type === 'text' && typeof block.text === 'string') {
+      return { ...sanitizeValue({ ...block, text: '' }, state), text: capText(block.text, caps.textChars, '[large content truncated for session recovery]', state) };
+    }
     return sanitizeValue(block, state);
   });
 }
@@ -87,7 +93,7 @@ function reduceToBudget(messages, maxBytes, state, preserveMessageIndices = []) 
   const out = messages.map(message => ({ ...message }));
   const preserved = new Set(
     Array.isArray(preserveMessageIndices)
-      ? preserveMessageIndices.filter(index => Number.isInteger(index) && index >= 0 && index < out.length)
+      ? preserveMessageIndices.filter(index => Number.isInteger(index) && index >= 0 && index < out.length).map(index => out[index])
       : [],
   );
   let keepRecentFrom = Math.max(1, out.length - 14);
@@ -98,7 +104,7 @@ function reduceToBudget(messages, maxBytes, state, preserveMessageIndices = []) 
     // messages intact even when a long tool loop pushes them outside the
     // ordinary recent-message window; otherwise a worker restart can promote
     // only the latest answer fragment as a new task.
-    if (!message || message.role === 'system' || preserved.has(index)) continue;
+    if (!message || message.role === 'system' || preserved.has(message)) continue;
     state.compacted = true;
     out[index] = {
       role: message.role,
@@ -136,7 +142,7 @@ function reduceToBudget(messages, maxBytes, state, preserveMessageIndices = []) 
   }
   for (let index = keepRecentFrom; index < out.length && byteLength(out) > maxBytes; index++) {
     const message = out[index];
-    if (!message || typeof message.content !== 'string' || message.content.length <= 4_000) continue;
+    if (!message || preserved.has(message) || typeof message.content !== 'string' || message.content.length <= 4_000) continue;
     state.compacted = true;
     out[index] = { ...message, content: `${message.content.slice(0, 3_900)}\n[content truncated for session recovery]` };
   }
@@ -176,7 +182,14 @@ export function serializeConversationForSession(messages, options = {}) {
     ? { textChars: 16_000, toolChars: 8_000, toolArgsChars: 8_000 }
     : { textChars: 96_000, toolChars: 32_000, toolArgsChars: 24_000 };
   const state = { compacted: false };
-  const sanitized = Array.isArray(messages) ? messages.map(message => sanitizeMessage(message, state, caps)) : [];
+  // Task-authority messages must survive recovery verbatim. If their text
+  // alone exceeds storage limits, persistence reports degradation instead of
+  // restoring a truncated correction under its original authorization hash.
+  const preserved = new Set(Array.isArray(options.preserveMessageIndices) ? options.preserveMessageIndices : []);
+  const sanitized = Array.isArray(messages) ? messages.map((message, index) => sanitizeMessage(
+    message, state, preserved.has(index) && message?.role === 'user'
+      ? { ...caps, textChars: Infinity } : caps,
+  )) : [];
   const bounded = reduceToBudget(sanitized, maxBytes, state, options.preserveMessageIndices);
   return { messages: bounded, bytes: byteLength(bounded), compacted: state.compacted };
 }

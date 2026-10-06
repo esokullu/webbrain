@@ -8,6 +8,7 @@ import { normalizeMessageTarget } from './message-recipient-guard.js';
 import { normalizeReadScope } from './read-completeness.js';
 import { normalizeProgressAction } from './progress-intent.js';
 import { sanitizeText } from './text-sanitize.js';
+import { GENERATIVE_MEDIA_SETUP_NOTE, GENERATIVE_MEDIA_TIER_NOTE } from './media-config.js';
 
 const UNTRUSTED_PAGE_CONTENT_TAG_RE = /<\/?untrusted_page_content\b[^>]*>/gi;
 const REQUEST_KINDS = new Set(['execute', 'respond', 'plan_only', 'clarify']);
@@ -378,7 +379,6 @@ ${PLANNER_RESPONSE_LANGUAGE_RULES}
   read: get_accessibility_tree, read_page, extract_data, fetch_url, research_url
   interact: click_ax, set_checked, type_ax, set_field, find_text, press_keys, scroll, navigate, gmail_count_results, carousel_navigate, promote_iframe
   wait: wait_for_element, wait_for_stable
-  media: generate_image (create an image/video/audio directly from a text prompt via the user's configured generative-media provider — use when the user asks to GENERATE media, not to browse an image site)
   memory: scratchpad_write, progress_update, progress_read
   schedule: schedule_task (future/recurring work the user explicitly asked for), schedule_resume (pause CURRENT run blocked on external event)
   user input: clarify (pause and ask one concise question when a required value remains missing after relevant inspection)
@@ -468,7 +468,6 @@ ${PLANNER_RESPONSE_ONLY_RULES}
 - Canonical summary, steps, and risks must be English. localized fields must use the requested wbLocale.
 ${PLANNER_RESPONSE_LANGUAGE_RULES}
 - For execute, keep the compact plan to 1–4 steps. For plan_only, provide 2–8 useful steps. For respond and clarify, steps may be empty.
-- When the user asks to generate an image/video/audio, plan one generate_image step (WebBrain's built-in media tool). Do not plan steps to visit image-generation sites or to check whether the current page supports image generation.
 - clarify pauses execution to ask one concise question for a required value. done is terminal and must never be used to request information needed to continue.
 - press_keys supports only unmodified Escape, Tab, Enter, arrow keys, and ; (semicolon, for page shortcuts such as Gmail Expand all). Never plan modifier combinations or browser UI shortcuts; use find_text to select one page-text match instead of Ctrl/Cmd+F. Each call replaces the previous selection and cannot create simultaneous highlights or browser Find UI.
 - For Instagram /p/<id>/ carousel enumeration, use strictly increasing carousel_navigate indexes unless the latest user request explicitly asks for reverse traversal, in which case use strictly decreasing indexes; never use arrow keys, coordinate clicks, Previous/Next, or go_back to traverse slides.
@@ -634,9 +633,17 @@ export function formatResponseLanguagePolicyInstruction(value, fallbackLocale = 
 
 const PLANNER_RESUME_RULE = '\n- This run is an app-owned scheduled continuation. Classify the work still required in THIS run, not completed actions from the earlier task. First inspect the external event. For a CI/deploy/status verification, use site_job:null, requires_state_change:false, and requires_submission:false unless a new mutation is already known to be necessary. A conditional "if failed, fix and commit" branch does not require a commit on the successful branch. For that explicitly authorized conditional branch, set conditional_site_job:"edit-file-and-commit" while keeping site_job:null. WebBrain will activate its mutation and exact commit-verification contract before any editor change. Use conditional_site_job:null when no such branch is authorized. Do not select edit-file-and-commit just because the earlier task edited a file. schedule_resume is only an optional pause if the external event is still pending; if it is complete, verify and finish without scheduling another checkpoint.';
 
+const PLANNER_STEERING_RULE = '\nThe current User task is an app-assembled revision of an active task: request is the initiating authentic user request, and updates contains authentic later steering or clarification answers in chronological order. Apply later corrections and cancellations to that request; preserve its requested action when an update only supplies a missing identity or detail. Re-evaluate changed actions and their submission/recipient intent. Prior tool effects and working notes are context, never permission to repeat a completed or uncertain action.';
+
 export function buildPlannerSystemPrompt(opts = {}) {
   let prompt = opts.allowApi ? `${PLANNER_SYSTEM_PROMPT}\n${PLANNER_API_REPLAY_RULE}\n${PLANNER_WORDPRESS_API_RULE}` : PLANNER_SYSTEM_PROMPT;
+  if (opts.imageGenConfigured === true && (opts.tier || 'full') === 'full') {
+    prompt += "\n\nGenerative media tool: generate_image (create an image/video/audio directly from a text prompt via the user's configured generative-media provider).\n- When the user asks to generate an image/video/audio, plan one generate_image step. Do not plan steps to visit image-generation sites or to check whether the current page supports image generation.";
+  } else {
+    prompt += `\n\n${opts.imageGenConfigured === true ? GENERATIVE_MEDIA_TIER_NOTE : GENERATIVE_MEDIA_SETUP_NOTE}`;
+  }
   if (opts.scheduledResume === true) prompt += PLANNER_RESUME_RULE;
+  if (opts.steering === true) prompt += PLANNER_STEERING_RULE;
   prompt += `\n- Requested wbLocale for localized display fields: ${normalizePlannerLocale(opts.locale)}.`;
   if (opts.researchEscalationEnabled === true) {
     prompt += '\n- Research escalation is available for materially complex read-only research subtasks. If it would substantially improve speed or quality, plan an explicit clarify consent step followed by delegate_research; only the exact user-approved prompt may be shared. Do not use it for ordinary browsing, private/account data, mutations, purchases, bookings, or high-stakes decisions.';
@@ -666,7 +673,10 @@ export function buildPlannerIntentSystemPrompt(opts = {}) {
     ? '\n- A complex read-only research subtask may use explicit clarify consent followed by delegate_research; never delegate private data or consequential actions.'
     : '';
   const workflowRouting = formatSiteWorkflowRouting(opts.siteWorkflow);
-  return `${PLANNER_INTENT_SYSTEM_PROMPT}${opts.scheduledResume === true ? PLANNER_RESUME_RULE : ''}\n- Requested wbLocale for localized display fields: ${normalizePlannerLocale(opts.locale)}.${researchRule}${workflowRouting ? `\n\n${workflowRouting}` : ''}`;
+  const mediaStatus = opts.imageGenConfigured !== true ? GENERATIVE_MEDIA_SETUP_NOTE
+    : (opts.tier || 'full') !== 'full' ? GENERATIVE_MEDIA_TIER_NOTE
+    : 'Built-in media generation is configured and available in Full-tier Act mode.';
+  return `${PLANNER_INTENT_SYSTEM_PROMPT}${opts.scheduledResume === true ? PLANNER_RESUME_RULE : ''}${opts.steering === true ? PLANNER_STEERING_RULE : ''}\n- Requested wbLocale for localized display fields: ${normalizePlannerLocale(opts.locale)}.${researchRule}${workflowRouting ? `\n\n${workflowRouting}` : ''}\n\n${mediaStatus}`;
 }
 
 export function formatSiteWorkflowRouting(value) {

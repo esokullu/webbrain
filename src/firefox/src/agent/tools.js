@@ -17,6 +17,9 @@ const DONE_OUTCOME_PROPERTY = {
 const DONE_REQUIRED = ['summary'];
 const DONE_REQUIRED_WITH_OUTCOME = ['summary', 'outcome'];
 
+export const SYSTEM_PROMPT_GENERATIVE_MEDIA = `GENERATIVE MEDIA:
+- generate_image: Create media (usually an image, sometimes video/audio) directly from a text prompt through the user's configured generative-media provider. When the user asks to GENERATE media ("generate an image of a red apple", "make a logo", "create a video clip"), call this tool — do NOT navigate to third-party image sites (Midjourney, DALL·E, Bing Images, etc.). Not available in Ask mode.`;
+
 export const AGENT_TOOLS = [
   {
     type: 'function',
@@ -1718,6 +1721,9 @@ export function getToolsForMode(mode, opts = {}) {
       && !(normalizedMode === 'ask' && t.function.name === 'clarify'))
       .map(t => (t.function.name === 'clarify' ? ordinaryClarifyTool(t) : t));
   }
+  if (opts.imageGenConfigured !== true) {
+    base = base.filter(tool => tool.function?.name !== 'generate_image');
+  }
   const requestedTreePageChars = tier !== 'compact'
     && Number(opts.accessibilityTreeMaxChars) === EXPANDED_TREE_PAGE_CHARS
     ? EXPANDED_TREE_PAGE_CHARS
@@ -1994,7 +2000,6 @@ ${BROWSER_TAB_LIMITATION}
 - scratchpad_write: Pin a note in context that survives summarization (use on long tasks to remember download IDs, file paths, plans)
 - progress_update / progress_read: Structured app-owned ledger for the active repeated item/action task. Use it for per-user/per-item status and collected fields; close pending/acted rows before done.
 - download_public_media (if enabled by a skill) / download_social_media: One-shot image/video download from public social sites. Prefer the enabled skill tool for public media URLs; otherwise use download_social_media. Single call — no need to inspect the DOM yourself.
-- generate_image: Create media (usually an image, sometimes video/audio) directly from a text prompt through the user's configured generative-media provider. When the user asks to GENERATE media ("generate an image of a red apple", "make a logo", "create a video clip"), call this tool — do NOT navigate to third-party image sites (Midjourney, DALL·E, Bing Images, etc.). Requires Settings → Assistive Models → Generative Media. Not available in Ask mode.
 - hover: Synthetic hover over a ref_id (Firefox MV2 — no CDP). Use ONLY for menus/tooltips that REVEAL on hover (GitHub three-dot menus, Linear card actions). Re-read the tree after to find the newly-visible items. isTrusted=false, so sites with strict event-trust gating won't respond — fall back to clicking the explicit "..." button if hover doesn't reveal a menu.
 - drag_drop: Synthetic drag from one ref_id to another (pointerdown/move/up + HTML5 dragstart/drop). Use for Trello/Linear/Notion-style card reordering, image-crop handles. Less reliable than Chrome's CDP path — verify by re-reading the tree.
 - wait_for_stable: Wait until the page is quiet (no DOM mutations + no in-flight network) for \`quietMs\` ms. Use AFTER navigate / set_field({submit:true}) / a click that fires async work, BEFORE re-reading the tree. Different from wait_for_element: wait_for_element answers "did X appear", wait_for_stable answers "is the page done shuffling".

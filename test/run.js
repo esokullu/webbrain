@@ -4288,7 +4288,7 @@ test('user memory browser wiring is mirrored and non-blocking', () => {
     assert.match(background, /USER_MEMORY_STORAGE_KEY/, `${label}: background should import memory constants`);
     assert.match(background, /USER_MEMORY_FORM_CAPTURE_KEY/, `${label}: background should import the form-capture setting key`);
     assert.match(background, /const userMemoryReady = syncAgentUserMemoryFromStorage\(\)\.catch\(\(\) => \{\}\);/, `${label}: first message should await memory hydration`);
-    assert.match(background, /Promise\.all\(\[planBeforeActReady, planReviewReady, customSkillsReady, userMemoryReady\]\)/, `${label}: handleMessage should await memory hydration`);
+    assert.match(background, /Promise\.all\(\[[^\]]*\buserMemoryReady\b[^\]]*\]\)/, `${label}: handleMessage should await memory hydration`);
     for (const action of ['get_user_memory', 'add_user_memory', 'update_user_memory', 'delete_user_memory', 'clear_user_memory', 'export_user_memory', 'import_user_memory', 'enqueue_user_memory_extraction']) {
       assert.match(background, new RegExp(`case '${action}'`), `${label}: ${action} route missing`);
     }
@@ -16283,7 +16283,7 @@ test('import_config_patch background handler merges against live provider storag
         parseConfigImport, parseConfigPatchImport, mergeConfigPatchSettings,
         providerManager, agent,
         loadMaxSteps, loadClarifyTimeout, loadAutoScreenshot, loadSiteAdapters, loadResearchEscalation,
-        loadScreenshotRedaction, loadStrictSecretMode, loadWebMCPEnabled, loadProfile,
+        loadScreenshotRedaction, loadStrictSecretMode, loadImageGenConfig, loadWebMCPEnabled, loadProfile,
         syncAgentUserMemoryFromStorage, loadCustomSkills, loadCaptchaSolver,
         loadPlanBeforeAct, loadPlanReviewSettings, loadApiMutationObserverSetting,
       } = helpers;
@@ -16334,6 +16334,7 @@ test('import_config_patch background handler merges against live provider storag
       loadResearchEscalation: noop,
       loadScreenshotRedaction: noop,
       loadStrictSecretMode: noop,
+      loadImageGenConfig: noop,
       loadWebMCPEnabled: noop,
       loadProfile: noop,
       syncAgentUserMemoryFromStorage: noop,
@@ -29192,7 +29193,9 @@ test('getToolsForMode: mode/tier redesign exposes the intended normal and Dev to
     const researchOptions = { researchEscalationEnabled: true };
     assert.equal(getTools('act', { tier: 'compact', ...researchOptions }).length, 25, `[${label}] Compact should expose 25 tools after tab-tool removal`);
     assert.equal(getTools('act', { tier: 'mid', ...researchOptions }).length, 48, `[${label}] Mid should expose 48 tools including CAPTCHA discovery and answer application`);
-    assert.equal(getTools('act', researchOptions).length, label === 'chrome' ? 56 : 55, `[${label}] Full tool count should include opt-in MemCode recall, chat workflow tools, and fal.ai generation`);
+    assert.equal(getTools('act', researchOptions).length, label === 'chrome' ? 55 : 54, `[${label}] Full tool count should omit unconfigured media generation`);
+    assert.equal(getTools('act', { ...researchOptions, imageGenConfigured: true }).length, label === 'chrome' ? 56 : 55,
+      `[${label}] Configured Full tier should include media generation`);
     assert.equal(ask.includes('recall_memcode'), true, `[${label}] Ask can read connected MemCode memories`);
     assert.equal(compact.includes('recall_memcode'), false, `[${label}] Compact does not expose remote recall`);
     assert.equal(compact.includes('research_url'), false, `[${label}] Compact must not gain research_url as a tab-tool replacement`);
@@ -119405,7 +119408,7 @@ test('attachments: text attachment scratchpad path never writes raw textContent'
     );
     assert.match(
       source,
-      /const attachmentToolNames = new Set\([\s\S]*?getToolsForMode\(mode, \{ tier: provider\.promptTier \}\)[\s\S]*?const canUseScratchpadTool = attachmentToolNames\.has\('scratchpad_write'\);[\s\S]*?const canUseUploadTool = attachmentToolNames\.has\('upload_file'\);[\s\S]*?(?:await )?this\._applyAttachments\(enriched, sourceBoundAttachments, provider, \{[\s\S]*?canUseScratchpadTool,[\s\S]*?canUseUploadTool,[\s\S]*?tabId,[\s\S]*?messages,[\s\S]*?\}\);[\s\S]*?_pinTextAttachmentMetadata\(tabId, sourceBoundAttachments, \{ canUseScratchpadTool \}\);/,
+      /const attachmentToolNames = new Set\([\s\S]*?getToolsForMode\(mode, \{ tier: provider\.promptTier(?:, [^}]*)? \}\)[\s\S]*?const canUseScratchpadTool = attachmentToolNames\.has\('scratchpad_write'\);[\s\S]*?const canUseUploadTool = attachmentToolNames\.has\('upload_file'\);[\s\S]*?(?:await )?this\._applyAttachments\(enriched, sourceBoundAttachments, provider, \{[\s\S]*?canUseScratchpadTool,[\s\S]*?canUseUploadTool,[\s\S]*?tabId,[\s\S]*?messages,[\s\S]*?\}\);[\s\S]*?_pinTextAttachmentMetadata\(tabId, sourceBoundAttachments, \{ canUseScratchpadTool \}\);/,
       `${label} should derive attachment guidance from the active run tool catalog`,
     );
   }

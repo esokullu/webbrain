@@ -42,6 +42,7 @@ import {
 import { getBalance as capsolverGetBalance } from './agent/captcha-solver.js';
 import { isCapsolverEnabled } from './agent/capsolver-config.js';
 import { testImageGenProvider } from './agent/fal-media.js';
+import { IMAGE_GEN_MODEL_KEY } from './agent/media-config.js';
 import { CAPTCHA_SETTINGS_KEYS, getCaptchaProviders } from './agent/captcha-provider-config.js';
 import { getAdditionalCaptchaBalance } from './agent/captcha-additional-providers.js';
 import { getTwoCaptchaBalance } from './agent/two-captcha.js';
@@ -269,6 +270,7 @@ const scheduler = new ScheduledJobManager({
     await customSkillsReady;
     await alwaysAllowApiMutationsReady;
     await strictSecretModeReady;
+    await imageGenConfigReady;
     await webMcpEnabledReady;
     if (providerManager.providers.size === 0) await providerManager.load();
   },
@@ -597,6 +599,12 @@ async function loadStrictSecretMode() {
   agent.strictSecretMode = stored?.strictSecretMode === true;
 }
 const strictSecretModeReady = loadStrictSecretMode().catch(() => {});
+
+async function loadImageGenConfig() {
+  const stored = await chrome.storage.local.get(IMAGE_GEN_MODEL_KEY).catch(() => ({}));
+  agent.setImageGenConfig(stored?.[IMAGE_GEN_MODEL_KEY]);
+}
+const imageGenConfigReady = loadImageGenConfig();
 
 async function loadWebMCPEnabled() {
   const stored = await chrome.storage.local.get('webMcpEnabled');
@@ -1233,6 +1241,9 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
   // already-open conversations so the next turn sees the update — without
   // wiping the chat history.
   let refreshPrompts = false;
+  if (areaName === 'local' && changes[IMAGE_GEN_MODEL_KEY]) {
+    agent.setImageGenConfig(changes[IMAGE_GEN_MODEL_KEY].newValue);
+  }
   if (changes[ALWAYS_ALLOW_API_MUTATIONS_KEY]) {
     const value = changes[ALWAYS_ALLOW_API_MUTATIONS_KEY].newValue;
     agent.setAlwaysAllowApiMutations(value === undefined || value === true);
@@ -2866,7 +2877,7 @@ async function handleMessage(msg, sender) {
     // Agent toggles and prompt add-ons hydrate once at SW boot — await those
     // promises so the first chat can't race ahead of hydration, without a
     // storage round-trip on every message.
-    await Promise.all([planBeforeActReady, planReviewReady, customSkillsReady, userMemoryReady]);
+    await Promise.all([planBeforeActReady, planReviewReady, customSkillsReady, userMemoryReady, imageGenConfigReady]);
     await alwaysAllowApiMutationsReady;
     await strictSecretModeReady;
     await webMcpEnabledReady;
@@ -3792,6 +3803,7 @@ async function handleMessage(msg, sender) {
         loadResearchEscalation(),
         loadScreenshotRedaction(),
         loadStrictSecretMode(),
+        loadImageGenConfig(),
         loadWebMCPEnabled(),
         loadProfile(),
         syncAgentUserMemoryFromStorage(),

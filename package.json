@@ -70,7 +70,7 @@
     "test:cms:browser": "node --test test/cms-browser-smoke.mjs",
     "test:compass-quota": "node --test test/compass-quota.mjs",
     "test:compass-quota:ui": "node test/compass-quota-ui.mjs",
-    "test:generative-media": "node --test test/generative-media.mjs",
+    "test:generative-media": "node --test test/generative-media.mjs test/generative-media-availability.mjs",
     "test:generative-media:ui": "node test/generative-media-ui.mjs",
     "test:generative-media:extension": "node test/generative-media-extension.mjs"
   },
