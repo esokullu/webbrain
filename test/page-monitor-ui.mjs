@@ -121,9 +121,8 @@ async function installContentEditableFallback(page, build) {
     const editor = document.createElement('div'); editor.id = 'rich-editor'; editor.contentEditable = 'true';
     document.body.prepend(editor);
     window.typeRichText = async ({ text, clear }) => {
-      editor.focus();
       const finish = __wbPageMonitor.beginContentAction('type', { selector: '#rich-editor' });
-      try { return await richTextInsertion(editor, text, clear); }
+      try { editor.focus(); return await richTextInsertion(editor, text, clear); }
       catch (error) { return { success: false, code: error.code, dispatched: error.dispatched }; }
       finally { finish(); }
     };
@@ -863,8 +862,9 @@ for (const [build, engine] of [['chrome', chromium], ['firefox', firefox]]) {
       await page.waitForFunction(() => feedback.some(event => event.kind === 'input' && event.source === 'user'), null, { timeout: 1000 });
       await page.evaluate(() => {
         monitorEnabled = false; deliver('page_monitor_state'); document.activeElement?.blur();
-        document.getElementById('prep-scroll-box').scrollTop = 0; window.scrollTo(0, 0);
       });
+      await page.waitForTimeout(100);
+      await page.evaluate(() => { document.getElementById('prep-scroll-box').scrollTop = 0; window.scrollTo(0, 0); });
       await page.waitForTimeout(50);
       await page.evaluate(() => { monitorEnabled = true; deliver('page_monitor_state'); });
       await page.waitForTimeout(20);
