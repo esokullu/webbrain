@@ -863,6 +863,7 @@ export default {
   "sp.attach.read_failed": "{name} okunamadı.",
   "sp.attach.needs_prompt": "Ekinizle birlikte göndermek için bir soru yazın.",
   "sp.attach.no_tab": "Seçimi ekleyebileceğiniz etkin bir sekme yok.",
+  'sp.monitor.navigation': 'Görev çalışırken sayfa değişti ({before} → {after}). Göreve devam ediliyor.',
   "sp.steer.button": "Yönlendir",
   "st.display.composer_delivery.label": "Görev çalışırken mesaj gönderme",
   "st.display.composer_delivery.desc": "Görev çalışırken Enter ve Gönder düğmesinin davranışını seçin. Kuyruk, mesajı sonraki tur için saklar; Yönlendir, çalışan göreve iletir. Alt+Enter her zaman yönlendirir.",

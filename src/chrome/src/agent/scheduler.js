@@ -1994,7 +1994,7 @@ export class ScheduledJobManager {
       }
       // Tag scheduled clarify prompts and planner fallbacks with the job id so
       // the sidepanel can bind them to the correct scheduled assistant turn.
-      const jobScopedUpdate = type === 'clarify'
+      const jobScopedUpdate = type === 'page_feedback' || type === 'clarify'
         || type === 'clarify_timeout_extended'
         || type === 'clarify_auto'
         || (type === 'warning' && data?.code === 'planner_failed_continue_act');

@@ -1568,6 +1568,7 @@ const TEACHER_EXPLICIT_NAVIGATION_TYPES = new Set([
 ]);
 
 browser.webNavigation?.onCommitted?.addListener?.((details) => {
+  agent.observePageNavigation(details, 'committed');
   if (details.frameId !== 0) return;
   agent.clearLastTypeFieldIdent(details.tabId);
   agent.observeCloudflareManagedChallengeNavigation(details).catch(() => {});
@@ -1577,6 +1578,7 @@ browser.webNavigation?.onCommitted?.addListener?.((details) => {
   invalidateContextMenuForTab(details.tabId);
 });
 browser.webNavigation?.onHistoryStateUpdated?.addListener?.((details) => {
+  agent.observePageNavigation(details, 'history');
   if (details.frameId !== 0) return;
   agent.clearLastTypeFieldIdent(details.tabId);
   agent.observeCloudflareManagedChallengeNavigation(details).catch(() => {});
@@ -1584,6 +1586,7 @@ browser.webNavigation?.onHistoryStateUpdated?.addListener?.((details) => {
   invalidateContextMenuForTab(details.tabId);
 });
 browser.webNavigation?.onReferenceFragmentUpdated?.addListener?.((details) => {
+  agent.observePageNavigation(details, 'fragment');
   if (details.frameId !== 0) return;
   agent.clearLastTypeFieldIdent(details.tabId);
   agent.observeCloudflareManagedChallengeNavigation(details).catch(() => {});
@@ -2465,6 +2468,9 @@ browser.runtime.onMessage.addListener((msg, sender) => {
 });
 
 async function handleMessage(msg, sender) {
+  if (msg.action === 'get_page_monitor_state') return agent.pageMonitorState(sender, msg.documentToken);
+  if (msg.action === 'page_feedback') return agent.observePageFeedback(sender, msg.feedback);
+
   if (msg.action === 'chat_steer') {
     // Content scripts must never turn page text into a trusted human correction.
     if (sender?.url?.split(/[?#]/)[0] !== browser.runtime.getURL('src/ui/sidepanel.html')) {

@@ -64,6 +64,65 @@ test('stop during target preparation prevents input dispatch', async () => {
   await assert.rejects(session.perform(runId, 'click', {}), /stopped/);
   assert.equal(sent.includes('input.performActions'), false);
 });
+for (const failAt of [1, 2]) {
+  test(`page revision change before native input ${failAt} preserves dispatch evidence`, async () => {
+    const session = new BidiSession(), runId = id();
+    session.runs.set(runId, { context: 'a' });
+    session.locate = async () => ({ context: 'a', node: { sharedId: 'el' } });
+    let marks = 0, inputs = 0;
+    session.call = async (_match, declaration) => ({ result: { value:
+      declaration.includes('data-webbrain-page-revision') ? ++marks < failAt
+        : declaration.includes('el.innerText : el.value') ? '' : true } });
+    session.send = async method => { if (method === 'input.performActions') inputs++; return {}; };
+    await assert.rejects(session.perform(runId, 'type', { text: 'ab', clear: false,
+      pageFeedbackGuard: { documentToken: 'doc', revision: 7, operationId: 'op' } }), error => {
+      assert.equal(error.code, 'page_feedback_pending');
+      assert.equal(error.dispatchState.noDispatch, failAt === 1);
+      assert.equal(error.dispatchState.dispatched, failAt === 2);
+      assert.equal(error.dispatchState.outcomeUnknown, failAt === 2);
+      return true;
+    });
+    assert.equal(inputs, failAt - 1, 'No subsequent character may be sent after the intervention');
+  });
+}
+for (const platform of ['Win32', 'MacIntel']) {
+  test(`field clearing renews native attribution between modifier and A on ${platform}`, async () => {
+    const session = new BidiSession(), runId = id(), sent = [];
+    session.runs.set(runId, { context: 'a' });
+    session.locate = async () => ({ context: 'a', node: { sharedId: 'el' } });
+    let marks = 0;
+    session.call = async (_match, declaration) => ({ result: { value:
+      declaration.includes('data-webbrain-page-revision') ? (++marks, true)
+        : declaration.includes('navigator.platform') ? platform
+          : declaration.includes('el.innerText : el.value') ? '' : true } });
+    session.send = async (method, params) => { if (method === 'input.performActions') sent.push({ marks, actions: params.actions[0].actions }); return {}; };
+    await session.perform(runId, 'field', { text: 'x', pageFeedbackGuard: { documentToken: 'doc', revision: 0, operationId: 'op' } });
+    assert.deepEqual(sent.map(item => item.marks), [1, 2, 3, 4]);
+    assert.deepEqual(sent[0].actions, [{ type: 'keyDown', value: platform === 'MacIntel' ? '\uE03D' : '\uE009' }]);
+    assert.equal(sent[1].actions[0].value, 'a');
+    assert.equal(sent[2].actions[0].value, '\uE003');
+  });
+}
+test('human intervention after the clear modifier blocks A and releases held keys', async () => {
+  const session = new BidiSession(), runId = id(), sent = [];
+  session.runs.set(runId, { context: 'a' });
+  session.locate = async () => ({ context: 'a', node: { sharedId: 'el' } });
+  let marks = 0;
+  session.call = async (_match, declaration) => ({ result: { value:
+    declaration.includes('data-webbrain-page-revision') ? ++marks < 2
+      : declaration.includes('navigator.platform') ? 'Win32'
+        : declaration.includes('el.innerText : el.value') ? '' : true } });
+  session.send = async method => { sent.push(method); return {}; };
+  await assert.rejects(session.perform(runId, 'field', { text: 'x',
+    pageFeedbackGuard: { documentToken: 'doc', revision: 0, operationId: 'op' } }), error => {
+    assert.equal(error.code, 'page_feedback_pending');
+    assert.equal(error.dispatchState.dispatched, true);
+    assert.equal(error.dispatchState.outcomeUnknown, true);
+    return true;
+  });
+  assert.equal(sent.filter(method => method === 'input.performActions').length, 1);
+  assert.equal(sent.at(-1), 'input.releaseActions');
+});
 test('unsupported commands and modifiers fail before touching the page', async () => {
   const session = new BidiSession(); const runId = id();
   session.runs.set(runId, { context: 'a' });

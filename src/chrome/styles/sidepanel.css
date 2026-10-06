@@ -4822,3 +4822,12 @@ html[data-ui-scale="175"] .conversation-action-label {
 .quota-balance, .quota-reset { font-size: 12px; overflow-wrap: anywhere; }
 .quota-status { line-height: 1.45; overflow-wrap: anywhere; }
 .compass-quota [hidden] { display: none; }
+
+.page-feedback-note {
+  margin: 8px 0;
+  padding: 8px 10px;
+  border-left: 2px solid currentColor;
+  opacity: .8;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}

@@ -5,6 +5,7 @@
  */
 
 import { combineImages } from './image-utils.js';
+import { beforePageAgentDispatch, hasPageAgentDispatchOwner } from '../agent/page-feedback.js';
 
 function readProseMirrorText(el) {
   if (!el?.isContentEditable || !el.classList?.contains('ProseMirror')) return null;
@@ -139,6 +140,7 @@ export class CDPClient {
     try {
       chrome.debugger.onDetach.addListener(this._onDebuggerDetach);
     } catch (error) {
+      if (error?.code === 'page_feedback_pending') throw error;
       chrome.debugger.onEvent.removeListener(this._onDebuggerEvent);
       throw error;
     }
@@ -335,6 +337,7 @@ export class CDPClient {
       // must release the run even when Chrome never answers this command.
       await Promise.race([this.sendCommand(tabId, 'Page.enable'), interrupted]);
     } catch (error) {
+      if (error?.code === 'page_feedback_pending') throw error;
       markPendingAttachCancelled();
       if (this.dialogRuns.get(tabId) === owner) this.stopDialogHandling(tabId);
       throw error;
@@ -404,6 +407,24 @@ export class CDPClient {
       throw new Error(`Not attached to tab ${tabId}`);
     }
 
+    if (['Input.dispatchMouseEvent', 'Input.dispatchKeyEvent', 'Input.insertText'].includes(method)) {
+      const release = ['mouseReleased', 'keyUp'].includes(params.type);
+      let target = {};
+      try { target = await this._pageAgentInputTarget(tabId, method, params, sessionId); }
+      catch (error) { if (!release) throw error; } // Always allow held input to be released after navigation.
+      await beforePageAgentDispatch(chrome, tabId, {
+        kind: method === 'Input.dispatchMouseEvent' ? (params.type === 'mouseWheel' ? 'scroll' : 'click') : 'input',
+        nativeWheel: params.type === 'mouseWheel',
+        navigationCandidate: params.type === 'mousePressed',
+        ...(Number.isFinite(params.x) ? { x: params.x, y: params.y } : {}),
+        release,
+        ...(method === 'Input.insertText' ? { eventTypes: ['beforeinput', 'input', 'change'] } : {}),
+        ...(method === 'Input.dispatchMouseEvent' ? { eventTypes: params.type === 'mouseMoved' ? ['pointermove']
+          : params.type === 'mouseWheel' ? ['wheel'] : ['pointerdown', 'click', 'input', 'change'] } : {}),
+        ...target,
+      });
+    }
+
     return new Promise((resolve, reject) => {
       chrome.debugger.sendCommand(
         { tabId, ...(sessionId ? { sessionId } : {}) },
@@ -423,6 +444,92 @@ export class CDPClient {
         },
       );
     });
+  }
+
+  async _pageAgentObjectTarget(tabId, objectId, sessionId = '') {
+    const nativeTarget = globalThis.crypto.randomUUID();
+    const result = await this.sendCommand(tabId, 'Runtime.callFunctionOn', {
+      objectId, returnByValue: true,
+      functionDeclaration: `function (marker) {
+        const fence = this.ownerDocument?.documentElement?.getAttribute('data-webbrain-page-revision');
+        if (!fence || !this.isConnected) return null;
+        this.setAttribute('data-webbrain-native-target', marker);
+        const split = fence.lastIndexOf(':');
+        return { nativeTarget: marker, documentToken: fence.slice(0, split), documentRevision: Number(fence.slice(split + 1)) };
+      }`,
+      arguments: [{ value: nativeTarget }],
+    }, sessionId);
+    return result?.result?.value || {};
+  }
+
+  async _pageAgentInputTarget(tabId, method, params, sessionId = '') {
+    if (!hasPageAgentDispatchOwner(tabId)) return {};
+    const keyboard = method !== 'Input.dispatchMouseEvent';
+    let x = params.x, y = params.y, currentSession = sessionId;
+    let contextId;
+    const temporarySessions = [];
+    try {
+      // A process-isolated iframe is returned as its owner node. Descend into
+      // that target rather than registering the parent document's expectation.
+      for (let depth = 0; depth < 16; depth++) {
+        let objectId, node;
+        if (keyboard) {
+          // Use the target tab's focused document even when another tab is active.
+          const focused = await this.sendCommand(tabId, 'Runtime.evaluate', {
+            expression: '(() => { let el = document.activeElement; while (el?.shadowRoot?.activeElement) el = el.shadowRoot.activeElement; return el; })()',
+            ...(contextId ? { contextId } : {}),
+          }, currentSession);
+          objectId = focused?.result?.objectId;
+          if (!objectId) return {};
+          ({ node } = await this.sendCommand(tabId, 'DOM.describeNode', { objectId }, currentSession));
+        } else {
+          const hit = await this.sendCommand(tabId, 'DOM.getNodeForLocation', { x: Math.round(x), y: Math.round(y) }, currentSession);
+          ({ node } = await this.sendCommand(tabId, 'DOM.describeNode', { backendNodeId: hit.backendNodeId }, currentSession));
+          const resolved = await this.sendCommand(tabId, 'DOM.resolveNode', { backendNodeId: hit.backendNodeId }, currentSession);
+          objectId = resolved.object.objectId;
+        }
+        if (node?.frameId && /^(IFRAME|FRAME)$/.test(node.nodeName)) {
+          let size;
+          let quads;
+          try {
+            if (!keyboard) {
+              ({ quads } = await this.sendCommand(tabId, 'DOM.getContentQuads', { objectId }, currentSession));
+              size = (await this.sendCommand(tabId, 'Runtime.callFunctionOn', { objectId,
+                functionDeclaration: 'function () { return { width: this.clientWidth, height: this.clientHeight }; }', returnByValue: true }, currentSession))?.result?.value;
+            }
+          } finally { await this.sendCommand(tabId, 'Runtime.releaseObject', { objectId }, currentSession); }
+          if (!keyboard) {
+            const q = quads?.[0];
+            if (!q || !size?.width || !size?.height) throw new Error('Cannot resolve native input frame');
+            const ax = q[2] - q[0], ay = q[3] - q[1], bx = q[6] - q[0], by = q[7] - q[1];
+            const determinant = ax * by - ay * bx, dx = x - q[0], dy = y - q[1];
+            if (!determinant) throw new Error('Cannot resolve native input frame');
+            x = (dx * by - dy * bx) / determinant * size.width;
+            y = (ax * dy - ay * dx) / determinant * size.height;
+          } else {
+            try {
+              ({ executionContextId: contextId } = await this.sendCommand(tabId, 'Page.createIsolatedWorld', { frameId: node.frameId, worldName: 'webbrain-input-attribution' }, currentSession));
+              continue;
+            } catch { /* A process-isolated document requires its child session. */ }
+          }
+          const existing = [...(this.runtimeContexts.get(tabId)?.values() || [])].find(context => context.frameId === node.frameId && context.sessionId);
+          if (existing) currentSession = existing.sessionId;
+          else {
+            const attached = await this.sendCommand(tabId, 'Target.attachToTarget', { targetId: node.frameId, flatten: true });
+            currentSession = attached.sessionId; temporarySessions.push(currentSession);
+          }
+          contextId = undefined;
+          continue;
+        }
+        try { return await this._pageAgentObjectTarget(tabId, objectId, currentSession); }
+        finally { await this.sendCommand(tabId, 'Runtime.releaseObject', { objectId }, currentSession); }
+      }
+      throw new Error('Native input frame nesting exceeds the monitor limit');
+    } finally {
+      for (const id of temporarySessions.reverse()) {
+        try { await this.sendCommand(tabId, 'Target.detachFromTarget', { sessionId: id }); } catch {}
+      }
+    }
   }
 
   /**
@@ -1224,6 +1331,7 @@ export class CDPClient {
         }
         return state;
       } catch (error) {
+        if (error?.code === 'page_feedback_pending') throw error;
         this._removeWebMCPHandlers(tabId, state);
         if (!state.closed && this.webMcpSessions.get(tabId) === state) {
           this.webMcpSessions.delete(tabId);
@@ -1483,6 +1591,7 @@ export class CDPClient {
         input: safeInput,
       }, tool.sessionId);
     } catch (error) {
+      if (error?.code === 'page_feedback_pending') throw error;
       return {
         success: false,
         dispatched: true,
@@ -2076,6 +2185,7 @@ export class CDPClient {
       }
       return { objectIds, objectGroup };
     } catch (error) {
+      if (error?.code === 'page_feedback_pending') throw error;
       await this.releaseObjectGroup(tabId, objectGroup);
       throw error;
     }
@@ -2393,7 +2503,10 @@ export class CDPClient {
   /**
    * Set file input files (for upload).
    */
-  async setFileInputFiles(tabId, objectId, filePaths) {
+  async setFileInputFiles(tabId, objectId, filePaths, options = {}) {
+    const target = hasPageAgentDispatchOwner(tabId) ? await this._pageAgentObjectTarget(tabId, objectId) : {};
+    await beforePageAgentDispatch(chrome, tabId, { kind: 'input', eventTypes: ['input', 'change'], ...target });
+    options.beforeDispatch?.();
     await this.sendCommand(tabId, 'DOM.setFileInputFiles', {
       objectId,
       files: filePaths,
@@ -2418,6 +2531,9 @@ export class CDPClient {
     };
     throwIfAborted();
     await this.sendCommand(tabId, 'Runtime.enable');
+    throwIfAborted();
+    const target = hasPageAgentDispatchOwner(tabId) ? await this._pageAgentObjectTarget(tabId, objectId) : {};
+    await beforePageAgentDispatch(chrome, tabId, { kind: 'input', eventTypes: ['input', 'change'], ...target });
     throwIfAborted();
     if (typeof options?.beforeDispatch === 'function') options.beforeDispatch();
     const res = await this.sendCommand(tabId, 'Runtime.callFunctionOn', {
@@ -2446,6 +2562,7 @@ export class CDPClient {
           this.dispatchEvent(new Event('change', { bubbles: true }));
           return { success: true, dispatched: true, name: file.name, size: file.size, type: file.type };
         } catch (error) {
+          if (error?.code === 'page_feedback_pending') throw error;
           return { success: false, dispatched, error: error?.message || String(error) };
         }
       }`,
@@ -2784,6 +2901,7 @@ export class CDPClient {
             await f.slice(0, 1).arrayBuffer();
             readable = true;
           } catch (e) {
+            if (e?.code === 'page_feedback_pending') throw e;
             readable = false;
           }
           out.push({ name: f.name, size: f.size, type: f.type, readable });
@@ -2830,6 +2948,7 @@ export class CDPClient {
           contextId = isolated?.executionContextId || null;
         }
       } catch (e) {
+        if (e?.code === 'page_feedback_pending') throw e;
         contextId = null;
       }
 
@@ -2860,6 +2979,7 @@ export class CDPClient {
       });
       return res?.result?.value ?? null;
     } catch (e) {
+      if (e?.code === 'page_feedback_pending') throw e;
       return null;
     } finally {
       if (objectId) {
@@ -3100,6 +3220,7 @@ export class CDPClient {
           try {
             if (!el.matches(selector)) return false;
           } catch (e) {
+            if (e?.code === 'page_feedback_pending') throw e;
             return false;
           }
           if (!iconHref) return true;
@@ -3114,6 +3235,7 @@ export class CDPClient {
             try {
               return el.matches(selector);
             } catch (e) {
+              if (e?.code === 'page_feedback_pending') throw e;
               return false;
             }
           });
@@ -3124,6 +3246,7 @@ export class CDPClient {
             try {
               return el.matches(selector);
             } catch (e) {
+              if (e?.code === 'page_feedback_pending') throw e;
               return false;
             }
           });
@@ -3135,6 +3258,7 @@ export class CDPClient {
             try {
               if (!matchesSiteRule(el, rule)) continue;
             } catch (e) {
+              if (e?.code === 'page_feedback_pending') throw e;
               continue;
             }
             const explicit = String(el.getAttribute('aria-label') || el.getAttribute('title') || '').replace(/\\s+/g, ' ').trim();
@@ -3564,6 +3688,7 @@ export class CDPClient {
     let lastResult = null;
     for (let i = 0; i <= retries; i++) {
       deadline.throwIfExpired();
+      await beforePageAgentDispatch(chrome, tabId, { kind: 'scroll', selector, scrollIntoView: true });
       const result = await this._resolveSelectorOnce(tabId, selector, options);
       deadline.throwIfExpired();
       // Found and usable → done.
@@ -3865,6 +3990,7 @@ export class CDPClient {
               matches.push(...hits);
             }
           } catch (e) {
+            if (e?.code === 'page_feedback_pending') throw e;
             return { __error: 'Invalid selector: ' + e.message };
           }
           const walker = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT);
@@ -4091,6 +4217,7 @@ export class CDPClient {
             await this.sendCommand(tabId, 'DOM.scrollIntoViewIfNeeded', { nodeId: foundNodeId });
             deadline.throwIfExpired();
           } catch (error) {
+            if (error?.code === 'page_feedback_pending') throw error;
             deadline.throwIfExpired();
             // Not all targets support this command.
           }
@@ -4126,6 +4253,7 @@ export class CDPClient {
         viaCDP: true,
       };
     } catch (e) {
+      if (e?.code === 'page_feedback_pending') throw e;
       if (
         e === options?.deadlineError
         || e === options?.abortSignal?.reason
@@ -4281,6 +4409,7 @@ export class CDPClient {
         try {
           throwIfAborted();
         } catch (error) {
+          if (error?.code === 'page_feedback_pending') throw error;
           await cancelPressedPointer();
           throw error;
         }
@@ -4307,6 +4436,7 @@ export class CDPClient {
           rect,
         };
       } catch (e) {
+        if (e?.code === 'page_feedback_pending') throw e;
         if (actionExpired()) throwIfAborted();
         // fall through to fallback
       }
@@ -4341,6 +4471,7 @@ export class CDPClient {
           const priorDispatchAttempted = dispatchAttempted;
           const validation = await authorizeDispatch({ x: info.x, y: info.y, tag: info.tag });
           if (validation.success !== true) return validation;
+          await beforePageAgentDispatch(chrome, tabId, { kind: 'click', selector, x: info.x, y: info.y });
           dispatchAttempted = true;
           const clicked = await this.sendCommand(tabId, 'Runtime.callFunctionOn', {
             objectId,
@@ -4380,6 +4511,7 @@ export class CDPClient {
           };
         }
       } catch (e) {
+        if (e?.code === 'page_feedback_pending') throw e;
         if (actionExpired()) throwIfAborted();
         // fall through
       } finally {
@@ -4397,6 +4529,7 @@ export class CDPClient {
     const fallbackValidation = await authorizeDispatch({ x: info.x, y: info.y, tag: info.tag });
     if (fallbackValidation.success !== true) return fallbackValidation;
     const priorDispatchAttempted = dispatchAttempted;
+    await beforePageAgentDispatch(chrome, tabId, { kind: 'click', selector, x: info.x, y: info.y });
     dispatchAttempted = true;
     const fb = await this.evaluate(tabId, `
       (() => {
@@ -4782,6 +4915,7 @@ export class CDPClient {
           ...(commands.length ? { commands } : {}),
         });
       } catch (error) {
+        if (error?.code === 'page_feedback_pending') throw error;
         if (actionExpired()) {
           // A delayed debugger response can mean keyDown reached the page even
           // though the action deadline already expired. Release defensively so
@@ -4801,6 +4935,7 @@ export class CDPClient {
           ...keyParams,
         });
       } catch (error) {
+        if (error?.code === 'page_feedback_pending') throw error;
         if (actionExpired()) {
           await releaseKey();
           throwIfAborted();
@@ -5137,6 +5272,7 @@ export class CDPClient {
         throwIfAborted();
         focused = true;
       } catch (e) {
+        if (e?.code === 'page_feedback_pending') throw e;
         if (actionExpired()) {
           if (pointerPressed) await cancelPressedPointer();
           throwIfAborted();
@@ -5169,6 +5305,7 @@ export class CDPClient {
           focused = focusResult?.result?.value === true;
         }
       } catch (e) {
+        if (e?.code === 'page_feedback_pending') throw e;
         if (e?.code === 'content_action_timeout' || actionExpired()) throw e;
         // try next
       }
@@ -5222,6 +5359,7 @@ export class CDPClient {
           key: 'Delete', code: 'Delete', windowsVirtualKeyCode: 46,
         });
       } catch (e) {
+        if (e?.code === 'page_feedback_pending') throw e;
         if (actionExpired()) throwIfAborted();
         return {
           success: false,
@@ -5257,6 +5395,7 @@ export class CDPClient {
       await this.sendCommand(tabId, 'Input.insertText', { text });
       throwIfAborted();
     } catch (e) {
+      if (e?.code === 'page_feedback_pending') throw e;
       if (actionExpired()) throwIfAborted();
       return {
         success: false,
@@ -5301,6 +5440,7 @@ export class CDPClient {
    * Scroll page.
    */
   async scrollPage(tabId, direction, amount = 500) {
+    await beforePageAgentDispatch(chrome, tabId, { kind: 'scroll' });
     const scrollCode = {
       down: `window.scrollBy(0, ${amount})`,
       up: `window.scrollBy(0, -${amount})`,

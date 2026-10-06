@@ -1,4 +1,5 @@
 /** Optional native-messaging transport. No raw BiDi commands are exposed to pages. */
+import { beforePageAgentDispatch } from '../agent/page-feedback.js';
 export class FirefoxBidiClient {
   constructor(api) { this.apiOverride = api; this.pending = new Map(); this.runs = new Map(); this.captures = new Map(); this.sequence = 0; this.connectionEpoch = 0; }
   get api() { return this.apiOverride || globalThis.browser; }
@@ -32,6 +33,7 @@ export class FirefoxBidiClient {
           const error = new Error(message.error);
           if (message.dispatchState?.dispatched === false && message.dispatchState?.noDispatch === true) {
             error.dispatchState = { dispatched: false, noDispatch: true, outcomeUnknown: false, retryable: true };
+            if (message.dispatchState.pageFeedbackPending === true) error.code = 'page_feedback_pending';
           }
           entry.reject(error);
         } else entry.resolve(message.result);
@@ -139,12 +141,20 @@ export class FirefoxBidiClient {
     if (!owner || owner.signal?.aborted || owner.disconnected) throw new Error('No connected Firefox BiDi run; restart the task after reconnecting');
     await this.bindRun(tabId, owner);
     if (this.runs.get(tabId) !== owner || owner.disconnected || owner.signal?.aborted) throw new Error('Run stopped');
+    const pageFeedbackGuard = await beforePageAgentDispatch(this.api, tabId, {
+      kind: action === 'navigate' ? 'navigate' : action === 'scroll' ? 'scroll'
+        : ['type', 'field', 'key'].includes(action) ? 'input' : 'click',
+      ...(payload.point ? { x: payload.point.x, y: payload.point.y } : {}),
+      selector: payload.selector, ref_id: payload.ref_id, frameId: payload.frameId || 0,
+      navigationCandidate: ['click', 'checked'].includes(action),
+      url: action === 'navigate' ? payload.url : undefined,
+    });
     if (!owner.bound) {
       if (action !== 'navigate' || !/^https?:\/\//.test(payload.url || '')) throw new Error('Navigate to a web page before trusted input');
       await this.api.tabs.update(tabId, { url: payload.url });
       return { success: true, dispatched: true, bindingDeferred: true };
     }
-    return this.request('perform', { runId: owner.runId, action, payload });
+    return this.request('perform', { runId: owner.runId, action, payload: { ...payload, pageFeedbackGuard } });
   }
   async sendContent(tabId, message, options) {
     const actions = { click: 'click', click_ax: 'click', type: 'type', type_ax: 'type', set_field: 'field', press_keys: 'key', hover: 'hover', bidi_prepare_upload: 'upload' };
@@ -163,7 +173,7 @@ export class FirefoxBidiClient {
     try {
       return { ...metadata, ...await this.perform(tabId, action, {
         ...message.params,
-        token,
+        token, frameId: options?.frameId || 0,
         url: prepared.url,
         point: prepared.point || null,
         checkable: prepared.checkable || null,
@@ -171,6 +181,8 @@ export class FirefoxBidiClient {
       }), ...(prepared.rect ? { rect: prepared.rect } : {}), ...(prepared._filePickerGuardId ? { _filePickerGuardId: prepared._filePickerGuardId } : {}) };
     } catch (error) {
       // A transport failure can occur after trusted input was delivered.
+      if (error?.code === 'page_feedback_pending') return { ...metadata, success: false, dispatched: false,
+        noDispatch: true, pageFeedbackPending: true, error: error.message };
       return { ...metadata, success: false, dispatched: true, outcomeUnknown: true, retryable: false, ...(error.dispatchState || {}), error: error.message };
     }
   }

@@ -2408,6 +2408,7 @@ const TEACHER_EXPLICIT_NAVIGATION_TYPES = new Set([
 ]);
 
 chrome.webNavigation?.onHistoryStateUpdated?.addListener((details) => {
+  agent.observePageNavigation(details, 'history');
   if (details.frameId !== 0) return;
   agent.observeCloudflareManagedChallengeNavigation(details).catch(() => {});
   recordNav(details.tabId, 'history', details.url);
@@ -2415,12 +2416,14 @@ chrome.webNavigation?.onHistoryStateUpdated?.addListener((details) => {
   invalidateContextMenuForTab(details.tabId);
 });
 chrome.webNavigation?.onReferenceFragmentUpdated?.addListener((details) => {
+  agent.observePageNavigation(details, 'fragment');
   if (details.frameId !== 0) return;
   agent.observeCloudflareManagedChallengeNavigation(details).catch(() => {});
   recordNav(details.tabId, 'fragment', details.url);
   invalidateContextMenuForTab(details.tabId);
 });
 chrome.webNavigation?.onCommitted?.addListener((details) => {
+  agent.observePageNavigation(details, 'committed');
   if (details.frameId !== 0) return;
   agent.observeCloudflareManagedChallengeNavigation(details).catch(() => {});
   recordNav(details.tabId, 'committed', details.url);
@@ -2822,6 +2825,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 });
 
 async function handleMessage(msg, sender) {
+  if (msg.action === 'get_page_monitor_state') return agent.pageMonitorState(sender, msg.documentToken);
+  if (msg.action === 'page_feedback') return agent.observePageFeedback(sender, msg.feedback);
+
   if (msg.action === 'chat_steer') {
     // Content scripts must never turn page text into a trusted human correction.
     if (sender?.url?.split(/[?#]/)[0] !== chrome.runtime.getURL('src/ui/sidepanel.html')) {

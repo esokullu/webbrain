@@ -1,3 +1,4 @@
+import { installPageFeedback, beforePageAgentDispatch } from './page-feedback.js';
 import { JEV_FAST_KEYS, JEV_CLASSIFIER_THRESHOLD, JEV_BROWSER_THRESHOLD, confidentChoice, buildJevBrowserRequest, decideJevBrowser, jevVisualInputRequiresMainModel, JevFastSession } from './systemone-fast.js';
 import { redactSystemOneText, wrapSystemOneData } from './systemone-evidence.js';
 import { createSystemOneJudge, isSystemOneResponseContractError, systemOneFailureReason, SYSTEM_ONE_COST_PROVIDER } from './systemone-judge.js';
@@ -5742,6 +5743,9 @@ export class Agent extends LoopDetector {
     else externalSignal?.addEventListener?.('abort', onAbort, { once: true });
     try {
       await this.assertRunStartAllowed(tabId, defaultKind, runOptions);
+      if (!this._isStandaloneChatRun(runOptions)) {
+        await this._beginPageFeedbackRun(tabId, this._runEntryKind(defaultKind, runOptions));
+      }
     } catch (error) {
       this._releaseRunEntry(tabId);
       throw error;
@@ -5749,6 +5753,7 @@ export class Agent extends LoopDetector {
   }
 
   _releaseRunEntry(tabId) {
+    this._finishPageFeedbackRun(tabId);
     firefoxBidi.stopRun(tabId);
     this._runAbortStates.get(tabId)?.dispose();
     this._runAbortStates.delete(tabId);
@@ -5765,6 +5770,8 @@ export class Agent extends LoopDetector {
   }
 
   _beginSteeringRun(tabId, onUpdate, runOptions = {}) {
+    const feedbackRun = this._pageFeedbackRuns?.get(tabId);
+    if (feedbackRun) feedbackRun.onUpdate = onUpdate;
     if (runOptions.cloudRun || runOptions.scheduledRun) return;
     this._steeringRuns.set(tabId, {
       requestId: String(runOptions.detachedRequestId || ''),
@@ -5797,7 +5804,7 @@ export class Agent extends LoopDetector {
   }
 
   _hasPendingSteering(tabId) {
-    return !!this._steeringRuns.get(tabId)?.messages.length;
+    return !!this._steeringRuns.get(tabId)?.messages.length || this._hasPendingPageFeedback(tabId);
   }
 
   _applyPendingSteering(tabId, messages, onUpdate) {
@@ -6930,7 +6937,7 @@ export class Agent extends LoopDetector {
   }
 
   async _maybeJevFastTurn(tabId, task, messages, mode, allowed, provider, costState, runOptions = {}, recovery = null) {
-    if (this._steeringRuns.get(tabId)?.acceptedIds.size) return null;
+    if (this._steeringRuns.get(tabId)?.acceptedIds.size || this._pageFeedbackRuns?.get(tabId)?.revision) return null;
     const context = this.systemOneContext(tabId);
     if (!['act', 'dev'].includes(mode) || this._checkAbort(tabId)) return null;
     let session;
@@ -9104,7 +9111,8 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
    * triggered the bulk pattern and navigated the page never silently drops the
    * "previous page is GONE" warning.
    */
-  _injectNavNotices(messages, navNotices, onUpdate) {
+  _injectNavNotices(messages, navNotices, onUpdate, tabId) {
+    if ([...(this._pageFeedbackRuns?.get(tabId)?.events.values() || [])].some(event => event.kind === 'navigation' && event.frameId === 0)) return;
     if (!navNotices || navNotices.length === 0) return;
     const last = navNotices[navNotices.length - 1];
     const noticeText =
@@ -10742,7 +10750,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
         error: `Skipped ${skippedName}: ${triggeringTool} requires a fresh model turn before any dependent browser action.`,
       }),
     );
-    this._injectNavNotices(messages, options.navNotices || [], onUpdate);
+    this._injectNavNotices(messages, options.navNotices || [], onUpdate, tabId);
     onUpdate('warning', {
       message: `Paused ${skippedCount} stale tool call(s) after ${triggeringTool}; continuing from the observed result.`,
     });
@@ -10941,7 +10949,8 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       if (this._hasPendingSteering(tabId)) {
         this._appendSyntheticToolResults(tabId, toolCalls, toolIndex, messages, onUpdate, step, () => ({
           success: false, skipped: true, dispatched: false, noDispatch: true,
-          error: 'Skipped because the user steered the current task. Reconsider the remaining actions using the latest user message.',
+          pageFeedbackPending: this._hasPendingPageFeedback(tabId),
+          error: 'Skipped because the user steered the current task or the browser changed. Reconsider remaining actions using the latest feedback.',
         }));
         return { action: 'continue' };
       }
@@ -11312,7 +11321,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
         if (workflowPreSubmitBlock.workflowRearmed || workflowPreSubmitBlock.conditionalMutationBlocked) {
           this._appendSyntheticToolResults(tabId, toolCalls, toolIndex + 1, messages, onUpdate, step,
             () => ({ success: false, skipped: true, error: 'skipped: conditional workflow transition requires a fresh tool batch' }));
-          this._injectNavNotices(messages, navNotices, onUpdate);
+          this._injectNavNotices(messages, navNotices, onUpdate, tabId);
           this._persist(tabId);
           return { action: 'continue' };
         }
@@ -12023,7 +12032,8 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       if (steeringBeforeDispatch) {
         this._appendSyntheticToolResults(tabId, toolCalls, toolIndex, messages, onUpdate, step, () => ({
           success: false, skipped: true, dispatched: false, noDispatch: true,
-          error: 'Skipped because the user steered the current task. Reconsider the remaining actions using the latest user message.',
+          pageFeedbackPending: this._hasPendingPageFeedback(tabId),
+          error: 'Skipped because the user steered the current task or the browser changed. Reconsider remaining actions using the latest feedback.',
         }));
         return { action: 'continue' };
       }
@@ -12545,7 +12555,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
             error: 'skipped: an earlier tool returned no response; verify the current state before retrying',
           }),
         );
-        this._injectNavNotices(messages, navNotices, onUpdate);
+        this._injectNavNotices(messages, navNotices, onUpdate, tabId);
         onUpdate('warning', {
           message: `Tool response was lost; paused ${skippedCount} remaining tool call(s) for state verification.`,
         });
@@ -12671,7 +12681,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
         // A click can both trigger the bulk pattern AND navigate the page; this
         // early return skips the post-loop flush, so emit any nav notices here
         // or the model would replay against stale URLs from the prior page.
-        this._injectNavNotices(messages, navNotices, onUpdate);
+        this._injectNavNotices(messages, navNotices, onUpdate, tabId);
         this._persist(tabId);
         return { action: 'continue' };
       }
@@ -12681,7 +12691,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       }
     }
 
-    this._injectNavNotices(messages, navNotices, onUpdate);
+    this._injectNavNotices(messages, navNotices, onUpdate, tabId);
 
     // Auto-screenshot after state change. Capture if either the main
     // provider supports images, or a dedicated vision model is configured
@@ -30704,6 +30714,8 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       ? runOptions?.parentSessionId || null
       : null;
     await this._claimRunEntry(tabId, 'workflow', runOptions);
+    const feedbackRun = this._pageFeedbackRuns?.get(tabId);
+    if (feedbackRun) feedbackRun.onUpdate = onUpdate;
     let completionRunToken = '';
     let startUrl = '';
     let traceRunId = null;
@@ -30761,6 +30773,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     let finalContent = '';
     let matchedSteps = 0;
     const verifiedHealings = [];
+    const pageFeedbackRetries = new Map();
 
     const finishStopped = (reason, stepIndex = 0) => {
       const summary = `Saved workflow "${workflow.name}" stopped safely at step ${stepIndex + 1}: ${reason}.`;
@@ -30788,7 +30801,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
           stepIndex: 0,
           matchedSteps,
           healings: verifiedHealings,
-          prompt: workflowFallbackPrompt(workflow, 0, reason),
+          prompt: await this._workflowFeedbackFallbackPrompt(tabId, workflowFallbackPrompt(workflow, 0, reason), onUpdate),
         };
       }
       const protectedMessagingStep = savedWorkflowProtectedMessagingStepIndex(workflow, startUrl);
@@ -30805,6 +30818,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       }
 
       for (let index = 0; index < workflow.steps.length; index++) {
+        await this._applyPendingPageFeedback(tabId, [], onUpdate, { workflow: true });
         if (this._checkAbort(tabId)) return finishStopped('stopped by the user', index);
         const step = workflow.steps[index];
         const stepUrl = await this._currentUrl(tabId);
@@ -30835,7 +30849,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
             stepIndex: index,
             matchedSteps,
             healings: verifiedHealings,
-            prompt: workflowFallbackPrompt(workflow, index, reason),
+            prompt: await this._workflowFeedbackFallbackPrompt(tabId, workflowFallbackPrompt(workflow, index, reason), onUpdate),
           };
         }
         let executionArgs;
@@ -30912,7 +30926,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
               stepIndex: index,
               matchedSteps,
               healings: verifiedHealings,
-              prompt: workflowFallbackPrompt(workflow, index, reason),
+              prompt: await this._workflowFeedbackFallbackPrompt(tabId, workflowFallbackPrompt(workflow, index, reason), onUpdate),
             };
           }
           if (['click_ax', 'set_checked', 'type_ax', 'set_field', 'scroll'].includes(step.tool)) {
@@ -30956,6 +30970,20 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
           runOptions,
         );
         const afterUrl = await this._currentUrl(tabId);
+        if (rawResult?.pageFeedbackPending && rawResult?.noDispatch === true) {
+          const retries = (pageFeedbackRetries.get(index) || 0) + 1;
+          pageFeedbackRetries.set(index, retries);
+          if (retries > 3) {
+            const reason = 'page kept changing before workflow dispatch';
+            traceStatus = 'workflow_fallback';
+            finalContent = 'Continuing with the agent after repeated page changes.';
+            return { status: 'fallback', reason, stepIndex: index, matchedSteps, healings: verifiedHealings,
+              prompt: await this._workflowFeedbackFallbackPrompt(tabId, workflowFallbackPrompt(workflow, index, reason), onUpdate) };
+          }
+          await this._applyPendingPageFeedback(tabId, [], onUpdate, { workflow: true });
+          index--; // Re-resolve this unexecuted step against the new page.
+          continue;
+        }
         const validation = validateWorkflowStepResult(step.expected, rawResult, { beforeUrl, afterUrl, tool: step.tool });
         trace.recordNote(traceRunId, index + 1, 'workflow_replay_step', {
           workflowId: workflow.id,
@@ -30979,7 +31007,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
             stepIndex: index,
             matchedSteps,
             healings: verifiedHealings,
-            prompt: workflowFallbackPrompt(workflow, index, validation.reason),
+            prompt: await this._workflowFeedbackFallbackPrompt(tabId, workflowFallbackPrompt(workflow, index, validation.reason), onUpdate),
           };
         }
         if (pendingHealing) {
@@ -31153,6 +31181,10 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
   }
 
   async _executeToolImpl(tabId, name, args, onUpdate = null, executionContext = null) {
+    if (['navigate', 'go_back', 'go_forward', 'execute_js', 'inject_css', 'remove_injected_css'].includes(name)) {
+      await beforePageAgentDispatch(browser, tabId, { kind: ['navigate', 'go_back', 'go_forward'].includes(name) ? 'navigate' : 'dom',
+        url: name === 'navigate' ? args?.url : undefined });
+    }
     const dispatchContext = executionContext && typeof executionContext === 'object'
       ? executionContext
       : {};
@@ -31892,6 +31924,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
           dispatched: false,
           noDispatch: true,
           ...(firefoxBidi.runs.has(tabId) ? { dispatched: true, noDispatch: false, outcomeUnknown: true, retryable: false } : {}),
+          ...(e?.code === 'page_feedback_pending' ? { pageFeedbackPending: true, skipped: true } : {}),
           error: `navigate: browser rejected the navigation: ${e?.message || String(e)}`,
         };
       }
@@ -32091,11 +32124,13 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
               return { before };
             })()
           `;
+          await beforePageAgentDispatch(chrome, tabId, { kind: 'navigate', history: true });
           historyDispatchArmed = true;
           dispatched = true;
           const results = await browser.tabs.executeScript(tabId, { code });
           probe = (results && results[0]) || null;
         } catch (e) {
+          if (e?.code === 'page_feedback_pending') throw e;
           return { success: false, dispatched, error: `${name}: cannot navigate history on this page (${e.message}).` };
         }
         if (!probe) {
@@ -35125,7 +35160,14 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       }
     }
     if (dispatchContext.jevBinding) contentArgs = { ...contentArgs, _jevBinding: dispatchContext.jevBinding };
-    const sendContentAction = stageAbortSignal => {
+    const sendContentAction = async stageAbortSignal => {
+      if (Agent.STATE_CHANGE_TOOLS.has(name)) {
+        await beforePageAgentDispatch(globalThis.browser || globalThis.chrome, tabId, {
+          kind: /type|field|key/.test(name) ? 'input' : name === 'scroll' ? 'scroll' : /click|checked|hover|drag/.test(name) ? 'click' : 'dom',
+          frameId: messageOptions?.frameId || 0, selector: contentArgs?.selector, ref_id: contentArgs?.ref_id,
+          navigationCandidate: ['click', 'click_ax', 'set_checked'].includes(name),
+        });
+      }
       throwIfContentPipelineAborted();
       this._throwIfAborted(stageAbortSignal);
       if (Agent.STATE_CHANGE_TOOLS.has(name)) markContentPipelineDispatched();
@@ -35307,6 +35349,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
   }
 
   async _injectCoreContentScripts(tabId) {
+    await browser.tabs.executeScript(tabId, { file: 'src/content/page-monitor.js' });
     await browser.tabs.executeScript(tabId, {
       file: 'src/content/file-picker-guard-loader.js',
     });
@@ -36266,7 +36309,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
 
       steps++;
       lastTraceStep = steps;
-      this._applyPendingSteering(tabId, messages, onUpdate);
+      await this._applyPendingRunFeedback(tabId, messages, onUpdate);
       onUpdate('thinking', { step: steps });
       if (runId) trace.recordStepStart(runId, steps, {});
 
@@ -36442,7 +36485,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
         break;
       }
 
-      if (steps < this.maxSteps && this._applyPendingSteering(tabId, messages, onUpdate)) {
+      if (steps < this.maxSteps && await this._applyPendingRunFeedback(tabId, messages, onUpdate)) {
         onUpdate('text', { content: '', replace: true });
         continue;
       }
@@ -36499,7 +36542,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
           tabId, result.toolCalls, messages, onUpdate, provider, assistantToolContent, allowedToolNames, steps, runOptions, toolSchemas
         );
         if (['continue', 'return'].includes(batchResult.action) && !batchResult.status && steps < this.maxSteps
-            && this._applyPendingSteering(tabId, messages, onUpdate)) {
+            && await this._applyPendingRunFeedback(tabId, messages, onUpdate)) {
           onUpdate('text', { content: '', replace: true });
           continue;
         }
@@ -37268,7 +37311,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
 
       steps++;
       lastTraceStep = steps;
-      this._applyPendingSteering(tabId, messages, onUpdate);
+      await this._applyPendingRunFeedback(tabId, messages, onUpdate);
       onUpdate('thinking', { step: steps });
       if (runId) trace.recordStepStart(runId, steps, {});
       let traceStepClosed = false;
@@ -37413,7 +37456,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
           toolCalls: streamedToolCalls,
         }));
 
-        if (steps < this.maxSteps && this._applyPendingSteering(tabId, messages, onUpdate)) {
+        if (steps < this.maxSteps && await this._applyPendingRunFeedback(tabId, messages, onUpdate)) {
           onUpdate('text', { content: '', replace: true });
           continue;
         }
@@ -37457,7 +37500,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
             tabId, toolCalls, messages, onUpdate, provider, fullText, allowedToolNames, steps, runOptions, toolSchemas
           );
           if (['continue', 'return'].includes(batchResult.action) && !batchResult.status && steps < this.maxSteps
-              && this._applyPendingSteering(tabId, messages, onUpdate)) {
+              && await this._applyPendingRunFeedback(tabId, messages, onUpdate)) {
             onUpdate('text', { content: '', replace: true });
             continue;
           }
@@ -37815,3 +37858,5 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     }
   }
 }
+
+installPageFeedback(Agent);

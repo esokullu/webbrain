@@ -56,6 +56,7 @@ export const CAPABILITY_LABEL = {
  * tool is classified as gated, untrusted-read, or explicitly known-safe.
  */
 export const UNTRUSTED_CONTENT_TOOLS = new Set([
+  'page_feedback', // Internal monitor observations contain page-derived targets and URLs.
   'recall_memcode',
   // Discovery can recover a paid answer; solver output and callback failures
   // also contain external data, even when the tool otherwise reads a catalog.

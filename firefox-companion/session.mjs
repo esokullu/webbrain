@@ -209,7 +209,8 @@ export class BidiSession {
     try { return await this.performAction(id, action, payload, dispatch); }
     catch (error) {
       error.dispatchState = { dispatched: dispatch.started, noDispatch: !dispatch.started,
-        outcomeUnknown: dispatch.started, retryable: !dispatch.started };
+        outcomeUnknown: dispatch.started, retryable: !dispatch.started,
+        ...(error.code === 'page_feedback_pending' ? { pageFeedbackPending: true } : {}) };
       throw error;
     }
   }
@@ -231,6 +232,25 @@ export class BidiSession {
     }
     const match = await this.locate(payload.token, payload.url, run.context);
     assertLive();
+    let nativeSequence = 0;
+    const markNativeDispatch = async kind => {
+      assertLive();
+      const guard = payload.pageFeedbackGuard;
+      if (!guard) return; // Compatibility with clients without page monitoring.
+      const marker = JSON.stringify({ ...guard, kind, sequence: ++nativeSequence });
+      const checked = await this.call(match, `(el, fence, marker, kind) => {
+        if (!el.isConnected || document.documentElement.getAttribute('data-webbrain-page-revision') !== fence) return false;
+        const target = kind === 'input' ? el.getRootNode().activeElement || el : el;
+        target.setAttribute('data-webbrain-native-action', marker);
+        return true;
+      }`, [{ type: 'string', value: `${guard.documentToken}:${guard.revision}` },
+        { type: 'string', value: marker }, { type: 'string', value: kind }]);
+      if (checked.result?.value !== true) {
+        const error = new Error('Page changed during native preparation; no further input sent');
+        error.code = 'page_feedback_pending'; throw error;
+      }
+      assertLive();
+    };
     const point = action === 'click' && payload.point != null ? payload.point : null;
     if (point && (!Number.isInteger(point.x) || !Number.isInteger(point.y))) throw new Error('Invalid click coordinates');
     const check = await this.call(match, `(el, token, action, x, y) => {
@@ -276,6 +296,7 @@ export class BidiSession {
       const path = join(dir, name === '.' || name === '..' ? 'attachment' : name);
       await writeFile(path, bytes, { mode: 0o600 });
       assertLive();
+      await markNativeDispatch('input');
       dispatch.started = true;
       await this.send('input.setFiles', { context: match.context, element: { sharedId: match.node.sharedId }, files: [path] });
       const attached = await this.call(match, '(el, name, size) => el.isConnected && el.files?.length === 1 && el.files[0].name === name && el.files[0].size === size', [{ type: 'string', value: name }, { type: 'number', value: bytes.length }]);
@@ -299,11 +320,23 @@ export class BidiSession {
       if (followTabFocus) assertLive();
       else await assertFocus();
       const actions = [
-        ...(modifier ? [{ type: 'keyDown', value: modifier }] : []),
         { type: 'keyDown', value }, { type: 'keyUp', value },
         ...(modifier ? [{ type: 'keyUp', value: modifier }] : []),
       ];
-      try { dispatch.started = true; await this.send('input.performActions', { context: match.context, actions: [{ type: 'key', id: 'webbrain-keyboard', actions }] }); }
+      try {
+        // Each keydown needs its own expectation. Keep the modifier held while
+        // renewing the fence, so Ctrl/Meta+A cannot look like a human edit.
+        if (modifier) {
+          await markNativeDispatch('input');
+          dispatch.started = true;
+          await this.send('input.performActions', { context: match.context, actions: [{ type: 'key', id: 'webbrain-keyboard',
+            actions: [{ type: 'keyDown', value: modifier }] }] });
+          await assertFocus();
+        }
+        await markNativeDispatch('input');
+        dispatch.started = true;
+        await this.send('input.performActions', { context: match.context, actions: [{ type: 'key', id: 'webbrain-keyboard', actions }] });
+      }
       finally { await this.send('input.releaseActions', { context: match.context }).catch(() => {}); }
       assertLive();
     };
@@ -314,6 +347,7 @@ export class BidiSession {
         ...(action === 'click' ? [{ type: 'pointerDown', button: 0 }, { type: 'pointerUp', button: 0 }] : []),
       ] };
       assertLive();
+      await markNativeDispatch('click');
       try { dispatch.started = true; await this.send('input.performActions', { context: match.context, actions: [source] }); }
       finally { await this.send('input.releaseActions', { context: match.context }).catch(() => {}); }
       assertLive();
@@ -377,6 +411,7 @@ export class BidiSession {
           await assertFocus();
           // Enter is a submit shortcut on many editors, even with Shift. Insert a literal
           // newline through the editing command instead; never synthesize a submit key.
+          await markNativeDispatch('input');
           dispatch.started = true;
           const inserted = await this.call(match, `(el, text) => {
             if (!el.isConnected || el.getRootNode().activeElement !== el) return false;

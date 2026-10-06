@@ -122,6 +122,7 @@ export default {
   'sp.attach.read_failed': 'Could not read {name}.',
   'sp.attach.needs_prompt': 'Add a question to send with your attachment.',
   'sp.attach.no_tab': 'No active tab to attach the selection to.',
+  'sp.monitor.navigation': 'Page changed while the task was running ({before} → {after}). Continuing the task.',
   'sp.steer.button': 'Steer',
   'st.display.composer_delivery.label': 'Messages during a running task',
   'st.display.composer_delivery.desc': 'Choose what Enter and Send do while a task is running. Queue saves the message for the next turn; Steer sends it to the current task. Alt+Enter always steers.',
