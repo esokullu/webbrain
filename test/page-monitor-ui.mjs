@@ -18,11 +18,18 @@ body { margin: 0; } button,input { margin: 12px; }
 <script>document.getElementById('agent').addEventListener('click', () => { document.getElementById('status').textContent = 'Agent changed this'; });</script>`;
 
 async function fixture(engine, build, { runToken = 'test-run', siteIsolation = false, omitEmptyFrameMonitor = false,
-  capturePointerHandlers = false } = {}) {
+  capturePointerHandlers = false, instrumentWeakRefDeref = false } = {}) {
   const browser = await engine.launch({ headless: true, ...(siteIsolation ? { args: ['--site-per-process'] } : {}) });
   const context = await browser.newContext();
   await context.route('https://monitor.test/**', route => route.fulfill({ contentType: 'text/html', body: html }));
   await context.addInitScript(token => { window.monitorRunToken = token; }, runToken);
+  if (instrumentWeakRefDeref) await context.addInitScript(() => {
+    const NativeWeakRef = globalThis.WeakRef;
+    globalThis.__controlReferenceDerefs = 0;
+    globalThis.WeakRef = class CountedWeakRef extends NativeWeakRef {
+      deref() { globalThis.__controlReferenceDerefs++; return super.deref(); }
+    };
+  });
   if (capturePointerHandlers) await context.addInitScript(() => {
     window.monitorPointerHandlers = {};
     const add = EventTarget.prototype.addEventListener;
@@ -149,12 +156,20 @@ test('Chrome full-page capture marks temporary scrolling without suppressing a l
     session = await page.context().newCDPSession(page);
     client.sendCommand = (_tab, method, params) => session.send(method, params);
     const captureState = {};
-    await page.evaluate(() => { feedback = []; });
+    await page.evaluate(() => {
+      feedback = [];
+      document.addEventListener('scroll', () => {
+        const loaded = document.createElement('button'); loaded.id = 'capture-lazy-content';
+        loaded.style.cssText = 'position:fixed;top:0;left:0'; loaded.textContent = 'Loaded'; document.body.append(loaded);
+      }, { once: true });
+    });
     await client._scrollForFullPageCapture(tabId, 0, 600, captureState);
     await client._finishFullPageCaptureScroll(tabId, captureState);
     await page.waitForTimeout(250);
-    assert.equal((await page.evaluate(() => feedback)).some(event => event.kind === 'scroll'), false,
-      'The CDP scroll used by full-page capture must be attributed to the active agent run');
+    const captureFeedback = await page.evaluate(() => feedback);
+    assert.ok(await page.locator('#capture-lazy-content').count(), 'The trusted page scroll handler appended lazy content');
+    assert.equal(captureFeedback.length, 0,
+      'The capture scroll and its synchronous lazy-load mutation must be attributed to the active agent run');
 
     await page.evaluate(() => { feedback = []; window.scrollTo(0, 900); });
     await page.waitForFunction(() => feedback.some(event => event.kind === 'scroll'));
@@ -2050,6 +2065,27 @@ for (const [build, engine] of [['chrome', chromium], ['firefox', firefox]]) {
       await page.waitForFunction(() => feedback.some(event => event.kind === 'dom' && event.target === 'input#late-form-control'), null, { timeout: 5000 });
       const serialized = JSON.stringify(await page.evaluate(() => feedback));
       assert.equal(serialized.includes('sensitive-after'), false, 'Detected property values must stay private');
+    } finally { await browser.close(); }
+  });
+
+  test(`${build}: control polling dereferences only one bounded registry batch`, async () => {
+    const { browser, page } = await fixture(engine, build, { instrumentWeakRefDeref: true });
+    try {
+      await page.evaluate(() => {
+        const controls = document.createElement('div');
+        for (let index = 0; index < 900; index++) {
+          const input = document.createElement('input'); input.id = `bounded-control-${index}`; controls.append(input);
+        }
+        document.body.append(controls);
+      });
+      await page.waitForFunction(() => feedback.some(event => event.kind === 'dom'));
+      const derefs = await page.evaluate(() => {
+        __controlReferenceDerefs = 0;
+        deliver('page_monitor_prepare', { operationId: 'bounded-control-sample', tool: 'click', selector: '#agent' });
+        deliver('page_monitor_dispatch', { operationId: 'bounded-control-sample', kind: 'click', selector: '#agent', fenceOnly: true });
+        return __controlReferenceDerefs;
+      });
+      assert.ok(derefs > 0 && derefs <= 200, `One sample should dereference at most 200 controls, got ${derefs}`);
     } finally { await browser.close(); }
   });
 

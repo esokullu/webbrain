@@ -232,9 +232,11 @@ export const pageFeedbackMethods = {
       || qualifiers.includes('from_address_bar');
     const navigation = run.navigation;
     const redirect = qualifiers.some(q => /redirect$/.test(q));
+    const firstRedirect = type === 'committed' && !navigation?.redirectChain && redirect
+      && !!navigation?.url && ['click', 'navigate'].includes(navigation.kind);
     const sameNavigation = navigation?.redirectChain
       ? redirect && !!navigation.documentId && navigation.documentId === details.documentId
-      : (!!navigation?.url && navigation.url === details.url)
+      : (!!navigation?.url && navigation.url === details.url) || firstRedirect
         || (navigation?.kind === 'navigate' && navigation.history && qualifiers.includes('forward_back'));
     const agentNavigation = !explicit && navigation && navigation.frameId === frameId && Date.now() - navigation.at < 10000
       && (!qualifiers.includes('forward_back') || navigation.history)

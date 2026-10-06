@@ -425,9 +425,9 @@ for (const build of ['chrome', 'firefox']) {
       assert.equal(agent._hasPendingPageFeedback(tab), true, 'A same-frame navigation to a different URL remains visible');
       agent._pageFeedbackRuns.get(tab).events.clear();
       child.send({ kind: 'activity', source: 'agent', operation: 'click', navigationUrl: 'https://example.com/expected' });
-      agent.observePageNavigation({ tabId: tab, frameId: 2, url: 'https://example.com/unrelated-redirect', transitionType: 'link',
-        transitionQualifiers: ['server_redirect'] }, 'history');
-      assert.equal(agent._hasPendingPageFeedback(tab), true, 'Redirect qualifiers cannot turn an unrelated destination into an agent navigation');
+      agent.observePageNavigation({ tabId: tab, frameId: 2, documentId: 'child-redirect',
+        url: 'https://example.com/unrelated-redirect', transitionType: 'link', transitionQualifiers: ['server_redirect'] }, 'committed');
+      assert.equal(agent._hasPendingPageFeedback(tab), false, 'The first same-frame redirect may commit at a URL different from the armed destination');
       agent._pageFeedbackRuns.get(tab).events.clear();
       child.send({ kind: 'activity', source: 'agent', operation: 'click', navigationTarget: '_top', navigationUrl: 'javascript:alert(1)' });
       agent.observePageNavigation({ tabId: tab, frameId: 0, url: 'https://example.com/safe', transitionType: 'link' }, 'history');
@@ -740,8 +740,8 @@ for (const build of ['chrome', 'firefox']) {
       binding = bind(agent, tab, 0, 'redirected-document', 'content-redirected');
       binding.send({ kind: 'activity', source: 'agent', operation: 'click', navigationUrl: 'https://example.com/redirect-start' });
       agent.observePageNavigation({ tabId: tab, frameId: 0, documentId: 'redirect-chain-document',
-        url: 'https://example.com/redirect-start', transitionType: 'link', transitionQualifiers: ['server_redirect'] }, 'committed');
-      assert.equal(agent._hasPendingPageFeedback(tab), false, 'An exact click destination can start a redirect chain');
+        url: 'https://example.com/first-redirect-target', transitionType: 'link', transitionQualifiers: ['server_redirect'] }, 'committed');
+      assert.equal(agent._hasPendingPageFeedback(tab), false, 'A click destination may commit at its first redirect target');
       assert.equal(agent._pageFeedbackRuns.get(tab).navigation.documentId, 'redirect-chain-document');
       agent.observePageNavigation({ tabId: tab, frameId: 0, documentId: 'redirect-chain-document',
         url: 'https://example.com/final-two', transitionType: 'link', transitionQualifiers: ['client_redirect'] }, 'committed');
@@ -751,6 +751,23 @@ for (const build of ['chrome', 'firefox']) {
       assert.equal(agent._hasPendingPageFeedback(tab), true, 'A later navigation outside the redirect chain is visible');
       assert.equal(agent._pageFeedbackRuns.get(tab).navigation, null);
     } finally { agent._releaseRunEntry(tab); }
+  });
+
+  test(`${build}: first redirect of an armed URL navigation stays agent-attributed`, async () => {
+    const agent = setup(Agent), tab = nextTab++;
+    await agent._claimRunEntry(tab, 'interactive');
+    try {
+      await agent._beginPageFeedbackRun(tab, 'interactive');
+      bind(agent, tab);
+      await beforePageAgentDispatch(api, tab, { kind: 'navigate', url: 'https://example.com/redirect-start' });
+      agent.observePageNavigation({ tabId: tab, frameId: 0, documentId: 'first-redirect-document',
+        url: 'https://example.com/redirect-final', transitionType: 'link', transitionQualifiers: ['server_redirect'] }, 'committed');
+      assert.equal(agent._hasPendingPageFeedback(tab), false, 'The first redirect may commit at a URL different from the armed destination');
+      assert.equal(agent._pageFeedbackRuns.get(tab).navigation.documentId, 'first-redirect-document');
+      agent.observePageNavigation({ tabId: tab, frameId: 0, documentId: 'first-redirect-document',
+        url: 'https://example.com/redirect-final-two', transitionType: 'link', transitionQualifiers: ['client_redirect'] }, 'committed');
+      assert.equal(agent._hasPendingPageFeedback(tab), false, 'Redirect continuation remains bound to the first committed document');
+    } finally { agent._finishPageFeedbackRun(tab); agent._releaseRunEntry(tab); }
   });
 
   test(`${build}: content feedback uses authenticated sender identity; composer delivery never gates monitoring`, async () => {

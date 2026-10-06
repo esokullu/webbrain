@@ -16,7 +16,8 @@
   const operations = new Map();
   const agentLayoutHistory = [];
   const nativeTargets = new Set();
-  const liveControls = new Set();
+  // Weak references keep disconnected fields from outliving the DOM until their batch is sampled.
+  const controlReferences = new Set();
   let signatures = new WeakMap();
   let controlSignatures = new WeakMap();
   let textSignatures = new WeakMap();
@@ -24,7 +25,7 @@
   let roots = new WeakSet();
   let active = false, disposed = false, runToken = '', seq = 0, revision = 0;
   let observer = null, layoutObserver = null, domTimer = null, scrollTimer = null, controlTimer = null, lastUserAt = 0;
-  let pointerHeld = false, composing = false, localOperation = null, controlCursor = 0;
+  let pointerHeld = false, composing = false, localOperation = null, controlIterator = null;
   let requestGeneration = 0, unreported = 0, pendingDOM = null;
   let lastViewport = '';
   let lastFeedbackDelivery = Promise.resolve();
@@ -352,8 +353,8 @@
       controlValueFingerprint(el)]);
   }
   function trackControl(el) {
-    if (!/^(INPUT|TEXTAREA|SELECT|OPTION)$/.test(el.tagName) || liveControls.has(el)) return;
-    liveControls.add(el);
+    if (!/^(INPUT|TEXTAREA|SELECT|OPTION)$/.test(el.tagName) || controlSignatures.has(el)) return;
+    controlReferences.add(new WeakRef(el));
     controlSignatures.set(el, controlState(el));
   }
   function refreshControl(el) {
@@ -362,7 +363,8 @@
       controlSignatures.set(el, controlState(el));
     }
     if (el.tagName === 'SELECT') {
-      for (const option of liveControls) if (option.tagName === 'OPTION' && option.closest('select') === el) {
+      for (const option of el.options || []) {
+        trackControl(option);
         controlSignatures.set(option, controlState(option));
         signatures.set(option, signature(option));
       }
@@ -407,16 +409,19 @@
   }
   function sampleFormControls(...targets) {
     const extraTargets = targets.flat().filter(el => el instanceof Element);
-    if (!active || (!liveControls.size && !extraTargets.length)) return;
-    const controls = [...liveControls];
-    if (!controls.length || controlCursor >= controls.length) controlCursor = 0;
-    const batchSize = Math.min(200, controls.length);
-    const batch = Array.from({ length: batchSize }, (_, index) => controls[(controlCursor + index) % controls.length]);
-    if (controls.length) controlCursor = (controlCursor + batchSize) % controls.length;
-    const sampled = new Set(batch);
+    if (!active || (!controlReferences.size && !extraTargets.length)) return;
+    const sampled = new Set();
     const records = [];
-    for (const el of batch) {
-      if (!el.isConnected) { liveControls.delete(el); continue; }
+    let inspected = 0;
+    while (inspected < 200) {
+      controlIterator ||= controlReferences.values();
+      const next = controlIterator.next();
+      if (next.done) { controlIterator = null; break; }
+      inspected++;
+      const reference = next.value;
+      const el = reference.deref();
+      if (!el || !el.isConnected) { controlReferences.delete(reference); continue; }
+      sampled.add(el);
       if (!ignored(el)) records.push({ type: 'control', target: el });
     }
     for (const el of extraTargets) {
@@ -847,7 +852,16 @@
     }
     listen(document, 'scroll', event => {
       const el = event.target === document ? document.documentElement : event.target;
-      if (ignored(el) || expected('scroll', el)) return;
+      if (ignored(el)) return;
+      const agentScroll = expected('scroll', el);
+      if (agentScroll) {
+        // Page scroll handlers can synchronously append lazy content. Carry the
+        // exact scroll's attribution through the MutationObserver checkpoint.
+        const marker = { userAt: agentScroll.userAt };
+        agentTurn = marker;
+        setTimeout(() => { if (agentTurn === marker) agentTurn = null; }, 0);
+        return;
+      }
       const source = Date.now() - lastUserAt < 1000 ? 'user' : 'unknown';
       const viewport = { x: el === document.documentElement ? scrollX : el.scrollLeft,
         y: el === document.documentElement ? scrollY : el.scrollTop };
@@ -872,7 +886,7 @@
   }
   function stop() {
     active = false; runToken = ''; activePointers.clear(); pointerHeld = false; composing = false;
-    lastUserAt = 0; lastViewport = ''; userTurn = null; lastUserTarget = null; matchedEvents = new WeakMap(); controlCursor = 0;
+    lastUserAt = 0; lastViewport = ''; userTurn = null; lastUserTarget = null; matchedEvents = new WeakMap(); controlIterator = null;
     document.documentElement?.removeAttribute(fenceAttribute);
     for (const el of nativeTargets) {
       el.removeAttribute?.('data-webbrain-native-action');
@@ -885,7 +899,7 @@
     listeners.splice(0).forEach(remove => remove());
     operations.clear(); localOperation = null; agentTurn = null;
     agentLayoutHistory.length = 0;
-    roots = new WeakSet(); signatures = new WeakMap(); controlSignatures = new WeakMap(); textSignatures = new WeakMap(); popoverTurns = new WeakMap(); liveControls.clear();
+    roots = new WeakSet(); signatures = new WeakMap(); controlSignatures = new WeakMap(); textSignatures = new WeakMap(); popoverTurns = new WeakMap(); controlReferences.clear(); controlIterator = null;
   }
   async function requestState() {
     const generation = ++requestGeneration;
