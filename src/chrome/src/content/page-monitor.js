@@ -231,7 +231,8 @@
     send({ kind: 'dom', source, target: targetName(target || currentHit) });
     return true;
   }
-  function expected(kind, el, event) {
+  function expected(kind, el, event, nativeMarkerOnly = false) {
+    let activatedNativeMarker = false;
     const markerNode = event?.composedPath?.().find(node => node instanceof Element && node.hasAttribute(nativeMarkerAttribute))
       || (el?.hasAttribute?.(nativeMarkerAttribute) ? el : null);
     const marker = markerNode?.getAttribute(nativeMarkerAttribute);
@@ -243,7 +244,7 @@
         const nextSequence = Number.isSafeInteger(data.sequence) && data.sequence === (op?.nativeSequence || 0) + 1;
         const allowedEvent = data.kind === 'input'
           ? ['keydown', 'beforeinput', 'input', 'change', 'compositionstart', 'compositionend'].includes(event.type)
-          : data.kind === 'click' ? ['pointerdown', 'mousedown', 'click'].includes(event.type) : false;
+          : data.kind === 'click' ? ['pointerover', 'mouseover', 'pointermove', 'pointerdown', 'mousedown', 'click'].includes(event.type) : false;
         const fresh = op && data.revision === op.preparedRevision && op.preparedRevision === revision
           && !domTimer && !unreported && lastUserAt <= op.userAt;
         const signed = op && nativeMarkerSignature(op.nativeSecret, data) === data.signature;
@@ -253,9 +254,14 @@
           op.nativeSequence = data.sequence;
           markerNode.removeAttribute(nativeMarkerAttribute);
           dispatch({ operationId: data.operationId, kind: data.kind, runToken, navigationCandidate: data.navigationCandidate === true });
+          activatedNativeMarker = true;
+          const markerTurn = { userAt: op.userAt };
+          agentTurn = markerTurn;
+          setTimeout(() => { if (agentTurn === markerTurn) agentTurn = null; }, 0);
         }
       } catch { /* Page markers are hints; malformed ones grant no expectation. */ }
     }
+    if (nativeMarkerOnly && !activatedNativeMarker) return null;
     if (event && matchedEvents.has(event)) return matchedEvents.get(event);
     prune();
     const match = op => {
@@ -666,6 +672,9 @@
       // exact input's attribution through its page handlers, until the next task.
       setTimeout(() => { if (agentTurn === marker) agentTurn = null; }, 0);
     };
+    for (const name of ['pointerover', 'mouseover']) listen(document, name, event => {
+      if (event.isTrusted) expected('click', elementFor(event), event, true);
+    });
     for (const name of ['click', 'input', 'beforeinput', 'change', 'keydown', 'pointerdown', 'pointermove']) listen(document, name, noteAgentTurn);
     listen(document, 'pointerdown', event => {
       const el = elementFor(event);

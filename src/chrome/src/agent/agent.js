@@ -33565,13 +33565,16 @@ If the user has already named or confirmed this exact recipient, do NOT ask agai
       // Match Firefox's function-body contract while adding async/await:
       // callers use an explicit `return` for readback instead of having to
       // squeeze a multi-statement edit into one JavaScript expression.
-      let expression = `(async () => {\n${code}\n})()`;
       const pageGuard = await beforePageAgentDispatch(globalThis.chrome, tabId, { kind: 'dom' });
       const abortedDispatchToken = pageGuard ? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}` : null;
-      if (pageGuard) expression = `(() => { const gate = new CustomEvent('webbrain-agent-dom-dispatch', { detail: ${JSON.stringify(JSON.stringify(pageGuard))}, cancelable: true }); if (!window.dispatchEvent(gate)) return { __webbrainPageFeedbackAborted: ${JSON.stringify(abortedDispatchToken)} }; return ${expression}; })()`;
-      expression += '\n//# sourceURL=webbrain-dev-execute.js';
       dispatched = true;
-      const response = await cdpClient.evaluate(tabId, expression, true, { timeoutMs: 15000 });
+      const response = pageGuard
+        ? await cdpClient.evaluateFunction(tabId, `function (guard, abortedToken) {
+          const gate = new CustomEvent('webbrain-agent-dom-dispatch', { detail: JSON.stringify(guard), cancelable: true });
+          if (!window.dispatchEvent(gate)) return { __webbrainPageFeedbackAborted: abortedToken };
+          return (async () => {\n${code}\n})();
+        }\n//# sourceURL=webbrain-dev-execute.js`, [pageGuard, abortedDispatchToken], { timeoutMs: 15000 })
+        : await cdpClient.evaluate(tabId, `(async () => {\n${code}\n})()\n//# sourceURL=webbrain-dev-execute.js`, true, { timeoutMs: 15000 });
       if (response?.exceptionDetails) {
         const details = response.exceptionDetails;
         const exception = details.exception || {};

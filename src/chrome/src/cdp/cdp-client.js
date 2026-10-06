@@ -2254,6 +2254,36 @@ export class CDPClient {
     return result;
   }
 
+  /** Evaluate a function on the page global, passing data as protocol arguments. */
+  async evaluateFunction(tabId, functionDeclaration, args = [], options = {}) {
+    await this.sendCommand(tabId, 'Runtime.enable');
+    const global = await this.sendCommand(tabId, 'Runtime.evaluate', {
+      expression: 'globalThis',
+      returnByValue: false,
+      userGesture: true,
+    });
+    const objectId = global?.result?.objectId;
+    if (!objectId) return global;
+    const requestedTimeout = Number(options?.timeoutMs);
+    const params = {
+      functionDeclaration,
+      objectId,
+      arguments: args.map(value => ({ value })),
+      returnByValue: true,
+      awaitPromise: true,
+      userGesture: true,
+      allowUnsafeEvalBlockedByCSP: true,
+    };
+    if (Number.isFinite(requestedTimeout) && requestedTimeout > 0) {
+      params.timeout = Math.max(1, Math.min(30000, Math.round(requestedTimeout)));
+    }
+    try {
+      return await this.sendCommand(tabId, 'Runtime.callFunctionOn', params);
+    } finally {
+      await this.sendCommand(tabId, 'Runtime.releaseObject', { objectId }).catch(() => {});
+    }
+  }
+
   /**
    * Call function on an object.
    */

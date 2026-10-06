@@ -1891,6 +1891,35 @@ for (const [build, engine] of [['chrome', chromium], ['firefox', firefox]]) {
     } finally { await browser.close(); }
   });
 
+  test(`${build}: native hover markers attribute hover-triggered page changes to the agent`, async () => {
+    const { browser, page } = await fixture(engine, build);
+    try {
+      const guard = await page.evaluate(() => {
+        feedback = [];
+        document.getElementById('agent').addEventListener('pointerover', () => {
+          document.getElementById('status').textContent = 'Pointer hover changed';
+        });
+        document.getElementById('agent').addEventListener('mouseover', () => {
+          document.getElementById('status').textContent = 'Mouse hover changed';
+        });
+        deliver('page_monitor_prepare', { operationId: 'native-hover', tool: 'hover', selector: '#agent' });
+        deliver('page_monitor_dispatch', { operationId: 'native-hover', kind: 'click', navigationCandidate: false, fenceOnly: true });
+        return lastMonitorResponse.guard;
+      });
+      const marker = createNativeActionMarker(guard, 'click', 1);
+      await page.locator('#agent').evaluate((element, value) => element.setAttribute('data-webbrain-native-action', value), marker);
+      await page.locator('#agent').hover();
+      assert.match(await page.locator('#status').textContent(), /hover changed/i);
+      await page.waitForTimeout(200);
+      assert.equal((await page.evaluate(() => feedback)).some(event => event.source !== 'agent'), false,
+        'The first trusted hover event must activate and attribute its prepared native operation');
+      await page.locator('#human').click();
+      await page.waitForTimeout(200);
+      assert.ok((await page.evaluate(() => feedback)).some(event => event.source === 'user'),
+        'A subsequent user click remains visible to the monitor');
+    } finally { await browser.close(); }
+  });
+
   test(`${build}: native uploads target an unfocused file input without hiding user input`, async () => {
     const { browser, page } = await fixture(engine, build);
     const session = new BidiSession(), runId = crypto.randomUUID(), token = crypto.randomUUID();

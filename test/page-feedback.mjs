@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import vm from 'node:vm';
 import { test } from 'node:test';
 import { makeSchedulerHarness } from './lib/scheduler-harness.mjs';
-import { cdpClient } from '../src/chrome/src/cdp/cdp-client.js';
+import { CDPClient, cdpClient } from '../src/chrome/src/cdp/cdp-client.js';
 
 const area = { get: async () => ({}), set: async () => {}, remove: async () => {} };
 const api = { storage: { local: area, session: area },
@@ -15,6 +15,29 @@ globalThis.browser = api;
 const deferred = () => { let resolve; const promise = new Promise(r => { resolve = r; }); return { promise, resolve }; };
 const sender = (tabId, frameId = 0, documentId = 'document-1') => ({ tab: { id: tabId }, frameId, documentId, url: 'https://example.com/new' });
 let nextTab = 600;
+
+test('CDP evaluateFunction sends page data as arguments and releases the global target', async () => {
+  const client = new CDPClient(), tab = 599, calls = [];
+  client.sessions.set(tab, {});
+  client.sendCommand = async (_tab, method, params) => {
+    calls.push({ method, params });
+    if (method === 'Runtime.evaluate') return { result: { objectId: 'page-global' } };
+    if (method === 'Runtime.callFunctionOn') return { result: { value: 'done' } };
+    return {};
+  };
+  const guard = { documentToken: 'doc', revision: 3, operationId: 'op' };
+  const declaration = 'function (guard, token) { return [guard, token]; }';
+  const response = await client.evaluateFunction(tab, declaration, [guard, 'abort'], { timeoutMs: 15000 });
+  assert.deepEqual(response, { result: { value: 'done' } });
+  assert.deepEqual(calls.map(call => call.method), ['Runtime.enable', 'Runtime.evaluate', 'Runtime.callFunctionOn', 'Runtime.releaseObject']);
+  assert.equal(calls[1].params.expression, 'globalThis');
+  assert.equal(calls[2].params.objectId, 'page-global');
+  assert.equal(calls[2].params.functionDeclaration, declaration);
+  assert.deepEqual(calls[2].params.arguments, [{ value: guard }, { value: 'abort' }]);
+  assert.equal(calls[2].params.awaitPromise, true);
+  assert.equal(calls[2].params.timeout, 15000);
+  assert.deepEqual(calls[3].params, { objectId: 'page-global' });
+});
 
 function setup(Agent, implementation = {}) {
   const provider = { name: 'feedback test', model: 'test', promptTier: 'full', contextWindow: 128000,
@@ -72,7 +95,8 @@ for (const build of ['chrome', 'firefox']) {
       const tab = nextTab++, agent = setup(Agent);
       const previousSendMessage = api.tabs.sendMessage;
       const previousEnable = cdpClient.enableDevDiagnostics, previousEvaluate = cdpClient.evaluate;
-      let expression = '';
+      const previousEvaluateFunction = cdpClient.evaluateFunction;
+      let declaration = '', passedArgs = [];
       try {
         await agent._claimRunEntry(tab, 'interactive');
         await agent._beginPageFeedbackRun(tab, 'interactive');
@@ -83,22 +107,29 @@ for (const build of ['chrome', 'firefox']) {
             revision: 7, operationId: message.params.operationId } }
           : { ready: true };
         cdpClient.enableDevDiagnostics = async () => {};
-        cdpClient.evaluate = async (_tab, value) => {
-          expression = value;
-          const token = value.match(/__webbrainPageFeedbackAborted: "([^"]+)"/)?.[1];
-          assert.ok(token, 'The wrapped page expression must have a unique aborted-dispatch result');
-          return { result: { value: { __webbrainPageFeedbackAborted: token } } };
+        cdpClient.evaluateFunction = async (_tab, value, args) => {
+          declaration = value; passedArgs = args;
+          assert.equal(typeof args[0], 'object');
+          assert.equal(typeof args[1], 'string');
+          return { result: { value: { __webbrainPageFeedbackAborted: args[1] } } };
         };
         const result = await agent._executeDevJavaScript(tab, { code: 'window.__shouldNotRun = true;' });
         assert.equal(result.dispatched, false);
         assert.equal(result.noDispatch, true);
         assert.match(result.error, /page changed during JavaScript preparation/i);
-        assert.match(expression, /cancelable: true/);
-        assert.match(expression, /if \(!window\.dispatchEvent\(gate\)\) return/);
-        assert.ok(expression.indexOf('return (async () =>') > expression.indexOf('dispatchEvent(gate)'));
+        assert.match(declaration, /cancelable: true/);
+        assert.match(declaration, /if \(!window\.dispatchEvent\(gate\)\) return/);
+        assert.ok(declaration.indexOf('return (async () =>') > declaration.indexOf('dispatchEvent(gate)'));
+        assert.match(declaration, /window\.__shouldNotRun = true/);
+        assert.doesNotMatch(declaration, /execute-js-document|operationId/,
+          'The page guard must travel as a protocol argument instead of source text');
+        assert.equal(passedArgs[0].documentToken, 'execute-js-document');
+        assert.ok(passedArgs[1]);
+        assert.equal(cdpClient.evaluate, previousEvaluate, 'Guarded execution must not use Runtime.evaluate source construction');
       } finally {
         cdpClient.enableDevDiagnostics = previousEnable;
         cdpClient.evaluate = previousEvaluate;
+        cdpClient.evaluateFunction = previousEvaluateFunction;
         api.tabs.sendMessage = previousSendMessage;
         if (agent._pageFeedbackRuns.has(tab)) agent._finishPageFeedbackRun(tab);
         agent._releaseRunEntry(tab);
