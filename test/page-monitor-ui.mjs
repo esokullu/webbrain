@@ -138,6 +138,53 @@ for (const siteIsolation of [false, true]) {
   });
 }
 
+test('Firefox native preparation keeps same-target user edits and sends no stale keys', async () => {
+  const { FirefoxBidiClient } = await import('../src/firefox/src/bidi/client.js');
+  const { pageFeedbackMethods: methods } = await import('../src/firefox/src/agent/page-feedback.js');
+  const { browser, page } = await fixture(firefox, 'firefox');
+  const savedChrome = globalThis.chrome, savedBrowser = globalThis.browser;
+  const tab = 960, runId = crypto.randomUUID(), token = crypto.randomUUID(), session = new BidiSession();
+  const host = { ...methods, isRunning: () => true, _checkAbort: () => false };
+  let releasePreparation, startPreparation, inputs = 0;
+  const entered = new Promise(resolve => { startPreparation = resolve; });
+  const release = new Promise(resolve => { releasePreparation = resolve; });
+  const api = { tabs: { get: async () => ({ url: page.url() }), sendMessage: async (_tab, message) => page.evaluate(message => {
+    deliver(message.action, message.params || {}); return lastMonitorResponse;
+  }, message) } };
+  globalThis.chrome = api; globalThis.browser = api;
+  const client = new FirefoxBidiClient(api);
+  session.runs.set(runId, { context: 'tab' });
+  session.locate = async () => { startPreparation(); await release; return { context: 'tab', node: { sharedId: 'field' } }; };
+  session.call = async (_match, declaration, args = []) => ({ result: { value: await page.evaluate(({ declaration, args }) =>
+    (0, eval)(`(${declaration})`)(document.getElementById('field'), ...args.map(arg => arg.value)), { declaration, args }) } });
+  session.send = async method => { if (method === 'input.performActions') inputs++; return {}; };
+  client.runs.set(tab, { runId, bound: true });
+  client.request = async (_command, args) => session.perform(args.runId, args.action, args.payload);
+  try {
+    await host._beginPageFeedbackRun(tab, 'interactive');
+    const runToken = host._pageFeedbackRuns.get(tab).token;
+    await page.evaluate(runToken => { monitorRunToken = runToken; monitorEnabled = false; deliver('page_monitor_state'); monitorEnabled = true; deliver('page_monitor_state'); }, runToken);
+    await page.waitForTimeout(200);
+    const documentToken = await page.evaluate(() => document.documentElement.getAttribute('data-webbrain-page-revision').split(':')[0]);
+    const from = { tab: { id: tab }, frameId: 0 };
+    host.pageMonitorState(from, documentToken);
+    await page.evaluate(token => document.getElementById('field').setAttribute('data-webbrain-bidi', token), token);
+    await page.locator('#field').focus();
+    const action = client.perform(tab, 'type', { token, selector: '#field', text: 'agent', clear: false });
+    await entered;
+    await page.keyboard.insertText('human');
+    for (const event of await page.evaluate(() => feedback)) host.observePageFeedback(from, event);
+    releasePreparation();
+    await assert.rejects(action, error => error.code === 'page_feedback_pending' && error.dispatchState.noDispatch === true);
+    assert.equal(inputs, 0);
+    assert.equal(host._hasPendingPageFeedback(tab), true);
+    assert.equal(await page.locator('#field').inputValue(), 'human');
+  } finally {
+    releasePreparation(); await session.close(); host._finishPageFeedbackRun(tab); await browser.close();
+    globalThis.chrome = savedChrome; globalThis.browser = savedBrowser;
+  }
+});
+
 for (const [build, engine] of [['chrome', chromium], ['firefox', firefox]]) {
   test(`${build}: monitor captures user input without values, suppresses agent input and keeps concurrent user input`, async () => {
     const { browser, page } = await fixture(engine, build);
@@ -337,7 +384,7 @@ for (const [build, engine] of [['chrome', chromium], ['firefox', firefox]]) {
     try {
       const guard = await page.evaluate(() => {
         deliver('page_monitor_prepare', { operationId: 'native-typing', tool: 'type_text', selector: '#field' });
-        deliver('page_monitor_dispatch', { operationId: 'native-typing', kind: 'input', selector: '#field', navigationCandidate: false });
+        deliver('page_monitor_dispatch', { operationId: 'native-typing', kind: 'input', selector: '#field', navigationCandidate: false, fenceOnly: true });
         feedback = []; return lastMonitorResponse.guard;
       });
       await page.locator('#field').focus();
@@ -352,6 +399,66 @@ for (const [build, engine] of [['chrome', chromium], ['firefox', firefox]]) {
       assert.equal(JSON.stringify(await page.evaluate(() => feedback)).includes('human-private'), false);
       assert.notEqual(await page.evaluate(() => document.documentElement.getAttribute('data-webbrain-page-revision')),
         `${guard.documentToken}:${guard.revision}`);
+    } finally { await browser.close(); }
+  });
+
+  for (const action of ['click', 'type']) {
+    test(`${build}: ${action} preparation preserves same-target human input`, async () => {
+      const { browser, page } = await fixture(engine, build);
+      try {
+        const selector = action === 'click' ? '#agent' : '#field';
+        await page.evaluate(({ action, selector }) => {
+          feedback = [];
+          deliver('page_monitor_prepare', { operationId: 'preparing', tool: action, selector });
+          deliver('page_monitor_dispatch', { operationId: 'preparing', kind: action === 'click' ? 'click' : 'input', selector, fenceOnly: true });
+          window.finishPreparation = __wbPageMonitor.beginContentAction(action, { selector, _bidiPrepare: action === 'type' });
+        }, { action, selector });
+        if (action === 'click') await page.locator(selector).click();
+        else { await page.locator(selector).focus(); await page.keyboard.insertText('human'); }
+        assert.ok((await page.evaluate(() => feedback)).some(event => event.source === 'user'),
+          'Preparation must not consume physical input as an agent action');
+        const code = await page.evaluate(() => {
+          try { __wbPageMonitor.beforeLocalDispatch(); return null; }
+          catch (error) { return error.code; }
+          finally { finishPreparation(); }
+        });
+        assert.equal(code, 'page_feedback_pending');
+      } finally { await browser.close(); }
+    });
+  }
+
+  test(`${build}: ancestor class and style changes track plain content visibility`, async () => {
+    const { browser, page } = await fixture(engine, build);
+    try {
+      await page.evaluate(() => {
+        const style = document.createElement('style'); style.textContent = '#plain-result {display:var(--result-display,block)} .closed #plain-result {display:none}'; document.head.append(style);
+        const container = document.createElement('div'); container.id = 'style-container'; container.className = 'closed';
+        container.style.cssText = 'width:200px;height:80px'; container.innerHTML = '<div id="plain-result">Visible result content</div>';
+        document.body.prepend(container);
+      });
+      for (const attribute of ['class', 'style']) {
+        await page.evaluate(attribute => {
+          const container = document.getElementById('style-container');
+          container.className = 'closed'; container.style.setProperty('--result-display', attribute === 'style' ? 'none' : 'block');
+          if (attribute === 'style') container.className = '';
+          monitorEnabled = false; deliver('page_monitor_state'); monitorEnabled = true; deliver('page_monitor_state');
+        }, attribute);
+        await page.waitForTimeout(200);
+        for (const show of [true, false]) {
+          const unchangedGeometry = await page.evaluate(({ attribute, show }) => {
+            feedback = [];
+            const container = document.getElementById('style-container'), before = container.getBoundingClientRect();
+            if (attribute === 'class') container.className = show ? '' : 'closed';
+            else container.style.setProperty('--result-display', show ? 'block' : 'none');
+            const after = container.getBoundingClientRect();
+            return before.width === after.width && before.height === after.height;
+          }, { attribute, show });
+          assert.equal(unchangedGeometry, true);
+          await page.waitForFunction(() => feedback.some(event => event.kind === 'dom'), null, { timeout: 1000 });
+          assert.equal(await page.locator('#plain-result').isVisible(), show);
+          assert.ok((await page.evaluate(() => feedback)).some(event => event.kind === 'dom'));
+        }
+      }
     } finally { await browser.close(); }
   });
 
@@ -444,7 +551,7 @@ for (const [build, engine] of [['chrome', chromium], ['firefox', firefox]]) {
       await page.waitForTimeout(200);
       const guard = await page.evaluate(() => {
         deliver('page_monitor_prepare', { operationId: 'clear-chord', tool: 'set_field', selector: '#field' });
-        deliver('page_monitor_dispatch', { operationId: 'clear-chord', kind: 'input', selector: '#field' });
+        deliver('page_monitor_dispatch', { operationId: 'clear-chord', kind: 'input', selector: '#field', fenceOnly: true });
         feedback = []; return lastMonitorResponse.guard;
       });
       const mark = sequence => page.evaluate(({ guard, sequence }) => document.getElementById('field')
@@ -482,7 +589,7 @@ for (const [build, engine] of [['chrome', chromium], ['firefox', firefox]]) {
       await page.locator('#field').focus();
       const guard = await page.evaluate(() => {
         deliver('page_monitor_prepare', { operationId: 'upload', tool: 'upload_file', selector: '#upload' });
-        deliver('page_monitor_dispatch', { operationId: 'upload', kind: 'input', selector: '#upload', navigationCandidate: false });
+        deliver('page_monitor_dispatch', { operationId: 'upload', kind: 'input', selector: '#upload', navigationCandidate: false, fenceOnly: true });
         feedback = []; return lastMonitorResponse.guard;
       });
       assert.equal((await session.perform(runId, 'upload', { token, base64: 'eA==', filename: 'test.txt', pageFeedbackGuard: guard })).success, true);

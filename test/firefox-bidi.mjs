@@ -22,6 +22,7 @@ test('uploads register input dispatches with the extension monitor', async () =>
     assert.equal(registrations.length, 1);
     assert.equal(registrations[0].kind, 'input');
     assert.equal(registrations[0].navigationCandidate, false);
+    assert.equal(registrations[0].fenceOnly, true);
   } finally { owner._finishPageFeedbackRun(tab); }
 });
 

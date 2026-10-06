@@ -45,6 +45,9 @@ Steer or grant authorization. Enter and Alt+Enter retain their existing behavior
   results have matching messages. In-flight results remain; undispatched sibling
   calls receive explicit skipped results. Transport and local dispatch gates
   cover interventions during asynchronous preparation.
+- Content and Firefox native preparation handshakes check the revision without
+  claiming input events. Local dispatch and native markers activate expectations
+  at the mutation boundary, preserving same-target intervention during preparation.
 - Both Chrome upload paths check feedback after preparation, immediately before
   attaching files. A skipped attachment retains its undispatched outcome.
 - Firefox companion uploads register as input and place their native marker on
@@ -85,5 +88,10 @@ late shadow-root attachment and custom-element upgrades, window and
 container scrolling, animation noise, cleanup/restart and persisted navigation
 notes. Browser extension APIs are mocked in these fixtures; they are not a live
 companion-session integration test.
+
+Visibility regressions include fixed-size ancestors changing class or CSS custom
+properties to reveal or hide non-interactive content. Native preparation fixtures
+also exercise the real companion code across an asynchronous target lookup while
+the user edits the same field.
 
 The monitor regressions are also included in `npm run test:runtime-lifecycle`.

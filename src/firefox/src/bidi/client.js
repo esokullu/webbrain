@@ -147,6 +147,7 @@ export class FirefoxBidiClient {
       ...(payload.point ? { x: payload.point.x, y: payload.point.y } : {}),
       selector: payload.selector, ref_id: payload.ref_id, frameId: payload.frameId || 0,
       navigationCandidate: ['click', 'checked'].includes(action),
+      fenceOnly: true,
       url: action === 'navigate' ? payload.url : undefined,
     });
     if (!owner.bound) {

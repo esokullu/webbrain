@@ -188,7 +188,11 @@
     for (const record of records) {
       if (record.type !== 'attributes' || !['class', 'style', 'hidden', 'aria-hidden'].includes(record.attributeName)) continue;
       if (record.target.getAnimations?.().some(animation => animation.playState === 'running')) continue;
-      for (const el of [...(record.target.querySelectorAll?.('button,a,input,textarea,select,[role],[contenteditable]') || [])].slice(0, 100))
+      const descendants = new Set([
+        ...[...(record.target.querySelectorAll?.('button,a,input,textarea,select,[role],[contenteditable]') || [])].slice(0, 100),
+        ...[...(record.target.querySelectorAll?.('*') || [])].slice(0, 100),
+      ]);
+      for (const el of descendants)
         changes.push({ type: 'layout', target: el });
     }
     let measured = 0;
@@ -391,7 +395,7 @@
     }
     op.windowScroll = params.scrollIntoView || (params.kind === 'scroll' && !op.target) || ['input', 'click'].includes(params.kind);
     op.kinds = new Set([params.kind, 'dom', ...(params.kind === 'input' ? ['selection'] : []), 'scroll']);
-    op.until = Date.now() + 1500; op.dispatched = true;
+    op.until = Date.now() + (params.fenceOnly ? 30000 : 1500); op.dispatched = !params.fenceOnly;
     operations.set(op.operationId, op);
   }
   const localMutations = new Set(['click', 'click_ax', 'type', 'type_ax', 'set_field', 'set_checked', 'press_keys', 'scroll',
@@ -425,7 +429,8 @@
       const marker = { userAt: lastUserAt }; agentTurn = marker;
       setTimeout(() => { if (agentTurn === marker) agentTurn = null; }, 0);
     }
-    dispatch({ ...localOperation, navigationCandidate: !preparation && localOperation.navigationCandidate, runToken });
+    dispatch({ ...localOperation, navigationCandidate: !preparation && localOperation.navigationCandidate,
+      fenceOnly: preparation, runToken });
   }
   const onMessage = (msg, _sender, respond) => {
     if (disposed || msg?.target !== 'content') return;

@@ -35169,6 +35169,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
           kind: /type|field|key/.test(name) ? 'input' : name === 'scroll' ? 'scroll' : /click|checked|hover|drag/.test(name) ? 'click' : 'dom',
           frameId: messageOptions?.frameId || 0, selector: contentArgs?.selector, ref_id: contentArgs?.ref_id,
           navigationCandidate: ['click', 'click_ax', 'set_checked'].includes(name),
+          fenceOnly: true,
         });
       }
       throwIfContentPipelineAborted();
