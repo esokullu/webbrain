@@ -240,6 +240,21 @@
       if (el.shadowRoot && !ignored(el)) observeRoot(el.shadowRoot, budget);
     }
   }
+  function sampleDescendants(root, limit = 100) {
+    const nodes = [];
+    let node = root?.firstElementChild || null;
+    while (node) {
+      if (nodes.length === limit) return { nodes, exceeded: true };
+      nodes.push(node);
+      if (node.firstElementChild) {
+        node = node.firstElementChild;
+        continue;
+      }
+      while (node && node !== root && !node.nextElementSibling) node = node.parentElement;
+      node = node && node !== root ? node.nextElementSibling : null;
+    }
+    return { nodes, exceeded: false };
+  }
   function observeRoot(root, budget) {
     if (!root || roots.has(root) || !observer) return;
     roots.add(root);
@@ -313,17 +328,17 @@
       if (record.type !== 'popover' && (record.type !== 'attributes' || !['class', 'style', 'hidden', 'aria-hidden', 'open', 'inert'].includes(record.attributeName))) continue;
       if (ignored(record.target)) continue;
       if (record.target.getAnimations?.().some(animation => animation.playState === 'running')) continue;
-      const interactive = record.target.querySelectorAll?.('button,a,input,textarea,select,[role],[contenteditable]') || [];
-      const all = record.target.querySelectorAll?.('*') || [];
+      const sample = sampleDescendants(record.target);
       // A bounded layout sample cannot prove that inherited visibility left a
       // large subtree unchanged. Invalidate conservatively on an actual state
       // change, before the measurement cap can omit a late affected descendant.
-      if (all.length > 100 && (record.type === 'popover' || record.oldValue !== record.target.getAttribute(record.attributeName))) noteChange(record.target, record.agentUserAt);
-      const descendants = new Set([
-        ...Array.prototype.slice.call(interactive, 0, 100),
-        ...Array.prototype.slice.call(all, 0, 100),
-      ]);
-      for (const el of descendants)
+      // Stop walking at the cap instead of materializing the whole subtree.
+      if (sample.exceeded) {
+        if (record.type === 'popover' || record.oldValue !== record.target.getAttribute(record.attributeName))
+          noteChange(record.target, record.agentUserAt);
+        continue;
+      }
+      for (const el of sample.nodes)
         changes.push({ type: 'layout', target: el, agentUserAt: record.agentUserAt });
     }
     let measured = 0;
@@ -608,6 +623,21 @@
     op.until = Date.now() + (params.fenceOnly ? 30000 : 1500); op.dispatched = !params.fenceOnly;
     operations.set(op.operationId, op);
   }
+  function activatePreparedDispatch(params = {}) {
+    const op = operations.get(params.operationId);
+    const layoutChanged = coordinatePreparationShifted(op);
+    if (!active || !op || layoutChanged || domTimer || unreported
+        || lastUserAt > op.userAt
+        || (Number.isFinite(op.preparedRevision) && op.preparedRevision !== revision)) {
+      const error = new Error('Browser changed during action preparation. Re-observe before acting.');
+      error.code = 'page_feedback_pending';
+      error.dispatched = false;
+      throw error;
+    }
+    dispatch({ ...params, runToken });
+    publishRevision();
+    return { ready: true, operationId: op.operationId, revision };
+  }
   const localMutations = new Set(['click', 'click_ax', 'type', 'type_ax', 'set_field', 'set_checked', 'press_keys', 'scroll',
     'hover', 'drag_drop', 'patch_element', 'revert_patch', 'highlight_element', 'execute_js',
     'ax_prepare_field_for_trusted_type', 'ax_resolve_two_rects', 'ax_resolve_rect']);
@@ -689,7 +719,7 @@
     }
   };
   api.runtime.onMessage.addListener(onMessage);
-  window.__wbPageMonitor = { beginContentAction, beforeLocalDispatch, withLocalDispatch, dispatch, registerDecoration,
+  window.__wbPageMonitor = { beginContentAction, beforeLocalDispatch, withLocalDispatch, dispatch, activatePreparedDispatch, registerDecoration,
     get active() { return active; },
     get disposed() { return disposed; },
     dispose() { disposed = true; requestGeneration++; stop(); api.runtime.onMessage.removeListener?.(onMessage); } };

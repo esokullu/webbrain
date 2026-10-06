@@ -381,6 +381,37 @@ for (const build of ['chrome', 'firefox']) {
     } finally { agent._releaseRunEntry(tab); }
   });
 
+  test(`${build}: frame click preparation installs a fence without claiming the click`, async () => {
+    const agent = setup(Agent), tab = nextTab++, previousMessage = api.tabs.sendMessage;
+    const messages = [];
+    api.tabs.sendMessage = async (_tab, message, options) => {
+      messages.push({ message, frameId: options?.frameId });
+      if (message.action === 'page_monitor_dispatch') return { ready: true, guard: {
+        documentToken: 'child-token', revision: 0, operationId: message.params.operationId,
+        navigationCandidate: true,
+      } };
+      return { ready: true };
+    };
+    await agent._claimRunEntry(tab, 'interactive');
+    try {
+      bind(agent, tab, 2, 'child-doc', 'child-token');
+      const run = agent._pageFeedbackRuns.get(tab);
+      run.navigation = { at: Date.now(), url: '', kind: 'click', frameId: 2 };
+      const guard = await beforePageAgentDispatch(api, tab, {
+        kind: 'click', selector: '#inside', frameId: 2, fenceOnly: true, prepareMonitor: true,
+      });
+      assert.equal(guard.operationId, messages.find(entry => entry.message.action === 'page_monitor_dispatch').message.params.operationId);
+      assert.deepEqual(messages.filter(entry => ['page_monitor_prepare', 'page_monitor_dispatch'].includes(entry.message.action))
+        .map(entry => entry.message.action), ['page_monitor_prepare', 'page_monitor_dispatch']);
+      assert.equal(messages.at(-1).frameId, 2);
+      assert.equal(messages.at(-1).message.params.fenceOnly, true);
+      assert.equal(run.navigation.kind, 'click', 'A preparation fence cannot consume an earlier navigation correlation');
+    } finally {
+      agent._releaseRunEntry(tab);
+      api.tabs.sendMessage = previousMessage;
+    }
+  });
+
   test(`${build}: intervention during the dispatch handshake blocks the prepared action`, async () => {
     const agent = setup(Agent), tab = nextTab++;
     await agent._claimRunEntry(tab, 'interactive');

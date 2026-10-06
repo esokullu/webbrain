@@ -34837,6 +34837,10 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
           };
         }
         const selected = candidates[0];
+        const dispatchGuard = await beforePageAgentDispatch(globalThis.browser || globalThis.chrome, tabId, {
+          kind: 'click', selector, frameId: selected.frameId, fenceOnly: true, prepareMonitor: true,
+        });
+        throwIfContentPipelineAborted();
         const clickCode = `
           (() => {
             let targetDispatched = false;
@@ -34846,6 +34850,15 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
               el.scrollIntoView({ block: 'center', inline: 'center' });
               const rect = el.getBoundingClientRect();
               const opts = { bubbles: true, cancelable: true, view: window, clientX: rect.left + rect.width/2, clientY: rect.top + rect.height/2, button: 0 };
+              const monitorGuard = ${JSON.stringify(dispatchGuard || null)};
+              if (monitorGuard?.operationId) {
+                if (typeof window.__wbPageMonitor?.activatePreparedDispatch !== 'function') {
+                  return { ok: false, url: location.href, reason: 'page-monitor-unavailable' };
+                }
+                window.__wbPageMonitor.activatePreparedDispatch({
+                  operationId: monitorGuard.operationId, kind: 'click', element: el, navigationCandidate: true,
+                });
+              }
               targetDispatched = true;
               try { el.dispatchEvent(new PointerEvent('pointerdown', opts)); } catch (e) {}
               el.dispatchEvent(new MouseEvent('mousedown', opts));

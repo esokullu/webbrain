@@ -457,6 +457,75 @@ for (const [build, engine] of [['chrome', chromium], ['firefox', firefox]]) {
     } finally { await browser.close(); }
   });
 
+  test(`${build}: fenced iframe clicks reject transport-gap input and attribute the dispatched click`, async () => {
+    const { browser, page } = await fixture(engine, build);
+    try {
+      await page.evaluate(() => {
+        feedback = [];
+        deliver('page_monitor_prepare', { operationId: 'iframe-click-stale', tool: 'click', selector: '#human' });
+        deliver('page_monitor_dispatch', { operationId: 'iframe-click-stale', kind: 'click', selector: '#human', fenceOnly: true });
+      });
+      await page.locator('#human').click();
+      await page.waitForFunction(() => feedback.some(event => event.kind === 'click' && event.source === 'user'), null, { timeout: 1000 });
+      const blocked = await page.evaluate(() => {
+        try {
+          __wbPageMonitor.activatePreparedDispatch({ operationId: 'iframe-click-stale', kind: 'click',
+            element: document.getElementById('human'), navigationCandidate: true });
+          return null;
+        } catch (error) { return { code: error.code, dispatched: error.dispatched }; }
+      });
+      assert.deepEqual(blocked, { code: 'page_feedback_pending', dispatched: false },
+        'The remote script must not claim a physical click received during the transport gap');
+
+      await page.waitForTimeout(200);
+      const accepted = await page.evaluate(() => {
+        feedback = [];
+        deliver('page_monitor_prepare', { operationId: 'iframe-click-live', tool: 'click', selector: '#agent' });
+        deliver('page_monitor_dispatch', { operationId: 'iframe-click-live', kind: 'click', selector: '#agent', fenceOnly: true });
+        try {
+          __wbPageMonitor.activatePreparedDispatch({ operationId: 'iframe-click-live', kind: 'click',
+            element: document.getElementById('agent'), navigationCandidate: true });
+          document.getElementById('agent').click();
+          return true;
+        } catch { return false; }
+      });
+      assert.equal(accepted, true, 'An unchanged prepared target can activate immediately before the click');
+      await page.waitForTimeout(200);
+      assert.ok((await page.evaluate(() => feedback)).every(event => event.source === 'agent'
+        && event.kind === 'activity' && event.operation === 'click'),
+      'The activated script click may correlate navigation but must not be reported as a user/page change');
+      assert.equal(await page.locator('#status').textContent(), 'Agent changed this');
+    } finally { await browser.close(); }
+  });
+
+  test(`${build}: large ancestor style changes stop descendant sampling at its cap`, async () => {
+    const { browser, page } = await fixture(engine, build);
+    try {
+      await page.evaluate(() => {
+        monitorEnabled = false; deliver('page_monitor_state');
+        const large = document.createElement('section');
+        large.innerHTML = '<span></span>'.repeat(250);
+        document.body.append(large);
+        monitorEnabled = true; deliver('page_monitor_state');
+      });
+      await page.waitForTimeout(100);
+      await page.evaluate(() => {
+        const original = Element.prototype.querySelectorAll;
+        let count = 0;
+        Element.prototype.querySelectorAll = function (selector) {
+          if (this === document.body && selector === '*') count++;
+          return original.call(this, selector);
+        };
+        window.wholeSubtreeQueryCount = () => count;
+        feedback = [];
+        document.body.classList.add('large-page-state-change');
+      });
+      await page.waitForFunction(() => feedback.some(event => event.kind === 'dom' && event.source === 'page'), null, { timeout: 1000 });
+      assert.equal(await page.evaluate(() => wholeSubtreeQueryCount()), 0,
+        'A common-ancestor mutation must not materialize its complete descendant list before applying the cap');
+    } finally { await browser.close(); }
+  });
+
   test(`${build}: opacity-only visibility changes invalidate prepared actions`, async () => {
     const { browser, page } = await fixture(engine, build);
     try {

@@ -40,7 +40,7 @@ export async function beforePageAgentDispatch(api, tabId, details = {}) {
     error.code = 'page_feedback_pending';
     throw error;
   }
-  if (!details.release && details.kind === 'click' && details.navigationCandidate !== false) owner.clearNavigation();
+  if (!details.release && !details.fenceOnly && details.kind === 'click' && details.navigationCandidate !== false) owner.clearNavigation();
   if (details.documentToken) {
     const frameId = owner.frameForDocument(details.documentToken);
     if (frameId === undefined && !details.release) {
@@ -50,10 +50,18 @@ export async function beforePageAgentDispatch(api, tabId, details = {}) {
     details = { ...details, ...(frameId === undefined ? {} : { frameId }) };
   }
   owner.operationFrames.get(owner.operationId)?.add(Number(details.frameId) || 0);
+  const { prepareMonitor = false, ...dispatchDetails } = details;
+  const operationId = owner.operationId || token();
+  const monitorParams = { ...dispatchDetails, runToken: owner.runToken, operationId };
   let acknowledgement;
+  let preparationAcknowledgement;
   try {
+    if (!details.release && details.fenceOnly && prepareMonitor) {
+      preparationAcknowledgement = await api.tabs.sendMessage(tabId, { target: 'content', action: 'page_monitor_prepare',
+        params: { ...monitorParams, tool: dispatchDetails.tool || dispatchDetails.kind } }, { frameId: Number(details.frameId) || 0 });
+    }
     acknowledgement = await api.tabs.sendMessage(tabId, { target: 'content', action: 'page_monitor_dispatch',
-      params: { ...details, runToken: owner.runToken, operationId: owner.operationId || token() } }, { frameId: Number(details.frameId) || 0 });
+      params: monitorParams }, { frameId: Number(details.frameId) || 0 });
   } catch { /* restricted pages can still use background tools */ }
   if (!details.release && dispatchOwners.get(tabId) !== owner) {
     const error = new Error('Browser run ended before dispatch'); error.name = 'AbortError'; throw error;
@@ -61,6 +69,11 @@ export async function beforePageAgentDispatch(api, tabId, details = {}) {
   // The messaging round trip itself may have received a human intervention.
   if (!details.release && (owner.pending() || acknowledgement?.pageFeedbackPending)) {
     const error = new Error(pageFeedbackPendingResult().error);
+    error.code = 'page_feedback_pending';
+    throw error;
+  }
+  if (!details.release && details.fenceOnly && prepareMonitor && acknowledgement?.guard && preparationAcknowledgement?.ready !== true) {
+    const error = new Error('The browser could not prepare the page monitor before dispatch. Re-observe the page before acting.');
     error.code = 'page_feedback_pending';
     throw error;
   }

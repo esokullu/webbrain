@@ -37717,7 +37717,7 @@ If the user has already named or confirmed this exact recipient, do NOT ask agai
         }
         if (binding?.token && Number.isInteger(binding.frameId)) {
           throwIfEarlyCdpAborted();
-          await beforePageAgentDispatch(globalThis.chrome, tabId, { kind: 'click', selector, frameId: binding.frameId });
+          await beforePageAgentDispatch(globalThis.chrome, tabId, { kind: 'click', selector, frameId: binding.frameId, fenceOnly: true });
           dispatched = true;
           markEarlyCdpDispatched();
           const response = await chrome.tabs.sendMessage(tabId, {
@@ -37782,12 +37782,14 @@ If the user has already named or confirmed this exact recipient, do NOT ask agai
         }
         const selected = candidates[0];
         throwIfEarlyCdpAborted();
-        await beforePageAgentDispatch(globalThis.chrome, tabId, { kind: 'click', selector, frameId: selected.frameId });
+        const dispatchGuard = await beforePageAgentDispatch(globalThis.chrome, tabId, {
+          kind: 'click', selector, frameId: selected.frameId, fenceOnly: true, prepareMonitor: true,
+        });
         dispatched = true;
         markEarlyCdpDispatched();
         const clicked = await chrome.scripting.executeScript({
           target: { tabId, frameIds: [selected.frameId] },
-          func: (sel, matchIndex) => {
+          func: (sel, matchIndex, monitorGuard) => {
             let targetDispatched = false;
             try {
               const el = document.querySelectorAll(sel)[matchIndex];
@@ -37797,6 +37799,14 @@ If the user has already named or confirmed this exact recipient, do NOT ask agai
               const cx = rect.left + rect.width / 2;
               const cy = rect.top + rect.height / 2;
               const opts = { bubbles: true, cancelable: true, view: window, clientX: cx, clientY: cy, button: 0 };
+              if (monitorGuard?.operationId) {
+                if (typeof window.__wbPageMonitor?.activatePreparedDispatch !== 'function') {
+                  return { ok: false, url: location.href, reason: 'page-monitor-unavailable' };
+                }
+                window.__wbPageMonitor.activatePreparedDispatch({
+                  operationId: monitorGuard.operationId, kind: 'click', element: el, navigationCandidate: true,
+                });
+              }
               targetDispatched = true;
               try { el.dispatchEvent(new PointerEvent('pointerdown', opts)); } catch (e) {}
               el.dispatchEvent(new MouseEvent('mousedown', opts));
@@ -37808,7 +37818,7 @@ If the user has already named or confirmed this exact recipient, do NOT ask agai
               return { ok: false, url: location.href, dispatched: targetDispatched, error: e.message };
             }
           },
-          args: [selector, requestedMatchIndex],
+          args: [selector, requestedMatchIndex, dispatchGuard],
         });
         const result = clicked?.[0]?.result;
         return result?.ok
