@@ -179,7 +179,7 @@ export const pageFeedbackMethods = {
       // A physical interaction supersedes an expected agent navigation.
       run.navigation = null;
     }
-    if (feedback.kind !== 'dom' && (feedback.source === 'user' || feedback.kind === 'scroll'
+    if (feedback.kind !== 'dom' && (feedback.source === 'user'
         || (feedback.kind === 'resize' && feedback.source !== 'page'))) run.lastActivityAt = Date.now();
     this._queuePageFeedback(tabId, item);
     return { accepted: true };

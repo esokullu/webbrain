@@ -344,10 +344,17 @@ for (const build of ['chrome', 'firefox']) {
       const started = Date.now();
       await agent._waitForPageFeedbackIdle(tab);
       assert.ok(Date.now() - started >= 30);
-      binding.send({ kind: 'scroll', source: 'unknown' });
+      binding.send({ kind: 'scroll', source: 'user' });
       const externalScrollAt = Date.now();
       await agent._waitForPageFeedbackIdle(tab);
-      assert.ok(Date.now() - externalScrollAt >= 30, 'Unattributed scrollbar/page scroll also gets the idle gate');
+      assert.ok(Date.now() - externalScrollAt >= 30, 'A physical scroll receives the idle gate');
+      binding.send({ kind: 'click', source: 'user' });
+      const automaticScrollAt = Date.now();
+      const ticker = setInterval(() => binding.send({ kind: 'scroll', source: 'unknown' }), 5);
+      try { await agent._waitForPageFeedbackIdle(tab); }
+      finally { clearInterval(ticker); }
+      assert.ok(Date.now() - automaticScrollAt >= 30 && Date.now() - automaticScrollAt < 100,
+        'Repeated unattributed scroll events must not restart the physical-input idle deadline');
       binding.send({ kind: 'activity', interacting: true });
       const waiting = agent._waitForPageFeedbackIdle(tab);
       agent.abort(tab);
