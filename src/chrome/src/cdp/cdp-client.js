@@ -5,7 +5,24 @@
  */
 
 import { combineImages } from './image-utils.js';
-import { beforePageAgentDispatch, hasPageAgentDispatchOwner } from '../agent/page-feedback.js';
+import { beforePageAgentDispatch, hasPageAgentDispatchOwner, pageFeedbackPendingResult } from '../agent/page-feedback.js';
+
+const SELECTOR_SCROLL_DISPATCH_SOURCE = `
+  const beforeSelectorScroll = (element, guard) => {
+    if (!guard) return true;
+    const doc = element.ownerDocument;
+    if (!element.isConnected || doc.documentElement?.getAttribute('data-webbrain-page-revision') !== guard.documentToken + ':' + guard.revision) return false;
+    return element.dispatchEvent(new doc.defaultView.CustomEvent('webbrain-agent-scroll-dispatch', {
+      bubbles: true, composed: true, cancelable: true, detail: JSON.stringify(guard),
+    }));
+  };
+`;
+
+function throwIfPageFeedbackPending(result) {
+  if (!result?.pageFeedbackPending) return;
+  const error = new Error(pageFeedbackPendingResult().error);
+  error.code = 'page_feedback_pending'; throw error;
+}
 
 function readProseMirrorText(el) {
   if (!el?.isContentEditable || !el.classList?.contains('ProseMirror')) return null;
@@ -3688,7 +3705,6 @@ export class CDPClient {
     let lastResult = null;
     for (let i = 0; i <= retries; i++) {
       deadline.throwIfExpired();
-      await beforePageAgentDispatch(globalThis.chrome, tabId, { kind: 'scroll', selector, scrollIntoView: true });
       const result = await this._resolveSelectorOnce(tabId, selector, options);
       deadline.throwIfExpired();
       // Found and usable → done.
@@ -3969,12 +3985,19 @@ export class CDPClient {
     await this.sendCommand(tabId, 'Runtime.enable');
     deadline.throwIfExpired();
 
+    const scrollGuard = scrollRequested ? await beforePageAgentDispatch(globalThis.chrome, tabId, {
+      kind: 'scroll', selector, scrollIntoView: true, fenceOnly: true,
+    }) : null;
+    deadline.throwIfExpired();
+
     const selectorJSON = JSON.stringify(selector);
     const requireUnique = options?.requireUnique === true;
 
     // ---- Strategy 1: JS walker (open shadow roots) ----
     const jsExpr = `
       (() => {
+        ${SELECTOR_SCROLL_DISPATCH_SOURCE}
+        const pageGuard = ${JSON.stringify(scrollGuard || null)};
         const sel = ${selectorJSON};
         const requireUnique = ${requireUnique};
         const scrollRequested = ${scrollRequested};
@@ -4026,6 +4049,7 @@ export class CDPClient {
         if (deadlineExpired()) return { found: false, deadlineExpired: true };
         if (scrollRequested && found.tagName !== 'SELECT') {
           if (deadlineExpired()) return { found: false, deadlineExpired: true };
+          if (!beforeSelectorScroll(found, pageGuard)) return { found: false, pageFeedbackPending: true };
           try { found.scrollIntoView({ block: 'center', inline: 'center' }); } catch (e) {}
         }
         const r = found.getBoundingClientRect();
@@ -4059,6 +4083,7 @@ export class CDPClient {
     const jsRes = await this.evaluate(tabId, jsExpr);
     deadline.throwIfExpired();
     const jsInfo = jsRes?.result?.value;
+    throwIfPageFeedbackPending(jsInfo);
     if (jsInfo?.deadlineExpired) deadline.throwIfExpired(true);
     if (jsInfo?.error) return jsInfo;
     if (jsInfo?.found) {
@@ -4180,7 +4205,7 @@ export class CDPClient {
       // deadline when a frozen renderer resumes, so deadline-bound callers use
       // a guarded Runtime function on the exact closed-shadow node instead.
       if (scrollRequested) {
-        if (deadline.deadlineAt > 0) {
+        if (deadline.deadlineAt > 0 || hasPageAgentDispatchOwner(tabId)) {
           let scrollObjectId = null;
           try {
             deadline.throwIfExpired();
@@ -4188,12 +4213,19 @@ export class CDPClient {
             deadline.throwIfExpired();
             scrollObjectId = resolved?.object?.objectId || null;
             if (scrollObjectId) {
+              const target = hasPageAgentDispatchOwner(tabId) ? await this._pageAgentObjectTarget(tabId, scrollObjectId) : {};
+              const guard = await beforePageAgentDispatch(globalThis.chrome, tabId, {
+                kind: 'scroll', scrollIntoView: true, fenceOnly: true, ...target,
+              });
+              deadline.throwIfExpired();
               const scrolled = await this.sendCommand(tabId, 'Runtime.callFunctionOn', {
                 objectId: scrollObjectId,
                 returnByValue: true,
-                functionDeclaration: `function (actionDeadlineAt) {
+                functionDeclaration: `function (actionDeadlineAt, pageGuard) {
+                  ${SELECTOR_SCROLL_DISPATCH_SOURCE}
                   const deadlineExpired = () => actionDeadlineAt > 0 && Date.now() >= actionDeadlineAt;
                   if (deadlineExpired()) return { scrolled: false, deadlineExpired: true };
+                  if (!beforeSelectorScroll(this, pageGuard)) return { scrolled: false, pageFeedbackPending: true };
                   try {
                     this.scrollIntoView({ block: 'center', inline: 'center' });
                   } catch {
@@ -4201,9 +4233,10 @@ export class CDPClient {
                   }
                   return { scrolled: true };
                 }`,
-                arguments: [{ value: deadline.deadlineAt }],
+                arguments: [{ value: deadline.deadlineAt }, { value: guard || null }],
               });
               deadline.throwIfExpired();
+              throwIfPageFeedbackPending(scrolled?.result?.value);
               if (scrolled?.result?.value?.deadlineExpired) deadline.throwIfExpired(true);
             }
           } finally {

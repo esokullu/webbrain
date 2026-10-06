@@ -58006,7 +58006,7 @@ test('CDP selector resolution rejects queued open- and closed-shadow scrolls aft
     if (method === 'DOM.resolveNode') return { object: { objectId: 'late-closed-shadow-target' } };
     if (method === 'Runtime.callFunctionOn') {
       assert.match(params.functionDeclaration, /deadlineExpired[\s\S]*scrollIntoView/);
-      assert.deepEqual(params.arguments, [{ value: deadlineAt }]);
+      assert.deepEqual(params.arguments, [{ value: deadlineAt }, { value: null }]);
       return { result: { value: { scrolled: false, deadlineExpired: true } } };
     }
     return {};

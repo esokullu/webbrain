@@ -144,7 +144,7 @@ export const pageFeedbackMethods = {
     }
     const seq = Number(feedback.seq);
     if (!Number.isSafeInteger(seq) || seq <= frame.seq) return { accepted: false, reason: 'duplicate-observation' };
-    if (!['click', 'input', 'selection', 'scroll', 'dom', 'activity'].includes(feedback.kind)
+    if (!['click', 'input', 'selection', 'scroll', 'resize', 'dom', 'activity'].includes(feedback.kind)
         || !['user', 'agent', 'page', 'unknown'].includes(feedback.source)) return { accepted: false, reason: 'invalid-observation' };
     frame.seq = seq;
     if (feedback.source === 'agent') {
@@ -156,6 +156,8 @@ export const pageFeedbackMethods = {
     const item = { kind: feedback.kind, source: feedback.source, frameId,
       revision: Math.max(0, Number(feedback.revision) || 0), target: clean(feedback.target, 180) };
     if (feedback.kind === 'scroll') item.viewport = { x: Number(feedback.viewport?.x) || 0, y: Number(feedback.viewport?.y) || 0 };
+    if (feedback.kind === 'resize') item.viewport = Object.fromEntries(['width', 'height', 'visualWidth', 'visualHeight', 'scale', 'offsetX', 'offsetY']
+      .map(key => [key, Number.isFinite(feedback.viewport?.[key]) ? feedback.viewport[key] : 0]));
     if (feedback.source === 'user') {
       // DOM callbacks describe consequences; only physical activity extends the idle gate.
       if (feedback.kind !== 'dom') run.lastUserAt = Date.now();
@@ -164,7 +166,8 @@ export const pageFeedbackMethods = {
       // A physical interaction supersedes an expected agent navigation.
       run.navigation = null;
     }
-    if (feedback.kind !== 'dom' && (feedback.source === 'user' || feedback.kind === 'scroll')) run.lastActivityAt = Date.now();
+    if (feedback.kind !== 'dom' && (feedback.source === 'user' || feedback.kind === 'scroll'
+        || (feedback.kind === 'resize' && feedback.source !== 'page'))) run.lastActivityAt = Date.now();
     this._queuePageFeedback(tabId, item);
     return { accepted: true };
   },

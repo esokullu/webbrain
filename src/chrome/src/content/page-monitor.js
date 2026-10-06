@@ -12,6 +12,7 @@
   let observer = null, domTimer = null, scrollTimer = null, lastUserAt = 0;
   let pointerHeld = false, composing = false, localOperation = null;
   let requestGeneration = 0, unreported = 0, pendingDOM = null;
+  let lastViewport = '';
   let lastFeedbackDelivery = Promise.resolve();
   let agentTurn = null, userTurn = null, lastUserTarget = null;
   let matchedEvents = new WeakMap(), nativeMarks = new WeakMap();
@@ -154,6 +155,7 @@
       .map(node => node.textContent).join('').slice(0, 200);
     return JSON.stringify([shown, content, el.children.length + (el.shadowRoot?.children.length || 0), el.getAttribute('role'), el.getAttribute('aria-label'),
       el.getAttribute('aria-expanded'), el.getAttribute('aria-selected'), el.getAttribute('aria-checked'),
+      el.getAttribute('aria-hidden'), el.hasAttribute('open'), el.inert === true,
       el.getAttribute('aria-disabled'), el.disabled === true, el.readOnly === true, el.checked === true, el.validity?.valid !== false, Math.round((rect.width || 0) / 8), Math.round((rect.height || 0) / 8),
       Math.round(((rect.x || 0) + window.scrollX) / 8), Math.round(((rect.y || 0) + window.scrollY) / 8)]);
   }
@@ -170,7 +172,7 @@
     roots.add(root);
     observer.observe(root, { childList: true, subtree: true, characterData: true, attributes: true,
       attributeFilter: ['role', 'aria-label', 'aria-expanded', 'aria-selected', 'aria-checked', 'aria-disabled',
-        'aria-hidden', 'hidden', 'disabled', 'readonly', 'checked', 'selected', 'class', 'style'] });
+        'aria-hidden', 'hidden', 'disabled', 'readonly', 'checked', 'selected', 'open', 'inert', 'class', 'style'] });
     seed(root, budget);
   }
   function subtreeChanged(record, el) {
@@ -200,7 +202,7 @@
     let changed = false, source = 'page', target = '';
     const changes = [...records];
     for (const record of records) {
-      if (record.type !== 'attributes' || !['class', 'style', 'hidden', 'aria-hidden'].includes(record.attributeName)) continue;
+      if (record.type !== 'attributes' || !['class', 'style', 'hidden', 'aria-hidden', 'open', 'inert'].includes(record.attributeName)) continue;
       if (record.target.getAnimations?.().some(animation => animation.playState === 'running')) continue;
       const descendants = new Set([
         ...[...(record.target.querySelectorAll?.('button,a,input,textarea,select,[role],[contenteditable]') || [])].slice(0, 100),
@@ -247,8 +249,8 @@
     pendingDOM = { kind: 'dom', source, target };
     domTimer = setTimeout(() => { domTimer = null; const observation = pendingDOM; pendingDOM = null; send(observation); }, 150);
   }
-  function listen(target, name, handler) {
-    target.addEventListener(name, handler, { capture: true, passive: true });
+  function listen(target, name, handler, passive = true) {
+    target.addEventListener(name, handler, { capture: true, passive });
     listeners.push(() => target.removeEventListener(name, handler, true));
   }
   function start(state) {
@@ -274,6 +276,18 @@
         setTimeout(() => { if (agentTurn === marker) agentTurn = null; }, 0);
       } catch { /* Only a current prepared operation can mark a DOM write. */ }
     });
+    listen(document, 'webbrain-agent-scroll-dispatch', event => {
+      try {
+        const guard = JSON.parse(String(event.detail));
+        if (guard.documentToken !== documentToken || guard.revision !== revision || !operations.has(guard.operationId)
+            || domTimer || unreported) { event.preventDefault(); return; }
+        const el = elementFor(event);
+        dispatch({ operationId: guard.operationId, kind: 'scroll', scrollIntoView: true, runToken });
+        const op = operations.get(guard.operationId);
+        op.target = el; op.scrollAncestors.clear();
+        for (let node = el?.parentElement || el?.getRootNode?.().host; node; node = node.parentElement || node.getRootNode?.().host) op.scrollAncestors.add(node);
+      } catch { event.preventDefault(); }
+    }, false);
     const noteAgentTurn = event => {
       const el = elementFor(event);
       const op = expected(['input', 'beforeinput', 'change', 'keydown'].includes(event.type) ? 'input' : 'click', el, event);
@@ -339,6 +353,21 @@
       const el = elementFor(event);
       if (event.isTrusted && !expected('scroll', el, event)) interact('activity', el);
     });
+    const viewport = () => ({ width: innerWidth, height: innerHeight,
+      visualWidth: window.visualViewport?.width ?? innerWidth, visualHeight: window.visualViewport?.height ?? innerHeight,
+      scale: window.visualViewport?.scale ?? 1, offsetX: window.visualViewport?.offsetLeft ?? 0, offsetY: window.visualViewport?.offsetTop ?? 0 });
+    lastViewport = JSON.stringify(viewport());
+    const onResize = () => {
+      const current = viewport(), key = JSON.stringify(current);
+      if (!active || key === lastViewport) return;
+      lastViewport = key; revision++;
+      send({ kind: 'resize', source: window === window.top ? 'unknown' : 'page', target: 'viewport', viewport: current });
+    };
+    listen(window, 'resize', onResize);
+    if (window.visualViewport) {
+      listen(window.visualViewport, 'resize', onResize);
+      listen(window.visualViewport, 'scroll', onResize);
+    }
     listen(document, 'scroll', event => {
       const el = event.target === document ? document.documentElement : event.target;
       if (ignored(el) || expected('scroll', el)) return;
@@ -366,7 +395,7 @@
   }
   function stop() {
     active = false; runToken = ''; pointerHeld = false; composing = false;
-    lastUserAt = 0; userTurn = null; lastUserTarget = null; matchedEvents = new WeakMap(); nativeMarks = new WeakMap();
+    lastUserAt = 0; lastViewport = ''; userTurn = null; lastUserTarget = null; matchedEvents = new WeakMap(); nativeMarks = new WeakMap();
     document.documentElement?.removeAttribute(fenceAttribute);
     for (const el of nativeTargets) {
       el.removeAttribute?.('data-webbrain-native-action');

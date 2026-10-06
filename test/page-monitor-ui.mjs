@@ -65,6 +65,96 @@ async function installContentEditableFallback(page, build) {
   });
 }
 
+test('Chrome selector scrolling claims input only at the actual page mutation', { timeout: 30000 }, async () => {
+  const savedChrome = globalThis.chrome, savedBrowser = globalThis.browser, tab = 912;
+  const host = Object.assign({ isRunning: () => true, _checkAbort: () => false }, pageFeedbackMethods);
+  let browser, page, session, pauseMethod = '', entered, resume;
+  const registrations = [];
+  const api = { runtime: {}, tabs: {
+    get: async () => ({ url: 'https://monitor.test/start' }),
+    sendMessage: async (_tab, msg) => {
+      if (!page) return {};
+      if (msg.action === 'page_monitor_dispatch') registrations.push(msg.params);
+      return page.evaluate(msg => new Promise(resolve => messageListeners.forEach(fn => fn(msg, {}, resolve))), msg);
+    },
+  }, debugger: { sendCommand(_source, method, params, callback) {
+    void (async () => {
+      if (method === pauseMethod) {
+        pauseMethod = ''; entered(); await new Promise(resolve => { resume = resolve; });
+      }
+      return await session.send(method, params);
+    })().then(callback, error => { api.runtime.lastError = { message: error.message }; callback(); delete api.runtime.lastError; });
+  } } };
+  globalThis.chrome = api; delete globalThis.browser;
+  try {
+    await host._beginPageFeedbackRun(tab, 'interactive');
+    ({ browser, page } = await fixture(chromium, 'chrome', { runToken: host._pageFeedbackRuns.get(tab).token }));
+    const documentToken = await page.evaluate(() => document.documentElement.getAttribute('data-webbrain-page-revision').split(':')[0]);
+    host.pageMonitorState({ tab: { id: tab }, frameId: 0 }, documentToken);
+    await page.exposeFunction('feedbackToHost', feedback => host.observePageFeedback({ tab: { id: tab }, frameId: 0 }, feedback));
+    await page.exposeFunction('monitorStateFromHost', token => host.pageMonitorState({ tab: { id: tab }, frameId: 0 }, token));
+    await page.evaluate(() => {
+      const original = chrome.runtime.sendMessage;
+      chrome.runtime.sendMessage = async message => {
+        if (message.action === 'get_page_monitor_state') return await monitorStateFromHost(message.documentToken);
+        const response = await original(message);
+        return message.action === 'page_feedback' ? await feedbackToHost(message.feedback) : response;
+      };
+    });
+    session = await page.context().newCDPSession(page);
+    const client = new CDPClient(); client.sessions.set(tab, { attached: true });
+    const reset = async () => {
+      host._finishPageFeedbackRun(tab);
+      await page.waitForTimeout(20);
+      await page.evaluate(() => window.scrollTo(0, 0));
+      await page.waitForTimeout(100);
+      await host._beginPageFeedbackRun(tab, 'interactive');
+      registrations.length = 0;
+      await page.evaluate(() => { feedback = []; });
+    };
+    for (const scenario of [
+      { method: 'Runtime.enable', selector: '#agent', options: { scroll: false, retries: 0 }, readOnly: true },
+      { method: 'DOM.getDocument', selector: '#missing', options: { retries: 1, delayMs: 0 } },
+      { method: 'Runtime.evaluate', selector: '#agent', options: { retries: 0 } },
+    ]) {
+      await reset(); pauseMethod = scenario.method;
+      const paused = new Promise(resolve => { entered = resolve; });
+      const resolving = client.resolveSelector(tab, scenario.selector, scenario.options)
+        .then(value => ({ value }), error => ({ code: error.code }));
+      await paused;
+      await page.evaluate(() => window.scrollTo(0, 600));
+      await page.waitForFunction(() => feedback.some(event => event.kind === 'scroll'), null, { timeout: 1000 });
+      assert.ok(registrations.every(mark => mark.fenceOnly === true), 'A resolver cannot claim scroll while a DOM search is pending');
+      resume(); resume = null;
+      const result = await resolving;
+      if (scenario.readOnly) {
+        assert.equal(result.value.found, true); assert.equal(registrations.length, 0);
+      } else assert.equal(result.code, 'page_feedback_pending', `${scenario.method} must preserve the external intervention`);
+      assert.equal(await page.evaluate(() => scrollY), 600, 'A stale resolver must not scroll back to its target');
+    }
+    await reset();
+    await page.evaluate(() => {
+      for (const mode of ['open', 'closed']) {
+        const el = document.createElement('div');
+        el.attachShadow({ mode }).innerHTML = `<button id="deep-${mode}">Deep target</button>`;
+        document.body.append(el);
+      }
+    });
+    await page.waitForTimeout(200);
+    for (const mode of ['open', 'closed']) {
+      await reset();
+      const result = await client.resolveSelector(tab, `#deep-${mode}`, { retries: 0 });
+      assert.equal(result.found, true); assert.equal(result.inViewport, true);
+      await page.waitForTimeout(200);
+      assert.ok(await page.evaluate(() => scrollY > 1000), `${mode} target must actually scroll into view`);
+      assert.deepEqual(await page.evaluate(() => feedback), [], `${mode} agent scroll must not trigger a feedback loop`);
+    }
+  } finally {
+    resume?.(); host._finishPageFeedbackRun(tab);
+    await browser?.close(); globalThis.chrome = savedChrome; globalThis.browser = savedBrowser;
+  }
+});
+
 for (const siteIsolation of [false, true]) {
   test(`Chrome CDP input reaches the receiving iframe monitor (site isolation: ${siteIsolation})`, { timeout: 30000 }, async () => {
     const savedChrome = globalThis.chrome, savedBrowser = globalThis.browser;
@@ -373,6 +463,69 @@ for (const [build, engine] of [['chrome', chromium], ['firefox', firefox]]) {
         return lastMonitorResponse;
       });
       assert.equal(earlyDispatch.pageFeedbackPending, true);
+    } finally { await browser.close(); }
+  });
+
+  test(`${build}: existing dialogs, details and inert surfaces invalidate prepared actions`, async () => {
+    const { browser, page } = await fixture(engine, build);
+    try {
+      await page.evaluate(() => {
+        const surfaces = document.createElement('div');
+        surfaces.innerHTML = '<dialog id="modal"><button>Modal target</button></dialog><details id="details" style="height:100px"><summary>Summary</summary><button>Existing details target</button></details><div id="inert-surface"><button>Existing inert target</button></div>';
+        document.body.prepend(surfaces);
+      });
+      await page.waitForTimeout(200);
+      for (const state of ['modal-open', 'modal-close', 'details-open', 'details-close', 'inert-on', 'inert-off']) {
+        const response = await page.evaluate(async state => {
+          feedback = []; deliver('page_monitor_prepare', { operationId: state, tool: 'click', selector: '#agent' });
+          if (state === 'modal-open') document.getElementById('modal').showModal();
+          if (state === 'modal-close') document.getElementById('modal').close();
+          if (state.startsWith('details')) document.getElementById('details').open = state.endsWith('open');
+          if (state.startsWith('inert')) document.getElementById('inert-surface').inert = state.endsWith('on');
+          await Promise.resolve();
+          deliver('page_monitor_dispatch', { operationId: state, kind: 'click', selector: '#agent' });
+          await new Promise(resolve => setTimeout(resolve, 0));
+          return lastMonitorResponse;
+        }, state);
+        assert.equal(response.pageFeedbackPending, true, `${state} must invalidate the prepared click`);
+        assert.ok((await page.evaluate(() => feedback)).some(event => event.kind === 'dom'), `${state} must refresh page context`);
+      }
+    } finally { await browser.close(); }
+  });
+
+  test(`${build}: viewport resize fences prepared coordinates and stops with the run`, async () => {
+    const { browser, page } = await fixture(engine, build);
+    try {
+      await page.evaluate(() => { document.getElementById('agent').style.cssText = 'position:absolute;left:50vw;top:0'; });
+      await page.waitForTimeout(200);
+      const before = await page.locator('#agent').boundingBox();
+      await page.evaluate(() => { feedback = []; deliver('page_monitor_prepare', { operationId: 'resize-click', tool: 'click', selector: '#agent' }); });
+      await page.setViewportSize({ width: 900, height: 600 });
+      await page.waitForFunction(() => feedback.some(event => event.kind === 'resize'), null, { timeout: 1000 });
+      const after = await page.locator('#agent').boundingBox();
+      assert.notEqual(before.x, after.x);
+      const response = await page.evaluate(async () => {
+        deliver('page_monitor_dispatch', { operationId: 'resize-click', kind: 'click', x: 650, y: 20 });
+        await new Promise(resolve => setTimeout(resolve, 0)); return lastMonitorResponse;
+      });
+      assert.equal(response.pageFeedbackPending, true);
+      const observation = await page.evaluate(() => feedback.find(event => event.kind === 'resize'));
+      assert.equal(observation.source, 'unknown'); assert.equal(observation.viewport.width, 900);
+      const frameNavigation = page.waitForEvent('framenavigated', { predicate: frame => frame.url() === 'https://monitor.test/frame' });
+      await page.evaluate(() => {
+        const frame = document.createElement('iframe'); frame.src = 'https://monitor.test/frame';
+        frame.style.cssText = 'width:400px;height:250px'; document.body.prepend(frame);
+      });
+      const child = await frameNavigation;
+      await child.waitForFunction(() => window.__wbPageMonitor && document.documentElement.hasAttribute('data-webbrain-page-revision'));
+      await child.evaluate(() => { feedback = []; });
+      await page.evaluate(() => { document.querySelector('iframe').style.width = '450px'; });
+      await child.waitForFunction(() => feedback.some(event => event.kind === 'resize'), null, { timeout: 1000 });
+      assert.equal(await child.evaluate(() => feedback.find(event => event.kind === 'resize').source), 'page', 'Embedded frame dimensions are page layout changes');
+      await page.evaluate(() => { monitorEnabled = false; deliver('page_monitor_state'); feedback = []; });
+      await page.setViewportSize({ width: 1000, height: 700 });
+      await page.waitForTimeout(200);
+      assert.deepEqual(await page.evaluate(() => feedback), [], 'Stop removes viewport listeners');
     } finally { await browser.close(); }
   });
 

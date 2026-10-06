@@ -146,6 +146,25 @@ for (const build of ['chrome', 'firefox']) {
     } finally { agent._releaseRunEntry(tab); }
   });
 
+  test(`${build}: viewport resize invalidates coordinates and waits for geometry to settle`, async () => {
+    const agent = setup(Agent), tab = nextTab++;
+    await agent._claimRunEntry(tab, 'interactive');
+    try {
+      const binding = bind(agent, tab);
+      agent.screenshotCaptures.set(tab, { captureId: 'stale-coordinates' });
+      agent._jevSessions = new Map([[tab, { disabled: false, queue: ['prepared'], snapshot: {} }]]);
+      assert.equal(binding.send({ kind: 'resize', source: 'unknown', target: 'viewport', viewport: { width: 900, height: 600, scale: 1 } }).accepted, true);
+      assert.equal(agent.screenshotCaptures.has(tab), false);
+      assert.equal(agent._jevSessions.get(tab).disabled, true);
+      assert.deepEqual(agent._jevSessions.get(tab).queue, []);
+      assert.equal(agent._pageFeedbackRuns.get(tab).lastUserAt, 0, 'Resize alone does not prove physical user input');
+      assert.ok(agent._pageFeedbackRuns.get(tab).lastActivityAt > 0, 'Unknown geometry activity must settle before replanning');
+      agent._pageFeedbackRuns.get(tab).lastActivityAt = 0;
+      binding.send({ kind: 'resize', source: 'page', target: 'viewport', viewport: { width: 500, height: 200 } });
+      assert.equal(agent._pageFeedbackRuns.get(tab).lastActivityAt, 0, 'Page layout changes to embedded frame dimensions must not extend the user idle gate');
+    } finally { agent._releaseRunEntry(tab); }
+  });
+
   test(`${build}: navigation arriving during a page read gets its own feedback ID`, async () => {
     const agent = setup(Agent), tab = nextTab++, entered = deferred(), release = deferred();
     const updates = [], messages = [];

@@ -10,6 +10,9 @@ accessibility tree and continues the original task. Pointer gestures and IME
 composition keep the gate closed until they finish. External scroll/navigation
 with uncertain attribution also get the idle delay; automatic DOM observations
 do not extend it. Stop interrupts the wait.
+Window and visual-viewport size, zoom and offset changes invalidate prepared
+coordinates. Top-level viewport activity waits for geometry to settle; embedded
+frame size changes are page layout observations and do not extend the user gate.
 
 `composerDeliveryMode` only controls typed chat messages (Queue/Steer). Automatic
 page feedback uses its own bounded queue and cannot promote a queued message to
@@ -34,6 +37,10 @@ Steer or grant authorization. Enter and Alt+Enter retain their existing behavior
   a shortcut's modifier and letter, as well as before each later key. A different physical intervention
   breaks the expectation, including a later click on the same target. Uncertain
   effects remain `unknown`; `isTrusted` alone does not establish human origin.
+- Chrome selector resolution checks a fence without claiming scroll during its
+  asynchronous search or retries. Only a resolved node's actual `scrollIntoView`
+  dispatch activates attribution, with a live page revision check in both open
+  and closed shadow-root paths. Read-only selector queries do not arm scrolling.
 - Meaningful visible content, control state, visibility and geometry changes are
   coalesced. Visible subtree identity changes invalidate targets even when the
   replacement has identical text and geometry. CSS animation and extension
@@ -44,6 +51,8 @@ Steer or grant authorization. Enter and Alt+Enter retain their existing behavior
   shadow roots on existing hosts before their initial rendering; shadow-root
   child-list mutations are also monitored. Inaccessible frames and closed shadow roots retain the
   existing browser-access limitations.
+  Existing dialog/details `open` and subtree `inert` state changes are observed
+  even when no children, classes or styles change.
 - Event payloads contain bounded target identifiers and scroll positions, never
   typed keys, field values or selected text. The subsequent normal page read uses
   the existing untrusted-content and secret-handling rules.
@@ -107,5 +116,10 @@ the user edits the same field.
 Frame lifecycle regressions cover delayed child acknowledgements and inaccessible
 frames. Browser fixtures also cover page-owned marker attributes and the real
 extension indicators across monitor replacement.
+Real CDP regressions pause selector resolution during runtime enablement, missing
+target traversal and queued evaluation, then verify external scroll feedback and
+the final dispatch fence. Open and closed shadow-root agent scrolling remain
+attributed. Geometry fixtures also cover modal/details/inert transitions and
+viewport resizing during coordinate preparation and after cancellation.
 
 The monitor regressions are also included in `npm run test:runtime-lifecycle`.
