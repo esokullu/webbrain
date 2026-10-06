@@ -386,8 +386,8 @@
       el.getAttribute('aria-valuenow'), el.getAttribute('aria-valuetext'),
       el.getAttribute('aria-pressed'),
       el.getAttribute('type'),
-      el.getAttribute('href'), el.getAttribute('target'), el.getAttribute('download'), el.getAttribute('action'),
-      el.getAttribute('formaction'), el.getAttribute('formtarget'),
+      el.getAttribute('href'), el.getAttribute('target'), el.getAttribute('download'), el.getAttribute('action'), el.getAttribute('method'),
+      el.getAttribute('formaction'), el.getAttribute('formmethod'), el.getAttribute('formtarget'),
       el.getAttribute('popover'), popoverOpen(el),
       el.selected === true, el.defaultSelected === true,
       Number.isInteger(el.selectedIndex) ? el.selectedIndex : null,
@@ -462,7 +462,7 @@
       attributeFilter: ['role', 'aria-label', 'id', 'for', 'name', 'placeholder', 'title', 'alt', 'aria-labelledby',
         'aria-required', 'aria-readonly', 'contenteditable', 'tabindex', 'onclick', 'required',
         'aria-expanded', 'aria-selected', 'aria-checked', 'aria-pressed', 'aria-disabled',
-        'type', 'href', 'target', 'download', 'action', 'formaction', 'formtarget',
+        'type', 'href', 'target', 'download', 'action', 'method', 'formaction', 'formmethod', 'formtarget',
         'aria-valuenow', 'aria-valuetext', 'aria-hidden', 'hidden', 'disabled', 'readonly', 'checked', 'selected', 'open', 'popover', 'inert', 'class', 'style'] });
     listen(root, 'beforetoggle', event => {
       const el = elementFor(event);

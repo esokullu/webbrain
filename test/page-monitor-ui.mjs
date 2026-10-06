@@ -1774,6 +1774,40 @@ for (const [build, engine] of [['chrome', chromium], ['firefox', firefox]]) {
     } finally { await browser.close(); }
   });
 
+  test(`${build}: form method changes invalidate a prepared submit click`, async () => {
+    const { browser, page } = await fixture(engine, build);
+    try {
+      await page.evaluate(() => {
+        const form = document.createElement('form');
+        form.id = 'guarded-form'; form.method = 'get';
+        form.innerHTML = '<button id="guarded-submit" type="submit" formmethod="get">Save</button>';
+        form.addEventListener('submit', event => event.preventDefault());
+        document.body.append(form);
+      });
+      await page.waitForTimeout(120);
+
+      const prepare = operationId => page.evaluate(id => {
+        feedback = [];
+        deliver('page_monitor_prepare', { operationId: id, tool: 'click', selector: '#guarded-submit' });
+        deliver('page_monitor_dispatch', { operationId: id, kind: 'click', selector: '#guarded-submit' });
+        return lastMonitorResponse.guard;
+      }, operationId);
+      const assertStale = guard => page.evaluate(value => window.dispatchEvent(new CustomEvent('webbrain-agent-dom-dispatch', {
+        detail: JSON.stringify({ ...value, dispatchPhase: 'focus' }), cancelable: true,
+      })), guard);
+
+      const formGuard = await prepare('form-method');
+      await page.locator('#guarded-form').evaluate(form => form.setAttribute('method', 'post'));
+      await page.waitForFunction(() => feedback.some(event => event.kind === 'dom' && event.target === 'form#guarded-form'));
+      assert.equal(await assertStale(formGuard), false, 'Changing form method must invalidate the prepared submit click');
+
+      const buttonGuard = await prepare('button-formmethod');
+      await page.locator('#guarded-submit').evaluate(button => button.setAttribute('formmethod', 'post'));
+      await page.waitForFunction(() => feedback.some(event => event.kind === 'dom' && event.target === 'button#guarded-submit'));
+      assert.equal(await assertStale(buttonGuard), false, 'Changing formmethod must invalidate the prepared submit click');
+    } finally { await browser.close(); }
+  });
+
   for (const action of ['click', 'type']) {
     test(`${build}: ${action} preparation preserves same-target human input`, async () => {
       const { browser, page } = await fixture(engine, build);
