@@ -7217,6 +7217,7 @@
           if (!_isFullyVisibleForInteraction(el)) {
             try { _scrollElementIntoClearView(el); } catch (error) { if (error?.code === 'page_feedback_pending') throw error; }
           }
+          window.__wbPageMonitor?.beforeLocalDispatch({ preparation: true, kind: 'focus', target: el });
           try { el.focus({ preventScroll: true }); } catch {}
           const rect = el.getBoundingClientRect();
           if (!el.isConnected || rect.width < 1 || rect.height < 1) {
@@ -7605,6 +7606,7 @@
           if (actionDeadlineExpired()) return deadlineFailure();
           try { _scrollElementIntoClearView(el); } catch (error) { if (error?.code === 'page_feedback_pending') throw error; }
           if (actionDeadlineExpired()) return deadlineFailure();
+          window.__wbPageMonitor?.beforeLocalDispatch({ preparation: true, kind: 'focus', target: el });
           try { el.focus({ preventScroll: true }); } catch {}
           if (actionDeadlineExpired()) return deadlineFailure();
           const rect = el.getBoundingClientRect();

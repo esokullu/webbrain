@@ -451,6 +451,47 @@ for (const [build, engine] of [['chrome', chromium], ['firefox', firefox]]) {
     }
   });
 
+  test(`${build}: accessibility click actions attribute preparatory focus before focusin`, async () => {
+    const source = read(build, 'content/content.js');
+    const clickAxStart = source.indexOf("'click_ax':");
+    const checkedStart = source.indexOf("'set_checked':", clickAxStart);
+    const typeAxStart = source.indexOf("'type_ax':", checkedStart);
+    assert.ok(clickAxStart >= 0 && checkedStart > clickAxStart && typeAxStart > checkedStart);
+    for (const body of [source.slice(clickAxStart, checkedStart), source.slice(checkedStart, typeAxStart)]) {
+      assert.match(body, /beforeLocalDispatch\(\{ preparation: true, kind: 'focus', target: el \}\);\s*try \{ el\.focus\(\{ preventScroll: true \}\); \} catch \{\}/,
+        `${build}: click_ax and set_checked must fence focus before invoking it`);
+    }
+
+    const { browser, page } = await fixture(engine, build);
+    try {
+      await page.evaluate(() => {
+        const checkbox = document.createElement('input'); checkbox.type = 'checkbox'; checkbox.id = 'prepared-checkbox';
+        document.body.append(checkbox);
+      });
+      await page.waitForTimeout(160);
+      const results = await page.evaluate(() => {
+        feedback = [];
+        const actions = [
+          ['click_ax', document.getElementById('human')],
+          ['set_checked', document.getElementById('prepared-checkbox')],
+        ];
+        return actions.map(([action, target]) => {
+          const finish = __wbPageMonitor.beginContentAction(action, { selector: '#' + target.id });
+          let code = null;
+          try {
+            __wbPageMonitor.beforeLocalDispatch({ preparation: true, kind: 'focus', target });
+            target.focus({ preventScroll: true });
+            __wbPageMonitor.beforeLocalDispatch();
+          } catch (error) { code = error.code || error.message; }
+          finally { finish(); }
+          return { action, code };
+        });
+      });
+      assert.deepEqual(results, [{ action: 'click_ax', code: null }, { action: 'set_checked', code: null }]);
+      assert.deepEqual(await page.evaluate(() => feedback), [], 'Programmatic focus preparation must not create page feedback');
+    } finally { await browser.close(); }
+  });
+
   test(`${build}: content-script recovery preserves a live page monitor`, async () => {
     const { browser, page } = await fixture(engine, build);
     try {

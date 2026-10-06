@@ -301,7 +301,17 @@ export class BidiSession {
         const error = new Error('Page changed during native preparation; no further input sent');
         error.code = 'page_feedback_pending'; throw error;
       }
-      assertLive();
+      try {
+        assertLive();
+        if (!await validatePageDispatch(id, guard, kind, rebindFocus === true)) {
+          const error = new Error('Page changed during native preparation; no further input sent');
+          error.code = 'page_feedback_pending'; throw error;
+        }
+        assertLive();
+      } catch (error) {
+        await clearNativeDispatch(marker);
+        throw error;
+      }
       return marker;
     };
     const clearNativeDispatch = async marker => {
