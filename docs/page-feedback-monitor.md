@@ -55,6 +55,10 @@ Steer or grant authorization. Enter and Alt+Enter retain their existing behavior
 - Content and Firefox native preparation handshakes check the revision without
   claiming input events. Local dispatch and native markers activate expectations
   at the mutation boundary, preserving same-target intervention during preparation.
+- Contenteditable fallback marks its cancellable `beforeinput` before emission.
+  A native edit's repeated input phases are attributed only within the synchronous
+  command and its target; cancelled gates retain their undispatched outcome, and
+  user intervention during the settling wait prevents the remaining insertion.
 - Both Chrome upload paths check feedback after preparation, immediately before
   attaching files. A skipped attachment retains its undispatched outcome.
 - Firefox companion uploads register as input and place their native marker on

@@ -124,7 +124,7 @@
         if (op.eventTypes && !op.eventTypes.has(event.type)) return null;
         // One native dispatch owns one occurrence of each input phase. A later
         // human action on the same target must not fit that expectation again.
-        if (event.type !== 'pointermove' && op.seenEvents?.has(event.type)) return null;
+        if (!op.synchronous && event.type !== 'pointermove' && op.seenEvents?.has(event.type)) return null;
         op.seenEvents?.add(event.type); matchedEvents.set(event, op);
       }
       return op;
@@ -446,6 +446,18 @@
     dispatch({ ...localOperation, navigationCandidate: !preparation && localOperation.navigationCandidate,
       fenceOnly: preparation, runToken });
   }
+  function withLocalDispatch(callback) {
+    beforeLocalDispatch();
+    const op = operations.get(localOperation?.operationId);
+    if (!op) return callback();
+    // One synchronous native edit can emit repeated input phases (multiline
+    // execCommand). Attribute only its target until the command returns, never
+    // across an asynchronous preparation or settling wait.
+    const previous = op.synchronous;
+    op.synchronous = true;
+    try { return callback(); }
+    finally { op.synchronous = previous; }
+  }
   const onMessage = (msg, _sender, respond) => {
     if (disposed || msg?.target !== 'content') return;
     if (msg.action === 'page_monitor_state') {
@@ -476,7 +488,7 @@
     }
   };
   api.runtime.onMessage.addListener(onMessage);
-  window.__wbPageMonitor = { beginContentAction, beforeLocalDispatch, dispatch, registerDecoration,
+  window.__wbPageMonitor = { beginContentAction, beforeLocalDispatch, withLocalDispatch, dispatch, registerDecoration,
     dispose() { disposed = true; requestGeneration++; stop(); api.runtime.onMessage.removeListener?.(onMessage); } };
   void requestState();
   // A document restored from BFCache needs a fresh run/document handshake.

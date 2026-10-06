@@ -2348,6 +2348,7 @@
       // execCommand is the native editing fallback: it preserves markup and
       // the editor's undo stack. Its beforeinput behavior differs by browser,
       // so offer the page a cancellable gate BEFORE invoking the command.
+      window.__wbPageMonitor?.beforeLocalDispatch();
       const accepted = el.dispatchEvent(new InputEvent('beforeinput', {
         bubbles: true, composed: true, cancelable: true, inputType, data,
       }));
@@ -2369,7 +2370,9 @@
       window.__wbPageMonitor?.beforeLocalDispatch();
       dispatched = true;
       try {
-        if (!doc.execCommand(command, false, data)) {
+        const execute = () => doc.execCommand(command, false, data);
+        const inserted = window.__wbPageMonitor?.withLocalDispatch ? window.__wbPageMonitor.withLocalDispatch(execute) : execute();
+        if (!inserted) {
           return failure('The editor rejected native text entry. No DOM replacement was attempted.');
         }
       } catch (error) {

@@ -48,6 +48,23 @@ async function fixture(engine, build, { runToken = 'test-run', siteIsolation = f
   return { browser, context, page };
 }
 
+async function installContentEditableFallback(page, build) {
+  const insertion = read(build, 'content/content.js').match(/^  async function _insertContentEditableText\([\s\S]*?^  }/m)?.[0];
+  assert.ok(insertion, 'Exercise the real contenteditable fallback with the real monitor');
+  await page.addScriptTag({ content: `window._fieldMeta = () => ({ contentEditable: true }); window.richTextInsertion = ${insertion};` });
+  await page.evaluate(() => {
+    const editor = document.createElement('div'); editor.id = 'rich-editor'; editor.contentEditable = 'true';
+    document.body.prepend(editor);
+    window.typeRichText = async ({ text, clear }) => {
+      editor.focus();
+      const finish = __wbPageMonitor.beginContentAction('type', { selector: '#rich-editor' });
+      try { return await richTextInsertion(editor, text, clear); }
+      catch (error) { return { success: false, code: error.code, dispatched: error.dispatched }; }
+      finally { finish(); }
+    };
+  });
+}
+
 for (const siteIsolation of [false, true]) {
   test(`Chrome CDP input reaches the receiving iframe monitor (site isolation: ${siteIsolation})`, { timeout: 30000 }, async () => {
     const savedChrome = globalThis.chrome, savedBrowser = globalThis.browser;
@@ -356,6 +373,81 @@ for (const [build, engine] of [['chrome', chromium], ['firefox', firefox]]) {
         return lastMonitorResponse;
       });
       assert.equal(earlyDispatch.pageFeedbackPending, true);
+    } finally { await browser.close(); }
+  });
+
+  test(`${build}: contenteditable fallback attributes its cancellable gate and native edits`, async () => {
+    const { browser, page } = await fixture(engine, build);
+    try {
+      await installContentEditableFallback(page, build);
+      for (const behavior of ['append', 'replace', 'cancel', 'editor-handles']) {
+        await page.evaluate(behavior => {
+          const editor = document.getElementById('rich-editor');
+          editor.innerHTML = '<p>Original <strong>format</strong></p>';
+          window.originalStrong = editor.querySelector('strong'); window.gates = [];
+          editor.onbeforeinput = event => {
+            gates.push(event.inputType);
+            if (behavior === 'cancel') event.preventDefault();
+            if (behavior === 'editor-handles') { event.preventDefault(); editor.append(' handled'); }
+          };
+        }, behavior);
+        await page.waitForTimeout(200);
+        await page.evaluate(() => { feedback = []; });
+        const result = await page.evaluate(params => typeRichText(params), {
+          text: behavior === 'replace' ? 'New\ntext' : ' added', clear: behavior === 'replace',
+        });
+        if (behavior === 'cancel') {
+          assert.equal(result.cancelled, true, JSON.stringify(result)); assert.equal(result.noDispatch, true);
+          assert.equal(await page.locator('#rich-editor').innerHTML(), '<p>Original <strong>format</strong></p>');
+        } else if (behavior === 'editor-handles') {
+          assert.equal(result.success, false); assert.equal(result.mutationMayHaveOccurred, true, JSON.stringify(result));
+          assert.equal(await page.locator('#rich-editor').textContent(), 'Original format handled');
+        } else {
+          assert.equal(result.success, true, JSON.stringify(result)); assert.equal(result.verified, true);
+          if (behavior === 'append') assert.equal(await page.evaluate(() => document.getElementById('rich-editor').contains(originalStrong)), true);
+          else assert.equal(result.value, 'New\ntext');
+        }
+        await page.waitForTimeout(200);
+        assert.deepEqual(await page.evaluate(() => feedback), [], 'Own beforeinput, input and DOM effects must not trigger replanning');
+      }
+      await page.evaluate(() => {
+        const editor = document.getElementById('rich-editor'); editor.onbeforeinput = null; editor.textContent = 'Ready';
+      });
+      await page.waitForTimeout(200);
+      await page.evaluate(() => { feedback = []; });
+      assert.equal((await page.evaluate(() => typeRichText({ text: ' agent' }))).success, true);
+      await page.keyboard.press('x');
+      await page.waitForFunction(() => feedback.some(event => event.kind === 'input' && event.source === 'user'), null, { timeout: 1000 });
+      assert.equal(await page.locator('#rich-editor').textContent(), 'Ready agentx', 'A later same-target human edit remains observable');
+    } finally { await browser.close(); }
+  });
+
+  test(`${build}: contenteditable fallback skips remaining insertion after user intervention`, async () => {
+    const { browser, page } = await fixture(engine, build);
+    try {
+      await installContentEditableFallback(page, build);
+      await page.evaluate(() => { document.getElementById('rich-editor').textContent = 'Original'; });
+      await page.waitForTimeout(200);
+      await page.evaluate(() => {
+        feedback = []; const schedule = window.setTimeout;
+        window.setTimeout = (callback, delay, ...args) => {
+          if (delay === 30) {
+            window.editPaused = true;
+            window.resumeEdit = () => { window.setTimeout = schedule; schedule(callback, 0, ...args); };
+            return 0;
+          }
+          return schedule(callback, delay, ...args);
+        };
+        window.editResult = typeRichText({ text: 'Never inserted', clear: true });
+      });
+      await page.waitForFunction(() => window.editPaused, null, { timeout: 1000 });
+      await page.locator('#field').fill('Human intervention');
+      await page.waitForFunction(() => feedback.some(event => event.source === 'user'));
+      const result = await page.evaluate(async () => { resumeEdit(); return await editResult; });
+      assert.equal(result.success, false, JSON.stringify(result));
+      assert.equal(result.dispatched, true, 'The completed deletion retains its dispatched outcome');
+      assert.equal(await page.locator('#rich-editor').textContent(), '');
+      assert.equal(await page.locator('#field').inputValue(), 'Human intervention');
     } finally { await browser.close(); }
   });
 
