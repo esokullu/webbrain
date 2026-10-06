@@ -1095,6 +1095,19 @@ for (const [build, engine] of [['chrome', chromium], ['firefox', firefox]]) {
     } finally { await browser.close(); }
   });
 
+  test(`${build}: native select input does not emit a delayed duplicate option change`, async () => {
+    const { browser, page } = await fixture(engine, build);
+    try {
+      await page.evaluate(() => { feedback = []; });
+      await page.locator('#select').selectOption('B');
+      await page.waitForFunction(() => feedback.some(event => event.kind === 'input'), null, { timeout: 1000 });
+      await page.waitForTimeout(350);
+      const observed = await page.evaluate(() => feedback);
+      assert.equal(observed.some(event => event.kind === 'dom' && event.target === 'option'), false,
+        'Sampling the option property after its user input must not replan the run a second time');
+    } finally { await browser.close(); }
+  });
+
   test(`${build}: native markers reject replay, tampering and copied targets`, async () => {
     const { browser, page } = await fixture(engine, build);
     try {
@@ -1389,7 +1402,7 @@ for (const [build, engine] of [['chrome', chromium], ['firefox', firefox]]) {
             if (behavior === 'editor-handles') { event.preventDefault(); editor.append(' handled'); }
           };
         }, behavior);
-        await page.waitForTimeout(200);
+        await page.waitForTimeout(400);
         await page.evaluate(() => { feedback = []; });
         const result = await page.evaluate(params => typeRichText(params), {
           text: behavior === 'replace' ? 'New\ntext' : ' added', clear: behavior === 'replace',
@@ -1405,8 +1418,8 @@ for (const [build, engine] of [['chrome', chromium], ['firefox', firefox]]) {
           if (behavior === 'append') assert.equal(await page.evaluate(() => document.getElementById('rich-editor').contains(originalStrong)), true);
           else assert.equal(result.value, 'New\ntext');
         }
-        await page.waitForTimeout(200);
-        assert.deepEqual(await page.evaluate(() => feedback), [], 'Own beforeinput, input and DOM effects must not trigger replanning');
+        await page.waitForTimeout(400);
+        assert.deepEqual(await page.evaluate(() => feedback), [], `Own beforeinput, input and DOM effects must not trigger replanning (${behavior})`);
       }
       await page.evaluate(() => {
         const editor = document.getElementById('rich-editor'); editor.onbeforeinput = null; editor.textContent = 'Ready';
@@ -1591,6 +1604,112 @@ for (const [build, engine] of [['chrome', chromium], ['firefox', firefox]]) {
       assert.ok(observations.some(event => event.source === 'page' && event.target.startsWith('div#programmatic-editor')));
       assert.equal(JSON.stringify(observations).includes('Page updated this editor'), false,
         'Editable content must invalidate state without being included in feedback');
+
+      const guard = await page.evaluate(() => {
+        feedback = [];
+        deliver('page_monitor_prepare', { operationId: 'editable-replacement', tool: 'click', selector: '#agent' });
+        deliver('page_monitor_dispatch', { operationId: 'editable-replacement', kind: 'click', selector: '#agent', fenceOnly: true });
+        return lastMonitorResponse.guard;
+      });
+      await page.evaluate(() => { document.getElementById('programmatic-editor').textContent = 'Page replaced the editor value'; });
+      await page.waitForFunction(() => feedback.some(event => event.kind === 'dom'), null, { timeout: 1000 });
+      const replacementObservations = await page.evaluate(() => feedback);
+      assert.ok(replacementObservations.some(event => event.source === 'page'
+        && event.target.startsWith('div#programmatic-editor')),
+      'Replacing an editable text node must advance the page revision');
+      assert.equal(JSON.stringify(replacementObservations).includes('Page replaced the editor value'), false,
+        'Replaced editable text must remain private');
+      const ready = await page.evaluate(async () => {
+        deliver('page_monitor_dispatch', { operationId: 'editable-replacement', kind: 'click', selector: '#agent' });
+        await new Promise(resolve => setTimeout(resolve, 0));
+        return lastMonitorResponse;
+      });
+      assert.equal(ready.pageFeedbackPending, true, 'A prepared action must not survive editable text replacement');
+      assert.ok(replacementObservations.some(observation => observation.revision > guard.revision));
+    } finally { await browser.close(); }
+  });
+
+  test(`${build}: hidden aria-labelledby text changes invalidate visible targets`, async () => {
+    const { browser, page } = await fixture(engine, build);
+    try {
+      await page.evaluate(() => {
+        const label = document.createElement('span'); label.id = 'hidden-accessible-label'; label.textContent = 'Initial label';
+        label.style.display = 'none';
+        const button = document.createElement('button'); button.id = 'labelled-button'; button.setAttribute('aria-labelledby', label.id);
+        document.body.append(label, button);
+      });
+      await page.waitForTimeout(180);
+      const guard = await page.evaluate(() => {
+        feedback = [];
+        deliver('page_monitor_prepare', { operationId: 'hidden-label', tool: 'click', selector: '#labelled-button' });
+        deliver('page_monitor_dispatch', { operationId: 'hidden-label', kind: 'click', selector: '#labelled-button', fenceOnly: true });
+        return lastMonitorResponse.guard;
+      });
+      await page.evaluate(() => { document.getElementById('hidden-accessible-label').textContent = 'Updated label'; });
+      await page.waitForFunction(() => feedback.some(event => event.kind === 'dom'), null, { timeout: 1000 });
+      const observations = await page.evaluate(() => feedback);
+      assert.ok(observations.some(event => event.source === 'page'));
+      assert.equal(JSON.stringify(observations).includes('Updated label'), false, 'Hidden accessible-name text must not be sent');
+      const accepted = await page.evaluate(value => {
+        const event = new CustomEvent('webbrain-agent-dom-dispatch', {
+          detail: JSON.stringify({ ...value, dispatchPhase: 'click' }), bubbles: true, composed: true, cancelable: true,
+        });
+        return document.getElementById('labelled-button').dispatchEvent(event);
+      }, guard);
+      assert.equal(accepted, false, 'Changing a hidden accessible label must invalidate the prepared click');
+    } finally { await browser.close(); }
+  });
+
+  test(`${build}: guarded synthetic file input events are attributed once`, async () => {
+    const { browser, page } = await fixture(engine, build);
+    try {
+      await page.evaluate(() => {
+        const input = document.createElement('input'); input.id = 'synthetic-upload'; input.type = 'file'; document.body.append(input);
+      });
+      await page.waitForTimeout(200);
+      const guard = await page.evaluate(() => {
+        feedback = [];
+        deliver('page_monitor_prepare', { operationId: 'synthetic-upload', tool: 'upload_file', selector: '#synthetic-upload' });
+        deliver('page_monitor_dispatch', { operationId: 'synthetic-upload', kind: 'input', selector: '#synthetic-upload',
+          eventTypes: ['input', 'change'], fenceOnly: true });
+        return lastMonitorResponse.guard;
+      });
+      const accepted = await page.locator('#synthetic-upload').evaluate((input, value) => {
+        const event = new CustomEvent('webbrain-agent-dom-dispatch', {
+          detail: JSON.stringify({ ...value, dispatchPhase: 'input' }), bubbles: true, composed: true, cancelable: true,
+        });
+        if (!input.dispatchEvent(event)) return false;
+        const transfer = new DataTransfer(); transfer.items.add(new File(['fixture'], 'fixture.txt', { type: 'text/plain' }));
+        input.files = transfer.files;
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        input.dispatchEvent(new Event('change', { bubbles: true }));
+        return true;
+      }, guard);
+      assert.equal(accepted, true);
+      await page.waitForTimeout(200);
+      assert.deepEqual(await page.evaluate(() => feedback), [], 'The guarded synthetic upload must not interrupt its own run');
+
+      const staleGuard = await page.evaluate(() => {
+        feedback = [];
+        deliver('page_monitor_prepare', { operationId: 'stale-synthetic-upload', tool: 'upload_file', selector: '#synthetic-upload' });
+        deliver('page_monitor_dispatch', { operationId: 'stale-synthetic-upload', kind: 'input', selector: '#synthetic-upload',
+          eventTypes: ['input', 'change'], fenceOnly: true });
+        const value = lastMonitorResponse.guard;
+        document.getElementById('status').textContent = 'Page changed before upload dispatch';
+        return value;
+      });
+      await page.waitForFunction(() => feedback.some(event => event.kind === 'dom'), null, { timeout: 1000 });
+      const staleAccepted = await page.locator('#synthetic-upload').evaluate((input, value) => {
+        let inputEvents = 0;
+        input.addEventListener('input', () => inputEvents++, { once: true });
+        const event = new CustomEvent('webbrain-agent-dom-dispatch', {
+          detail: JSON.stringify({ ...value, dispatchPhase: 'input' }), bubbles: true, composed: true, cancelable: true,
+        });
+        const okay = input.dispatchEvent(event);
+        if (okay) input.dispatchEvent(new Event('input', { bubbles: true }));
+        return { okay, inputEvents };
+      }, staleGuard);
+      assert.deepEqual(staleAccepted, { okay: false, inputEvents: 0 }, 'Stale upload guards must stop the synthetic input sequence');
     } finally { await browser.close(); }
   });
 

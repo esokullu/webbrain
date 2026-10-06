@@ -896,21 +896,27 @@ for (const path of ['local', 'memory']) {
       const originalMessage = api.tabs.sendMessage;
       try {
         const binding = bind(agent, tab), child = bind(agent, tab, 2, 'upload-doc', 'upload-token');
-        const client = new CDPClient();
+        const client = new CDPClient(), monitorGuards = [], runtimeCalls = [];
         client._pageAgentObjectTarget = async () => {
           if (intervention === 'preparation') binding.send({ kind: 'click' });
           return { documentToken: child.state.documentToken, documentRevision: 0, nativeTarget: 'upload-target' };
         };
         api.tabs.sendMessage = async (_tab, message, options) => {
+          if (message.action === 'page_monitor_prepare') return { ready: true };
           if (message.action === 'page_monitor_dispatch') {
             assert.equal(options.frameId, 2);
             notices.push(message);
             if (intervention === 'handshake') binding.send({ kind: 'click' });
+            const guard = { runToken: message.params.runToken, documentToken: child.state.documentToken,
+              revision: 0, operationId: message.params.operationId };
+            monitorGuards.push(guard);
+            return { ready: true, guard };
           }
           return {};
         };
         client.sendCommand = async (_tab, method, params) => {
           if (method === 'DOM.setFileInputFiles' || method === 'Runtime.callFunctionOn') mutations.push(method);
+          if (method === 'Runtime.callFunctionOn') runtimeCalls.push(params);
           return { result: { value: { success: true, dispatched: true } } };
         };
         let started = false;
@@ -922,6 +928,12 @@ for (const path of ['local', 'memory']) {
           assert.equal(started, true);
           assert.equal(mutations.length, 1);
           assert.equal(notices.length, 1);
+          if (path === 'memory') {
+            const call = runtimeCalls[0];
+            assert.deepEqual(call.arguments.at(-1), { value: monitorGuards[0] });
+            assert.ok(call.functionDeclaration.indexOf("beforePageAgentDomAction(pageGuard, 'input', this)")
+              < call.functionDeclaration.indexOf('this.files = transfer.files'));
+          }
         } else {
           await assert.rejects(upload, { code: 'page_feedback_pending' });
           assert.equal(started, false);

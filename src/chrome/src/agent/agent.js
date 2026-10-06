@@ -38718,6 +38718,10 @@ If the user has already named or confirmed this exact recipient, do NOT ask agai
               },
             },
           );
+          if ((injected?.noDispatch === true || injected?.dispatched === false) && injected?.outcomeUnknown !== true) {
+            uploadDispatched = false;
+            earlyCdpDispatchState.started = false;
+          }
           if (injected?.deadlineExpired && injected?.dispatched !== true) {
             uploadDispatched = false;
             earlyCdpDispatchState.started = false;
@@ -38736,6 +38740,8 @@ If the user has already named or confirmed this exact recipient, do NOT ask agai
             return {
               success: false,
               dispatched: injected?.dispatched === true,
+              ...(injected?.noDispatch === true || injected?.dispatched === false ? { noDispatch: true } : {}),
+              ...(injected?.pageFeedbackPending === true ? { pageFeedbackPending: true } : {}),
               error: `Upload failed: ${injected?.error || 'the page rejected the attached file data'}`,
             };
           }

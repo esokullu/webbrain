@@ -19,12 +19,12 @@ const SELECTOR_SCROLL_DISPATCH_SOURCE = `
 `;
 
 const PAGE_AGENT_DOM_ACTION_SOURCE = `
-  const beforePageAgentDomAction = (guard, phase) => {
+  const beforePageAgentDomAction = (guard, phase, target = window) => {
     if (!guard) return true;
     const event = new CustomEvent('webbrain-agent-dom-dispatch', {
-      detail: JSON.stringify({ ...guard, dispatchPhase: phase }), cancelable: true,
+      detail: JSON.stringify({ ...guard, dispatchPhase: phase }), bubbles: true, composed: true, cancelable: true,
     });
-    return window.dispatchEvent(event);
+    return target.dispatchEvent(event);
   };
 `;
 
@@ -2590,11 +2590,14 @@ export class CDPClient {
     await this.sendCommand(tabId, 'Runtime.enable');
     throwIfAborted();
     const target = hasPageAgentDispatchOwner(tabId) ? await this._pageAgentObjectTarget(tabId, objectId) : {};
-    await beforePageAgentDispatch(globalThis.chrome, tabId, { kind: 'input', eventTypes: ['input', 'change'], ...target });
+    const pageGuard = await beforePageAgentDispatch(globalThis.chrome, tabId, {
+      kind: 'input', eventTypes: ['input', 'change'], fenceOnly: true, prepareMonitor: true, ...target,
+    });
     throwIfAborted();
     if (typeof options?.beforeDispatch === 'function') options.beforeDispatch();
     const res = await this.sendCommand(tabId, 'Runtime.callFunctionOn', {
-      functionDeclaration: `function (base64, filename, mimeType, actionDeadlineAt) {
+      functionDeclaration: `function (base64, filename, mimeType, actionDeadlineAt, pageGuard) {
+        ${PAGE_AGENT_DOM_ACTION_SOURCE}
         const deadlineExpired = () => Number(actionDeadlineAt) > 0 && Date.now() >= Number(actionDeadlineAt);
         if (deadlineExpired()) {
           return { success: false, dispatched: false, deadlineExpired: true, error: 'Upload action deadline expired before dispatch' };
@@ -2613,6 +2616,10 @@ export class CDPClient {
           if (deadlineExpired()) {
             return { success: false, dispatched: false, deadlineExpired: true, error: 'Upload action deadline expired before dispatch' };
           }
+          if (!beforePageAgentDomAction(pageGuard, 'input', this)) {
+            return { success: false, dispatched: false, noDispatch: true, pageFeedbackPending: true,
+              error: 'The page changed before the in-memory upload could dispatch.' };
+          }
           this.files = transfer.files;
           dispatched = true;
           this.dispatchEvent(new Event('input', { bubbles: true }));
@@ -2629,6 +2636,7 @@ export class CDPClient {
         { value: String(filename || 'attachment') },
         { value: String(mimeType || 'application/octet-stream') },
         { value: deadlineAt },
+        { value: pageGuard || null },
       ],
       returnByValue: true,
     });

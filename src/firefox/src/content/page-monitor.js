@@ -14,6 +14,7 @@
   const documentToken = randomToken();
   const listeners = [];
   const operations = new Map();
+  const agentLayoutHistory = [];
   const nativeTargets = new Set();
   const liveControls = new Set();
   let signatures = new WeakMap();
@@ -170,13 +171,7 @@
     if (related(target, el) || related(el, target)) return true;
     // Editing a target can move a following sibling. Associate only the
     // matching displacement from a recent, expected input on that target.
-    for (const cause of op.layoutCauses || []) {
-      if (Date.now() > cause.until || cause.parent !== el.parentElement || !shift?.previousRect || !shift?.currentRect) continue;
-      const sourceTopDelta = shift.currentRect.y - shift.previousRect.y;
-      if (Math.abs(sourceTopDelta) <= 2 || Math.sign(sourceTopDelta) !== Math.sign(cause.heightDelta)
-          || Math.abs(sourceTopDelta) > Math.abs(cause.heightDelta) + 8) continue;
-      return true;
-    }
+    if ((op.layoutCauses || []).some(cause => layoutCauseMatches(cause, el, shift))) return true;
     // Scroll operations may change layout inside their actual scroll box.
     // Ignore document-wide ancestors so an unrelated page shift is not claimed.
     for (const region of op.scrollAncestors || []) {
@@ -195,14 +190,32 @@
       if (layoutAgentOperation(op, el, shift)) return op.userAt;
     }
     for (const op of operations.values()) if (layoutAgentOperation(op, el, shift)) return op.userAt;
+    pruneAgentLayoutHistory();
+    const cause = agentLayoutHistory.find(entry => lastUserAt <= entry.userAt && layoutCauseMatches(entry, el, shift));
+    if (cause) return cause.userAt;
     return undefined;
+  }
+  function pruneAgentLayoutHistory() {
+    const now = Date.now();
+    for (let i = agentLayoutHistory.length - 1; i >= 0; i--) if (agentLayoutHistory[i].until < now) agentLayoutHistory.splice(i, 1);
+  }
+  function layoutCauseMatches(cause, el, shift) {
+    if (Date.now() > cause.until || cause.parent !== el.parentElement || !shift?.previousRect || !shift?.currentRect) return false;
+    const sourceTopDelta = shift.currentRect.y - shift.previousRect.y;
+    return Math.abs(sourceTopDelta) > 2 && Math.sign(sourceTopDelta) === Math.sign(cause.heightDelta)
+      && Math.abs(sourceTopDelta) <= Math.abs(cause.heightDelta) + 8;
   }
   function rememberAgentLayout(op) {
     if (!op?.target) return;
+    pruneAgentLayoutHistory();
     const before = op.layoutRect || op.targetRectAtDispatch, after = rectFor(op.target);
     if (before && after && Math.abs(after.height - before.height) > 2) {
       const causes = op.layoutCauses ||= [];
-      causes.push({ parent: op.target.parentElement, heightDelta: after.height - before.height, until: Date.now() + 3000 });
+      const cause = { parent: op.target.parentElement, heightDelta: after.height - before.height,
+        userAt: op.userAt, until: Date.now() + 3000 };
+      causes.push(cause);
+      agentLayoutHistory.push(cause);
+      if (agentLayoutHistory.length > 256) agentLayoutHistory.splice(0, agentLayoutHistory.length - 256);
       if (causes.length > 8) causes.splice(0, causes.length - 8);
     }
     if (after) op.layoutRect = after;
@@ -347,6 +360,12 @@
     if (/^(INPUT|TEXTAREA|SELECT|OPTION)$/.test(el.tagName)) {
       trackControl(el);
       controlSignatures.set(el, controlState(el));
+    }
+    if (el.tagName === 'SELECT') {
+      for (const option of liveControls) if (option.tagName === 'OPTION' && option.closest('select') === el) {
+        controlSignatures.set(option, controlState(option));
+        signatures.set(option, signature(option));
+      }
     }
     signatures.set(el, signature(el));
   }
@@ -495,6 +514,21 @@
         return false;
       }));
   }
+  function hasVisibleAriaLabelledbyConsumer(el) {
+    const ids = new Set();
+    for (let node = el; node; node = node.parentElement || node.getRootNode?.().host) {
+      if (node.id) ids.add(node.id);
+    }
+    if (!ids.size) return false;
+    let consumers;
+    try { consumers = document.querySelectorAll('[aria-labelledby]'); } catch { return false; }
+    for (const consumer of consumers) {
+      if (ignored(consumer) || !visible(consumer)) continue;
+      const references = (consumer.getAttribute('aria-labelledby') || '').trim().split(/\s+/);
+      if (references.some(id => ids.has(id))) return true;
+    }
+    return false;
+  }
   function onMutations(records) {
     if (!active) return;
     let changed = false, source = 'page', target = '';
@@ -539,12 +573,13 @@
     for (const record of changes) {
       const el = record.target.nodeType === 1 ? record.target
         : record.target.host || record.target.parentElement || record.target.getRootNode?.().host;
-      const editableCharacterData = record.type === 'characterData' && editable(el);
+      const editableTextMutation = editable(el) && (record.type === 'characterData'
+        || (record.type === 'childList' && [...record.addedNodes, ...record.removedNodes].some(node => node.nodeType === 3)));
       if (ignored(el)) continue;
       // Native input already reports user edits, and agent input's synchronous
       // DOM writes are attributed to its dispatch. Keep those paths deduplicated
       // while observing independent page-script changes to editable text.
-      if (editableCharacterData && (userTurn || (agentTurn && lastUserAt <= agentTurn.userAt))) continue;
+      if (editableTextMutation && (userTurn || (agentTurn && lastUserAt <= agentTurn.userAt))) continue;
       if (record.type === 'attributes' && ['class', 'style'].includes(record.attributeName)
           && el.getAnimations?.().some(animation => animation.playState === 'running')) continue;
       if (++measured > 300) {
@@ -563,12 +598,15 @@
         if (nextControl !== previousControl) noteChange(el, record.agentUserAt);
         continue;
       }
+      const hiddenAccessibleNameChanged = !visible(el)
+        && ['characterData', 'childList'].includes(record.type)
+        && hasVisibleAriaLabelledbyConsumer(el);
       let identityChanged = (record.type === 'popover' && record.stateChanged)
         || (record.type === 'layout' && record.layoutChanged)
-        || editableCharacterData
+        || editableTextMutation || hiddenAccessibleNameChanged
         || (record.type === 'shadow' && (visible(el) || signatures.get(el)?.startsWith('[true')));
       if (record.type === 'childList') {
-        identityChanged = subtreeChanged(record, el);
+        identityChanged ||= subtreeChanged(record, el);
         for (const node of record.addedNodes) {
           if (node.nodeType !== 1 || ignored(node)) continue;
           if (seedBudget.remaining > 0) { seedBudget.remaining--; signatures.set(node, signature(node)); }
@@ -641,7 +679,8 @@
       try {
         const guard = JSON.parse(String(event.detail));
         const op = operations.get(guard.operationId);
-        const phase = ['focus', 'click'].includes(guard.dispatchPhase) ? guard.dispatchPhase : 'dom';
+        const phase = ['focus', 'click', 'input'].includes(guard.dispatchPhase) ? guard.dispatchPhase : 'dom';
+        const phaseKind = phase === 'input' ? 'input' : phase === 'dom' ? 'dom' : 'click';
         const actionPhase = phase !== 'dom';
         const phaseAlreadyConsumed = phase === 'dom'
           ? op?.domDispatchConsumed === true
@@ -650,17 +689,19 @@
         flushPendingMutations();
         sampleFormControls(op?.target);
         if (!active || guard.runToken !== runToken || guard.documentToken !== documentToken || guard.revision !== revision
-            || !op || phaseAlreadyConsumed || (actionPhase ? op.kind !== 'click' : op.kind !== 'dom')
+            || !op || phaseAlreadyConsumed || op.kind !== phaseKind
+            || (phase === 'input' && elementFor(event) !== op.target && elementFor(event) !== op.focusTarget)
             || op.preparedRevision !== revision || domTimer || unreported || lastUserAt > op.userAt) {
           event.preventDefault(); return;
         }
         if (actionPhase) {
           op.domDispatchPhases ||= new Set();
           op.domDispatchPhases.add(phase);
-          if (!op.dispatched) dispatch({ operationId: op.operationId, kind: 'click', runToken });
+          if (!op.dispatched) dispatch({ operationId: op.operationId, kind: phaseKind, runToken });
+          if (phase === 'input') op.synchronous = true;
         } else op.domDispatchConsumed = true;
         const marker = { userAt: lastUserAt }; agentTurn = marker;
-        setTimeout(() => { if (agentTurn === marker) agentTurn = null; }, 0);
+        setTimeout(() => { if (phase === 'input') op.synchronous = false; if (agentTurn === marker) agentTurn = null; }, 0);
       } catch { event.stopImmediatePropagation(); event.preventDefault(); /* Only a current prepared operation can mark a DOM write. */ }
     }, false);
     listen(document, 'webbrain-agent-scroll-dispatch', event => {
@@ -815,6 +856,7 @@
     clearTimeout(domTimer); clearTimeout(scrollTimer); clearInterval(controlTimer); domTimer = null; scrollTimer = null; controlTimer = null; unreported = 0; pendingDOM = null; lastFeedbackDelivery = Promise.resolve();
     listeners.splice(0).forEach(remove => remove());
     operations.clear(); localOperation = null; agentTurn = null;
+    agentLayoutHistory.length = 0;
     roots = new WeakSet(); signatures = new WeakMap(); controlSignatures = new WeakMap(); textSignatures = new WeakMap(); popoverTurns = new WeakMap(); liveControls.clear();
   }
   async function requestState() {
@@ -911,7 +953,12 @@
     const previous = op.synchronous;
     op.synchronous = true;
     try { return callback(); }
-    finally { op.synchronous = previous; }
+    finally {
+      op.synchronous = previous;
+      // Native editing can move following siblings; record the causal size
+      // change now, before the browser reports its layout shift asynchronously.
+      rememberAgentLayout(op);
+    }
   }
   const localMutations = new Set(['click', 'click_ax', 'type', 'type_ax', 'set_field', 'set_checked', 'press_keys', 'scroll',
     'hover', 'drag_drop', 'patch_element', 'revert_patch', 'highlight_element', 'execute_js',
