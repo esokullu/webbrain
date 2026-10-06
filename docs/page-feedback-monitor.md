@@ -28,6 +28,9 @@ Steer or grant authorization. Enter and Alt+Enter retain their existing behavior
   acknowledgement; cleanup sends the owning run token to all frames. Restricted
   frames do not prevent a run, and frame enumeration failures retain broadcast
   delivery.
+  Firefox also registers the monitor and MAIN-world shadow hook at document end
+  to cover inherited `about:blank`/`about:srcdoc` frames skipped at document start.
+  This supplemental pass preserves an existing live monitor and its expectations.
 - Native CDP/BiDi and content actions register their target, input operation and
   actual dispatch before changing the page. Target and native-event phase
   matching suppress their observed effects. CDP resolves the receiving document
@@ -41,6 +44,11 @@ Steer or grant authorization. Enter and Alt+Enter retain their existing behavior
   asynchronous search or retries. Only a resolved node's actual `scrollIntoView`
   dispatch activates attribution, with a live page revision check in both open
   and closed shadow-root paths. Read-only selector queries do not arm scrolling.
+- AX rect/field preparation and content/BiDi visibility helpers register the
+  exact node immediately before each actual scroll. Multiple scrolled ancestors
+  remain attributed within the operation; preparation scrolling never claims
+  input events on the field. Pending feedback is propagated through scroll
+  fallbacks rather than permitting an extra viewport mutation.
 - Meaningful visible content, control state, visibility and geometry changes are
   coalesced. Visible subtree identity changes invalidate targets even when the
   replacement has identical text and geometry. CSS animation and extension
@@ -121,5 +129,10 @@ target traversal and queued evaluation, then verify external scroll feedback and
 the final dispatch fence. Open and closed shadow-root agent scrolling remain
 attributed. Geometry fixtures also cover modal/details/inert transitions and
 viewport resizing during coordinate preparation and after cancellation.
+Preparation-scroll fixtures cover the real AX handlers, nested scroll containers,
+same-field human typing and an intervening DOM change. Firefox frame fixtures
+model the document-start omission, apply the manifest's document-end scripts,
+and verify user/DOM/late-shadow feedback in blank and srcdoc frames while keeping
+an existing monitor intact. These remain mocked extension registration fixtures.
 
 The monitor regressions are also included in `npm run test:runtime-lifecycle`.

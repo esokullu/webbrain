@@ -425,15 +425,20 @@
       const fullyVisible = _isFullyVisibleForInteraction(el, insets);
       const coveredByFixed = fullyVisible && _isCoveredByFixedNonModalSurface(el, view);
       if (!fullyVisible || coveredByFixed) {
+        window.__wbPageMonitor?.beforeLocalDispatch({ kind: 'scroll', target: el });
         el.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' });
         const rAfter = el.getBoundingClientRect();
         if (rAfter.top < insets.top) {
+          window.__wbPageMonitor?.beforeLocalDispatch({ kind: 'scroll', target: el });
           view.scrollBy({ top: rAfter.top - insets.top - 16, behavior: 'instant' });
         } else if (rAfter.bottom > view.innerHeight - insets.bottom) {
+          window.__wbPageMonitor?.beforeLocalDispatch({ kind: 'scroll', target: el });
           view.scrollBy({ top: rAfter.bottom - (view.innerHeight - insets.bottom) + 16, behavior: 'instant' });
         }
       }
-    } catch {
+    } catch (error) {
+      if (error?.code === 'page_feedback_pending') throw error;
+      window.__wbPageMonitor?.beforeLocalDispatch({ kind: 'scroll', target: el });
       try { el.scrollIntoView({ block: 'center', inline: 'center' }); } catch {}
     }
   }
@@ -7146,7 +7151,7 @@
             );
           }
           if (!_isFullyVisibleForInteraction(el)) {
-            try { _scrollElementIntoClearView(el); } catch {}
+            try { _scrollElementIntoClearView(el); } catch (error) { if (error?.code === 'page_feedback_pending') throw error; }
           }
           try { el.focus({ preventScroll: true }); } catch {}
           const rect = el.getBoundingClientRect();
@@ -7534,7 +7539,7 @@
             return failure(`set_checked only supports native input[type="checkbox"] controls; ${ref_id} resolved to ${tag || 'unknown'}${inputType ? `[type="${inputType}"]` : ''}.`);
           }
           if (actionDeadlineExpired()) return deadlineFailure();
-          try { _scrollElementIntoClearView(el); } catch {}
+          try { _scrollElementIntoClearView(el); } catch (error) { if (error?.code === 'page_feedback_pending') throw error; }
           if (actionDeadlineExpired()) return deadlineFailure();
           try { el.focus({ preventScroll: true }); } catch {}
           if (actionDeadlineExpired()) return deadlineFailure();
@@ -7684,7 +7689,7 @@
             return failure(`ref_id ${ref_id} not found.${formatNote} The element may have been removed or the page replaced.${hint} Re-read the accessibility tree to get fresh ids — do NOT guess ref numbers or invent placeholders.`, { suggestions });
           }
           if (actionDeadlineExpired()) return deadlineFailure();
-          try { _scrollElementIntoClearView(el); } catch {}
+          try { _scrollElementIntoClearView(el); } catch (error) { if (error?.code === 'page_feedback_pending') throw error; }
           if (actionDeadlineExpired()) return deadlineFailure();
           try { el.focus({ preventScroll: true }); } catch {}
           if (actionDeadlineExpired()) return deadlineFailure();
@@ -7874,7 +7879,7 @@
             return failure(`ref_id ${ref_id} not found.${formatNote} The element may have been removed or the page replaced.${hint} Re-read the accessibility tree to get fresh ids — do NOT guess ref numbers or invent placeholders.`, { suggestions });
           }
           if (actionDeadlineExpired()) return deadlineFailure();
-          try { _scrollElementIntoClearView(el); } catch {}
+          try { _scrollElementIntoClearView(el); } catch (error) { if (error?.code === 'page_feedback_pending') throw error; }
           if (actionDeadlineExpired()) return deadlineFailure();
           try { el.focus({ preventScroll: true }); } catch {}
           if (actionDeadlineExpired()) return deadlineFailure();
@@ -8129,6 +8134,7 @@
           if (!el || !el.isConnected) return { success: false, error: `ref_id ${ref_id} is stale` };
           const typeable = el.isContentEditable || el.tagName === 'INPUT' || el.tagName === 'TEXTAREA';
           if (!typeable) return { success: false, error: `ref_id ${ref_id} is not a text field` };
+          window.__wbPageMonitor?.beforeLocalDispatch({ kind: 'scroll', target: el });
           try { el.scrollIntoView({ block: 'center', inline: 'center' }); } catch {}
           try { el.focus({ preventScroll: true }); } catch {}
           if (el.isContentEditable) {
@@ -8317,7 +8323,7 @@
               : '';
             return { success: false, error: `ref_id ${ref_id} not found.${formatNote} The element may have been removed or the page replaced.${hint} Re-read the accessibility tree to get fresh ids.`, suggestions };
           }
-          try { _scrollElementIntoClearView(el); } catch {}
+          try { _scrollElementIntoClearView(el); } catch (error) { if (error?.code === 'page_feedback_pending') throw error; }
           showAgentWorkingTarget(el, 'ax_resolve_rect');
           let r = el.getBoundingClientRect();
           const cx = r.left + r.width / 2;
@@ -8467,7 +8473,9 @@
           // BOTH rects against that frame is what drag_drop wants.
           // Source may end up partly off-screen if the two are far
           // apart vertically — flagged via inViewport on the return.
+          window.__wbPageMonitor?.beforeLocalDispatch({ kind: 'scroll', target: fromEl });
           try { fromEl.scrollIntoView({ block: 'center', inline: 'center' }); } catch {}
+          window.__wbPageMonitor?.beforeLocalDispatch({ kind: 'scroll', target: toEl });
           try { toEl.scrollIntoView({ block: 'center', inline: 'center' }); } catch {}
           showAgentWorkingTarget(toEl, 'ax_resolve_two_rects');
 

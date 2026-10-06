@@ -1,5 +1,9 @@
 /** Value-free, run-scoped page monitoring. Keep the Firefox copy byte-identical. */
 (() => {
+  if (window.__wbPageMonitorRecoveryOnly) {
+    delete window.__wbPageMonitorRecoveryOnly;
+    if (window.__wbPageMonitor && !window.__wbPageMonitor.disposed) return;
+  }
   window.__wbPageMonitor?.dispose?.();
   const api = globalThis.browser || globalThis.chrome;
   const documentToken = crypto.randomUUID();
@@ -74,7 +78,7 @@
     send({ kind, source: 'user', target: targetName(el), interacting: pointerHeld || composing, ...extra });
   };
   const resolveTarget = params => {
-    let el = params.ref_id ? window.__wb_ax_lookup?.(params.ref_id) : null;
+    let el = params.element instanceof Element ? params.element : params.ref_id ? window.__wb_ax_lookup?.(params.ref_id) : null;
     if (params.nativeTarget) {
       const find = root => {
         const marked = root.querySelector(`[data-webbrain-native-target="${CSS.escape(params.nativeTarget)}"]`);
@@ -432,9 +436,10 @@
     op.focused = params.kind === 'input'; op.kind = params.kind;
     op.nativeWheel = params.nativeWheel === true;
     if (!params.release) op.navigationCandidate = params.kind === 'click' && params.navigationCandidate !== false;
-    op.scrollAncestors = new Set();
+    op.scrollAncestors = params.addScrollTarget ? op.scrollAncestors || new Set() : new Set();
     if (params.scrollIntoView || params.nativeWheel || ['input', 'click'].includes(params.kind)) {
-      for (let node = op.target?.parentElement; node; node = node.parentElement) op.scrollAncestors.add(node);
+      if (params.addScrollTarget && op.target) op.scrollAncestors.add(op.target);
+      for (let node = op.target?.parentElement || op.target?.getRootNode?.().host; node; node = node.parentElement || node.getRootNode?.().host) op.scrollAncestors.add(node);
     }
     op.windowScroll = params.scrollIntoView || (params.kind === 'scroll' && !op.target) || ['input', 'click'].includes(params.kind);
     op.kinds = new Set([params.kind, 'dom', ...(params.kind === 'input' ? ['selection'] : []), 'scroll']);
@@ -461,7 +466,7 @@
       localOperation = previous;
     };
   }
-  function beforeLocalDispatch({ preparation = false } = {}) {
+  function beforeLocalDispatch({ preparation = false, kind, target } = {}) {
     if (!active || !localOperation) return;
     if (domTimer || unreported || lastUserAt > localOperation.userAt || revision !== localOperation.revision) {
       const error = new Error('Browser changed during action preparation. Re-observe before acting.');
@@ -472,7 +477,10 @@
       const marker = { userAt: lastUserAt }; agentTurn = marker;
       setTimeout(() => { if (agentTurn === marker) agentTurn = null; }, 0);
     }
-    dispatch({ ...localOperation, navigationCandidate: !preparation && localOperation.navigationCandidate,
+    dispatch({ ...localOperation, kind: kind || localOperation.kind, element: target,
+      scrollIntoView: localOperation.scrollIntoView || (kind === 'scroll' && !!target),
+      addScrollTarget: kind === 'scroll' && !!target,
+      navigationCandidate: !preparation && localOperation.navigationCandidate,
       fenceOnly: preparation, runToken });
   }
   function withLocalDispatch(callback) {
@@ -518,6 +526,7 @@
   };
   api.runtime.onMessage.addListener(onMessage);
   window.__wbPageMonitor = { beginContentAction, beforeLocalDispatch, withLocalDispatch, dispatch, registerDecoration,
+    get disposed() { return disposed; },
     dispose() { disposed = true; requestGeneration++; stop(); api.runtime.onMessage.removeListener?.(onMessage); } };
   void requestState();
   // A document restored from BFCache needs a fresh run/document handshake.

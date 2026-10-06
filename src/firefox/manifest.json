@@ -53,6 +53,21 @@
     },
     {
       "matches": ["<all_urls>"],
+      "js": ["src/content/page-monitor-recovery.js", "src/content/page-monitor.js"],
+      "run_at": "document_end",
+      "all_frames": true,
+      "match_about_blank": true
+    },
+    {
+      "matches": ["<all_urls>"],
+      "js": ["src/content/page-monitor-shadow.js"],
+      "run_at": "document_end",
+      "world": "MAIN",
+      "all_frames": true,
+      "match_about_blank": true
+    },
+    {
+      "matches": ["<all_urls>"],
       "js": ["src/content/file-picker-guard-loader.js"],
       "run_at": "document_start"
     },

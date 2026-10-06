@@ -684,15 +684,20 @@
       const fullyVisible = _isFullyVisibleForInteraction(el, insets);
       const coveredByFixed = fullyVisible && _isCoveredByFixedNonModalSurface(el, view);
       if (!fullyVisible || coveredByFixed) {
+        window.__wbPageMonitor?.beforeLocalDispatch({ kind: 'scroll', target: el });
         el.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' });
         const rAfter = el.getBoundingClientRect();
         if (rAfter.top < insets.top) {
+          window.__wbPageMonitor?.beforeLocalDispatch({ kind: 'scroll', target: el });
           view.scrollBy({ top: rAfter.top - insets.top - 16, behavior: 'instant' });
         } else if (rAfter.bottom > view.innerHeight - insets.bottom) {
+          window.__wbPageMonitor?.beforeLocalDispatch({ kind: 'scroll', target: el });
           view.scrollBy({ top: rAfter.bottom - (view.innerHeight - insets.bottom) + 16, behavior: 'instant' });
         }
       }
-    } catch {
+    } catch (error) {
+      if (error?.code === 'page_feedback_pending') throw error;
+      window.__wbPageMonitor?.beforeLocalDispatch({ kind: 'scroll', target: el });
       try { el.scrollIntoView({ block: 'center', inline: 'center' }); } catch {}
     }
   }
@@ -6574,7 +6579,7 @@
             return failure(`set_checked only supports native input[type="checkbox"] controls; ${ref_id} resolved to ${tag || 'unknown'}${inputType ? `[type="${inputType}"]` : ''}.`);
           }
           if (actionDeadlineExpired()) return deadlineFailure();
-          try { _scrollElementIntoClearView(el); } catch {}
+          try { _scrollElementIntoClearView(el); } catch (error) { if (error?.code === 'page_feedback_pending') throw error; }
           if (actionDeadlineExpired()) return deadlineFailure();
           try { el.focus({ preventScroll: true }); } catch {}
           if (actionDeadlineExpired()) return deadlineFailure();
@@ -6694,7 +6699,7 @@
             return failure(`ref_id ${ref_id} not found. Re-read the accessibility tree to get fresh ids.`, { suggestions });
           }
           if (actionDeadlineExpired()) return deadlineFailure();
-          try { _scrollElementIntoClearView(el); } catch {}
+          try { _scrollElementIntoClearView(el); } catch (error) { if (error?.code === 'page_feedback_pending') throw error; }
           if (actionDeadlineExpired()) return deadlineFailure();
           try { el.focus({ preventScroll: true }); } catch {}
           if (actionDeadlineExpired()) return deadlineFailure();
@@ -6872,7 +6877,7 @@
           const el = window.__wb_ax_lookup(ref_id);
           if (!el) return failure(`ref_id ${ref_id} not found. Re-read the accessibility tree.`);
           if (actionDeadlineExpired()) return deadlineFailure();
-          try { _scrollElementIntoClearView(el); } catch {}
+          try { _scrollElementIntoClearView(el); } catch (error) { if (error?.code === 'page_feedback_pending') throw error; }
           if (actionDeadlineExpired()) return deadlineFailure();
           try { el.focus({ preventScroll: true }); } catch {}
           if (actionDeadlineExpired()) return deadlineFailure();
@@ -7263,7 +7268,7 @@
             return { success: false, error: `ref_id ${ref_id} not found.`, suggestions };
           }
           if (actionDeadlineExpired()) return deadlineFailure();
-          try { _scrollElementIntoClearView(el); } catch {}
+          try { _scrollElementIntoClearView(el); } catch (error) { if (error?.code === 'page_feedback_pending') throw error; }
           if (actionDeadlineExpired()) return deadlineFailure();
           const r = el.getBoundingClientRect();
           const cx = r.left + r.width / 2;

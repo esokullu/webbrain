@@ -17,7 +17,7 @@ body { margin: 0; } button,input { margin: 12px; }
 <div id="moving">Animated</div><div style="height:3000px"></div>
 <script>document.getElementById('agent').addEventListener('click', () => { document.getElementById('status').textContent = 'Agent changed this'; });</script>`;
 
-async function fixture(engine, build, { runToken = 'test-run', siteIsolation = false } = {}) {
+async function fixture(engine, build, { runToken = 'test-run', siteIsolation = false, omitEmptyFrameMonitor = false } = {}) {
   const browser = await engine.launch({ headless: true, ...(siteIsolation ? { args: ['--site-per-process'] } : {}) });
   const context = await browser.newContext();
   await context.route('https://monitor.test/**', route => route.fulfill({ contentType: 'text/html', body: html }));
@@ -39,14 +39,79 @@ async function fixture(engine, build, { runToken = 'test-run', siteIsolation = f
       params: { runToken: monitorRunToken, ...params }, active: action === 'page_monitor_state' ? monitorEnabled : undefined,
       runToken: monitorRunToken }, {}, value => { window.lastMonitorResponse = value; }));
   });
-  await context.addInitScript({ content: read(build, 'content/page-monitor-shadow.js') });
-  await context.addInitScript({ content: read(build, 'content/page-monitor.js') });
+  const initialScript = file => omitEmptyFrameMonitor
+    ? `if (window === window.top) { ${read(build, file)} }` : read(build, file);
+  await context.addInitScript({ content: initialScript('content/page-monitor-shadow.js') });
+  await context.addInitScript({ content: initialScript('content/page-monitor.js') });
   const page = await context.newPage();
   await page.goto('https://monitor.test/start');
   await page.waitForTimeout(200);
   await page.evaluate(() => { feedback = []; });
   return { browser, context, page };
 }
+
+async function installScrollHelper(page, build) {
+  const source = read(build, 'content/content.js');
+  const helper = source.match(/^  function _scrollElementIntoClearView\([\s\S]*?^  }/m)?.[0];
+  assert.ok(helper);
+  await page.addScriptTag({ content: `window._scrollElementIntoClearView = ${helper};` });
+  await page.evaluate(() => Object.assign(window, {
+    _isAlreadyVisibleInFixedSurface: () => false, _getViewportDockedInsets: () => ({ top: 0, bottom: 0 }),
+    _isFullyVisibleForInteraction: () => false, _isCoveredByFixedNonModalSurface: () => false,
+    showAgentWorkingTarget: () => {}, _fieldMeta: () => ({}),
+    _axFallbackStaticAssessment: () => ({ tag: 'button', role: 'button', name: 'Target' }),
+  }));
+}
+
+test('Chrome AX preparation attributes actual scrolling without claiming field input', async () => {
+  const { browser, page } = await fixture(chromium, 'chrome');
+  try {
+    await installScrollHelper(page, 'chrome');
+    const source = read('chrome', 'content/content.js');
+    const entries = ['ax_resolve_rect', 'ax_resolve_two_rects', 'ax_prepare_field_for_trusted_type'].map(action => {
+      const start = source.indexOf(`'${action}': () => {`), end = source.indexOf('\n      },', start);
+      assert.ok(start > 0 && end > start); return source.slice(start, end + 8);
+    });
+    await page.addScriptTag({ content: `window.axHelpers = { ${entries.join(',\n')} };` });
+    await page.evaluate(() => {
+      for (let i = 1; i <= 3; i++) {
+        const box = document.createElement('div'); box.id = `scroll-box-${i}`;
+        box.style.cssText = 'overflow:auto;height:100px;width:300px';
+        box.innerHTML = `<${i === 3 ? 'input' : 'button'} id="ref_${i}" style="margin-top:900px">Target</${i === 3 ? 'input' : 'button'}>`;
+        document.body.append(box);
+      }
+      window.__wb_ax_lookup = ref => document.getElementById(ref);
+    });
+    await page.waitForTimeout(200);
+    for (const [action, params] of [
+      ['ax_resolve_rect', { ref_id: 'ref_1' }],
+      ['ax_resolve_two_rects', { fromRefId: 'ref_1', toRefId: 'ref_2' }],
+      ['ax_prepare_field_for_trusted_type', { ref_id: 'ref_3' }],
+    ]) {
+      await page.evaluate(() => {
+        monitorEnabled = false; deliver('page_monitor_state'); window.scrollTo(0, 0);
+        for (const el of document.querySelectorAll('[id^="scroll-box-"]')) el.scrollTop = 0;
+      });
+      await page.waitForTimeout(50);
+      await page.evaluate(() => { monitorEnabled = true; deliver('page_monitor_state'); });
+      await page.waitForTimeout(20);
+      const result = await page.evaluate(({ action, params }) => {
+        feedback = []; window.msg = { params };
+        const finish = __wbPageMonitor.beginContentAction(action, params);
+        try { return axHelpers[action](); } finally { finish(); }
+      }, { action, params });
+      assert.equal(result.success, true, JSON.stringify(result));
+      await page.waitForTimeout(80);
+      assert.deepEqual(await page.evaluate(() => feedback), [], `${action} must not block the native action after scroll settling`);
+      assert.ok(await page.evaluate(() => [...document.querySelectorAll('[id^="scroll-box-"]')].some(el => el.scrollTop > 0)));
+      if (action === 'ax_resolve_two_rects') assert.ok(await page.evaluate(() => [1, 2].every(i => document.getElementById(`scroll-box-${i}`).scrollTop > 0)));
+      if (action === 'ax_prepare_field_for_trusted_type') {
+        await page.keyboard.press('x');
+        await page.waitForFunction(() => feedback.some(event => event.kind === 'input' && event.source === 'user'), null, { timeout: 1000 });
+      }
+    }
+  } finally { await browser.close(); }
+});
 
 async function installContentEditableFallback(page, build) {
   const insertion = read(build, 'content/content.js').match(/^  async function _insertContentEditableText\([\s\S]*?^  }/m)?.[0];
@@ -64,6 +129,52 @@ async function installContentEditableFallback(page, build) {
     };
   });
 }
+
+test('Firefox late registration covers blank/srcdoc frames and preserves an existing monitor', async () => {
+  const { browser, page } = await fixture(firefox, 'firefox', { omitEmptyFrameMonitor: true });
+  try {
+    const manifest = JSON.parse(fs.readFileSync(new URL('../src/firefox/manifest.json', import.meta.url), 'utf8'));
+    const late = manifest.content_scripts.find(entry => entry.run_at !== 'document_start'
+      && entry.js.includes('src/content/page-monitor.js') && entry.all_frames && entry.match_about_blank);
+    const lateShadow = manifest.content_scripts.find(entry => entry.run_at !== 'document_start' && entry.world === 'MAIN'
+      && entry.js.includes('src/content/page-monitor-shadow.js') && entry.all_frames && entry.match_about_blank);
+    assert.ok(late && lateShadow, 'Empty Firefox frames need a later monitor and shadow-hook registration');
+    const recovery = late.js.map(file => read('firefox', file.replace(/^src\//, ''))).join('\n');
+    await page.evaluate(() => { window.earlyMonitor = __wbPageMonitor; window.earlyFence = document.documentElement.getAttribute('data-webbrain-page-revision'); });
+    await page.addScriptTag({ content: recovery });
+    assert.equal(await page.evaluate(() => __wbPageMonitor === earlyMonitor && document.documentElement.getAttribute('data-webbrain-page-revision') === earlyFence), true,
+      'The supplemental pass must not replace a live monitor or its dispatch expectations');
+    await page.evaluate(() => {
+      const blank = document.createElement('iframe'); blank.id = 'blank-frame'; document.body.prepend(blank);
+      const srcdoc = document.createElement('iframe'); srcdoc.id = 'srcdoc-frame';
+      srcdoc.srcdoc = '<input id="inside"><p id="inside-status">Ready</p>'; document.body.prepend(srcdoc);
+    });
+    for (const [id, url] of [['blank-frame', 'about:blank'], ['srcdoc-frame', 'about:srcdoc']]) {
+      const handle = await page.locator(`#${id}`).elementHandle(), frame = await handle.contentFrame();
+      await frame.waitForFunction(url => location.href === url && window.chrome?.runtime && document.body, url);
+      assert.equal(await frame.evaluate(() => !!window.__wbPageMonitor), false, 'Model the Firefox document_start omission');
+      if (url === 'about:blank') await frame.evaluate(() => { document.body.innerHTML = '<input id="inside"><p id="inside-status">Ready</p>'; });
+      await frame.addScriptTag({ content: read('firefox', 'content/page-monitor-shadow.js') });
+      await frame.addScriptTag({ content: recovery });
+      await frame.waitForFunction(() => __wbPageMonitor && document.documentElement.hasAttribute('data-webbrain-page-revision'));
+      await frame.locator('#inside').fill('Private input');
+      await frame.waitForFunction(() => feedback.some(event => event.kind === 'input' && event.source === 'user'));
+      assert.ok(!(JSON.stringify(await frame.evaluate(() => feedback))).includes('Private input'));
+      await frame.evaluate(() => { document.getElementById('inside-status').textContent = 'Page changed'; });
+      await frame.waitForFunction(() => feedback.some(event => event.kind === 'dom'));
+      await frame.evaluate(() => {
+        const host = document.createElement('div'); host.id = 'late-frame-host'; document.body.append(host);
+      });
+      await frame.waitForTimeout(200);
+      await frame.evaluate(() => {
+        feedback = []; document.getElementById('late-frame-host').attachShadow({ mode: 'open' }).innerHTML = '<button id="late-frame-target">New target</button>';
+      });
+      await frame.waitForFunction(() => feedback.some(event => event.kind === 'dom' && event.target === 'div#late-frame-host'), null, { timeout: 1000 });
+      await frame.evaluate(() => { feedback = []; document.getElementById('late-frame-host').shadowRoot.querySelector('button').textContent = 'Updated target'; });
+      await frame.waitForFunction(() => feedback.some(event => event.kind === 'dom' && event.target === 'button#late-frame-target'), null, { timeout: 1000 });
+    }
+  } finally { await browser.close(); }
+});
 
 test('Chrome selector scrolling claims input only at the actual page mutation', { timeout: 30000 }, async () => {
   const savedChrome = globalThis.chrome, savedBrowser = globalThis.browser, tab = 912;
@@ -463,6 +574,43 @@ for (const [build, engine] of [['chrome', chromium], ['firefox', firefox]]) {
         return lastMonitorResponse;
       });
       assert.equal(earlyDispatch.pageFeedbackPending, true);
+    } finally { await browser.close(); }
+  });
+
+  test(`${build}: preparation scrolling preserves same-target input and rejects intervening DOM changes`, async () => {
+    const { browser, page } = await fixture(engine, build);
+    try {
+      await installScrollHelper(page, build);
+      await page.evaluate(() => {
+        const box = document.createElement('div'); box.id = 'prep-scroll-box'; box.style.cssText = 'overflow:auto;height:100px;width:300px';
+        box.innerHTML = '<input id="prepared-field" style="margin-top:900px">'; document.body.append(box);
+        window.__wb_ax_lookup = ref => document.getElementById(ref);
+      });
+      await page.waitForTimeout(200);
+      await page.evaluate(() => {
+        feedback = [];
+        const finish = __wbPageMonitor.beginContentAction('type_ax', { ref_id: 'prepared-field', _bidiPrepare: { action: 'type' } });
+        try { _scrollElementIntoClearView(document.getElementById('prepared-field')); } finally { finish(); }
+      });
+      await page.waitForTimeout(80);
+      assert.ok(await page.evaluate(() => document.getElementById('prep-scroll-box').scrollTop > 0));
+      assert.deepEqual(await page.evaluate(() => feedback), []);
+      await page.evaluate(() => document.getElementById('prepared-field').focus({ preventScroll: true }));
+      await page.keyboard.press('x');
+      await page.waitForFunction(() => feedback.some(event => event.kind === 'input' && event.source === 'user'), null, { timeout: 1000 });
+      await page.evaluate(() => { monitorEnabled = false; deliver('page_monitor_state'); document.getElementById('prep-scroll-box').scrollTop = 0; window.scrollTo(0, 0); });
+      await page.waitForTimeout(50);
+      await page.evaluate(() => { monitorEnabled = true; deliver('page_monitor_state'); });
+      await page.waitForTimeout(20);
+      const result = await page.evaluate(async () => {
+        const finish = __wbPageMonitor.beginContentAction('type_ax', { ref_id: 'prepared-field', _bidiPrepare: { action: 'type' } });
+        document.getElementById('status').textContent = 'Intervening page change'; await Promise.resolve();
+        try { _scrollElementIntoClearView(document.getElementById('prepared-field')); return { dispatched: true }; }
+        catch (error) { return { code: error.code, dispatched: error.dispatched }; }
+        finally { finish(); }
+      });
+      assert.deepEqual(result, { code: 'page_feedback_pending', dispatched: false });
+      assert.equal(await page.evaluate(() => document.getElementById('prep-scroll-box').scrollTop), 0, 'A rejected helper must not scroll through its fallback');
     } finally { await browser.close(); }
   });
 

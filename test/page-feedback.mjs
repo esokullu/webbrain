@@ -592,6 +592,16 @@ test('shared page monitoring modules stay identical between browser builds', () 
   }
 });
 
+test('Firefox supplements empty-frame monitoring after document start', () => {
+  const manifest = JSON.parse(fs.readFileSync(new URL('../src/firefox/manifest.json', import.meta.url), 'utf8'));
+  const monitor = manifest.content_scripts.find(entry => entry.run_at === 'document_end' && entry.js.includes('src/content/page-monitor.js'));
+  assert.ok(monitor); assert.equal(monitor.all_frames, true); assert.equal(monitor.match_about_blank, true);
+  assert.deepEqual(monitor.js, ['src/content/page-monitor-recovery.js', 'src/content/page-monitor.js']);
+  const shadow = manifest.content_scripts.find(entry => entry.run_at === 'document_end' && entry.world === 'MAIN'
+    && entry.js.includes('src/content/page-monitor-shadow.js'));
+  assert.ok(shadow); assert.equal(shadow.all_frames, true); assert.equal(shadow.match_about_blank, true);
+});
+
 test('both manifests signal shadow attachment from MAIN in all monitored frames', () => {
   for (const build of ['chrome', 'firefox']) {
     const manifest = JSON.parse(fs.readFileSync(new URL(`../src/${build}/manifest.json`, import.meta.url), 'utf8'));
