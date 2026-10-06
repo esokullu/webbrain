@@ -58,6 +58,7 @@
     if (document.getElementById('webbrain-agent-styles')) return;
     const style = document.createElement('style');
     style.id = 'webbrain-agent-styles';
+    (window.__wbPageMonitorDecorations ??= new WeakSet()).add(style);
     style.textContent = `
       @keyframes webbrain-pulse {
         0% {

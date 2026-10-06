@@ -1979,6 +1979,62 @@ for (const [build, engine] of [['chrome', chromium], ['firefox', firefox]]) {
     } finally { await browser.close(); }
   });
 
+  test(`${build}: GET submitter activity omits serialized form values from its navigation marker`, async () => {
+    const { browser, page } = await fixture(engine, build);
+    try {
+      await page.evaluate(() => {
+        const form = document.createElement('form'); form.id = 'get-submit-form';
+        form.method = 'get'; form.action = '/search?fixed=private-action-value#result';
+        form.addEventListener('submit', event => event.preventDefault());
+        const input = document.createElement('input'); input.name = 'query'; input.value = 'private-form-value';
+        const button = document.createElement('button'); button.id = 'get-submit'; button.type = 'submit'; button.textContent = 'Search';
+        form.append(input, button); document.body.append(form);
+      });
+      await page.waitForTimeout(250);
+      await page.evaluate(() => {
+        feedback = [];
+        deliver('page_monitor_prepare', { operationId: 'get-form-submit', tool: 'click', selector: '#get-submit' });
+        deliver('page_monitor_dispatch', { operationId: 'get-form-submit', kind: 'click', selector: '#get-submit' });
+      });
+      await page.locator('#get-submit').click();
+      await page.waitForTimeout(150);
+      const events = await page.evaluate(() => feedback);
+      const marker = events.find(event => event.navigationFormGet === true);
+      assert.ok(marker, JSON.stringify(events));
+      assert.equal(marker.navigationUrl, 'https://monitor.test/search');
+      assert.equal(JSON.stringify(events).includes('private-form-value'), false);
+      assert.equal(JSON.stringify(events).includes('private-action-value'), false);
+    } finally { await browser.close(); }
+  });
+
+  test(`${build}: stylesheet text changes invalidate prepared actions without exposing CSS`, async () => {
+    const { browser, page } = await fixture(engine, build);
+    try {
+      await page.evaluate(() => {
+        const style = document.createElement('style'); style.id = 'page-stylesheet';
+        style.textContent = '#stylesheet-target { visibility: visible; }';
+        const target = document.createElement('button'); target.id = 'stylesheet-target'; target.textContent = 'Checkout';
+        document.head.append(style); document.body.append(target);
+      });
+      await page.waitForFunction(() => feedback.some(event => event.kind === 'dom'));
+      await page.waitForTimeout(180);
+      const guard = await page.evaluate(() => {
+        feedback = [];
+        deliver('page_monitor_prepare', { operationId: 'stylesheet-change', tool: 'click', selector: '#stylesheet-target' });
+        deliver('page_monitor_dispatch', { operationId: 'stylesheet-change', kind: 'click', selector: '#stylesheet-target' });
+        return lastMonitorResponse.guard;
+      });
+      await page.locator('#page-stylesheet').evaluate(style => { style.textContent = '#stylesheet-target { visibility: hidden; opacity: 0; }'; });
+      await page.waitForFunction(() => feedback.some(event => event.kind === 'dom' && event.target === 'html'));
+      const accepted = await page.evaluate(value => window.dispatchEvent(new CustomEvent('webbrain-agent-dom-dispatch', {
+        detail: JSON.stringify({ ...value, dispatchPhase: 'focus' }), cancelable: true,
+      })), guard);
+      assert.equal(accepted, false, 'A stylesheet change must stale a prepared action even without layout movement');
+      assert.equal(JSON.stringify(await page.evaluate(() => feedback)).includes('visibility: hidden'), false,
+        'Stylesheet contents must not be copied into feedback');
+    } finally { await browser.close(); }
+  });
+
   test(`${build}: submitter form association changes invalidate a prepared click`, async () => {
     const { browser, page } = await fixture(engine, build);
     try {

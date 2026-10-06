@@ -110,6 +110,13 @@ function safeAction(tool, args = {}) {
   return { tool, ...target };
 }
 
+function sameOriginPath(expected, actual) {
+  try {
+    const expectedUrl = new URL(expected), actualUrl = new URL(actual);
+    return expectedUrl.origin === actualUrl.origin && expectedUrl.pathname === actualUrl.pathname;
+  } catch { return false; }
+}
+
 export const pageFeedbackMethods = {
   async _beginPageFeedbackRun(tabId, kind) {
     this._pageFeedbackRuns ??= new Map();
@@ -189,6 +196,7 @@ export const pageFeedbackMethods = {
         } catch { /* Clicks without a safe, concrete destination cannot correlate navigation. */ }
         run.navigation = url ? { at: Date.now(), url, kind: 'click',
           frameId: feedback.navigationTarget === '_top' ? 0 : frameId,
+          ...(feedback.navigationFormGet === true ? { formGet: true } : {}),
           operationId: dispatchOwners.get(tabId)?.operationId || '' } : null;
       }
       return { accepted: true };
@@ -234,9 +242,11 @@ export const pageFeedbackMethods = {
     const redirect = qualifiers.some(q => /redirect$/.test(q));
     const firstRedirect = type === 'committed' && !navigation?.redirectChain && redirect
       && !!navigation?.url && ['click', 'navigate'].includes(navigation.kind);
+    const formGetDestination = type === 'committed' && details.transitionType === 'form_submit'
+      && navigation?.formGet === true && navigation.frameId === frameId && sameOriginPath(navigation.url, details.url);
     const sameNavigation = navigation?.redirectChain
       ? redirect && !!navigation.documentId && navigation.documentId === details.documentId
-      : (!!navigation?.url && navigation.url === details.url) || firstRedirect
+      : (!!navigation?.url && navigation.url === details.url) || firstRedirect || formGetDestination
         || (navigation?.kind === 'navigate' && navigation.history && qualifiers.includes('forward_back'));
     const agentNavigation = !explicit && navigation && navigation.frameId === frameId && Date.now() - navigation.at < 10000
       && (!qualifiers.includes('forward_back') || navigation.history)

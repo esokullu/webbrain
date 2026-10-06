@@ -260,7 +260,7 @@ for (const build of ['chrome', 'firefox']) {
     const agent = setup(Agent), tab = nextTab++;
     await agent._claimRunEntry(tab, 'interactive');
     try {
-      const binding = bind(agent, tab);
+      let binding = bind(agent, tab);
       for (let i = 0; i < 100; i++) binding.send({ kind: 'dom', source: 'page', target: `button#${i}` });
       assert.equal(agent._pageFeedbackRuns.get(tab).events.size, 32);
       for (const [type, qualifiers] of [['history', []], ['fragment', []], ['committed', ['forward_back']]]) {
@@ -751,6 +751,31 @@ for (const build of ['chrome', 'firefox']) {
       assert.equal(agent._hasPendingPageFeedback(tab), true, 'A later navigation outside the redirect chain is visible');
       assert.equal(agent._pageFeedbackRuns.get(tab).navigation, null);
     } finally { agent._releaseRunEntry(tab); }
+  });
+
+  test(`${build}: GET form submission correlates serialized query by its private base action`, async () => {
+    const agent = setup(Agent), tab = nextTab++;
+    await agent._claimRunEntry(tab, 'interactive');
+    try {
+      await agent._beginPageFeedbackRun(tab, 'interactive');
+      let binding = bind(agent, tab);
+      binding.send({ kind: 'activity', source: 'agent', operation: 'click', navigationUrl: 'https://example.com/search',
+        navigationFormGet: true });
+      const armed = agent._pageFeedbackRuns.get(tab).navigation;
+      assert.equal(armed.url, 'https://example.com/search', 'The correlation marker contains only the action path');
+      assert.equal(armed.formGet, true);
+      agent.observePageNavigation({ tabId: tab, frameId: 0, documentId: 'form-result',
+        url: 'https://example.com/search?q=private-form-value', transitionType: 'form_submit' }, 'committed');
+      assert.equal(agent._hasPendingPageFeedback(tab), false, 'A GET form submission can append its successful controls to the query');
+      assert.equal(agent._pageFeedbackRuns.get(tab).navigation, null);
+
+      binding = bind(agent, tab, 0, 'form-result', 'form-result-token');
+      binding.send({ kind: 'activity', source: 'agent', operation: 'click', navigationUrl: 'https://example.com/search',
+        navigationFormGet: true });
+      agent.observePageNavigation({ tabId: tab, frameId: 0, documentId: 'wrong-form-result',
+        url: 'https://example.com/other?q=value', transitionType: 'form_submit' }, 'committed');
+      assert.equal(agent._hasPendingPageFeedback(tab), true, 'Form-specific correlation still requires the same origin and action path');
+    } finally { agent._finishPageFeedbackRun(tab); agent._releaseRunEntry(tab); }
   });
 
   test(`${build}: first redirect of an armed URL navigation stays agent-attributed`, async () => {

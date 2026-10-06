@@ -464,7 +464,7 @@
     if (!root || roots.has(root) || !observer) return;
     roots.add(root);
     observer.observe(root, { childList: true, subtree: true, characterData: true, attributes: true, attributeOldValue: true,
-      attributeFilter: ['role', 'aria-label', 'id', 'for', 'form', 'name', 'placeholder', 'title', 'alt', 'aria-labelledby',
+      attributeFilter: ['role', 'aria-label', 'id', 'for', 'form', 'name', 'placeholder', 'title', 'alt', 'aria-labelledby', 'rel', 'media',
         'aria-required', 'aria-readonly', 'contenteditable', 'tabindex', 'onclick', 'required',
         'aria-expanded', 'aria-selected', 'aria-checked', 'aria-pressed', 'aria-disabled',
         'type', 'href', 'target', 'download', 'action', 'method', 'formaction', 'formmethod', 'formtarget',
@@ -548,6 +548,29 @@
       || (root === document ? document.getElementById(previousFor) : null);
     return visibleControl(priorControl);
   }
+  function stylesheetNode(node) {
+    if (!(node instanceof Element)) return false;
+    return node.tagName === 'STYLE' || (node.tagName === 'LINK'
+      && (node.getAttribute('rel') || '').split(/\s+/).some(token => token.toLowerCase() === 'stylesheet'));
+  }
+  function stylesheetMutation(record) {
+    const target = record.target.nodeType === 1 ? record.target : record.target.parentElement;
+    if (record.type === 'attributes') {
+      return stylesheetNode(target) || (target?.tagName === 'LINK' && record.attributeName === 'rel'
+        && (record.oldValue || '').split(/\s+/).some(token => token.toLowerCase() === 'stylesheet')) ? [target] : [];
+    }
+    if (record.type === 'characterData') {
+      const style = stylesheetNode(target) ? target : stylesheetNode(target?.parentElement) ? target.parentElement : null;
+      return style ? [style] : [];
+    }
+    if (record.type !== 'childList') return [];
+    const stylesheets = stylesheetNode(target) ? [target] : [];
+    for (const node of [...record.addedNodes, ...record.removedNodes]) {
+      const style = stylesheetNode(node) ? node : node.nodeType === 3 && stylesheetNode(node.parentElement) ? node.parentElement : null;
+      if (style && !stylesheets.includes(style)) stylesheets.push(style);
+    }
+    return stylesheets;
+  }
   function onMutations(records) {
     if (!active) return;
     let changed = false, source = 'page', target = '';
@@ -592,6 +615,11 @@
     for (const record of changes) {
       const el = record.target.nodeType === 1 ? record.target
         : record.target.host || record.target.parentElement || record.target.getRootNode?.().host;
+      const changedStylesheets = stylesheetMutation(record);
+      if (changedStylesheets.length) {
+        if (changedStylesheets.some(style => !decorations.has(style))) noteChange(document.documentElement, record.agentUserAt);
+        continue;
+      }
       const editableTextMutation = editable(el) && (record.type === 'characterData'
         || (record.type === 'childList' && [...record.addedNodes, ...record.removedNodes].some(node => node.nodeType === 3)));
       if (ignored(el)) continue;
@@ -750,17 +778,22 @@
         const path = event.composedPath();
         const link = path.find(node => node instanceof Element && node.matches('a[href],area[href]'));
         const submitter = path.find(node => node instanceof Element && node.matches('button,input[type="submit"],input[type="image"]') && node.form);
+        const form = submitter?.form;
+        const formMethod = submitter?.hasAttribute('formmethod') ? submitter.formMethod : form?.method;
+        const navigationFormGet = !link && !!form && String(formMethod || 'get').toLowerCase() === 'get';
         const navigationTarget = (link?.getAttribute('target') || el?.form?.getAttribute('target')
           || (link && document.querySelector('base[target]')?.getAttribute('target')) || '').toLowerCase();
         let navigationUrl = '';
         try {
-          const rawUrl = link?.href || (submitter?.form ? submitter.formAction || submitter.form.action : '');
+          const rawUrl = link?.href || (form ? (submitter.hasAttribute('formaction') ? submitter.formAction : form.action) : '');
           const destination = new URL(rawUrl, document.baseURI);
+          if (navigationFormGet) { destination.search = ''; destination.hash = ''; }
           if (['http:', 'https:'].includes(destination.protocol) && !destination.username && !destination.password
               && destination.href.length <= 2000) navigationUrl = destination.href;
         } catch { /* Non-web and malformed targets are not navigation correlations. */ }
         send({ kind: 'activity', source: 'agent', operation: 'click',
           ...(navigationUrl ? { navigationUrl } : {}),
+          ...(navigationUrl && navigationFormGet ? { navigationFormGet: true } : {}),
           ...(navigationTarget === '_top' || (navigationTarget === '_parent' && window.parent === window.top)
             ? { navigationTarget: '_top' } : {}) });
       }
