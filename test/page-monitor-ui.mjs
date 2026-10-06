@@ -113,6 +113,26 @@ test('Chrome AX preparation attributes actual scrolling without claiming field i
   } finally { await browser.close(); }
 });
 
+test('Chrome: unrelated layout shifts during an agent operation stay observable', async () => {
+  const { browser, page } = await fixture(chromium, 'chrome');
+  try {
+    await page.evaluate(() => {
+      const spacer = document.createElement('div'); spacer.id = 'unrelated-layout-shift';
+      spacer.style.height = '1px'; document.getElementById('agent').after(spacer);
+    });
+    await page.waitForTimeout(200);
+    await page.evaluate(() => {
+      feedback = [];
+      deliver('page_monitor_prepare', { operationId: 'active-layout-op', tool: 'click', selector: '#agent' });
+      deliver('page_monitor_dispatch', { operationId: 'active-layout-op', kind: 'click', selector: '#agent' });
+      document.styleSheets[0].insertRule('#unrelated-layout-shift { height: 120px !important; }', document.styleSheets[0].cssRules.length);
+    });
+    await page.waitForFunction(() => feedback.some(event => event.kind === 'dom'), null, { timeout: 1000 });
+    assert.ok(await page.evaluate(() => feedback.some(event => event.kind === 'dom' && event.source !== 'agent')),
+      'A shift in a sibling region must not be discarded as an expected agent effect');
+  } finally { await browser.close(); }
+});
+
 async function installContentEditableFallback(page, build) {
   const insertion = read(build, 'content/content.js').match(/^  async function _insertContentEditableText\([\s\S]*?^  }/m)?.[0];
   assert.ok(insertion, 'Exercise the real contenteditable fallback with the real monitor');
@@ -1355,6 +1375,32 @@ for (const [build, engine] of [['chrome', chromium], ['firefox', firefox]]) {
           assert.equal(await page.locator('#plain-result').isVisible(), show);
           assert.ok((await page.evaluate(() => feedback)).some(event => event.kind === 'dom'));
         }
+      }
+    } finally { await browser.close(); }
+  });
+
+  test(`${build}: inherited host styles track visible changes inside open shadow roots`, async () => {
+    const { browser, page } = await fixture(engine, build);
+    try {
+      await page.evaluate(() => {
+        const host = document.createElement('div'); host.id = 'shadow-inherited-style-host';
+        host.className = 'closed'; host.style.cssText = 'width:200px;height:80px';
+        host.attachShadow({ mode: 'open' }).innerHTML = '<style>:host { --result-display:none } :host(.open) { --result-display:block } #shadow-inherited-result { display:var(--result-display) }</style><div id="shadow-inherited-result">Shadow result</div>';
+        document.body.prepend(host);
+      });
+      await page.waitForTimeout(200);
+      await page.evaluate(() => { feedback = []; });
+      for (const shown of [true, false]) {
+        await page.evaluate(shown => {
+          feedback = [];
+          document.getElementById('shadow-inherited-style-host').classList.toggle('open', shown);
+        }, shown);
+        await page.waitForFunction(() => feedback.some(event => event.kind === 'dom'), null, { timeout: 1000 });
+        assert.equal(await page.locator('#shadow-inherited-style-host').evaluate(host =>
+          getComputedStyle(host.shadowRoot.getElementById('shadow-inherited-result')).display !== 'none'), shown);
+        assert.ok(await page.evaluate(() => feedback.some(event => event.kind === 'dom'
+          && event.target === 'div#shadow-inherited-result')),
+        `A shadow descendant whose inherited visibility changed must be the feedback target: ${JSON.stringify(await page.evaluate(() => feedback))}`);
       }
     } finally { await browser.close(); }
   });

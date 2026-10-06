@@ -122,12 +122,53 @@
   };
   const related = (a, b) => !!a && !!b && (a === b
     || (a !== document.body && a !== document.documentElement && a.contains?.(b)));
-  function layoutAgentUserAt() {
-    if (agentTurn && lastUserAt <= agentTurn.userAt) return agentTurn.userAt;
-    for (const op of operations.values()) {
-      if (op.dispatched && Date.now() <= op.until && Number.isFinite(op.userAt) && lastUserAt <= op.userAt) return op.userAt;
+  function layoutAgentOperation(op, el, shift) {
+    if (!op?.dispatched || Date.now() > Math.max(op.until, op.layoutUntil || 0)
+        || !Number.isFinite(op.userAt) || lastUserAt > op.userAt) return false;
+    const target = op.target || (op.focused ? op.focusTarget : null);
+    if (!target) return false;
+    // A layout shift is attributable only when its source is the operation's
+    // target, part of that target, or an ancestor that moves the target.
+    if (related(target, el) || related(el, target)) return true;
+    // Editing a target can move a following sibling. Associate only the
+    // matching displacement from a recent, expected input on that target.
+    for (const cause of op.layoutCauses || []) {
+      if (Date.now() > cause.until || cause.parent !== el.parentElement || !shift?.previousRect || !shift?.currentRect) continue;
+      const sourceTopDelta = shift.currentRect.y - shift.previousRect.y;
+      if (Math.abs(sourceTopDelta) <= 2 || Math.sign(sourceTopDelta) !== Math.sign(cause.heightDelta)
+          || Math.abs(sourceTopDelta) > Math.abs(cause.heightDelta) + 8) continue;
+      return true;
     }
+    // Scroll operations may change layout inside their actual scroll box.
+    // Ignore document-wide ancestors so an unrelated page shift is not claimed.
+    for (const region of op.scrollAncestors || []) {
+      if (!region?.isConnected || region === document.body || region === document.documentElement) continue;
+      const style = getComputedStyle(region);
+      const scrollableX = /^(auto|scroll|overlay)$/.test(style.overflowX) && region.scrollWidth > region.clientWidth + 1;
+      const scrollableY = /^(auto|scroll|overlay)$/.test(style.overflowY) && region.scrollHeight > region.clientHeight + 1;
+      if ((scrollableX || scrollableY) && related(region, el)) return true;
+    }
+    return false;
+  }
+  function layoutAgentUserAt(el, shift) {
+    if (!(el instanceof Element)) return undefined;
+    if (agentTurn && lastUserAt <= agentTurn.userAt && localOperation?.operationId) {
+      const op = operations.get(localOperation.operationId);
+      if (layoutAgentOperation(op, el, shift)) return op.userAt;
+    }
+    for (const op of operations.values()) if (layoutAgentOperation(op, el, shift)) return op.userAt;
     return undefined;
+  }
+  function rememberAgentLayout(op) {
+    if (!op?.target) return;
+    const before = op.layoutRect || op.targetRectAtDispatch, after = rectFor(op.target);
+    if (before && after && Math.abs(after.height - before.height) > 2) {
+      const causes = op.layoutCauses ||= [];
+      causes.push({ parent: op.target.parentElement, heightDelta: after.height - before.height, until: Date.now() + 3000 });
+      if (causes.length > 8) causes.splice(0, causes.length - 8);
+    }
+    if (after) op.layoutRect = after;
+    op.layoutUntil = Date.now() + 3000;
   }
   const rectFor = el => {
     if (!(el instanceof Element) || !el.isConnected) return null;
@@ -148,7 +189,7 @@
     if (!hitChanged && !rectChanged) return false;
     op.layoutInvalidated = true;
     revision++; publishRevision();
-    const source = layoutAgentUserAt() !== undefined ? 'agent' : 'page';
+    const source = layoutAgentUserAt(target || currentHit) !== undefined ? 'agent' : 'page';
     send({ kind: 'dom', source, target: targetName(target || currentHit) });
     return true;
   }
@@ -244,16 +285,23 @@
   }
   function sampleDescendants(root, limit = 100) {
     const nodes = [];
-    let node = root?.firstElementChild || null;
-    while (node) {
+    const stack = [];
+    const pushChildren = parent => {
+      const length = parent?.children?.length || 0;
+      if (length) stack.push({ parent, index: 0, length });
+    };
+    pushChildren(root);
+    pushChildren(root?.shadowRoot);
+    while (stack.length) {
+      const frame = stack[stack.length - 1];
+      if (frame.index >= frame.length) { stack.pop(); continue; }
+      const node = frame.parent.children[frame.index++];
       if (nodes.length === limit) return { nodes, exceeded: true };
       nodes.push(node);
-      if (node.firstElementChild) {
-        node = node.firstElementChild;
-        continue;
-      }
-      while (node && node !== root && !node.nextElementSibling) node = node.parentElement;
-      node = node && node !== root ? node.nextElementSibling : null;
+      pushChildren(node);
+      // Inherited host styles and CSS variables can alter visible descendants
+      // inside an open shadow root without changing the host's own signature.
+      pushChildren(node.shadowRoot);
     }
     return { nodes, exceeded: false };
   }
@@ -319,7 +367,11 @@
     const noteChange = (el, agentUserAt) => {
       // Attribute the marked input/write's synchronous handlers to that dispatch.
       // Later DOM writes stay observable, including writes on the same target.
-      if ((Number.isFinite(agentUserAt) && lastUserAt <= agentUserAt) || (agentTurn && lastUserAt <= agentTurn.userAt)) return;
+      if ((Number.isFinite(agentUserAt) && lastUserAt <= agentUserAt) || (agentTurn && lastUserAt <= agentTurn.userAt)) {
+        const expectedAt = Number.isFinite(agentUserAt) ? agentUserAt : agentTurn?.userAt;
+        for (const op of operations.values()) if (op.userAt === expectedAt && related(op.target, el)) rememberAgentLayout(op);
+        return;
+      }
       changed = true;
       target ||= targetName(el);
       if (userTurn || (Date.now() - lastUserAt < 1500 && related(lastUserTarget, el))) source = 'user';
@@ -405,8 +457,8 @@
             if (!el || ignored(el) || !visible(el) || el.getAnimations?.().some(animation => animation.playState === 'running')) continue;
             const oldRect = source.previousRect, newRect = source.currentRect;
             if (!oldRect || !newRect || !['x', 'y', 'width', 'height'].some(key => Math.abs(oldRect[key] - newRect[key]) > 2)) continue;
-            records.push({ type: 'layout', target: el, layoutChanged: true,
-              agentUserAt: layoutAgentUserAt() });
+            const agentUserAt = layoutAgentUserAt(el, { previousRect: source.previousRect, currentRect: source.currentRect, entry });
+            records.push({ type: 'layout', target: el, layoutChanged: true, agentUserAt });
             if (records.length >= 32) break;
           }
           if (records.length >= 32) break;
@@ -460,6 +512,7 @@
       const el = elementFor(event);
       const op = expected(['input', 'beforeinput', 'change', 'keydown'].includes(event.type) ? 'input' : 'click', el, event);
       if (!op) return;
+      if (['input', 'beforeinput', 'change'].includes(event.type)) rememberAgentLayout(op);
       const marker = { userAt: op.userAt };
       agentTurn = marker;
       if (op.navigationCandidate && ['click', 'pointerdown'].includes(event.type)) {
@@ -629,6 +682,11 @@
     op.windowScroll = params.scrollIntoView || (params.kind === 'scroll' && !op.target) || ['input', 'click'].includes(params.kind);
     op.kinds = new Set([params.kind, 'dom', ...(params.kind === 'input' ? ['selection'] : []), 'scroll']);
     op.until = Date.now() + (params.fenceOnly ? 30000 : 1500); op.dispatched = !params.fenceOnly;
+    if (op.dispatched && op.target) {
+      op.targetRectAtDispatch = rectFor(op.target);
+      op.targetParentAtDispatch = op.target.parentElement;
+      op.layoutRect ||= op.targetRectAtDispatch;
+    }
     operations.set(op.operationId, op);
   }
   function activatePreparedDispatch(params = {}) {
