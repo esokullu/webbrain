@@ -144,5 +144,9 @@ monitor and MAIN shadow-hook registrations. Fixtures model these registrations
 and verify private-input, DOM and late-shadow feedback inside those documents.
 Document and local-action tokens use cryptographic random bytes when the document
 does not expose the secure-context-only randomUUID API.
+Text signatures cover the whole non-editable text with a cached fixed-size
+fingerprint, so middle/suffix edits and appends beyond the first 200 characters
+invalidate prepared actions even when geometry stays fixed. Accessibility-state
+regressions also cover aria-pressed-only toggle changes and their agent attribution.
 
 The monitor regressions are also included in `npm run test:runtime-lifecycle`.

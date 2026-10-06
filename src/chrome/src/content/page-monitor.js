@@ -15,6 +15,7 @@
   const operations = new Map();
   const nativeTargets = new Set();
   let signatures = new WeakMap();
+  let textSignatures = new WeakMap();
   let roots = new WeakSet();
   let active = false, disposed = false, runToken = '', seq = 0, revision = 0;
   let observer = null, domTimer = null, scrollTimer = null, lastUserAt = 0;
@@ -155,14 +156,30 @@
     }
     return null;
   }
+  function textSignature(node) {
+    const text = node.textContent || '', cached = textSignatures.get(node);
+    if (cached?.text === text) return cached.signature;
+    // Keep the fingerprint fixed-size while covering the entire text, including
+    // equal-length middle/suffix edits. Unchanged nodes avoid rehashing on layout reads.
+    let hash = 0, power = 1;
+    for (let i = 0; i < text.length; i++) {
+      hash = (Math.imul(hash, 16777619) + text.charCodeAt(i)) >>> 0;
+      power = Math.imul(power, 16777619) >>> 0;
+    }
+    const value = [text.length, hash, power];
+    textSignatures.set(node, { text, signature: value });
+    return value;
+  }
   function signature(el) {
     if (ignored(el)) return '';
     const shown = visible(el);
     const rect = shown ? el.getBoundingClientRect() : {};
     const content = editable(el) ? '' : [...el.childNodes, ...(el.shadowRoot?.childNodes || [])].filter(node => node.nodeType === 3)
-      .map(node => node.textContent).join('').slice(0, 200);
+      .map(textSignature).reduce(([size, hash], [length, part, power]) =>
+        [size + length, (Math.imul(hash, power) + part) >>> 0], [0, 0]);
     return JSON.stringify([shown, content, el.children.length + (el.shadowRoot?.children.length || 0), el.getAttribute('role'), el.getAttribute('aria-label'),
       el.getAttribute('aria-expanded'), el.getAttribute('aria-selected'), el.getAttribute('aria-checked'),
+      el.getAttribute('aria-pressed'),
       el.getAttribute('aria-hidden'), el.hasAttribute('open'), el.inert === true,
       el.getAttribute('aria-disabled'), el.disabled === true, el.readOnly === true, el.checked === true, el.validity?.valid !== false, Math.round((rect.width || 0) / 8), Math.round((rect.height || 0) / 8),
       Math.round(((rect.x || 0) + window.scrollX) / 8), Math.round(((rect.y || 0) + window.scrollY) / 8)]);
@@ -179,7 +196,7 @@
     if (!root || roots.has(root) || !observer) return;
     roots.add(root);
     observer.observe(root, { childList: true, subtree: true, characterData: true, attributes: true, attributeOldValue: true,
-      attributeFilter: ['role', 'aria-label', 'aria-expanded', 'aria-selected', 'aria-checked', 'aria-disabled',
+      attributeFilter: ['role', 'aria-label', 'aria-expanded', 'aria-selected', 'aria-checked', 'aria-pressed', 'aria-disabled',
         'aria-hidden', 'hidden', 'disabled', 'readonly', 'checked', 'selected', 'open', 'inert', 'class', 'style'] });
     seed(root, budget);
   }
@@ -424,7 +441,7 @@
     clearTimeout(domTimer); clearTimeout(scrollTimer); domTimer = null; scrollTimer = null; unreported = 0; pendingDOM = null; lastFeedbackDelivery = Promise.resolve();
     listeners.splice(0).forEach(remove => remove());
     operations.clear(); localOperation = null; agentTurn = null;
-    roots = new WeakSet(); signatures = new WeakMap();
+    roots = new WeakSet(); signatures = new WeakMap(); textSignatures = new WeakMap();
   }
   async function requestState() {
     const generation = ++requestGeneration;

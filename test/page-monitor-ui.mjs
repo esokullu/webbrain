@@ -683,10 +683,15 @@ for (const [build, engine] of [['chrome', chromium], ['firefox', firefox]]) {
       await page.evaluate(() => document.getElementById('prepared-field').focus({ preventScroll: true }));
       await page.keyboard.press('x');
       await page.waitForFunction(() => feedback.some(event => event.kind === 'input' && event.source === 'user'), null, { timeout: 1000 });
-      await page.evaluate(() => { monitorEnabled = false; deliver('page_monitor_state'); document.getElementById('prep-scroll-box').scrollTop = 0; window.scrollTo(0, 0); });
+      await page.evaluate(() => {
+        monitorEnabled = false; deliver('page_monitor_state'); document.activeElement?.blur();
+        document.getElementById('prep-scroll-box').scrollTop = 0; window.scrollTo(0, 0);
+      });
       await page.waitForTimeout(50);
       await page.evaluate(() => { monitorEnabled = true; deliver('page_monitor_state'); });
       await page.waitForTimeout(20);
+      assert.equal(await page.evaluate(() => document.getElementById('prep-scroll-box').scrollTop), 0,
+        'Keep the target offscreen before testing a rejected preparation, without browser caret scrolling');
       const result = await page.evaluate(async () => {
         const finish = __wbPageMonitor.beginContentAction('type_ax', { ref_id: 'prepared-field', _bidiPrepare: { action: 'type' } });
         document.getElementById('status').textContent = 'Intervening page change'; await Promise.resolve();
@@ -1063,6 +1068,80 @@ for (const [build, engine] of [['chrome', chromium], ['firefox', firefox]]) {
         assert.deepEqual(result, { code: 'page_feedback_pending', disconnected: true, sameSize: true, revised: true });
         await page.waitForFunction(() => feedback.some(event => event.kind === 'dom'));
       }
+    } finally { await browser.close(); }
+  });
+
+  test(`${build}: long text edits beyond the initial prefix invalidate prepared actions`, async () => {
+    const { browser, page } = await fixture(engine, build);
+    try {
+      await page.evaluate(() => {
+        const output = document.createElement('p'); output.id = 'long-output';
+        output.style.cssText = 'width:800px;height:160px;font:12px/14px monospace;word-break:break-all';
+        output.textContent = 'A'.repeat(260) + ' middle OLD ' + 'B'.repeat(260) + ' suffix OLD';
+        document.body.prepend(output);
+        monitorEnabled = false; deliver('page_monitor_state'); monitorEnabled = true; deliver('page_monitor_state');
+      });
+      await page.waitForTimeout(200);
+      for (const edit of ['middle', 'suffix', 'append']) {
+        const result = await page.evaluate(async edit => {
+          feedback = []; const output = document.getElementById('long-output'), before = output.getBoundingClientRect();
+          const prefix = output.textContent.slice(0, 200);
+          const finish = __wbPageMonitor.beginContentAction('click', { selector: '#agent', _bidiPrepare: true });
+          if (edit === 'middle') output.firstChild.data = output.firstChild.data.replace('middle OLD', 'middle NEW');
+          else if (edit === 'suffix') output.textContent = output.textContent.replace('suffix OLD', 'suffix NEW');
+          else output.firstChild.appendData(' additional output');
+          await Promise.resolve();
+          let code; try { __wbPageMonitor.beforeLocalDispatch(); } catch (error) { code = error.code; } finally { finish(); }
+          const after = output.getBoundingClientRect();
+          return { code, sameGeometry: before.width === after.width && before.height === after.height,
+            samePrefix: prefix === output.textContent.slice(0, 200) };
+        }, edit);
+        assert.deepEqual(result, { code: 'page_feedback_pending', sameGeometry: true, samePrefix: true });
+        await page.waitForFunction(() => feedback.some(event => event.kind === 'dom'), null, { timeout: 1000 });
+      }
+      await page.evaluate(() => { feedback = []; const output = document.getElementById('long-output'); output.textContent = output.textContent; });
+      await page.waitForTimeout(200);
+      assert.deepEqual(await page.evaluate(() => feedback), [], 'Replacing an identical text node must remain coalesced');
+      await page.evaluate(() => {
+        feedback = []; document.getElementById('long-output').firstChild.splitText(270);
+      });
+      await page.waitForTimeout(200);
+      assert.deepEqual(await page.evaluate(() => feedback), [], 'Splitting unchanged text must retain the same content signature');
+      await page.evaluate(() => {
+        feedback = []; const output = document.getElementById('long-output'); output.normalize(); output.append(document.createTextNode(''));
+      });
+      await page.waitForTimeout(200);
+      assert.deepEqual(await page.evaluate(() => feedback), [], 'Normalizing or adding empty text must not produce feedback');
+    } finally { await browser.close(); }
+  });
+
+  test(`${build}: aria-pressed-only toggle changes invalidate preparation and preserve agent attribution`, async () => {
+    const { browser, page } = await fixture(engine, build);
+    try {
+      await page.evaluate(() => {
+        const toggle = document.getElementById('human'); toggle.setAttribute('aria-pressed', 'false');
+        monitorEnabled = false; deliver('page_monitor_state'); monitorEnabled = true; deliver('page_monitor_state');
+      });
+      await page.waitForTimeout(200);
+      for (const state of ['true', 'mixed', 'false']) {
+        const code = await page.evaluate(async state => {
+          feedback = []; const finish = __wbPageMonitor.beginContentAction('click', { selector: '#human', _bidiPrepare: true });
+          document.getElementById('human').setAttribute('aria-pressed', state);
+          await Promise.resolve();
+          try { __wbPageMonitor.beforeLocalDispatch(); return null; }
+          catch (error) { return error.code; }
+          finally { finish(); }
+        }, state);
+        assert.equal(code, 'page_feedback_pending');
+        await page.waitForFunction(() => feedback.some(event => event.kind === 'dom' && event.target === 'button#human'), null, { timeout: 1000 });
+      }
+      await page.evaluate(() => {
+        feedback = []; const finish = __wbPageMonitor.beginContentAction('execute_js');
+        try { __wbPageMonitor.beforeLocalDispatch(); document.getElementById('human').setAttribute('aria-pressed', 'true'); }
+        finally { finish(); }
+      });
+      await page.waitForTimeout(200);
+      assert.deepEqual(await page.evaluate(() => feedback), [], 'A marked synchronous toggle must not feed back into its own run');
     } finally { await browser.close(); }
   });
 
