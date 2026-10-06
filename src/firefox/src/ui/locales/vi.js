@@ -1,3 +1,4 @@
+import { getGenerativeMediaCopy } from './generative-media-copy.mjs';
 import bidiCopy from './bidi-copy.mjs';
 import cloudBridgeCopy from './cloud-bridge-copy.mjs';
 // Vietnamese — translated from the canonical English locale.
@@ -5,6 +6,7 @@ import { getApocalypseModeCopy } from './apocalypse-copy.mjs';
 import { getEmergencyBoxCopy } from './emergency-copy.mjs';
 
 export default {
+  ...getGenerativeMediaCopy('vi'),
   ...bidiCopy,
   ...cloudBridgeCopy,
   'sp.ui_scale.label': 'Thu phóng giao diện tiện ích',
@@ -891,8 +893,8 @@ export default {
   'st.transcription.connected': "Đã kết nối! Model: {model}",
   'st.transcription.failed': "Không thành công: {error}",
   'st.transcription.fill_required': "Trước tiên hãy điền URL cơ sở và Mô hình.",
-  "st.imagegen.heading": "Media tạo sinh (fal.ai)",
-  "st.imagegen.desc": "Được công cụ tác nhân generate_image sử dụng để tạo hình ảnh và phương tiện khác từ lời nhắc văn bản thông qua API hàng đợi của fal.ai. Lấy khóa tại fal.ai/dashboard/keys. Không dùng cho trò chuyện.",
+  "st.imagegen.heading": "Media tạo sinh",
+  "st.imagegen.desc": "Công cụ tác nhân generate_image tạo hình ảnh và phương tiện khác từ lời nhắc văn bản qua nhà cung cấp đã chọn.",
   "st.imagegen.saved": "Đã lưu!",
   "st.imagegen.cleared": "Đã xóa.",
   "st.imagegen.testing": "Đang kiểm tra...",

@@ -1,3 +1,4 @@
+import { getGenerativeMediaCopy } from './generative-media-copy.mjs';
 import bidiCopy from './bidi-copy.mjs';
 import cloudBridgeCopy from './cloud-bridge-copy.mjs';
 // Hebrew (he).
@@ -7,6 +8,7 @@ import { getApocalypseModeCopy } from './apocalypse-copy.mjs';
 import { getEmergencyBoxCopy } from './emergency-copy.mjs';
 
 export default {
+  ...getGenerativeMediaCopy('he'),
   ...bidiCopy,
   ...cloudBridgeCopy,
   'sp.ui_scale.label': 'הגדלת ממשק התוסף',
@@ -805,8 +807,8 @@ export default {
   "st.transcription.connected": "מחובר! מודל: {model}",
   "st.transcription.failed": "נכשל: {error}",
   "st.transcription.fill_required": "יש למלא תחילה כתובת URL בסיסית ומודל.",
-  "st.imagegen.heading": "מדיה גנרטיבית (fal.ai)",
-  "st.imagegen.desc": "בשימוש על ידי כלי הסוכן generate_image ליצירת תמונות ומדיה אחרת מתיאור טקסטואלי דרך ה-Queue API של fal.ai. אפשר לקבל מפתח ב-fal.ai/dashboard/keys. אינו משמש לצ׳אט.",
+  "st.imagegen.heading": "מדיה גנרטיבית",
+  "st.imagegen.desc": "כלי הסוכן generate_image יוצר תמונות ומדיה נוספת מהנחיית טקסט באמצעות הספק שנבחר.",
   "st.imagegen.saved": "נשמר!",
   "st.imagegen.cleared": "נמחק.",
   "st.imagegen.testing": "בודק...",

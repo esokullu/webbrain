@@ -123,7 +123,8 @@ import {
   visionGenerationOptions,
 } from '../providers/provider-compatibility.js';
 import { resolveMaxOutputTokens } from '../providers/context-windows.js';
-import { generateImage } from './fal-media.js';
+import { generateImage, readMediaConfig } from './generative-media.js';
+import { mediaPermissionUrl, validateMediaConfig } from './media-config.js';
 import { extractFirstJsonObject } from './json-extract.js';
 import { repairAssistantDisplayText, sanitizeText as sanitizePlannerText } from './text-sanitize.js';
 import { emptyOutputFailureMessage, modelOutputDiagnostics } from './model-output-diagnostics.js';
@@ -11119,6 +11120,19 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
         continue;
       }
       const otpEmailPermissionArgs = otpEmailPreparation.permissionArgs;
+      let imageGenConfig;
+      let imageGenPermissionUrl = '';
+      if (fnName === 'generate_image') {
+        try {
+          imageGenConfig = await readMediaConfig();
+          validateMediaConfig(imageGenConfig);
+          imageGenPermissionUrl = mediaPermissionUrl(imageGenConfig);
+        } catch (error) {
+          const recovery = await recordPreparationFailure(toolIndex, fnName, fnArgs, { success: false, error: error.message });
+          if (recovery) return recovery;
+          continue;
+        }
+      }
 
       const mediaTargetGuard = await this._downloadPublicMediaExplicitUrlGuard(tabId, fnName, fnArgs);
       if (mediaTargetGuard) {
@@ -11596,7 +11610,9 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
           if (capability === Capability.NETWORK && isNetworkMutation(fnName, fnArgs) && apiMutationsAllowedForRun()) continue;
           // Every distinct host the call touches must be granted. Usually one,
           // but download_files takes a urls[] array that can span many hosts.
-          const gateArgs = fnName === OTP_EMAIL_TOOL_NAME && otpEmailPermissionArgs
+          const gateArgs = fnName === 'generate_image'
+            ? { _generativeMediaUrl: imageGenPermissionUrl }
+            : fnName === OTP_EMAIL_TOOL_NAME && otpEmailPermissionArgs
             ? otpEmailPermissionArgs
             : this._skillPermissionArgsForCapability(skillCallTool, capability, fnArgs);
           const hosts = requiredHosts(capability, gateArgs, curUrl, fnName);
@@ -11924,6 +11940,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
               dispatchBinding: pipelineToolbarPreflight.probe?.dispatchBinding || null,
               ...messageRecipientExecutionContext,
               iframeTargetUnresolved: pipelineToolbarPreflight.iframeTargetUnresolved === true,
+              imageGenConfig,
               _contentActionAbortSignal: abortSignal,
               _contentActionDispatchState: actionDispatchState,
             },
@@ -29437,6 +29454,10 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
    */
   _limitToolResult(result, maxResultChars = STANDARD_TOOL_RESULT_CHARS) {
     maxResultChars = Number(maxResultChars) === 16000 ? 16000 : STANDARD_TOOL_RESULT_CHARS;
+    // Inline media is rendered for the user; base64 bytes have no value in model context.
+    if (result?.success && result?.provider && (result.inlineMedia || /^data:(image|video|audio)\//.test(result.url || ''))) {
+      result = { ...result, url: undefined, mediaId: undefined, inlineMedia: true, note: 'Generated media is displayed in the chat with a save link. Tell the user it is ready; do not invent a hosted URL.' };
+    }
     const windowSafeResult = isReadPageWindowResult(result)
       ? fitReadPageWindowResult(result, maxResultChars)
       : result;
@@ -32848,7 +32869,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       return await this._restrictedDomainScreenshotFallback(tabId, name, args.url, result);
     }
     if (name === 'generate_image') {
-      return await generateImage(args, { signal: executionContext?._contentActionAbortSignal });
+      return await generateImage(args, { signal: executionContext?._contentActionAbortSignal, ...(executionContext?.imageGenConfig ? { config: executionContext.imageGenConfig } : {}) });
     }
     if (name === 'read_page_source') {
       const result = await readPageSource(args.url, args, { tabId, signal: executionContext?._contentActionAbortSignal });

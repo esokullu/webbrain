@@ -6,7 +6,7 @@
 
 **Settings → Providers** selects the main model for conversation, planning and
 final replies. **Settings → Assistive Models** groups Vision (including screenshot
-limits and redaction), Speech to text, Generative media (fal.ai, powering the
+limits and redaction), Speech to text, Generative Media (powering the
 `generate_image` agent tool), Jev (TypeSafe), and SafeSocial. Configuring an assistive
 model does not replace the active provider. Jev is outside the dynamic provider
 list; its verification, fast-classification and experimental browser switches
@@ -14,19 +14,50 @@ are independent opt-ins. See [the settings guide](https://webbrain.one/docs/sett
 and [data flow](privacy-and-data-flow.md#optional-jev-typesafe-scheduled-task-verification)
 for setup and disclosure details. Existing `#multimodal` settings links still work.
 
-### Generative media (fal.ai)
+### Generative Media
 
-The `generate_image` agent tool submits a text prompt to fal.ai's queue API
-(`agent/fal-media.js`) and returns the hosted media URL. Configure the API key
-and model under **Settings → Assistive Models → Generative media (fal.ai)**.
-The settings card offers **Test Connection** (a cheap auth probe that never
-generates media) and per-card **Save / Clear** controls. The tool is a full-tier
-Act-mode tool: it is **not** offered in Ask mode or on the compact/mid normal
-tool surface, so use a Full-tier provider in Act mode to exercise it.
+Configure **Settings → Assistive Models → Generative Media** for the
+`generate_image` agent tool. Select one provider and save its settings:
 
-The Act system prompt and the planner tool catalog tell the model to call
-`generate_image` whenever the user asks to generate media, rather than
-navigating to third-party image sites.
+| Provider | Required settings | Generation |
+| --- | --- | --- |
+| fal.ai | API key, model ID (for example `fal-ai/flux/schnell`) | fal.ai queue API; existing saved fal.ai settings remain compatible |
+| OpenRouter | API key, image model ID | [Dedicated Image API](https://openrouter.ai/docs/guides/overview/multimodal/image-generation); inline images appear in chat with a save link |
+| Comfy Router | Comfy API key, `provider/model` ID (for example `bfl/flux-2-pro`) | [Queued requests](https://docs.comfy.org/development/comfy-router/queued-delivery); hosted or inline media |
+| ComfyUI (localhost) | Local server URL (default `http://127.0.0.1:8188`), workflow JSON in API format | Local `/prompt`, `/history/{prompt_id}`, and `/view` endpoints; no API key |
+
+For Comfy Router models with native inputs other than `prompt`, paste their input
+JSON in **Model input JSON** and place `{{prompt}}` in the text field(s). Other
+values, such as duration or resolution, are preserved. Without a placeholder,
+WebBrain supplies the tool prompt as `prompt`. Refer to the model's
+[input schema](https://docs.comfy.org/development/comfy-router/schemas).
+
+For local ComfyUI, start the server, export a working workflow **in API format**,
+and replace its positive prompt text with `{{prompt}}`. Keep the model names,
+connections, and other inputs from the working export. Include a Save Image or
+other media output node. Only loopback URLs (`localhost`, `127.0.0.1`, or `[::1]`)
+are accepted. A connection test checks the server, not workflow execution.
+
+**Test Connection** makes only free, read-only authentication/model/server probes;
+it does not generate media. OpenRouter also checks that the selected model appears
+in the image generation catalog. **Save / Clear** apply to the selected media
+configuration. Unsaved drafts survive provider switches while settings remain open;
+only the saved selection is used by the agent.
+
+The tool is a full-tier Act-mode tool and is unavailable in Ask mode or on the
+compact/mid tool surface. Permission checks use the selected provider's host.
+Cloud keys are sent only to fixed API origins, and authenticated requests reject
+redirects. Generations have a ten-minute client deadline. Stop cancels queued
+fal.ai/Comfy Router jobs when possible; local Stop deletes only this prompt from
+the queue. A local workflow that has already started can continue, and Comfy Router
+can charge for a partner generation already in flight. Inline media is limited to
+20 MB; choose hosted output for larger files. Inline outputs are stored locally
+as media assets, so their previews and save links survive panel reopening without
+putting base64 bytes in the run journal or model context.
+
+The Act system prompt and planner direct the model to call `generate_image` when
+the user asks to generate media. Provider results are treated as untrusted content.
+Inline bytes are shown in chat and excluded from model context.
 
 ### SafeSocial image classifier (experimental)
 

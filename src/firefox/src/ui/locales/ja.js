@@ -1,3 +1,4 @@
+import { getGenerativeMediaCopy } from './generative-media-copy.mjs';
 import bidiCopy from './bidi-copy.mjs';
 import cloudBridgeCopy from './cloud-bridge-copy.mjs';
 // Japanese (ja).
@@ -7,6 +8,7 @@ import { getApocalypseModeCopy } from './apocalypse-copy.mjs';
 import { getEmergencyBoxCopy } from './emergency-copy.mjs';
 
 export default {
+  ...getGenerativeMediaCopy('ja'),
   ...bidiCopy,
   ...cloudBridgeCopy,
   'sp.ui_scale.label': '拡張機能 UI のズーム',
@@ -599,8 +601,8 @@ export default {
   "st.transcription.connected": "接続しました！モデル: {model}",
   "st.transcription.failed": "失敗: {error}",
   "st.transcription.fill_required": "先にベース URL とモデルを入力してください。",
-  "st.imagegen.heading": "生成メディア (fal.ai)",
-  "st.imagegen.desc": "generate_image エージェントツールが fal.ai のキュー API を通じてテキストプロンプトから画像などのメディアを生成するために使用します。キーは fal.ai/dashboard/keys で取得できます。チャットには使用されません。",
+  "st.imagegen.heading": "生成メディア",
+  "st.imagegen.desc": "エージェントツール generate_image は、選択したプロバイダーでテキストプロンプトから画像などのメディアを生成します。",
   "st.imagegen.saved": "保存しました！",
   "st.imagegen.cleared": "クリアしました。",
   "st.imagegen.testing": "テスト中...",

@@ -2054,22 +2054,47 @@
       </svg>
       <span data-i18n="st.imagegen.heading"></span>
     </h3>
-    <div class="provider-card" id="image-gen-card">
+    <div class="provider-card" id="image-gen-card" aria-labelledby="image-gen-heading">
       <div style="font-size:12px;color:var(--text2);margin-bottom:12px;line-height:1.5;" data-i18n="st.imagegen.desc"></div>
       <div class="field">
-        <label data-i18n="st.provider.field.api_key"></label>
-        <input type="password" id="image-gen-api-key" placeholder="FAL_KEY">
+        <label for="image-gen-provider" data-i18n="st.imagegen.provider"></label>
+        <select id="image-gen-provider">
+          <option value="fal">fal.ai</option>
+          <option value="openrouter">OpenRouter</option>
+          <option value="comfyrouter">Comfy Router</option>
+          <option value="comfyui" data-i18n="st.imagegen.local_provider">ComfyUI (localhost)</option>
+        </select>
       </div>
-      <div class="field">
-        <label data-i18n="st.provider.field.model"></label>
+      <div class="field" id="image-gen-key-field">
+        <label for="image-gen-api-key" data-i18n="st.provider.field.api_key"></label>
+        <input type="password" id="image-gen-api-key" placeholder="FAL_KEY" autocomplete="off">
+      </div>
+      <div class="field" id="image-gen-model-field">
+        <label for="image-gen-model" data-i18n="st.provider.field.model"></label>
         <input type="text" id="image-gen-model" placeholder="fal-ai/flux/schnell">
+      </div>
+      <div class="field" id="image-gen-url-field" hidden>
+        <label for="image-gen-base-url" data-i18n="st.provider.field.api_base_url"></label>
+        <input type="url" id="image-gen-base-url" placeholder="http://127.0.0.1:8188">
+      </div>
+      <div class="field" id="image-gen-workflow-field" hidden>
+        <label for="image-gen-workflow" data-i18n="st.imagegen.workflow"></label>
+        <textarea id="image-gen-workflow" rows="8" spellcheck="false" placeholder='{"6":{"class_type":"CLIPTextEncode","inputs":{"text":"{{prompt}}"}}}'></textarea>
+      </div>
+      <div class="field" id="image-gen-parameters-field" hidden>
+        <label for="image-gen-parameters" data-i18n="st.imagegen.parameters"></label>
+        <textarea id="image-gen-parameters" rows="4" spellcheck="false" placeholder='{"prompt":"{{prompt}}"}'></textarea>
+      </div>
+      <div style="font-size:12px;color:var(--text2);line-height:1.5;margin-bottom:12px;">
+        <span id="image-gen-provider-hint"></span>
+        <a id="image-gen-docs" href="https://fal.ai/dashboard/keys" target="_blank" rel="noopener noreferrer" data-i18n="st.imagegen.setup"></a>
       </div>
       <div class="btn-row">
         <button class="btn-primary" id="btn-save-image-gen" data-i18n="st.transcription.save"></button>
         <button class="btn-secondary" id="btn-test-image-gen" data-i18n="st.transcription.test"></button>
         <button class="btn-secondary" id="btn-clear-image-gen" data-i18n="st.transcription.clear"></button>
       </div>
-      <div class="test-result" id="test-image-gen"></div>
+      <div class="test-result" id="test-image-gen" role="status"></div>
     </div>
 
     <h3 class="mm-section-heading" id="system-one-heading">

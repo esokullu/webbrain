@@ -108641,26 +108641,30 @@ test('hostForCapability: navigate/network use target URL, others use current pag
   assert.equal(hostForCapability(Capability.NAVIGATE, { steps: 2 }, 'https://cur.com', 'go_forward'), 'cur.com');
 });
 
-test('generate_image permission and result trust are bound to fal.ai in both builds', () => {
+test('generate_image permission and result trust are bound to the configured provider in both builds', () => {
   for (const [label, Cap, hostFor, reqHosts, untrustedTools] of [
     ['firefox', Capability, hostForCapability, requiredHosts, UNTRUSTED_CONTENT_TOOLS],
     ['chrome', CapabilityCh, hostForCapabilityCh, requiredHostsCh, UNTRUSTED_CONTENT_TOOLS_CH],
   ]) {
     const activePage = 'https://example.com/article';
-    assert.equal(
-      hostFor(Cap.NETWORK, {}, activePage, 'generate_image'),
-      'queue.fal.run',
-      `${label}: paid generation must not borrow the active-page host`,
-    );
-    assert.deepEqual(
-      reqHosts(Cap.NETWORK, {}, activePage, 'generate_image'),
-      ['queue.fal.run'],
-      `${label}: the grant must name the real fal.ai egress host`,
-    );
+    for (const [url, host] of [
+      ['https://queue.fal.run', 'queue.fal.run'],
+      ['https://openrouter.ai', 'openrouter.ai'],
+      ['https://api.comfy.org', 'api.comfy.org'],
+      ['http://127.0.0.1:8188', '127.0.0.1'],
+    ]) {
+      const args = { _generativeMediaUrl: url };
+      assert.equal(hostFor(Cap.NETWORK, args, activePage, 'generate_image'), host,
+        `${label}: generation must not borrow the active-page host`);
+      assert.deepEqual(reqHosts(Cap.NETWORK, args, activePage, 'generate_image'), [host],
+        `${label}: the grant must name the configured media host`);
+    }
+    assert.deepEqual(reqHosts(Cap.NETWORK, {}, activePage, 'generate_image'), [],
+      `${label}: missing trusted settings must fail closed`);
     assert.equal(
       untrustedTools.has('generate_image'),
       true,
-      `${label}: provider-authored fal.ai results must be wrapped as untrusted`,
+      `${label}: provider-authored media results must be wrapped as untrusted`,
     );
   }
 });
@@ -128596,6 +128600,7 @@ test('generate_image success completes state-changing tasks while failed generat
       [2, { success: false, error: 'fal.ai rejected the request.' }, 0],
       [3, { success: false, error: 'fal.ai generation was cancelled.', cancelled: true }, 0],
       [4, { success: false, error: 'fal.ai generation timed out.' }, 0],
+      [5, { success: true, inlineMedia: true, mediaId: 'f0c21b19-32d0-44f4-93cd-1031c6bb9a4d', mimeType: 'image/png', provider: 'openrouter' }, 1],
     ]) {
       const state = agent._startPlanExecutionGuard(tabId, 'act', {
         requestKind: 'execute',
@@ -128644,7 +128649,7 @@ test('generate_image tool exists in both builds, full tier only, and settings UI
 
     const agentJs = fs.readFileSync(path.join(ROOT, `src/${build}/src/agent/agent.js`), 'utf8');
     assert.ok(agentJs.includes("name === 'generate_image'"), `${build}: agent.js should dispatch generate_image`);
-    assert.match(agentJs, /generateImage\(args, \{ signal: executionContext\?\._contentActionAbortSignal \}\)/,
+    assert.match(agentJs, /generateImage\(args, \{ signal: executionContext\?\._contentActionAbortSignal, \.\.\.\(executionContext\?\.imageGenConfig \? \{ config: executionContext\.imageGenConfig \} : \{\}\) \}\)/,
       `${build}: agent.js should pass the linked run signal into fal generation`);
 
     assert.equal(untrustedTools.has('generate_image'), true, `${build}: fal.ai output must be untrusted`);

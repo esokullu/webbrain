@@ -1,3 +1,4 @@
+import { getGenerativeMediaCopy } from './generative-media-copy.mjs';
 import bidiCopy from './bidi-copy.mjs';
 import cloudBridgeCopy from './cloud-bridge-copy.mjs';
 // Spanish (es).
@@ -7,6 +8,7 @@ import { getApocalypseModeCopy } from './apocalypse-copy.mjs';
 import { getEmergencyBoxCopy } from './emergency-copy.mjs';
 
 export default {
+  ...getGenerativeMediaCopy('es'),
   ...bidiCopy,
   ...cloudBridgeCopy,
   'sp.ui_scale.label': 'Zoom de la interfaz de la extensión',
@@ -599,8 +601,8 @@ export default {
   "st.transcription.connected": "¡Conectado! Modelo: {model}",
   "st.transcription.failed": "Falló: {error}",
   "st.transcription.fill_required": "Rellena primero la URL base y el modelo.",
-  "st.imagegen.heading": "Medios generativos (fal.ai)",
-  "st.imagegen.desc": "Usada por la herramienta de agente generate_image para crear imágenes y otros medios a partir de un prompt de texto mediante la API de cola de fal.ai. Obtén una clave en fal.ai/dashboard/keys. No se usa para chat.",
+  "st.imagegen.heading": "Medios generativos",
+  "st.imagegen.desc": "La herramienta de agente generate_image crea imágenes y otros medios a partir de texto con el proveedor seleccionado.",
   "st.imagegen.saved": "¡Guardado!",
   "st.imagegen.cleared": "Borrado.",
   "st.imagegen.testing": "Probando...",

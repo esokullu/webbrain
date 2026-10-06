@@ -1,3 +1,4 @@
+import { getGenerativeMediaCopy } from './generative-media-copy.mjs';
 import bidiCopy from './bidi-copy.mjs';
 import cloudBridgeCopy from './cloud-bridge-copy.mjs';
 // Malay (ms).
@@ -7,6 +8,7 @@ import { getApocalypseModeCopy } from './apocalypse-copy.mjs';
 import { getEmergencyBoxCopy } from './emergency-copy.mjs';
 
 export default {
+  ...getGenerativeMediaCopy('ms'),
   ...bidiCopy,
   ...cloudBridgeCopy,
   'sp.ui_scale.label': 'Zum UI sambungan',
@@ -599,8 +601,8 @@ export default {
   "st.transcription.connected": "Tersambung! Model: {model}",
   "st.transcription.failed": "Gagal: {error}",
   "st.transcription.fill_required": "Isi URL Asas dan Model terlebih dahulu.",
-  "st.imagegen.heading": "Media generatif (fal.ai)",
-  "st.imagegen.desc": "Digunakan oleh alat ejen generate_image untuk mencipta imej dan media lain daripada geseran teks melalui API baris giliran fal.ai. Dapatkan kunci di fal.ai/dashboard/keys. Tidak digunakan untuk sembang.",
+  "st.imagegen.heading": "Media generatif",
+  "st.imagegen.desc": "Alat ejen generate_image menghasilkan imej dan media lain daripada gesaan teks melalui penyedia yang dipilih.",
   "st.imagegen.saved": "Disimpan!",
   "st.imagegen.cleared": "Dibersihkan.",
   "st.imagegen.testing": "Menguji...",

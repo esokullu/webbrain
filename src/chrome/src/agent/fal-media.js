@@ -1,6 +1,6 @@
 // fal.ai generative media (assistive model).
 //
-// Configured in Settings -> Assistive Models -> "Generative media (fal.ai)"
+// Configured in Settings -> Assistive Models -> Generative Media (fal.ai provider).
 // and stored in extension storage as `imageGenModel = { apiKey, model }`.
 // fal.ai uses a queue API: submit a prompt, poll status_url, then fetch
 // response_url. Auth uses `Authorization: Key <FAL_KEY>`.
@@ -20,9 +20,7 @@ export function normalizeFalModelId(model) {
   return id;
 }
 
-export function isImageGenConfigured(cfg) {
-  return !!(cfg && cfg.apiKey && cfg.model);
-}
+export { isImageGenConfigured } from './media-config.js';
 
 export function falQueueSubmitUrl(model) {
   return `${FAL_QUEUE_BASE}/${model}`;
@@ -150,6 +148,7 @@ export async function runFalGeneration({
     throwIfAborted(operation.signal);
     const submitRes = await fetchImpl(falQueueSubmitUrl(model), {
       method: 'POST',
+      redirect: 'error', credentials: 'omit',
       headers,
       body: JSON.stringify({ prompt: text }),
       signal: operation.signal,
@@ -177,7 +176,7 @@ export async function runFalGeneration({
     let status = 'IN_QUEUE';
     while (true) {
       await abortableDelay(FAL_STATUS_POLL_INTERVAL_MS, operation.signal);
-      const statusRes = await fetchImpl(statusUrl, { headers, signal: operation.signal });
+      const statusRes = await fetchImpl(statusUrl, { headers, signal: operation.signal, redirect: 'error', credentials: 'omit' });
       if (!statusRes.ok) throw new Error(`fal.ai status check failed (HTTP ${statusRes.status}).`);
 
       let statusPayload;
@@ -188,7 +187,7 @@ export async function runFalGeneration({
       }
       status = String(statusPayload?.status || '').toUpperCase();
       if (status === 'COMPLETED') {
-        const resultRes = await fetchImpl(responseUrl, { headers, signal: operation.signal });
+        const resultRes = await fetchImpl(responseUrl, { headers, signal: operation.signal, redirect: 'error', credentials: 'omit' });
         if (!resultRes.ok) throw new Error(`fal.ai result fetch failed (HTTP ${resultRes.status}).`);
 
         let payload;
@@ -217,54 +216,13 @@ export async function runFalGeneration({
   }
 }
 
-/** Agent tool entry point. Reads the assistive-model config from storage. */
+// Legacy entry points retained for callers importing fal-media.js.
 export async function generateImage(args, options = {}) {
-  const fetchImpl = typeof options === 'function' ? options : (options.fetchImpl || fetch);
-  const signal = typeof options === 'object' ? options.signal : null;
-  let cfg;
-  const api = (typeof browser !== 'undefined' && browser?.storage) ? browser
-    : (typeof chrome !== 'undefined' ? chrome : null);
-  try {
-    const stored = await api.storage.local.get([IMAGE_GEN_MODEL_KEY]);
-    cfg = stored?.[IMAGE_GEN_MODEL_KEY];
-  } catch (error) {
-    return { success: false, error: 'Failed to read generative media config: ' + error.message };
-  }
-  if (!isImageGenConfigured(cfg)) {
-    return { success: false, error: 'Generative media is not configured. Set up fal.ai in Settings -> Assistive Models.' };
-  }
-  try {
-    const result = await runFalGeneration({ prompt: args?.prompt, config: cfg, fetchImpl, signal });
-    return { success: true, url: result.url, model: result.model };
-  } catch (error) {
-    return { success: false, error: error.message };
-  }
+  const media = await import('./generative-media.js');
+  return media.generateImage(args, options);
 }
 
-/** Verify a key against a free, read-only endpoint that requires authentication. */
 export async function testImageGenProvider(fetchImpl = fetch) {
-  let cfg;
-  const api = (typeof browser !== 'undefined' && browser?.storage) ? browser
-    : (typeof chrome !== 'undefined' ? chrome : null);
-  try {
-    const stored = await api.storage.local.get([IMAGE_GEN_MODEL_KEY]);
-    cfg = stored?.[IMAGE_GEN_MODEL_KEY];
-  } catch (error) {
-    return { ok: false, error: 'Failed to read generative media config: ' + error.message };
-  }
-  if (!isImageGenConfigured(cfg)) {
-    return { ok: false, error: 'Generative media not configured (API Key and Model are required).' };
-  }
-  const model = normalizeFalModelId(cfg.model);
-  if (!model) return { ok: false, error: 'Invalid fal.ai model id.' };
-  try {
-    const res = await fetchImpl(FAL_AUTH_PROBE_URL, { headers: await falAuthHeaders(cfg.apiKey) });
-    if (res.status === 401 || res.status === 403) {
-      return { ok: false, error: 'fal.ai rejected the API key (HTTP ' + res.status + ').' };
-    }
-    if (res.ok) return { ok: true, model };
-    return { ok: false, error: `Unexpected response from fal.ai (HTTP ${res.status}).` };
-  } catch (error) {
-    return { ok: false, error: error.message };
-  }
+  const media = await import('./generative-media.js');
+  return media.testImageGenProvider(fetchImpl);
 }

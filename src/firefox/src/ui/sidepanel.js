@@ -1,4 +1,5 @@
 import { renderPageFeedbackNote } from './page-feedback-ui.js';
+import { appendGeneratedMedia, restoreGeneratedMedia } from './generated-media-view.js';
 import { saveScreenshot } from './screenshot-download.js';
 /**
  * WebBrain Side Panel — Chat UI logic.
@@ -7089,6 +7090,7 @@ function renderAgentErrorUpdate(data, tabId = currentTabId, requestId = '', opti
 }
 
 function rebindRestoredMessageControls() {
+  void restoreGeneratedMedia(messagesEl, t);
   restoreStagedScreenshotAttachments();
   rebindCopyButtons();
   rebindMessageInfoToggles();
@@ -9699,6 +9701,10 @@ function handleAgentUpdateMessage(msg) {
 
     case 'tool_result':
       if (currentAssistantEl) {
+        if (data.name === 'generate_image') {
+          void appendGeneratedMedia(currentAssistantEl.querySelector('.message-content'), data.result, t);
+          schedulePersist();
+        }
         if (verboseMode) appendVerboseToolResult(data.name, data.result);
         else markLastStepDone(data.name, data.result);
       }

@@ -45,7 +45,7 @@ export function runUiSnapshotForRequest(snapshot, requestedRequestId = '') {
 
 const RUN_UI_TOOL_RESULT_PREVIEW_CHARS = 500;
 
-function compactRunUiToolResult(result) {
+function compactRunUiToolResult(result, name) {
   const source = result && typeof result === 'object' && !Array.isArray(result) ? result : {};
   const compacted = {};
   if (typeof source.success === 'boolean') compacted.success = source.success;
@@ -68,6 +68,14 @@ function compactRunUiToolResult(result) {
   if (source.truncated === true) compacted.truncated = true;
   if (source.hasMore === true) compacted.hasMore = true;
   if (source.notice) compacted.notice = String(source.notice).slice(0, 300);
+  if (name === 'generate_image' && source.success === true) {
+    // Inline bytes live in IndexedDB; retain the asset handle for live delivery
+    // and replay. Hosted/local URLs are small enough to keep in the journal.
+    for (const key of ['url', 'mediaId', 'mimeType', 'provider', 'model']) {
+      if (typeof source[key] === 'string') compacted[key] = source[key];
+    }
+    if (source.inlineMedia === true) compacted.inlineMedia = true;
+  }
   if (Object.keys(compacted).length === 0) {
     try {
       compacted.preview = String(JSON.stringify(source) || '{}').slice(0, 300);
@@ -83,7 +91,7 @@ export function compactRunUiData(type, data) {
   if (type === 'tool_result') {
     return {
       name: data.name,
-      result: compactRunUiToolResult(data.result),
+      result: compactRunUiToolResult(data.result, data.name),
     };
   }
   if (type === 'text' || type === 'text_delta') {

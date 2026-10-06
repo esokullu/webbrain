@@ -1,3 +1,4 @@
+import { getGenerativeMediaCopy } from './generative-media-copy.mjs';
 import bidiCopy from './bidi-copy.mjs';
 import cloudBridgeCopy from './cloud-bridge-copy.mjs';
 // Thai (th).
@@ -7,6 +8,7 @@ import { getApocalypseModeCopy } from './apocalypse-copy.mjs';
 import { getEmergencyBoxCopy } from './emergency-copy.mjs';
 
 export default {
+  ...getGenerativeMediaCopy('th'),
   ...bidiCopy,
   ...cloudBridgeCopy,
   'sp.ui_scale.label': 'ซูม UI ของส่วนขยาย',
@@ -615,8 +617,8 @@ export default {
   "st.transcription.connected": "เชื่อมต่อแล้ว! โมเดล: {model}",
   "st.transcription.failed": "ล้มเหลว: {error}",
   "st.transcription.fill_required": "กรอก URL ฐานและโมเดลก่อน",
-  "st.imagegen.heading": "สื่อเชิงสร้างสรรค์ (fal.ai)",
-  "st.imagegen.desc": "เครื่องมือเอเจนต์ generate_image ใช้สร้างรูปภาพและสื่ออื่น ๆ จากพรอมต์ข้อความผ่านคิว API ของ fal.ai รับคีย์ได้ที่ fal.ai/dashboard/keys ไม่ได้ใช้สำหรับแชท",
+  "st.imagegen.heading": "สื่อเชิงสร้างสรรค์",
+  "st.imagegen.desc": "เครื่องมือเอเจนต์ generate_image สร้างภาพและสื่ออื่นจากพรอมต์ข้อความผ่านผู้ให้บริการที่เลือก",
   "st.imagegen.saved": "บันทึกแล้ว!",
   "st.imagegen.cleared": "ล้างแล้ว.",
   "st.imagegen.testing": "กำลังทดสอบ...",

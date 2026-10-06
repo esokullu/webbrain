@@ -1,3 +1,4 @@
+import { getGenerativeMediaCopy } from './generative-media-copy.mjs';
 import bidiCopy from './bidi-copy.mjs';
 import cloudBridgeCopy from './cloud-bridge-copy.mjs';
 // Persian — translated from the canonical English locale.
@@ -5,6 +6,7 @@ import { getApocalypseModeCopy } from './apocalypse-copy.mjs';
 import { getEmergencyBoxCopy } from './emergency-copy.mjs';
 
 export default {
+  ...getGenerativeMediaCopy('fa'),
   ...bidiCopy,
   ...cloudBridgeCopy,
   'sp.ui_scale.label': 'بزرگ‌نمایی رابط کاربری افزونه',
@@ -891,8 +893,8 @@ export default {
   'st.transcription.connected': "متصل است! مدل: {model}",
   'st.transcription.failed': "ناموفق: {error}",
   'st.transcription.fill_required': "ابتدا Base URL و Model را پر کنید.",
-  "st.imagegen.heading": "رسانه‌های مولد (fal.ai)",
-  "st.imagegen.desc": "ابزار ایجنت generate_image برای ساخت تصویر و سایر رسانه‌ها از یک پرامپت متنی از طریق API صف fal.ai استفاده می‌کند. کلید را از fal.ai/dashboard/keys بگیرید. برای چت استفاده نمی‌شود.",
+  "st.imagegen.heading": "رسانه‌های مولد",
+  "st.imagegen.desc": "ابزار عامل generate_image با ارائه‌دهنده انتخاب‌شده از درخواست متنی، تصویر و رسانه‌های دیگر تولید می‌کند.",
   "st.imagegen.saved": "ذخیره شد!",
   "st.imagegen.cleared": "پاک شد.",
   "st.imagegen.testing": "در حال آزمایش...",

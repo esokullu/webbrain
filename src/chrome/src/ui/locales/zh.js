@@ -1,3 +1,4 @@
+import { getGenerativeMediaCopy } from './generative-media-copy.mjs';
 import bidiCopy from './bidi-copy.mjs';
 import cloudBridgeCopy from './cloud-bridge-copy.mjs';
 // Simplified Chinese (zh).
@@ -7,6 +8,7 @@ import { getApocalypseModeCopy } from './apocalypse-copy.mjs';
 import { getEmergencyBoxCopy } from './emergency-copy.mjs';
 
 export default {
+  ...getGenerativeMediaCopy('zh'),
   ...bidiCopy,
   ...cloudBridgeCopy,
   'sp.ui_scale.label': '插件界面缩放',
@@ -615,8 +617,8 @@ export default {
   "st.transcription.connected": "连接成功！模型：{model}",
   "st.transcription.failed": "失败：{error}",
   "st.transcription.fill_required": "请先填写基础 URL 和模型。",
-  "st.imagegen.heading": "生成式媒体 (fal.ai)",
-  "st.imagegen.desc": "generate_image 代理工具通过 fal.ai 的队列 API 根据文本提示生成图片等媒体。请前往 fal.ai/dashboard/keys 获取密钥。不用于聊天。",
+  "st.imagegen.heading": "生成式媒体",
+  "st.imagegen.desc": "generate_image 智能体工具通过所选提供商，根据文本提示生成图像和其他媒体。",
   "st.imagegen.saved": "已保存！",
   "st.imagegen.cleared": "已清除。",
   "st.imagegen.testing": "测试中...",

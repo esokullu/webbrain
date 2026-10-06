@@ -1,3 +1,4 @@
+import { getGenerativeMediaCopy } from './generative-media-copy.mjs';
 import bidiCopy from './bidi-copy.mjs';
 import cloudBridgeCopy from './cloud-bridge-copy.mjs';
 // Ukrainian (uk).
@@ -7,6 +8,7 @@ import { getApocalypseModeCopy } from './apocalypse-copy.mjs';
 import { getEmergencyBoxCopy } from './emergency-copy.mjs';
 
 export default {
+  ...getGenerativeMediaCopy('uk'),
   ...bidiCopy,
   ...cloudBridgeCopy,
   'sp.ui_scale.label': 'Масштаб інтерфейсу розширення',
@@ -615,8 +617,8 @@ export default {
   "st.transcription.connected": "Підключено! Модель: {model}",
   "st.transcription.failed": "Збій: {error}",
   "st.transcription.fill_required": "Спочатку заповніть базовий URL і модель.",
-  "st.imagegen.heading": "Генеративні медіа (fal.ai)",
-  "st.imagegen.desc": "Використовується інструментом агента generate_image для створення зображень та інших медіа з текстового запиту через API черги fal.ai. Ключ можна отримати на fal.ai/dashboard/keys. Не використовується для чату.",
+  "st.imagegen.heading": "Генеративні медіа",
+  "st.imagegen.desc": "Інструмент агента generate_image створює зображення та інші медіа за текстовим запитом через вибраного постачальника.",
   "st.imagegen.saved": "Збережено!",
   "st.imagegen.cleared": "Очищено.",
   "st.imagegen.testing": "Перевірка...",

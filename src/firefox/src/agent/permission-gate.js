@@ -89,7 +89,7 @@ export const UNTRUSTED_CONTENT_TOOLS = new Set([
   'execute_webmcp_tool',
   'fetch_url',
   'research_url',
-  // fal.ai returns provider-authored URLs and error text.
+  // Generative media providers return untrusted URLs and error text.
   'generate_image',
   // ChatGPT's answer and cited links are third-party page content.
   'delegate_research',
@@ -416,7 +416,7 @@ const TOOL_CAPABILITY = {
   chrome_web_store_publish: Capability.NETWORK,
   schedule_resume: Capability.SCHEDULE,
   schedule_task: Capability.SCHEDULE,
-  // generate_image spends the user's fal.ai credits via a paid network call.
+  // generate_image submits to the user's configured media provider.
   generate_image: Capability.NETWORK,
 };
 
@@ -575,7 +575,7 @@ export function hostForCapability(capability, args, currentUrlOrHost, toolName) 
     return normalizeHost(args._otpMailboxUrl);
   }
   if (toolName === 'delegate_research') return 'chatgpt.com';
-  if (toolName === 'generate_image') return 'queue.fal.run';
+  if (toolName === 'generate_image') return normalizeHost(args._generativeMediaUrl);
   if (toolName === 'execute_webmcp_tool') {
     // A tool can belong to a cross-origin frame. Charge mutations to that
     // frame's resolved URL instead of borrowing the top-level page grant.

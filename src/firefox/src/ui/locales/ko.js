@@ -1,3 +1,4 @@
+import { getGenerativeMediaCopy } from './generative-media-copy.mjs';
 import bidiCopy from './bidi-copy.mjs';
 import cloudBridgeCopy from './cloud-bridge-copy.mjs';
 // Korean (ko).
@@ -7,6 +8,7 @@ import { getApocalypseModeCopy } from './apocalypse-copy.mjs';
 import { getEmergencyBoxCopy } from './emergency-copy.mjs';
 
 export default {
+  ...getGenerativeMediaCopy('ko'),
   ...bidiCopy,
   ...cloudBridgeCopy,
   'sp.ui_scale.label': '확장 프로그램 UI 확대/축소',
@@ -599,8 +601,8 @@ export default {
   "st.transcription.connected": "연결됨! 모델: {model}",
   "st.transcription.failed": "실패: {error}",
   "st.transcription.fill_required": "먼저 기본 URL과 모델을 입력하세요.",
-  "st.imagegen.heading": "생성 미디어 (fal.ai)",
-  "st.imagegen.desc": "generate_image 에이전트 도구가 fal.ai 큐 API를 통해 텍스트 프롬프트에서 이미지 등 미디어를 생성하는 데 사용됩니다. fal.ai/dashboard/keys에서 키를 발급받으세요. 채팅에는 사용되지 않습니다.",
+  "st.imagegen.heading": "생성 미디어",
+  "st.imagegen.desc": "generate_image 에이전트 도구가 선택한 제공업체를 통해 텍스트 프롬프트로 이미지와 기타 미디어를 생성합니다.",
   "st.imagegen.saved": "저장되었습니다!",
   "st.imagegen.cleared": "지워졌습니다.",
   "st.imagegen.testing": "테스트 중...",

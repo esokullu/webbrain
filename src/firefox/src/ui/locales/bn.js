@@ -1,3 +1,4 @@
+import { getGenerativeMediaCopy } from './generative-media-copy.mjs';
 import bidiCopy from './bidi-copy.mjs';
 import cloudBridgeCopy from './cloud-bridge-copy.mjs';
 // Bengali — translated from the canonical English locale.
@@ -5,6 +6,7 @@ import { getApocalypseModeCopy } from './apocalypse-copy.mjs';
 import { getEmergencyBoxCopy } from './emergency-copy.mjs';
 
 export default {
+  ...getGenerativeMediaCopy('bn'),
   ...bidiCopy,
   ...cloudBridgeCopy,
   'sp.ui_scale.label': 'এক্সটেনশনের UI জুম',
@@ -891,8 +893,8 @@ export default {
   'st.transcription.connected': "সংযুক্ত ! মডেল: {model}",
   'st.transcription.failed': "ব্যর্থ হয়েছে: {error}",
   'st.transcription.fill_required': "প্রথমে বেস URL এবং মডেল পূরণ করুন।",
-  "st.imagegen.heading": "জেনারেটিভ মিডিয়া (fal.ai)",
-  "st.imagegen.desc": "generate_image এজেন্ট টুল দ্বারা fal.ai-র কিউ API-র মাধ্যমে টেক্সট প্রম্পট থেকে ছবি ও অন্যান্য মিডিয়া তৈরিতে ব্যবহৃত হয়। fal.ai/dashboard/keys থেকে কী নিন। চ্যাটের জন্য ব্যবহৃত হয় না।",
+  "st.imagegen.heading": "জেনারেটিভ মিডিয়া",
+  "st.imagegen.desc": "generate_image এজেন্ট টুল নির্বাচিত প্রদানকারীর মাধ্যমে টেক্সট প্রম্পট থেকে ছবি ও অন্যান্য মিডিয়া তৈরি করে।",
   "st.imagegen.saved": "সংরক্ষিত হয়েছে!",
   "st.imagegen.cleared": "মুছে ফেলা হয়েছে।",
   "st.imagegen.testing": "পরীক্ষা চলছে...",

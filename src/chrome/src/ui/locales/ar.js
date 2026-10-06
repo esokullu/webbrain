@@ -1,3 +1,4 @@
+import { getGenerativeMediaCopy } from './generative-media-copy.mjs';
 import bidiCopy from './bidi-copy.mjs';
 import cloudBridgeCopy from './cloud-bridge-copy.mjs';
 // Arabic (ar).
@@ -7,6 +8,7 @@ import { getApocalypseModeCopy } from './apocalypse-copy.mjs';
 import { getEmergencyBoxCopy } from './emergency-copy.mjs';
 
 export default {
+  ...getGenerativeMediaCopy('ar'),
   ...bidiCopy,
   ...cloudBridgeCopy,
   'sp.ui_scale.label': 'تكبير واجهة الإضافة',
@@ -615,8 +617,8 @@ export default {
   "st.transcription.connected": "تم الاتصال! النموذج: {model}",
   "st.transcription.failed": "فشل: {error}",
   "st.transcription.fill_required": "املأ عنوان API الأساسي والنموذج أولًا.",
-  "st.imagegen.heading": "الوسائط التوليدية (fal.ai)",
-  "st.imagegen.desc": "تُستخدَم بواسطة أداة generate_image لإنشاء الصور وغيرها من الوسائط من وصف نصي عبر واجهة قائمة الانتظار في fal.ai. احصل على مفتاح من fal.ai/dashboard/keys. لا تُستخدم للمحادثة.",
+  "st.imagegen.heading": "الوسائط التوليدية",
+  "st.imagegen.desc": "تستخدم أداة الوكيل generate_image المزوّد المحدد لإنشاء الصور والوسائط الأخرى من وصف نصي.",
   "st.imagegen.saved": "تم الحفظ!",
   "st.imagegen.cleared": "تم المسح.",
   "st.imagegen.testing": "جارٍ الاختبار...",

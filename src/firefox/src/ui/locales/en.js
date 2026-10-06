@@ -1,3 +1,4 @@
+import { getGenerativeMediaCopy } from './generative-media-copy.mjs';
 import bidiCopy from './bidi-copy.mjs';
 import cloudBridgeCopy from './cloud-bridge-copy.mjs';
 // English — canonical locale. Other locales inherit key names from this file.
@@ -5,6 +6,7 @@ import apocalypseModeCopy from './apocalypse-copy.mjs';
 import emergencyCopy from './emergency-copy.mjs';
 
 export default {
+  ...getGenerativeMediaCopy('en'),
   ...bidiCopy,
   ...cloudBridgeCopy,
   'sp.ui_scale.label': 'Extension UI zoom',
@@ -898,9 +900,9 @@ export default {
   'st.transcription.failed': 'Failed: {error}',
   'st.transcription.fill_required': 'Fill in Base URL and Model first.',
 
-  // Generative media (fal.ai) — Assistive Models section
-  'st.imagegen.heading': 'Generative media (fal.ai)',
-  'st.imagegen.desc': 'Used by the generate_image agent tool to create images and other media from a text prompt via fal.ai\'s queue API. Get a key at fal.ai/dashboard/keys. Not used for chat.',
+  // Generative Media — Assistive Models section
+  'st.imagegen.heading': "Generative Media",
+  'st.imagegen.desc': "Used by the generate_image agent tool to create images and other media from a text prompt with the selected provider.",
   'st.imagegen.saved': 'Saved!',
   'st.imagegen.cleared': 'Cleared.',
   'st.imagegen.testing': 'Testing...',

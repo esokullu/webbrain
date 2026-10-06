@@ -1,3 +1,4 @@
+import { getGenerativeMediaCopy } from './generative-media-copy.mjs';
 import bidiCopy from './bidi-copy.mjs';
 import cloudBridgeCopy from './cloud-bridge-copy.mjs';
 // Turkish (tr).
@@ -7,6 +8,7 @@ import { getApocalypseModeCopy } from './apocalypse-copy.mjs';
 import { getEmergencyBoxCopy } from './emergency-copy.mjs';
 
 export default {
+  ...getGenerativeMediaCopy('tr'),
   ...bidiCopy,
   ...cloudBridgeCopy,
   'sp.ui_scale.label': 'Uzantı arayüzü yakınlaştırması',
@@ -655,8 +657,8 @@ export default {
   "st.transcription.connected": "Bağlandı! Model: {model}",
   "st.transcription.failed": "Başarısız: {error}",
   "st.transcription.fill_required": "Önce Temel URL ve Model alanlarını doldur.",
-  "st.imagegen.heading": "Üretken medya (fal.ai)",
-  "st.imagegen.desc": "generate_image ajan aracı tarafından metin isteminden fal.ai'nin kuyruk API'si üzerinden görsel ve diğer medyaları oluşturmak için kullanılır. Anahtar alın: fal.ai/dashboard/keys. Sohbet için kullanılmaz.",
+  "st.imagegen.heading": "Üretken medya",
+  "st.imagegen.desc": "generate_image ajan aracı, seçilen sağlayıcıyla metin isteminden görsel ve diğer medyaları üretir.",
   "st.imagegen.saved": "Kaydedildi!",
   "st.imagegen.cleared": "Temizlendi.",
   "st.imagegen.testing": "Test ediliyor...",

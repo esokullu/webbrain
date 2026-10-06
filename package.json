@@ -5,7 +5,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "npm run test:cms && npm run test:markdown && npm run test:systemone && npm run test:systemone:fast && node --test test/browser-dialogs.mjs test/capsolver-cloud-broker.mjs test/captcha-providers.mjs test/captcha-weighted-fallback.mjs test/captcha-hcaptcha-providers.mjs test/captcha-native-providers.mjs test/captcha-runtime-policy.mjs test/captcha-callback-bridge.mjs test/captcha-aws-recovery.mjs test/captcha-documented-contracts.mjs test/huggingface-signup-recovery.mjs test/trace-full-export.mjs && npm run test:firefox-bidi && npm run test:runtime-lifecycle && npm run test:billing-notice && npm run test:compass-quota && npm run test:provider-limits && npm run test:provider-catalog && npm run test:openrouter-capabilities && npm run test:accessibility-tree-benchmark && npm run test:toolbar-guard && npm run test:cloud-bridge-approval && npm run test:discord && npm run test:pdf-read && npm run test:pdf-selection && npm run test:social-contract && npm run test:safesocial && npm run test:build-unpacked && npm run test:attachment-drop && npm run test:workflow-editor && node --test test/profile-sync-stats.mjs && node --test test/memcode-recall.mjs && node test/run.js && node test/selection-scope-restoration.mjs && node scripts/benchmark-offline-relevance.mjs && npm run test:security",
+    "test": "npm run test:cms && npm run test:markdown && npm run test:generative-media && npm run test:systemone && npm run test:systemone:fast && node --test test/browser-dialogs.mjs test/capsolver-cloud-broker.mjs test/captcha-providers.mjs test/captcha-weighted-fallback.mjs test/captcha-hcaptcha-providers.mjs test/captcha-native-providers.mjs test/captcha-runtime-policy.mjs test/captcha-callback-bridge.mjs test/captcha-aws-recovery.mjs test/captcha-documented-contracts.mjs test/huggingface-signup-recovery.mjs test/trace-full-export.mjs && npm run test:firefox-bidi && npm run test:runtime-lifecycle && npm run test:billing-notice && npm run test:compass-quota && npm run test:provider-limits && npm run test:provider-catalog && npm run test:openrouter-capabilities && npm run test:accessibility-tree-benchmark && npm run test:toolbar-guard && npm run test:cloud-bridge-approval && npm run test:discord && npm run test:pdf-read && npm run test:pdf-selection && npm run test:social-contract && npm run test:safesocial && npm run test:build-unpacked && npm run test:attachment-drop && npm run test:workflow-editor && node --test test/profile-sync-stats.mjs && node --test test/memcode-recall.mjs && node test/run.js && node test/selection-scope-restoration.mjs && node scripts/benchmark-offline-relevance.mjs && npm run test:security",
     "test:captcha:ui": "node test/captcha-settings-ui.mjs && node test/captcha-application-ui.mjs",
     "test:captcha:bridge:ui": "node test/captcha-callback-bridge-ui.mjs",
     "test:billing-notice": "node test/billing-payment-notice.mjs",
@@ -69,7 +69,9 @@
     "test:cms": "node --test test/cms-api-first.mjs",
     "test:cms:browser": "node --test test/cms-browser-smoke.mjs",
     "test:compass-quota": "node --test test/compass-quota.mjs",
-    "test:compass-quota:ui": "node test/compass-quota-ui.mjs"
+    "test:compass-quota:ui": "node test/compass-quota-ui.mjs",
+    "test:generative-media": "node --test test/generative-media.mjs",
+    "test:generative-media:ui": "node test/generative-media-ui.mjs"
   },
   "devDependencies": {
     "playwright": "^1.48.0",

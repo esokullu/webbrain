@@ -1,3 +1,4 @@
+import { getGenerativeMediaCopy } from './generative-media-copy.mjs';
 import bidiCopy from './bidi-copy.mjs';
 import cloudBridgeCopy from './cloud-bridge-copy.mjs';
 // Filipino / Tagalog (tl).
@@ -7,6 +8,7 @@ import { getApocalypseModeCopy } from './apocalypse-copy.mjs';
 import { getEmergencyBoxCopy } from './emergency-copy.mjs';
 
 export default {
+  ...getGenerativeMediaCopy('tl'),
   ...bidiCopy,
   ...cloudBridgeCopy,
   'sp.ui_scale.label': 'Pag-zoom ng UI ng extension',
@@ -615,8 +617,8 @@ export default {
   "st.transcription.connected": "Konektado! Modelo: {model}",
   "st.transcription.failed": "Nabigo: {error}",
   "st.transcription.fill_required": "Punan muna ang Base URL at Modelo.",
-  "st.imagegen.heading": "Generative media (fal.ai)",
-  "st.imagegen.desc": "Ginagamit ng generate_image agent tool para gumawa ng mga larawan at iba pang media mula sa text prompt sa pamamagitan ng fal.ai queue API. Kumuha ng key sa fal.ai/dashboard/keys. Hindi ginagamit sa chat.",
+  "st.imagegen.heading": "Generative media",
+  "st.imagegen.desc": "Gumagawa ang generate_image agent tool ng mga larawan at ibang media mula sa text prompt gamit ang napiling provider.",
   "st.imagegen.saved": "Na-save!",
   "st.imagegen.cleared": "Na-clear.",
   "st.imagegen.testing": "Sinusuri...",
