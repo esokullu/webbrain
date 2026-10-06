@@ -1,10 +1,11 @@
 /** Value-free, run-scoped page monitoring. Keep the Firefox copy byte-identical. */
 (() => {
-  if (window.__wbPageMonitorRecoveryOnly) {
-    delete window.__wbPageMonitorRecoveryOnly;
-    if (window.__wbPageMonitor && !window.__wbPageMonitor.disposed) return;
-  }
-  window.__wbPageMonitor?.dispose?.();
+  const previousMonitor = window.__wbPageMonitor;
+  const recoveryOnly = window.__wbPageMonitorRecoveryOnly === true;
+  delete window.__wbPageMonitorRecoveryOnly;
+  if (previousMonitor && !previousMonitor.disposed
+      && (recoveryOnly || previousMonitor.active === true)) return;
+  previousMonitor?.dispose?.();
   const api = globalThis.browser || globalThis.chrome;
   // randomUUID is secure-context-only; related data frames and HTTP pages
   // still provide getRandomValues for unpredictable document/action tokens.
@@ -19,7 +20,7 @@
   let popoverTurns = new WeakMap();
   let roots = new WeakSet();
   let active = false, disposed = false, runToken = '', seq = 0, revision = 0;
-  let observer = null, domTimer = null, scrollTimer = null, lastUserAt = 0;
+  let observer = null, layoutObserver = null, domTimer = null, scrollTimer = null, lastUserAt = 0;
   let pointerHeld = false, composing = false, localOperation = null;
   let requestGeneration = 0, unreported = 0, pendingDOM = null;
   let lastViewport = '';
@@ -52,7 +53,11 @@
   const visible = el => {
     if (ignored(el)) return false;
     const style = getComputedStyle(el);
-    return style.display !== 'none' && style.visibility !== 'hidden' && el.getClientRects().length > 0;
+    if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0' || el.getClientRects().length === 0) return false;
+    for (let ancestor = el.parentElement || el.getRootNode?.().host; ancestor; ancestor = ancestor.parentElement || ancestor.getRootNode?.().host) {
+      if (getComputedStyle(ancestor).opacity === '0') return false;
+    }
+    return true;
   };
   const elementFor = event => event.composedPath?.().find(node => node instanceof Element) || event.target;
   const targetName = el => {
@@ -117,6 +122,36 @@
   };
   const related = (a, b) => !!a && !!b && (a === b
     || (a !== document.body && a !== document.documentElement && a.contains?.(b)));
+  function layoutAgentUserAt() {
+    if (agentTurn && lastUserAt <= agentTurn.userAt) return agentTurn.userAt;
+    for (const op of operations.values()) {
+      if (op.dispatched && Date.now() <= op.until && Number.isFinite(op.userAt) && lastUserAt <= op.userAt) return op.userAt;
+    }
+    return undefined;
+  }
+  const rectFor = el => {
+    if (!(el instanceof Element) || !el.isConnected) return null;
+    const rect = el.getBoundingClientRect();
+    return { x: rect.left, y: rect.top, width: rect.width, height: rect.height };
+  };
+  function coordinatePreparationShifted(op) {
+    if (!op?.coordinateSensitive || op.layoutInvalidated || op.dispatched || op.preparedRevision !== revision) return false;
+    const target = op.coordinateTarget;
+    const currentHit = document.elementFromPoint(op.coordinatePoint.x, op.coordinatePoint.y);
+    const previousRect = op.coordinateRect, currentRect = rectFor(target);
+    const initialHit = op.coordinateHit;
+    const sameHit = initialHit && currentHit && (initialHit === currentHit
+      || (initialHit !== document.body && initialHit !== document.documentElement && initialHit.contains?.(currentHit)));
+    const hitChanged = !initialHit || !sameHit;
+    const rectChanged = op.coordinateTargetAtPoint && (!target?.isConnected || !previousRect || !currentRect
+      || ['x', 'y', 'width', 'height'].some(key => Math.abs(previousRect[key] - currentRect[key]) > 2));
+    if (!hitChanged && !rectChanged) return false;
+    op.layoutInvalidated = true;
+    revision++; publishRevision();
+    const source = layoutAgentUserAt() !== undefined ? 'agent' : 'page';
+    send({ kind: 'dom', source, target: targetName(target || currentHit) });
+    return true;
+  }
   function expected(kind, el, event) {
     const marker = el?.getAttribute?.('data-webbrain-native-action');
     if (marker && nativeMarks.get(el) !== marker) {
@@ -308,6 +343,7 @@
         break;
       }
       let identityChanged = (record.type === 'popover' && record.stateChanged)
+        || (record.type === 'layout' && record.layoutChanged)
         || (record.type === 'shadow' && (visible(el) || signatures.get(el)?.startsWith('[true')));
       if (record.type === 'childList') {
         identityChanged = subtreeChanged(record, el);
@@ -332,6 +368,31 @@
     pendingDOM = { kind: 'dom', source, target };
     domTimer = setTimeout(() => { domTimer = null; const observation = pendingDOM; pendingDOM = null; send(observation); }, 150);
   }
+  function observeLayoutShifts() {
+    if (typeof PerformanceObserver !== 'function'
+        || !PerformanceObserver.supportedEntryTypes?.includes('layout-shift')) return;
+    try {
+      layoutObserver = new PerformanceObserver(list => {
+        if (!active) return;
+        const records = [];
+        for (const entry of list.getEntries()) {
+          if (entry.hadRecentInput || !Array.isArray(entry.sources)) continue;
+          for (const source of entry.sources) {
+            const el = source.node instanceof Element ? source.node : source.node?.parentElement;
+            if (!el || ignored(el) || !visible(el) || el.getAnimations?.().some(animation => animation.playState === 'running')) continue;
+            const oldRect = source.previousRect, newRect = source.currentRect;
+            if (!oldRect || !newRect || !['x', 'y', 'width', 'height'].some(key => Math.abs(oldRect[key] - newRect[key]) > 2)) continue;
+            records.push({ type: 'layout', target: el, layoutChanged: true,
+              agentUserAt: layoutAgentUserAt() });
+            if (records.length >= 32) break;
+          }
+          if (records.length >= 32) break;
+        }
+        if (records.length) onMutations(records);
+      });
+      layoutObserver.observe({ type: 'layout-shift', buffered: false });
+    } catch { layoutObserver?.disconnect(); layoutObserver = null; }
+  }
   function listen(target, name, handler, passive = true) {
     target.addEventListener(name, handler, { capture: true, passive });
     listeners.push(() => target.removeEventListener(name, handler, true));
@@ -343,6 +404,7 @@
     active = true; runToken = state.runToken; seq = 0; revision = 0; publishRevision();
     observer = new MutationObserver(onMutations);
     observeRoot(document);
+    observeLayoutShifts();
     listen(document, 'webbrain-shadow-root-attached', event => {
       const path = event.composedPath();
       if (path.some(node => node instanceof Element && ignored(node))) return;
@@ -495,6 +557,7 @@
     }
     nativeTargets.clear();
     observer?.disconnect(); observer = null;
+    layoutObserver?.disconnect(); layoutObserver = null;
     clearTimeout(domTimer); clearTimeout(scrollTimer); domTimer = null; scrollTimer = null; unreported = 0; pendingDOM = null; lastFeedbackDelivery = Promise.resolve();
     listeners.splice(0).forEach(remove => remove());
     operations.clear(); localOperation = null; agentTurn = null;
@@ -513,7 +576,14 @@
     const target = resolveTarget(params);
     const focusEligible = kindFor(params.tool) === 'input';
     const focusTarget = target || (focusEligible ? deepActiveElement() : null);
+    const coordinateSensitive = Number.isFinite(params.x) && Number.isFinite(params.y);
+    const coordinateHit = coordinateSensitive ? document.elementFromPoint(params.x, params.y) : null;
+    const coordinateTarget = coordinateSensitive ? target || coordinateHit : null;
+    const coordinateTargetAtPoint = !target || !coordinateHit || target === coordinateHit || target.contains?.(coordinateHit);
     operations.set(params.operationId, { ...params, target: target || focusTarget, focusTarget, focusEligible, kinds: new Set(),
+      coordinateSensitive, coordinateTarget, coordinateHit, coordinateTargetAtPoint,
+      coordinatePoint: coordinateSensitive ? { x: params.x, y: params.y } : null,
+      coordinateRect: rectFor(coordinateTarget),
       until: Date.now() + 30000, dispatched: false, userAt: lastUserAt, preparedRevision: revision });
   }
   function dispatch(params) {
@@ -560,7 +630,8 @@
   }
   function beforeLocalDispatch({ preparation = false, kind, target } = {}) {
     if (!active || !localOperation) return;
-    if (domTimer || unreported || lastUserAt > localOperation.userAt || revision !== localOperation.revision) {
+    const layoutChanged = coordinatePreparationShifted(operations.get(localOperation.operationId));
+    if (layoutChanged || domTimer || unreported || lastUserAt > localOperation.userAt || revision !== localOperation.revision) {
       const error = new Error('Browser changed during action preparation. Re-observe before acting.');
       error.code = 'page_feedback_pending'; error.dispatched = localOperation.started === true; throw error;
     }
@@ -596,7 +667,8 @@
     else if (msg.action === 'page_monitor_dispatch') {
       const params = msg.params || {};
       const prepared = operations.get(params.operationId);
-      if (!params.release && active && (domTimer || unreported || (prepared && prepared.preparedRevision !== revision)
+      const layoutChanged = !params.release && active && coordinatePreparationShifted(prepared);
+      if (!params.release && active && (layoutChanged || domTimer || unreported || (prepared && prepared.preparedRevision !== revision)
           || (params.documentToken && (params.documentToken !== documentToken || params.documentRevision !== revision)))) {
         if (domTimer) {
           clearTimeout(domTimer); domTimer = null; const observation = pendingDOM; pendingDOM = null;
@@ -618,6 +690,7 @@
   };
   api.runtime.onMessage.addListener(onMessage);
   window.__wbPageMonitor = { beginContentAction, beforeLocalDispatch, withLocalDispatch, dispatch, registerDecoration,
+    get active() { return active; },
     get disposed() { return disposed; },
     dispose() { disposed = true; requestGeneration++; stop(); api.runtime.onMessage.removeListener?.(onMessage); } };
   void requestState();

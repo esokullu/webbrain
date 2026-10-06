@@ -403,6 +403,78 @@ test('Firefox native preparation keeps same-target user edits and sends no stale
 });
 
 for (const [build, engine] of [['chrome', chromium], ['firefox', firefox]]) {
+  test(`${build}: content-script recovery preserves a live page monitor`, async () => {
+    const { browser, page } = await fixture(engine, build);
+    try {
+      await page.waitForFunction(() => window.__wbPageMonitor?.active === true);
+      await page.evaluate(() => { window.monitorBeforeRecovery = window.__wbPageMonitor; feedback = []; });
+      await page.addScriptTag({ content: read(build, 'content/page-monitor.js') });
+      await page.waitForTimeout(200);
+      assert.deepEqual(await page.evaluate(() => ({
+        same: window.__wbPageMonitor === window.monitorBeforeRecovery,
+        active: window.__wbPageMonitor?.active,
+      })), { same: true, active: true });
+      await page.evaluate(() => { feedback = []; document.getElementById('status').textContent = 'Monitor survived recovery'; });
+      await page.waitForFunction(() => feedback.some(event => event.kind === 'dom'), null, { timeout: 1000 });
+    } finally { await browser.close(); }
+  });
+
+  test(`${build}: CSSOM layout shifts fence prepared coordinate clicks`, async () => {
+    const { browser, page } = await fixture(engine, build);
+    try {
+      await page.evaluate(() => {
+        feedback = [];
+        const rect = document.getElementById('agent').getBoundingClientRect();
+        const x = rect.left + rect.width / 2, y = rect.top + rect.height / 2;
+        window.layoutClickPoint = { x, y };
+        deliver('page_monitor_prepare', { operationId: 'layout-click', tool: 'click', x, y });
+        deliver('page_monitor_dispatch', { operationId: 'layout-click', kind: 'click', x, y, fenceOnly: true });
+        const sheet = document.styleSheets[0];
+        sheet.insertRule('#agent { margin-top: 100px; }', sheet.cssRules.length);
+      });
+      await page.waitForTimeout(200);
+      if (build === 'chrome') await page.waitForFunction(() => feedback.some(event => event.kind === 'dom'), null, { timeout: 1000 });
+      const response = await page.evaluate(() => new Promise(resolve => {
+        deliver('page_monitor_dispatch', { operationId: 'layout-click', kind: 'click', ...layoutClickPoint });
+        setTimeout(() => resolve(lastMonitorResponse), 0);
+      }));
+      assert.equal(response.pageFeedbackPending, true, 'A CSSOM-only layout shift must invalidate the old click point');
+      await page.waitForFunction(() => feedback.some(event => event.kind === 'dom' && event.source === 'page'), null, { timeout: 1000 });
+      const localResult = await page.evaluate(() => {
+        feedback = [];
+        const rect = document.getElementById('human').getBoundingClientRect();
+        const finish = __wbPageMonitor.beginContentAction('click', { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 });
+        document.styleSheets[0].insertRule('#human { transform: translateY(80px) !important; }', document.styleSheets[0].cssRules.length);
+        let code, dispatched;
+        try { __wbPageMonitor.beforeLocalDispatch(); }
+        catch (error) { code = error.code; dispatched = error.dispatched; }
+        finally { finish(); }
+        return { code, dispatched };
+      });
+      assert.deepEqual(localResult, { code: 'page_feedback_pending', dispatched: false },
+        'The local content-action path must reject a moved coordinate before dispatch');
+      await page.waitForFunction(() => feedback.some(event => event.kind === 'dom' && event.source === 'page'), null, { timeout: 1000 });
+    } finally { await browser.close(); }
+  });
+
+  test(`${build}: opacity-only visibility changes invalidate prepared actions`, async () => {
+    const { browser, page } = await fixture(engine, build);
+    try {
+      await page.evaluate(() => {
+        feedback = [];
+        deliver('page_monitor_prepare', { operationId: 'opacity-click', tool: 'click', selector: '#agent' });
+        deliver('page_monitor_dispatch', { operationId: 'opacity-click', kind: 'click', selector: '#agent', fenceOnly: true });
+        document.body.style.opacity = '0';
+      });
+      await page.waitForFunction(() => feedback.some(event => event.kind === 'dom' && event.source === 'page'), null, { timeout: 1000 });
+      const response = await page.evaluate(() => new Promise(resolve => {
+        deliver('page_monitor_dispatch', { operationId: 'opacity-click', kind: 'click', selector: '#agent' });
+        setTimeout(() => resolve(lastMonitorResponse), 0);
+      }));
+      assert.equal(response.pageFeedbackPending, true, 'An ancestor opacity change must hide its descendants from prepared state');
+    } finally { await browser.close(); }
+  });
+
   test(`${build}: page focus theft fences a selectorless input while the identified agent target stays quiet`, async () => {
     const { browser, page } = await fixture(engine, build);
     try {
