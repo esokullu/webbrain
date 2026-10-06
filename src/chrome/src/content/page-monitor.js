@@ -6,7 +6,11 @@
   }
   window.__wbPageMonitor?.dispose?.();
   const api = globalThis.browser || globalThis.chrome;
-  const documentToken = crypto.randomUUID();
+  // randomUUID is secure-context-only; related data frames and HTTP pages
+  // still provide getRandomValues for unpredictable document/action tokens.
+  const randomToken = () => crypto.randomUUID?.()
+    || Array.from(crypto.getRandomValues(new Uint8Array(16)), byte => byte.toString(16).padStart(2, '0')).join('');
+  const documentToken = randomToken();
   const listeners = [];
   const operations = new Map();
   const nativeTargets = new Set();
@@ -174,7 +178,7 @@
   function observeRoot(root, budget) {
     if (!root || roots.has(root) || !observer) return;
     roots.add(root);
-    observer.observe(root, { childList: true, subtree: true, characterData: true, attributes: true,
+    observer.observe(root, { childList: true, subtree: true, characterData: true, attributes: true, attributeOldValue: true,
       attributeFilter: ['role', 'aria-label', 'aria-expanded', 'aria-selected', 'aria-checked', 'aria-disabled',
         'aria-hidden', 'hidden', 'disabled', 'readonly', 'checked', 'selected', 'open', 'inert', 'class', 'style'] });
     seed(root, budget);
@@ -204,13 +208,29 @@
   function onMutations(records) {
     if (!active) return;
     let changed = false, source = 'page', target = '';
+    const noteChange = el => {
+      // Attribute the marked input/write's synchronous handlers to that dispatch.
+      // Later DOM writes stay observable, including writes on the same target.
+      if (agentTurn && lastUserAt <= agentTurn.userAt) return;
+      changed = true;
+      target ||= targetName(el);
+      if (userTurn || (Date.now() - lastUserAt < 1500 && related(lastUserTarget, el))) source = 'user';
+      else if (source !== 'user' && [...operations.values()].some(op => op.dispatched)) source = 'unknown';
+    };
     const changes = [...records];
     for (const record of records) {
       if (record.type !== 'attributes' || !['class', 'style', 'hidden', 'aria-hidden', 'open', 'inert'].includes(record.attributeName)) continue;
+      if (ignored(record.target)) continue;
       if (record.target.getAnimations?.().some(animation => animation.playState === 'running')) continue;
+      const interactive = record.target.querySelectorAll?.('button,a,input,textarea,select,[role],[contenteditable]') || [];
+      const all = record.target.querySelectorAll?.('*') || [];
+      // A bounded layout sample cannot prove that inherited visibility left a
+      // large subtree unchanged. Invalidate conservatively on an actual state
+      // change, before the measurement cap can omit a late affected descendant.
+      if (all.length > 100 && record.oldValue !== record.target.getAttribute(record.attributeName)) noteChange(record.target);
       const descendants = new Set([
-        ...[...(record.target.querySelectorAll?.('button,a,input,textarea,select,[role],[contenteditable]') || [])].slice(0, 100),
-        ...[...(record.target.querySelectorAll?.('*') || [])].slice(0, 100),
+        ...Array.prototype.slice.call(interactive, 0, 100),
+        ...Array.prototype.slice.call(all, 0, 100),
       ]);
       for (const el of descendants)
         changes.push({ type: 'layout', target: el });
@@ -239,13 +259,7 @@
       const next = signature(el), previous = signatures.get(el);
       signatures.set(el, next);
       if (!identityChanged && (next === previous || (!visible(el) && !previous?.startsWith('[true')))) continue;
-      // Attribute the marked input/write's synchronous handlers to that dispatch.
-      // Later DOM writes stay observable, including writes on the same target.
-      if (agentTurn && lastUserAt <= agentTurn.userAt) continue;
-      changed = true;
-      target ||= targetName(el);
-      if (userTurn || (Date.now() - lastUserAt < 1500 && related(lastUserTarget, el))) source = 'user';
-      else if ([...operations.values()].some(op => op.dispatched)) source = 'unknown';
+      noteChange(el);
     }
     if (!changed) return;
     revision++; publishRevision();
@@ -349,9 +363,9 @@
     listen(document, 'keydown', event => {
       const el = elementFor(event);
       if (!event.isTrusted || expected('input', el, event)) return;
-      // Key names are only used locally to identify scrolling, never transmitted.
+      // Key names identify scrolling and focus movement locally, never transmitted.
       if (editable(el)) interact('activity', el);
-      else if (['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' '].includes(event.key)) interact('activity', el);
+      else if (['Tab', 'ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' '].includes(event.key)) interact('activity', el);
     });
     for (const name of ['wheel', 'touchmove']) listen(document, name, event => {
       const el = elementFor(event);
@@ -451,7 +465,7 @@
     'ax_prepare_field_for_trusted_type', 'ax_resolve_two_rects', 'ax_resolve_rect']);
   function beginContentAction(action, params = {}) {
     if (!active || !localMutations.has(action)) return () => {};
-    const operationId = `local-${crypto.randomUUID()}`;
+    const operationId = `local-${randomToken()}`;
     const previous = localOperation;
     prepare({ selector: params.selector, ref_id: params.ref_id, x: params.x, y: params.y,
       textMatch: action === 'click' ? params.text : undefined, tool: action, operationId, runToken });

@@ -404,6 +404,91 @@ test('Firefox native preparation keeps same-target user edits and sends no stale
 });
 
 for (const [build, engine] of [['chrome', chromium], ['firefox', firefox]]) {
+  test(`${build}: related data/blob frames receive monitor and MAIN shadow hook`, async () => {
+    const { browser, page } = await fixture(engine, build, { omitEmptyFrameMonitor: true });
+    try {
+      const manifest = JSON.parse(fs.readFileSync(new URL(`../src/${build}/manifest.json`, import.meta.url), 'utf8'));
+      const entries = manifest.content_scripts.filter(entry => entry.run_at === 'document_start'
+        && entry.js.some(file => /\/page-monitor(?:-shadow)?\.js$/.test(file)));
+      assert.equal(entries.length, 2);
+      for (const entry of entries) assert.ok(entry.all_frames && entry.match_origin_as_fallback,
+        'Related opaque-origin documents need origin fallback for both execution worlds');
+      await page.evaluate(() => {
+        const markup = '<input id="inside"><p id="inside-status">Ready</p><div id="late-host"></div>';
+        for (const [id, src] of [['data-frame', `data:text/html,${encodeURIComponent(markup)}`],
+          ['blob-frame', URL.createObjectURL(new Blob([markup], { type: 'text/html' }))]]) {
+          const frame = document.createElement('iframe'); frame.id = id; frame.src = src; document.body.prepend(frame);
+        }
+      });
+      for (const [id, scheme] of [['data-frame', 'data:'], ['blob-frame', 'blob:']]) {
+        const frame = await (await page.locator(`#${id}`).elementHandle()).contentFrame();
+        await frame.waitForFunction(scheme => location.href.startsWith(scheme) && window.chrome?.runtime && document.getElementById('inside'), scheme);
+        assert.equal(await frame.evaluate(() => !!window.__wbPageMonitor), false);
+        // Model the manifest's related-origin registration, not Playwright's unconditional init-script injection.
+        for (const entry of entries) for (const file of entry.js.filter(file => /\/page-monitor(?:-shadow)?\.js$/.test(file)))
+          await frame.addScriptTag({ content: read(build, file.replace(/^src\//, '')) });
+        await frame.waitForFunction(() => document.documentElement.hasAttribute('data-webbrain-page-revision'));
+        const preparation = await frame.evaluate(() => {
+          const finish = __wbPageMonitor.beginContentAction('type', { selector: '#inside', _bidiPrepare: true });
+          try { __wbPageMonitor.beforeLocalDispatch(); return true; } finally { finish(); }
+        });
+        assert.equal(preparation, true, 'Document and local action tokens must work in related origins');
+        await frame.waitForTimeout(220);
+        await frame.locator('#inside').fill('Private frame input');
+        await frame.waitForFunction(() => feedback.some(event => event.kind === 'input' && event.source === 'user'));
+        assert.ok(!JSON.stringify(await frame.evaluate(() => feedback)).includes('Private frame input'));
+        await frame.evaluate(() => { feedback = []; document.getElementById('inside-status').textContent = 'Updated'; });
+        await frame.waitForFunction(() => feedback.some(event => event.kind === 'dom'));
+        await frame.evaluate(() => { feedback = []; document.getElementById('late-host').attachShadow({ mode: 'open' }).innerHTML = '<button>Target</button>'; });
+        await frame.waitForFunction(() => feedback.some(event => event.kind === 'dom' && event.target === 'div#late-host'));
+        await frame.evaluate(() => { feedback = []; document.getElementById('late-host').shadowRoot.querySelector('button').textContent = 'Changed'; });
+        await frame.waitForFunction(() => feedback.some(event => event.kind === 'dom' && event.target === 'button'));
+      }
+    } finally { await browser.close(); }
+  });
+
+  test(`${build}: Tab focus movement invalidates preparation without recording keys`, async () => {
+    const { browser, page } = await fixture(engine, build);
+    try {
+      for (const key of ['Tab', 'Shift+Tab']) {
+        await page.locator('#human').focus();
+        const before = await page.evaluate(() => {
+          monitorEnabled = false; deliver('page_monitor_state'); monitorEnabled = true; deliver('page_monitor_state');
+          return document.activeElement.id;
+        });
+        await page.waitForTimeout(40);
+        await page.evaluate(() => {
+          feedback = []; window.finishPreparation = __wbPageMonitor.beginContentAction('type', { _bidiPrepare: true });
+        });
+        await page.keyboard.press(key);
+        assert.notEqual(await page.evaluate(() => document.activeElement.id), before);
+        const code = await page.evaluate(() => {
+          try { __wbPageMonitor.beforeLocalDispatch(); return null; }
+          catch (error) { return error.code; }
+          finally { finishPreparation(); }
+        });
+        assert.equal(code, 'page_feedback_pending');
+        const events = await page.evaluate(() => feedback);
+        assert.ok(events.some(event => event.kind === 'activity' && event.source === 'user'));
+        assert.ok(!JSON.stringify(events).includes('Tab'));
+      }
+      await page.locator('#human').focus();
+      await page.evaluate(() => {
+        monitorEnabled = false; deliver('page_monitor_state'); monitorEnabled = true; deliver('page_monitor_state');
+      });
+      await page.waitForTimeout(40);
+      await page.evaluate(() => {
+        feedback = []; deliver('page_monitor_prepare', { operationId: 'agent-tab', tool: 'press_keys', selector: '#human' });
+        deliver('page_monitor_dispatch', { operationId: 'agent-tab', kind: 'input', selector: '#human', fenceOnly: true });
+        document.getElementById('human').setAttribute('data-webbrain-native-action', JSON.stringify({ ...lastMonitorResponse.guard, kind: 'input', sequence: 1 }));
+      });
+      await page.keyboard.press('Tab');
+      await page.waitForTimeout(80);
+      assert.equal((await page.evaluate(() => feedback)).some(event => event.source !== 'agent'), false,
+        'An attributed native Tab must not steer its own run');
+    } finally { await browser.close(); }
+  });
+
   test(`${build}: monitor captures user input without values, suppresses agent input and keeps concurrent user input`, async () => {
     const { browser, page } = await fixture(engine, build);
     try {
@@ -895,6 +980,56 @@ for (const [build, engine] of [['chrome', chromium], ['firefox', firefox]]) {
           assert.ok((await page.evaluate(() => feedback)).some(event => event.kind === 'dom'));
         }
       }
+    } finally { await browser.close(); }
+  });
+
+  test(`${build}: large ancestor visibility changes invalidate actions beyond the sampling budget`, async () => {
+    const { browser, page } = await fixture(engine, build);
+    try {
+      await page.evaluate(() => {
+        const style = document.createElement('style');
+        style.textContent = '#late-result {display:var(--late-display,block)} .closed #late-result {display:none}'; document.head.append(style);
+        const region = document.createElement('div'); region.id = 'large-region'; region.className = 'closed';
+        region.style.cssText = 'width:200px;height:80px';
+        region.innerHTML = '<span style="display:none">Earlier unchanged node</span>'.repeat(650) + '<div id="late-result">Late visible result</div>';
+        document.body.prepend(region);
+      });
+      for (const attribute of ['class', 'style']) {
+        await page.evaluate(attribute => {
+          const region = document.getElementById('large-region'); region.className = attribute === 'class' ? 'closed' : '';
+          region.style.setProperty('--late-display', attribute === 'style' ? 'none' : 'block');
+          monitorEnabled = false; deliver('page_monitor_state'); monitorEnabled = true; deliver('page_monitor_state');
+        }, attribute);
+        await page.waitForTimeout(200);
+        for (const shown of [true, false]) {
+          const result = await page.evaluate(async ({ attribute, shown }) => {
+            const region = document.getElementById('large-region'), before = region.getBoundingClientRect();
+            feedback = []; const finish = __wbPageMonitor.beginContentAction('click', { selector: '#agent', _bidiPrepare: true });
+            if (attribute === 'class') region.className = shown ? '' : 'closed';
+            else region.style.setProperty('--late-display', shown ? 'block' : 'none');
+            await Promise.resolve();
+            let code; try { __wbPageMonitor.beforeLocalDispatch(); } catch (error) { code = error.code; } finally { finish(); }
+            const after = region.getBoundingClientRect();
+            return { code, sameGeometry: before.width === after.width && before.height === after.height };
+          }, { attribute, shown });
+          assert.deepEqual(result, { code: 'page_feedback_pending', sameGeometry: true });
+          await page.waitForFunction(() => feedback.some(event => event.kind === 'dom'), null, { timeout: 1000 });
+          assert.equal(await page.locator('#late-result').isVisible(), shown);
+          await page.evaluate(attribute => {
+            feedback = []; const region = document.getElementById('large-region');
+            region.setAttribute(attribute, region.getAttribute(attribute));
+          }, attribute);
+          await page.waitForTimeout(200);
+          assert.deepEqual(await page.evaluate(() => feedback), [], 'Repeated identical attributes must not trigger the conservative fallback');
+        }
+      }
+      await page.evaluate(() => {
+        feedback = []; const finish = __wbPageMonitor.beginContentAction('execute_js');
+        try { __wbPageMonitor.beforeLocalDispatch(); document.getElementById('large-region').className = 'agent-theme'; }
+        finally { finish(); }
+      });
+      await page.waitForTimeout(200);
+      assert.deepEqual(await page.evaluate(() => feedback), [], 'A synchronous attributed ancestor write must not steer itself');
     } finally { await browser.close(); }
   });
 

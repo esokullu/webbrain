@@ -613,6 +613,15 @@ test('both manifests signal shadow attachment from MAIN in all monitored frames'
   }
 });
 
+test('monitor registrations include related-origin frames in both execution worlds', () => {
+  for (const build of ['chrome', 'firefox']) {
+    const manifest = JSON.parse(fs.readFileSync(new URL(`../src/${build}/manifest.json`, import.meta.url), 'utf8'));
+    const entries = manifest.content_scripts.filter(entry => entry.js.some(file => /\/page-monitor(?:-shadow)?\.js$/.test(file)));
+    assert.equal(entries.length, build === 'firefox' ? 4 : 2);
+    for (const entry of entries) assert.ok(entry.all_frames && entry.match_about_blank && entry.match_origin_as_fallback);
+  }
+});
+
 for (const path of ['local', 'memory']) {
   for (const intervention of ['preparation', 'handshake', 'none']) {
     test(`Chrome ${path} upload honors feedback arriving during ${intervention}`, async () => {

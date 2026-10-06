@@ -118,7 +118,12 @@ notes. Browser extension APIs are mocked in these fixtures; they are not a live
 companion-session integration test.
 
 Visibility regressions include fixed-size ancestors changing class or CSS custom
-properties to reveal or hide non-interactive content. Native preparation fixtures
+properties to reveal or hide non-interactive content past the layout sampling and
+signature seed limits. An actual inherited-state attribute change on an oversized
+subtree conservatively invalidates prepared actions, while keeping layout reads
+bounded; identical assignments, known animations and owned indicators are filtered.
+Tab and Shift+Tab focus movement also invalidate preparation without recording keys.
+Native preparation fixtures
 also exercise the real companion code across an asynchronous target lookup while
 the user edits the same field.
 Frame lifecycle regressions cover delayed child acknowledgements and inaccessible
@@ -134,5 +139,10 @@ same-field human typing and an intervening DOM change. Firefox frame fixtures
 model the document-start omission, apply the manifest's document-end scripts,
 and verify user/DOM/late-shadow feedback in blank and srcdoc frames while keeping
 an existing monitor intact. These remain mocked extension registration fixtures.
+Both manifests enable origin fallback for related data/blob documents in the
+monitor and MAIN shadow-hook registrations. Fixtures model these registrations
+and verify private-input, DOM and late-shadow feedback inside those documents.
+Document and local-action tokens use cryptographic random bytes when the document
+does not expose the secure-context-only randomUUID API.
 
 The monitor regressions are also included in `npm run test:runtime-lifecycle`.
