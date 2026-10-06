@@ -33024,7 +33024,7 @@ If the user has already named or confirmed this exact recipient, do NOT ask agai
     await chrome.scripting.executeScript({
       target: { tabId },
       world: 'MAIN',
-      files: ['src/content/file-picker-guard-page.js'],
+      files: ['src/content/page-monitor-shadow.js', 'src/content/file-picker-guard-page.js'],
     });
     await chrome.scripting.executeScript({
       target: { tabId },

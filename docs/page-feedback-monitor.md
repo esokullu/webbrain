@@ -31,8 +31,11 @@ Steer or grant authorization. Enter and Alt+Enter retain their existing behavior
   breaks the expectation, including a later click on the same target. Uncertain
   effects remain `unknown`; `isTrusted` alone does not establish human origin.
 - Meaningful visible content, control state, visibility and geometry changes are
-  coalesced. CSS animation and extension decoration are ignored. Open shadow
-  roots are observed; inaccessible frames and closed shadow roots retain the
+  coalesced. Visible subtree identity changes invalidate targets even when the
+  replacement has identical text and geometry. CSS animation and extension
+  decoration are ignored. A MAIN-world attachment signal observes new open
+  shadow roots on existing hosts before their initial rendering; shadow-root
+  child-list mutations are also monitored. Inaccessible frames and closed shadow roots retain the
   existing browser-access limitations.
 - Event payloads contain bounded target identifiers and scroll positions, never
   typed keys, field values or selected text. The subsequent normal page read uses
@@ -66,7 +69,8 @@ cancellation remove the monitor and its pending run state.
 
 `npm run test:page-feedback` runs the controller/transport/workflow/cloud/scheduler
 regressions and real Chromium/Firefox DOM fixtures. Fixtures exercise trusted
-browser input, same-target intervention, frames, open shadow roots, window and
+browser input, same-target intervention, same-shape subtree replacements, frames,
+late shadow-root attachment and custom-element upgrades, window and
 container scrolling, animation noise, cleanup/restart and persisted navigation
 notes. Browser extension APIs are mocked in these fixtures; they are not a live
 companion-session integration test.

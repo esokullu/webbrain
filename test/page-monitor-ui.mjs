@@ -38,6 +38,7 @@ async function fixture(engine, build, { runToken = 'test-run', siteIsolation = f
       params: { runToken: monitorRunToken, ...params }, active: action === 'page_monitor_state' ? monitorEnabled : undefined,
       runToken: monitorRunToken }, {}, value => { window.lastMonitorResponse = value; }));
   });
+  await context.addInitScript({ content: read(build, 'content/page-monitor-shadow.js') });
   await context.addInitScript({ content: read(build, 'content/page-monitor.js') });
   const page = await context.newPage();
   await page.goto('https://monitor.test/start');
@@ -297,9 +298,11 @@ for (const [build, engine] of [['chrome', chromium], ['firefox', firefox]]) {
         feedback = [];
         const decoration = document.createElement('div'); decoration.dataset.webbrainUi = 'indicator';
         decoration.textContent = 'Agent decoration'; document.body.appendChild(decoration);
+        const root = decoration.attachShadow({ mode: 'open' }); root.innerHTML = '<span>Shadow decoration</span>';
         window.animationUpdates = setInterval(() => {
           document.getElementById('moving').style.transform = `translateX(${Math.random() * 10}px)`;
           decoration.textContent = String(Math.random());
+          root.querySelector('span').textContent = String(Math.random());
         }, 10);
       });
       await page.waitForTimeout(400);
@@ -328,6 +331,71 @@ for (const [build, engine] of [['chrome', chromium], ['firefox', firefox]]) {
       assert.equal(JSON.stringify(await page.evaluate(() => feedback)).includes('human-private'), false);
       assert.notEqual(await page.evaluate(() => document.documentElement.getAttribute('data-webbrain-page-revision')),
         `${guard.documentToken}:${guard.revision}`);
+    } finally { await browser.close(); }
+  });
+
+  test(`${build}: same-shape subtree replacements invalidate prepared actions`, async () => {
+    const { browser, page } = await fixture(engine, build);
+    try {
+      await page.evaluate(() => {
+        const region = document.createElement('div'); region.id = 'rerender';
+        region.style.cssText = 'width:200px;height:50px';
+        region.innerHTML = '<div><button id="replace-target" style="width:100px;height:30px">Old</button></div>';
+        document.body.prepend(region);
+      });
+      for (const label of ['New', 'New']) {
+        await page.evaluate(() => { monitorEnabled = false; deliver('page_monitor_state'); monitorEnabled = true; deliver('page_monitor_state'); });
+        await page.waitForTimeout(200);
+        const result = await page.evaluate(async label => {
+          feedback = [];
+          const region = document.getElementById('rerender'), oldTarget = document.getElementById('replace-target');
+          const before = region.getBoundingClientRect();
+          const fence = document.documentElement.getAttribute('data-webbrain-page-revision');
+          const finish = __wbPageMonitor.beginContentAction('click', { selector: '#replace-target', _bidiPrepare: true });
+          region.innerHTML = `<div><button id="replace-target" style="width:100px;height:30px">${label}</button></div>`;
+          await Promise.resolve();
+          let code;
+          try { __wbPageMonitor.beforeLocalDispatch(); } catch (error) { code = error.code; }
+          finally { finish(); }
+          const after = region.getBoundingClientRect();
+          return { code, disconnected: !oldTarget.isConnected, sameSize: before.width === after.width && before.height === after.height,
+            revised: fence !== document.documentElement.getAttribute('data-webbrain-page-revision') };
+        }, label);
+        assert.deepEqual(result, { code: 'page_feedback_pending', disconnected: true, sameSize: true, revised: true });
+        await page.waitForFunction(() => feedback.some(event => event.kind === 'dom'));
+      }
+    } finally { await browser.close(); }
+  });
+
+  test(`${build}: upgrading an existing host observes its newly attached shadow root`, async () => {
+    const { browser, page } = await fixture(engine, build);
+    try {
+      await page.evaluate(() => {
+        const host = document.createElement('wb-late-shadow'); host.id = 'late-shadow';
+        host.style.cssText = 'display:block;width:200px;height:50px'; document.body.prepend(host);
+        monitorEnabled = false; deliver('page_monitor_state'); monitorEnabled = true; deliver('page_monitor_state');
+      });
+      await page.waitForTimeout(200);
+      const result = await page.evaluate(async () => {
+        feedback = [];
+        const finish = __wbPageMonitor.beginContentAction('click', { selector: '#agent', _bidiPrepare: true });
+        customElements.define('wb-late-shadow', class extends HTMLElement {
+          constructor() { super(); this.attachShadow({ mode: 'open' }).innerHTML = '<button id="late-target">Before</button>'; }
+        });
+        await Promise.resolve();
+        try { __wbPageMonitor.beforeLocalDispatch(); return null; }
+        catch (error) { return error.code; }
+        finally { finish(); }
+      });
+      assert.equal(result, 'page_feedback_pending');
+      await page.waitForFunction(() => feedback.some(event => event.kind === 'dom'));
+      await page.evaluate(() => { feedback = []; document.getElementById('late-shadow').shadowRoot.querySelector('button').textContent = 'After'; });
+      await page.waitForFunction(() => feedback.some(event => event.kind === 'dom' && event.target === 'button#late-target'));
+      await page.evaluate(() => { feedback = []; document.getElementById('late-shadow').shadowRoot.innerHTML = '<button id="late-target">After</button>'; });
+      await page.waitForFunction(() => feedback.some(event => event.kind === 'dom'));
+      await page.evaluate(() => { monitorEnabled = false; deliver('page_monitor_state'); feedback = []; document.getElementById('late-shadow').shadowRoot.querySelector('button').textContent = 'Stopped'; });
+      await page.waitForTimeout(200);
+      assert.equal((await page.evaluate(() => feedback)).length, 0);
     } finally { await browser.close(); }
   });
 

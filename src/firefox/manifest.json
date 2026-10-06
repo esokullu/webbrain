@@ -45,7 +45,7 @@
     },
     {
       "matches": ["<all_urls>"],
-      "js": ["src/content/captcha-callback-bridge.js"],
+      "js": ["src/content/page-monitor-shadow.js", "src/content/captcha-callback-bridge.js"],
       "run_at": "document_start",
       "world": "MAIN",
       "all_frames": true,
@@ -131,6 +131,7 @@
     "vendor/pdfjs/pdf.worker.mjs",
     "src/agent/social-media-downloader.js",
     "src/content/file-picker-guard-page.js",
+    "src/content/page-monitor-shadow.js",
     "skills/*"
   ],
   "browser_specific_settings": {

@@ -55,7 +55,7 @@
     },
     {
       "matches": ["<all_urls>"],
-      "js": ["src/content/captcha-callback-bridge.js"],
+      "js": ["src/content/page-monitor-shadow.js", "src/content/captcha-callback-bridge.js"],
       "run_at": "document_start",
       "world": "MAIN",
       "all_frames": true,

@@ -136,27 +136,50 @@
     if (ignored(el)) return '';
     const shown = visible(el);
     const rect = shown ? el.getBoundingClientRect() : {};
-    const content = editable(el) ? '' : [...el.childNodes].filter(node => node.nodeType === 3)
+    const content = editable(el) ? '' : [...el.childNodes, ...(el.shadowRoot?.childNodes || [])].filter(node => node.nodeType === 3)
       .map(node => node.textContent).join('').slice(0, 200);
-    return JSON.stringify([shown, content, el.children.length, el.getAttribute('role'), el.getAttribute('aria-label'),
+    return JSON.stringify([shown, content, el.children.length + (el.shadowRoot?.children.length || 0), el.getAttribute('role'), el.getAttribute('aria-label'),
       el.getAttribute('aria-expanded'), el.getAttribute('aria-selected'), el.getAttribute('aria-checked'),
       el.getAttribute('aria-disabled'), el.disabled === true, el.readOnly === true, el.checked === true, el.validity?.valid !== false, Math.round((rect.width || 0) / 8), Math.round((rect.height || 0) / 8),
       Math.round(((rect.x || 0) + window.scrollX) / 8), Math.round(((rect.y || 0) + window.scrollY) / 8)]);
   }
-  function seed(root) {
+  function seed(root, budget = { remaining: 600 }) {
     const nodes = root.querySelectorAll?.('*') || [];
-    for (const el of [...nodes].slice(0, 600)) {
-      signatures.set(el, signature(el));
-      if (el.shadowRoot) observeRoot(el.shadowRoot);
+    for (const el of nodes) {
+      if (budget.remaining > 0) { budget.remaining--; signatures.set(el, signature(el)); }
+      // Root discovery is cheap and must not share the layout-measurement cap.
+      if (el.shadowRoot && !ignored(el)) observeRoot(el.shadowRoot, budget);
     }
   }
-  function observeRoot(root) {
+  function observeRoot(root, budget) {
     if (!root || roots.has(root) || !observer) return;
     roots.add(root);
     observer.observe(root, { childList: true, subtree: true, characterData: true, attributes: true,
       attributeFilter: ['role', 'aria-label', 'aria-expanded', 'aria-selected', 'aria-checked', 'aria-disabled',
         'aria-hidden', 'hidden', 'disabled', 'readonly', 'checked', 'selected', 'class', 'style'] });
-    seed(root);
+    seed(root, budget);
+  }
+  function subtreeChanged(record, el) {
+    const changedNodes = [...record.addedNodes, ...record.removedNodes];
+    const meaningful = node => {
+      // Text identity is not an interactive target; its content is compared by
+      // the parent's signature, including direct text in a shadow root.
+      if (node.nodeType === 3) return false;
+      if (node.nodeType !== 1 || ignored(node)) return false;
+      if (visible(node) || signatures.get(node)?.startsWith('[true')) return true;
+      return [...node.querySelectorAll('*')].slice(0, 200).some(child => !ignored(child)
+        && (visible(child) || signatures.get(child)?.startsWith('[true')));
+    };
+    if (changedNodes.some(meaningful)) return true;
+    // Removed prepared targets also matter when their old geometry was outside
+    // the bounded signature seed, including targets inside an open shadow root.
+    return [...record.removedNodes].some(node => !ignored(node.nodeType === 1 ? node : el)
+      && [...operations.values()].some(op => {
+        for (let target = op.target; target; target = target.getRootNode?.().host) {
+          if (node === target || node.contains?.(target)) return true;
+        }
+        return false;
+      }));
   }
   function onMutations(records) {
     if (!active) return;
@@ -169,23 +192,29 @@
         changes.push({ type: 'layout', target: el });
     }
     let measured = 0;
+    const seedBudget = { remaining: 600 };
     for (const record of changes) {
-      const el = record.target.nodeType === 1 ? record.target : record.target.parentElement;
+      const el = record.target.nodeType === 1 ? record.target : record.target.host || record.target.parentElement;
       if (ignored(el) || (record.type === 'characterData' && editable(el))) continue;
       if (record.type === 'attributes' && ['class', 'style'].includes(record.attributeName)
           && el.getAnimations?.().some(animation => animation.playState === 'running')) continue;
-      if (record.type === 'childList') {
-        for (const node of record.addedNodes) {
-          if (node.nodeType !== 1) continue;
-          if (node.shadowRoot) observeRoot(node.shadowRoot);
-          for (const child of [...node.querySelectorAll('*')].slice(0, 200)) if (child.shadowRoot) observeRoot(child.shadowRoot);
-        }
-        if ([...record.addedNodes, ...record.removedNodes].every(node => node.nodeType === 1 && ignored(node))) continue;
-      }
       if (++measured > 300) break;
+      let identityChanged = record.type === 'shadow' && (visible(el) || signatures.get(el)?.startsWith('[true'));
+      if (record.type === 'childList') {
+        identityChanged = subtreeChanged(record, el);
+        for (const node of record.addedNodes) {
+          if (node.nodeType !== 1 || ignored(node)) continue;
+          if (seedBudget.remaining > 0) { seedBudget.remaining--; signatures.set(node, signature(node)); }
+          seed(node, seedBudget);
+          if (node.shadowRoot) observeRoot(node.shadowRoot, seedBudget);
+        }
+        if ([...record.addedNodes, ...record.removedNodes].every(node => node.nodeType === 1 && ignored(node))) {
+          signatures.set(el, signature(el)); continue;
+        }
+      }
       const next = signature(el), previous = signatures.get(el);
       signatures.set(el, next);
-      if (next === previous || (!visible(el) && !previous?.startsWith('[true'))) continue;
+      if (!identityChanged && (next === previous || (!visible(el) && !previous?.startsWith('[true')))) continue;
       // Attribute the marked input/write's synchronous handlers to that dispatch.
       // Later DOM writes stay observable, including writes on the same target.
       if (agentTurn && lastUserAt <= agentTurn.userAt) continue;
@@ -211,6 +240,14 @@
     active = true; runToken = state.runToken; seq = 0; revision = 0; publishRevision();
     observer = new MutationObserver(onMutations);
     observeRoot(document);
+    listen(document, 'webbrain-shadow-root-attached', event => {
+      const path = event.composedPath();
+      if (path.some(node => node instanceof Element && ignored(node))) return;
+      const host = elementFor(event), root = host?.shadowRoot;
+      if (!host?.isConnected || !root || roots.has(root)) return;
+      observeRoot(root);
+      onMutations([{ type: 'shadow', target: host }]);
+    });
     listen(document, 'webbrain-agent-dom-dispatch', event => {
       try {
         const guard = JSON.parse(String(event.detail));

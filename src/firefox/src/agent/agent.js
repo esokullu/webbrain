@@ -35349,6 +35349,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
   }
 
   async _injectCoreContentScripts(tabId) {
+    await browser.tabs.executeScript(tabId, { file: 'src/content/page-monitor-shadow-loader.js' });
     await browser.tabs.executeScript(tabId, { file: 'src/content/page-monitor.js' });
     await browser.tabs.executeScript(tabId, {
       file: 'src/content/file-picker-guard-loader.js',

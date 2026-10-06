@@ -414,9 +414,20 @@ for (const build of ['chrome', 'firefox']) {
 }
 
 test('shared page monitoring modules stay identical between browser builds', () => {
-  for (const file of ['agent/page-feedback.js', 'content/page-monitor.js', 'ui/page-feedback-ui.js']) {
+  for (const file of ['agent/page-feedback.js', 'content/page-monitor.js', 'content/page-monitor-shadow.js', 'ui/page-feedback-ui.js']) {
     const read = build => fs.readFileSync(new URL(`../src/${build}/src/${file}`, import.meta.url), 'utf8');
     assert.equal(read('chrome'), read('firefox'));
+  }
+});
+
+test('both manifests signal shadow attachment from MAIN in all monitored frames', () => {
+  for (const build of ['chrome', 'firefox']) {
+    const manifest = JSON.parse(fs.readFileSync(new URL(`../src/${build}/manifest.json`, import.meta.url), 'utf8'));
+    const entry = manifest.content_scripts.find(item => item.js.includes('src/content/page-monitor-shadow.js'));
+    assert.equal(entry.world, 'MAIN');
+    assert.equal(entry.run_at, 'document_start');
+    assert.equal(entry.all_frames, true);
+    assert.equal(entry.match_about_blank, true);
   }
 });
 
