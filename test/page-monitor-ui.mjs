@@ -365,6 +365,7 @@ for (const [build, engine] of [['chrome', chromium], ['firefox', firefox]]) {
       await page.evaluate(() => {
         feedback = [];
         const decoration = document.createElement('div'); decoration.dataset.webbrainUi = 'indicator';
+        __wbPageMonitor.registerDecoration(decoration);
         decoration.textContent = 'Agent decoration'; document.body.appendChild(decoration);
         const root = decoration.attachShadow({ mode: 'open' }); root.innerHTML = '<span>Shadow decoration</span>';
         window.animationUpdates = setInterval(() => {
@@ -376,6 +377,48 @@ for (const [build, engine] of [['chrome', chromium], ['firefox', firefox]]) {
       await page.waitForTimeout(400);
       const observed = await page.evaluate(() => { clearInterval(animationUpdates); return feedback; });
       assert.equal(observed.length, 0, JSON.stringify(observed));
+    } finally { await browser.close(); }
+  });
+
+  test(`${build}: page-owned marker attributes and ID prefixes cannot silence monitoring`, async () => {
+    const { browser, page } = await fixture(engine, build);
+    try {
+      for (const [name, value] of [['id', 'webbrain-layout'], ['id', 'wb-agent-layout'], ['data-webbrain-ui', 'page'],
+        ['data-webbrain-dev-highlight', 'page'], ['data-webbrain-attention', 'page']]) {
+        await page.evaluate(({ name, value }) => {
+          document.body.setAttribute(name, value); feedback = [];
+        }, { name, value });
+        await page.locator('#human').click();
+        assert.ok((await page.evaluate(() => feedback)).some(event => event.kind === 'click' && event.source === 'user'),
+          `${name} is page data, not proof of extension ownership`);
+        await page.evaluate(() => { feedback = []; document.getElementById('status').textContent += ' changed'; });
+        await page.waitForFunction(() => feedback.some(event => event.kind === 'dom'), null, { timeout: 1000 });
+        await page.evaluate(name => document.body.removeAttribute(name), name);
+      }
+    } finally { await browser.close(); }
+  });
+
+  test(`${build}: actual extension indicator nodes remain excluded after monitor replacement`, async () => {
+    const { browser, page } = await fixture(engine, build);
+    try {
+      await page.addScriptTag({ content: read(build, 'content/agent-visual-indicator.js') });
+      await page.evaluate(() => {
+        feedback = [];
+        messageListeners.forEach(listener => listener({ type: 'WB_SHOW_AGENT_INDICATORS' }, {}, () => {}));
+      });
+      await page.waitForTimeout(400);
+      assert.equal((await page.evaluate(() => feedback)).length, 0);
+      await page.addScriptTag({ content: read(build, 'content/page-monitor.js') });
+      await page.waitForTimeout(200);
+      await page.evaluate(() => {
+        feedback = [];
+        document.getElementById('webbrain-agent-stop-container').style.left = '40%';
+      });
+      await page.locator('#webbrain-agent-stop-button').click();
+      await page.waitForTimeout(200);
+      assert.equal((await page.evaluate(() => feedback)).length, 0);
+      await page.locator('#human').click();
+      assert.ok((await page.evaluate(() => feedback)).some(event => event.source === 'user'));
     } finally { await browser.close(); }
   });
 

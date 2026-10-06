@@ -87,6 +87,38 @@ for (const build of ['chrome', 'firefox']) {
     assert.equal(agent._pageFeedbackRuns.size, 0);
   });
 
+  test(`${build}: run startup awaits every accessible frame and cleanup stops all of them`, async () => {
+    const agent = setup(Agent), tab = nextTab++, entered = deferred(), release = deferred();
+    const states = new Map([[0, false], [2, false]]);
+    const previousNavigation = api.webNavigation, previousMessage = api.tabs.sendMessage;
+    api.webNavigation = { getAllFrames: async () => [{ frameId: 0 }, { frameId: 2 }, { frameId: 9 }] };
+    const sendFrame = async (frameId, message) => {
+      if (frameId === 9) throw new Error('Restricted frame');
+      if (message.action !== 'page_monitor_state') return {};
+      if (frameId === 2 && message.active) { entered.resolve(); await release.promise; }
+      states.set(frameId, message.active); return { ready: true };
+    };
+    // Model real broadcast semantics: all frames receive the message, but the
+    // caller only waits for the first responding frame unless it targets each.
+    api.tabs.sendMessage = async (_tab, message, options) => options?.frameId === undefined
+      ? Promise.any([0, 2, 9].map(frameId => sendFrame(frameId, message))) : sendFrame(options.frameId, message);
+    let complete = false;
+    const starting = agent._claimRunEntry(tab, 'interactive').then(() => { complete = true; });
+    try {
+      await entered.promise;
+      await new Promise(resolve => setImmediate(resolve));
+      assert.equal(complete, false, 'A top-frame response must not bypass a delayed child acknowledgement');
+      release.resolve(); await starting;
+      assert.deepEqual([...states.values()], [true, true]);
+      agent._releaseRunEntry(tab);
+      await new Promise(resolve => setImmediate(resolve));
+      assert.deepEqual([...states.values()], [false, false]);
+    } finally {
+      release.resolve(); await starting; agent._releaseRunEntry(tab);
+      api.webNavigation = previousNavigation; api.tabs.sendMessage = previousMessage;
+    }
+  });
+
   test(`${build}: navigation bursts and DOM storms remain bounded and retain navigation intent`, async () => {
     const agent = setup(Agent), tab = nextTab++;
     await agent._claimRunEntry(tab, 'interactive');

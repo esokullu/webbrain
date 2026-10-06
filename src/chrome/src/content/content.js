@@ -4303,6 +4303,7 @@
     const labelText = String(params?.label || '').trim().slice(0, 100);
     const overlay = document.createElement('div');
     overlay.setAttribute('data-webbrain-dev-highlight', '');
+    (window.__wbPageMonitorDecorations ??= new WeakSet()).add(overlay);
     Object.assign(overlay.style, {
       position: 'fixed',
       pointerEvents: 'none',

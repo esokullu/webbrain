@@ -104,6 +104,7 @@
   function createBorder() {
     const el = document.createElement('div');
     el.id = 'webbrain-agent-glow-border';
+    (window.__wbPageMonitorDecorations ??= new WeakSet()).add(el);
     el.style.cssText = `
       position: fixed;
       top: 0; left: 0; right: 0; bottom: 0;
@@ -123,6 +124,7 @@
   function createStopButton() {
     const container = document.createElement('div');
     container.id = 'webbrain-agent-stop-container';
+    (window.__wbPageMonitorDecorations ??= new WeakSet()).add(container);
     container.style.cssText = `
       position: fixed;
       bottom: 16px;
@@ -194,6 +196,7 @@
   function createTargetOutline() {
     const el = document.createElement('div');
     el.id = 'webbrain-agent-target-outline';
+    (window.__wbPageMonitorDecorations ??= new WeakSet()).add(el);
     el.style.cssText = `
       position: fixed;
       pointer-events: none;
@@ -216,6 +219,7 @@
   function createTargetCursor() {
     const el = document.createElement('div');
     el.id = 'webbrain-agent-target-cursor';
+    (window.__wbPageMonitorDecorations ??= new WeakSet()).add(el);
     el.setAttribute('aria-hidden', 'true');
     el.innerHTML = `
       <svg width="48" height="56" viewBox="0 0 48 56" fill="none" xmlns="http://www.w3.org/2000/svg">

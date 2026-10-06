@@ -21,6 +21,10 @@ Steer or grant authorization. Enter and Alt+Enter retain their existing behavior
   document token. Background validates the actual sender's tab, frame, browser
   document identity when available and monotonic sequence. Full navigation
   invalidates the previous document and its frames.
+  Run startup addresses every existing accessible frame and waits for its ready
+  acknowledgement; cleanup sends the owning run token to all frames. Restricted
+  frames do not prevent a run, and frame enumeration failures retain broadcast
+  delivery.
 - Native CDP/BiDi and content actions register their target, input operation and
   actual dispatch before changing the page. Target and native-event phase
   matching suppress their observed effects. CDP resolves the receiving document
@@ -33,7 +37,10 @@ Steer or grant authorization. Enter and Alt+Enter retain their existing behavior
 - Meaningful visible content, control state, visibility and geometry changes are
   coalesced. Visible subtree identity changes invalidate targets even when the
   replacement has identical text and geometry. CSS animation and extension
-  decoration are ignored. A MAIN-world attachment signal observes new open
+  decoration are ignored. Extension UI roots register their actual node
+  references in the isolated content-script world, preserved across monitor
+  replacement; page-owned IDs and attributes cannot suppress observations.
+  A MAIN-world attachment signal observes new open
   shadow roots on existing hosts before their initial rendering; shadow-root
   child-list mutations are also monitored. Inaccessible frames and closed shadow roots retain the
   existing browser-access limitations.
@@ -93,5 +100,8 @@ Visibility regressions include fixed-size ancestors changing class or CSS custom
 properties to reveal or hide non-interactive content. Native preparation fixtures
 also exercise the real companion code across an asynchronous target lookup while
 the user edits the same field.
+Frame lifecycle regressions cover delayed child acknowledgements and inaccessible
+frames. Browser fixtures also cover page-owned marker attributes and the real
+extension indicators across monitor replacement.
 
 The monitor regressions are also included in `npm run test:runtime-lifecycle`.

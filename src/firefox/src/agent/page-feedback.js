@@ -6,6 +6,24 @@ const clean = (value, limit = 240) => String(value ?? '').replace(/[\u0000-\u001
 const token = () => globalThis.crypto.randomUUID();
 const apiFor = () => globalThis.browser || globalThis.chrome;
 
+async function notifyPageMonitorFrames(api, tabId, message, knownFrames = []) {
+  if (!api?.tabs?.sendMessage) return;
+  const frameIds = new Set([0, ...knownFrames]);
+  let enumerated = false;
+  try {
+    const frames = await api.webNavigation?.getAllFrames?.({ tabId });
+    if (Array.isArray(frames)) {
+      enumerated = true;
+      for (const frame of frames) if (Number.isSafeInteger(frame.frameId) && frame.frameId >= 0) frameIds.add(frame.frameId);
+    }
+  } catch { /* Restricted documents may not expose their frame tree. */ }
+  // A broadcast reaches every frame but resolves on the first response. Address
+  // enumerated frames separately so startup waits for each accessible monitor.
+  const deliveries = [...frameIds].map(frameId => Promise.resolve().then(() => api.tabs.sendMessage(tabId, message, { frameId })));
+  if (!enumerated) deliveries.push(Promise.resolve().then(() => api.tabs.sendMessage(tabId, message)));
+  await Promise.allSettled(deliveries);
+}
+
 export const hasPageAgentDispatchOwner = tabId => dispatchOwners.has(tabId);
 
 export function pageFeedbackPendingResult() {
@@ -81,7 +99,7 @@ export const pageFeedbackMethods = {
       } });
     const api = apiFor();
     try { run.url = (await api.tabs.get(tabId)).url || ''; } catch {}
-    try { await api.tabs.sendMessage(tabId, { target: 'content', action: 'page_monitor_state', active: true }); } catch {}
+    await notifyPageMonitorFrames(api, tabId, { target: 'content', action: 'page_monitor_state', active: true }, run.frames.keys());
   },
 
   _finishPageFeedbackRun(tabId) {
@@ -94,8 +112,8 @@ export const pageFeedbackMethods = {
     }); } catch { /* UI delivery cannot retain run ownership. */ }
     this._pageFeedbackRuns.delete(tabId);
     if (dispatchOwners.get(tabId)?.runToken === run.token) dispatchOwners.delete(tabId);
-    try { Promise.resolve(apiFor().tabs.sendMessage(tabId, { target: 'content', action: 'page_monitor_state',
-      active: false, runToken: run.token })).catch(() => {}); } catch {}
+    void notifyPageMonitorFrames(apiFor(), tabId, { target: 'content', action: 'page_monitor_state',
+      active: false, runToken: run.token }, run.frames.keys()).catch(() => {});
   },
 
   pageMonitorState(sender, documentToken) {

@@ -22,8 +22,22 @@
   };
   const compact = (value, max = 120) => String(value || '').replace(/[\u0000-\u001f]/g, ' ').slice(0, max);
   const editable = el => !!el?.closest?.('input,textarea,[contenteditable]:not([contenteditable="false"])');
-  const ignored = el => !el || el.nodeType !== 1 || /^(SCRIPT|STYLE|LINK|META|HEAD)$/.test(el.tagName)
-    || !!el.closest?.('[id^="webbrain-"],[id^="wb-agent-"],[data-webbrain-ui],[data-webbrain-dev-highlight],[data-webbrain-attention]');
+  // Owned references survive reinjection in the isolated content-script world.
+  // Page-controlled IDs and attributes cannot establish extension ownership.
+  const decorations = window.__wbPageMonitorDecorations ??= new WeakSet();
+  const registerDecoration = el => {
+    if (el?.nodeType === 1 && el.ownerDocument === document && el !== document.body && el !== document.documentElement) decorations.add(el);
+    return el;
+  };
+  const ignored = el => {
+    if (!el || el.nodeType !== 1 || /^(SCRIPT|STYLE|LINK|META|HEAD)$/.test(el.tagName)) return true;
+    for (let node = el; node; node = node.parentElement || node.getRootNode?.().host) {
+      // Reparenting the page under a real indicator cannot silence the page.
+      if (node === document.body || node === document.documentElement) return false;
+      if (decorations.has(node)) return true;
+    }
+    return false;
+  };
   const visible = el => {
     if (ignored(el)) return false;
     const style = getComputedStyle(el);
@@ -462,7 +476,7 @@
     }
   };
   api.runtime.onMessage.addListener(onMessage);
-  window.__wbPageMonitor = { beginContentAction, beforeLocalDispatch, dispatch,
+  window.__wbPageMonitor = { beginContentAction, beforeLocalDispatch, dispatch, registerDecoration,
     dispose() { disposed = true; requestGeneration++; stop(); api.runtime.onMessage.removeListener?.(onMessage); } };
   void requestState();
   // A document restored from BFCache needs a fresh run/document handshake.

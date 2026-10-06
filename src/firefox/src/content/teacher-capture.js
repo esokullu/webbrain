@@ -138,6 +138,7 @@
     if (!active || !document.documentElement) return;
     const indicator = document.createElement('div');
     indicator.id = INDICATOR_ID;
+    (window.__wbPageMonitorDecorations ??= new WeakSet()).add(indicator);
     indicator.setAttribute('role', 'status');
     indicator.setAttribute('aria-live', 'polite');
     indicator.textContent = `● WebBrain Teach${sessionName ? ` · ${sessionName}` : ''}`;
