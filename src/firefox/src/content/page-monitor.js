@@ -360,6 +360,7 @@
         [size + length, (Math.imul(hash, power) + part) >>> 0], [0, 0]);
     const controlValue = controlValueFingerprint(el);
     return JSON.stringify([shown, content, el.children.length + (el.shadowRoot?.children.length || 0), el.getAttribute('role'), el.getAttribute('aria-label'),
+      el.getAttribute('name'), el.getAttribute('placeholder'), el.getAttribute('aria-required'), el.getAttribute('aria-readonly'),
       el.getAttribute('aria-expanded'), el.getAttribute('aria-selected'), el.getAttribute('aria-checked'),
       el.getAttribute('aria-valuenow'), el.getAttribute('aria-valuetext'),
       el.getAttribute('aria-pressed'),
@@ -437,7 +438,8 @@
     if (!root || roots.has(root) || !observer) return;
     roots.add(root);
     observer.observe(root, { childList: true, subtree: true, characterData: true, attributes: true, attributeOldValue: true,
-      attributeFilter: ['role', 'aria-label', 'aria-expanded', 'aria-selected', 'aria-checked', 'aria-pressed', 'aria-disabled',
+      attributeFilter: ['role', 'aria-label', 'name', 'placeholder', 'aria-required', 'aria-readonly',
+        'aria-expanded', 'aria-selected', 'aria-checked', 'aria-pressed', 'aria-disabled',
         'type', 'href', 'target', 'download', 'action', 'formaction', 'formtarget',
         'aria-valuenow', 'aria-valuetext', 'aria-hidden', 'hidden', 'disabled', 'readonly', 'checked', 'selected', 'open', 'popover', 'inert', 'class', 'style'] });
     listen(root, 'beforetoggle', event => {
@@ -534,7 +536,12 @@
     for (const record of changes) {
       const el = record.target.nodeType === 1 ? record.target
         : record.target.host || record.target.parentElement || record.target.getRootNode?.().host;
-      if (ignored(el) || (record.type === 'characterData' && editable(el))) continue;
+      const editableCharacterData = record.type === 'characterData' && editable(el);
+      if (ignored(el)) continue;
+      // Native input already reports user edits, and agent input's synchronous
+      // DOM writes are attributed to its dispatch. Keep those paths deduplicated
+      // while observing independent page-script changes to editable text.
+      if (editableCharacterData && (userTurn || (agentTurn && lastUserAt <= agentTurn.userAt))) continue;
       if (record.type === 'attributes' && ['class', 'style'].includes(record.attributeName)
           && el.getAnimations?.().some(animation => animation.playState === 'running')) continue;
       if (++measured > 300) {
@@ -555,6 +562,7 @@
       }
       let identityChanged = (record.type === 'popover' && record.stateChanged)
         || (record.type === 'layout' && record.layoutChanged)
+        || editableCharacterData
         || (record.type === 'shadow' && (visible(el) || signatures.get(el)?.startsWith('[true')));
       if (record.type === 'childList') {
         identityChanged = subtreeChanged(record, el);

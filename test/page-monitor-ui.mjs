@@ -1532,6 +1532,62 @@ for (const [build, engine] of [['chrome', chromium], ['firefox', firefox]]) {
     } finally { await browser.close(); }
   });
 
+  test(`${build}: programmatic contenteditable text updates produce page feedback`, async () => {
+    const { browser, page } = await fixture(engine, build);
+    try {
+      await page.evaluate(() => {
+        const editor = document.createElement('div');
+        editor.id = 'programmatic-editor'; editor.contentEditable = 'true'; editor.setAttribute('role', 'textbox');
+        editor.textContent = 'Initial text'; document.body.append(editor);
+      });
+      await page.waitForTimeout(180);
+      await page.evaluate(() => {
+        feedback = [];
+        document.getElementById('programmatic-editor').firstChild.data = 'Page updated this editor';
+      });
+      await page.waitForFunction(() => feedback.some(event => event.kind === 'dom'), null, { timeout: 1000 });
+      const observations = await page.evaluate(() => feedback);
+      assert.ok(observations.some(event => event.source === 'page' && event.target.startsWith('div#programmatic-editor')));
+      assert.equal(JSON.stringify(observations).includes('Page updated this editor'), false,
+        'Editable content must invalidate state without being included in feedback');
+    } finally { await browser.close(); }
+  });
+
+  test(`${build}: accessibility field metadata mutations invalidate prepared input`, async () => {
+    const { browser, page } = await fixture(engine, build);
+    try {
+      await page.evaluate(() => {
+        const input = document.createElement('input'); input.id = 'metadata-field';
+        input.name = 'original-name'; input.placeholder = 'Original placeholder'; input.setAttribute('aria-required', 'false');
+        input.setAttribute('aria-readonly', 'false'); document.body.append(input);
+      });
+      await page.waitForTimeout(180);
+      const changes = [
+        ['name', 'updated-name'], ['placeholder', 'Updated placeholder'],
+        ['aria-required', 'true'], ['aria-readonly', 'true'],
+      ];
+      for (const [attribute, value] of changes) {
+        const guard = await page.evaluate(attribute => {
+          feedback = [];
+          const operationId = 'metadata-' + attribute;
+          deliver('page_monitor_prepare', { operationId, tool: 'type_text', selector: '#metadata-field' });
+          deliver('page_monitor_dispatch', { operationId, kind: 'input', selector: '#metadata-field', fenceOnly: true });
+          return lastMonitorResponse.guard;
+        }, attribute);
+        await page.locator('#metadata-field').evaluate((element, [name, next]) => element.setAttribute(name, next), [attribute, value]);
+        await page.waitForFunction(() => feedback.some(event => event.kind === 'dom' && event.target === 'input#metadata-field'), null, { timeout: 1000 });
+        const ready = await page.evaluate(value => {
+          deliver('page_monitor_validate', { ...value, kind: 'input' });
+          return lastMonitorResponse.ready;
+        }, guard);
+        assert.equal(ready, false, `${attribute} changes must invalidate an existing input guard`);
+        const serialized = await page.evaluate(() => JSON.stringify(feedback));
+        assert.equal(serialized.includes(value), false, 'Field metadata values must not be included in feedback');
+        await page.waitForTimeout(180);
+      }
+    } finally { await browser.close(); }
+  });
+
   test(`${build}: button type changes invalidate a prepared click`, async () => {
     const { browser, page } = await fixture(engine, build);
     try {
