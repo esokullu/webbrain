@@ -216,13 +216,5 @@ export async function runFalGeneration({
   }
 }
 
-// Legacy entry points retained for callers importing fal-media.js.
-export async function generateImage(args, options = {}) {
-  const media = await import('./generative-media.js');
-  return media.generateImage(args, options);
-}
-
-export async function testImageGenProvider(fetchImpl = fetch) {
-  const media = await import('./generative-media.js');
-  return media.testImageGenProvider(fetchImpl);
-}
+// Legacy entry points must use static exports: MV3 service workers forbid import().
+export { generateImage, testImageGenProvider } from './generative-media.js';

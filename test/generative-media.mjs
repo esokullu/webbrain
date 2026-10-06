@@ -7,6 +7,7 @@ const workflow = { '6': { class_type: 'CLIPTextEncode', inputs: { text: '{{promp
 
 for (const build of ['chrome', 'firefox']) {
   const media = await import(`../src/${build}/src/agent/generative-media.js`);
+  const legacyMedia = await import(`../src/${build}/src/agent/fal-media.js`);
   const config = await import(`../src/${build}/src/agent/media-config.js`);
   const gate = await import(`../src/${build}/src/agent/permission-gate.js`);
   const journal = await import(`../src/${build}/src/run-ui-journal.js`);
@@ -58,16 +59,95 @@ for (const build of ['chrome', 'firefox']) {
     const calls = [];
     const result = await media.runMediaGeneration({ prompt: 'red apple', config: { provider: 'openrouter', apiKey: 'or-key', model: 'google/gemini-2.5-flash-image' }, fetchImpl: async (url, init) => {
       calls.push(url); assert.equal(init.headers.Authorization, 'Bearer or-key');
-      assert.equal(init.redirect, 'error'); assert.deepEqual(JSON.parse(init.body), { model: 'google/gemini-2.5-flash-image', prompt: 'red apple' });
+      assert.equal(init.redirect, 'error');
+      if (url.endsWith('/images/models')) return json({ data: [{ id: 'google/gemini-2.5-flash-image' }] });
+      assert.deepEqual(JSON.parse(init.body), { model: 'google/gemini-2.5-flash-image', prompt: 'red apple' });
       return json({ data: [{ b64_json: 'YWJj', media_type: 'image/webp' }] });
     } });
-    assert.deepEqual(calls, ['https://openrouter.ai/api/v1/images']);
+    assert.deepEqual(calls, ['https://openrouter.ai/api/v1/images/models', 'https://openrouter.ai/api/v1/images']);
     assert.equal(result.url, 'data:image/webp;base64,YWJj');
     assert.equal(media.extractMediaUrl({ data: [{ b64_json: 'YWJj', media_type: 'image/svg+xml' }] }), '');
     assert.equal(media.extractMediaUrl({ candidates: [{ content: { parts: [{ inlineData: { mimeType: 'image/png', data: 'YWJj' } }] } }] }), 'data:image/png;base64,YWJj');
     assert.equal(media.extractMediaUrl({ status_url: 'https://api.example/status' }), '');
     assert.equal(media.safeMediaUrl('javascript:alert(1)'), '');
     assert.equal(media.safeMediaUrl('https://key@evil.example/x'), '');
+  });
+
+  test(`${build}: legacy media entry points bind statically to the provider implementation`, () => {
+    assert.equal(legacyMedia.testImageGenProvider, media.testImageGenProvider);
+    assert.equal(legacyMedia.generateImage, media.generateImage);
+  });
+
+  test(`${build}: OpenRouter Hailuo video polls and downloads through authenticated trusted paths`, async () => {
+    const calls = [];
+    const responses = [
+      json({ data: [] }), json({ data: [{ id: 'minimax/hailuo-3-max' }] }),
+      json({ id: 'job-1', status: 'pending', polling_url: 'https://evil.example/status' }, 202),
+      json({ status: 'pending' }), json({ status: 'in_progress' }),
+      json({ status: 'completed', unsigned_urls: ['https://evil.example/content'] }),
+      new Response('abc', { headers: { 'Content-Type': 'video/mp4' } }),
+    ];
+    const result = await media.runMediaGeneration({ prompt: 'a moving red apple', config: { provider: 'openrouter', apiKey: 'or-key', model: 'minimax/hailuo-3-max' }, pollIntervalMs: 1, fetchImpl: async (url, init) => {
+      calls.push(url);
+      assert.equal(init.headers.Authorization, 'Bearer or-key');
+      assert.equal(init.redirect, 'error'); assert.equal(init.credentials, 'omit');
+      if (init.method === 'POST') assert.deepEqual(JSON.parse(init.body), { model: 'minimax/hailuo-3-max', prompt: 'a moving red apple' });
+      return responses.shift();
+    } });
+    assert.deepEqual(result, { url: 'data:video/mp4;base64,YWJj', model: 'minimax/hailuo-3-max' });
+    assert.deepEqual(calls, [
+      'https://openrouter.ai/api/v1/images/models', 'https://openrouter.ai/api/v1/videos/models', 'https://openrouter.ai/api/v1/videos',
+      ...Array(3).fill('https://openrouter.ai/api/v1/videos/job-1'), 'https://openrouter.ai/api/v1/videos/job-1/content?index=0',
+    ]);
+  });
+
+  test(`${build}: OpenRouter completed video downloads even without unsigned URLs`, async () => {
+    const responses = [json({ data: [] }), json({ data: [{ id: 'video-model' }] }), json({ id: 'job-1' }, 202), json({ status: 'completed' }), new Response('abc', { headers: { 'Content-Type': 'video/mp4' } })];
+    const result = await media.runMediaGeneration({ prompt: 'apple', config: { provider: 'openrouter', apiKey: 'k', model: 'video-model' }, pollIntervalMs: 1, fetchImpl: async () => responses.shift() });
+    assert.equal(result.url, 'data:video/mp4;base64,YWJj');
+  });
+
+  test(`${build}: OpenRouter rejects invalid jobs and terminal failures without downloading media`, async () => {
+    for (const [submit, status, expected] of [
+      [{ id: '../another-job' }, null, /invalid video job ID/],
+      [{ id: 'job-1' }, { status: 'failed', error: 'Content policy violation' }, /Content policy violation/],
+      [{ id: 'job-1' }, { status: 'failed' }, /failed/],
+      [{ id: 'job-1' }, { status: 'cancelled' }, /cancelled/],
+      [{ id: 'job-1' }, { status: 'expired' }, /expired/],
+      [{ id: 'job-1' }, {}, /unknown status/],
+    ]) {
+      const calls = [];
+      const responses = [json({ data: [] }), json({ data: [{ id: 'video-model' }] }), json(submit, 202), json(status)];
+      await assert.rejects(media.runMediaGeneration({ prompt: 'apple', config: { provider: 'openrouter', apiKey: 'k', model: 'video-model' }, pollIntervalMs: 1, fetchImpl: async url => { calls.push(url); return responses.shift(); } }), expected);
+      assert.ok(!calls.some(url => url.includes('/content')));
+      assert.equal(calls.length, status ? 4 : 3);
+    }
+  });
+
+  test(`${build}: OpenRouter rejects non-media models before paid submission`, async () => {
+    const calls = [];
+    await assert.rejects(media.runMediaGeneration({ prompt: 'apple', config: { provider: 'openrouter', apiKey: 'k', model: 'text-only' }, fetchImpl: async (url, init) => {
+      calls.push(url); assert.equal(init.method, undefined); return json({ data: [] });
+    } }), /image or video generation catalog/);
+    assert.equal(calls.length, 2);
+  });
+
+  test(`${build}: OpenRouter video cancellation stops polling and aborts in-flight downloads`, async () => {
+    for (const phase of ['poll', 'download']) {
+      const controller = new AbortController();
+      const calls = [];
+      const responses = [json({ data: [] }), json({ data: [{ id: 'video-model' }] }), json({ id: 'job-1' }, 202)];
+      await assert.rejects(media.runMediaGeneration({ prompt: 'apple', config: { provider: 'openrouter', apiKey: 'k', model: 'video-model' }, signal: controller.signal, pollIntervalMs: 1, fetchImpl: async (url, init) => {
+        calls.push(url);
+        if (responses.length) return responses.shift();
+        if (phase === 'download' && !url.includes('/content')) return json({ status: 'completed' });
+        return new Promise((_resolve, reject) => {
+          init.signal.addEventListener('abort', () => reject(init.signal.reason), { once: true });
+          controller.abort(new Error('Stopped video generation.'));
+        });
+      } }), /Stopped video generation/);
+      assert.equal(calls.length, phase === 'poll' ? 4 : 5);
+    }
   });
 
   test(`${build}: Comfy Router binds native inputs and polls trusted job paths`, async () => {
@@ -207,17 +287,18 @@ for (const build of ['chrome', 'firefox']) {
       for (const [provider, values, responses, urls] of [
         ['fal', { apiKey: 'k', model: 'fal-ai/flux/schnell' }, [json({})], ['https://api.fal.ai/v1/workflows?limit=1']],
         ['openrouter', { apiKey: 'k', model: 'image-model' }, [json({ data: {} }), json({ data: [{ id: 'image-model' }] })], ['https://openrouter.ai/api/v1/key', 'https://openrouter.ai/api/v1/images/models']],
+        ['openrouter', { apiKey: 'k', model: 'minimax/hailuo-3-max' }, [json({ data: {} }), json({ data: [] }), json({ data: [{ id: 'minimax/hailuo-3-max' }] })], ['https://openrouter.ai/api/v1/key', 'https://openrouter.ai/api/v1/images/models', 'https://openrouter.ai/api/v1/videos/models']],
         ['comfyrouter', { apiKey: 'k', model: 'bfl/flux-2-pro' }, [json({ id: 'bfl/flux-2-pro' })], ['https://api.comfy.org/v2/models/bfl/flux-2-pro']],
         ['comfyui', { workflow }, [json({ system: {}, devices: [] })], ['http://127.0.0.1:8188/system_stats']],
       ]) {
         selected = { provider, ...values }; const calls = [];
-        const result = await media.testImageGenProvider(async (url, init) => { assert.ok(!init.method || init.method === 'GET'); calls.push(url); return responses.shift(); });
+        const result = await legacyMedia.testImageGenProvider(async (url, init) => { assert.ok(!init.method || init.method === 'GET'); calls.push(url); return responses.shift(); });
         assert.equal(result.ok, true, result.error); assert.deepEqual(calls, urls);
         assert.equal((await media.testImageGenProvider(async () => json({}, 401))).ok, false);
       }
       selected = { provider: 'openrouter', apiKey: 'k', model: 'text-only' };
-      const responses = [json({ data: {} }), json({ data: [{ id: 'image-model' }] })];
-      assert.match((await media.testImageGenProvider(async () => responses.shift())).error, /image generation catalog/);
+      const responses = [json({ data: {} }), json({ data: [{ id: 'image-model' }] }), json({ data: [] })];
+      assert.match((await legacyMedia.testImageGenProvider(async () => responses.shift())).error, /image or video generation catalog/);
     } finally { globalThis.chrome = originalChrome; globalThis.browser = originalBrowser; }
   });
 

@@ -100,12 +100,21 @@ async function mediaResponse(response, label) {
   return url;
 }
 
-export async function runMediaGeneration({ prompt, config, fetchImpl = fetch, signal, timeoutMs = GENERATION_TIMEOUT_MS, pollIntervalMs = 2000 }) {
+async function openRouterMediaType(model, headers, request) {
+  for (const kind of ['images', 'videos']) {
+    const catalog = await jsonResponse(await request(`https://openrouter.ai/api/v1/${kind}/models`, { headers }), `OpenRouter ${kind} models`);
+    if (catalog.data?.some(item => item.id === model)) return kind;
+  }
+  throw new Error('The selected OpenRouter model is not in the image or video generation catalog.');
+}
+
+export async function runMediaGeneration({ prompt, config, fetchImpl = fetch, signal, timeoutMs = GENERATION_TIMEOUT_MS, pollIntervalMs }) {
   const provider = validateMediaConfig(config);
   const text = String(prompt || '').trim();
   if (!text) throw new Error('prompt is required.');
   if (provider === 'fal') return runFalGeneration({ prompt: text, config, fetchImpl, signal, timeoutMs });
   const operation = operationSignal(signal, timeoutMs);
+  const pollMs = pollIntervalMs ?? (provider === 'openrouter' ? 30000 : 2000);
   const model = provider === 'comfyui' ? 'ComfyUI workflow' : normalizeMediaModel(config.model);
   const request = (url, init = {}) => {
     operation.signal.throwIfAborted();
@@ -115,11 +124,30 @@ export async function runMediaGeneration({ prompt, config, fetchImpl = fetch, si
   let completed = false;
   try {
     if (provider === 'openrouter') {
-      const res = await request('https://openrouter.ai/api/v1/images', {
-        method: 'POST', headers: { Authorization: `Bearer ${config.apiKey}`, 'Content-Type': 'application/json' },
+      const headers = { Authorization: `Bearer ${config.apiKey}`, 'Content-Type': 'application/json' };
+      const kind = await openRouterMediaType(model, headers, request);
+      const base = `https://openrouter.ai/api/v1/${kind}`;
+      const res = await request(base, {
+        method: 'POST', headers,
         body: JSON.stringify({ model, prompt: text }),
       });
-      return { url: await mediaResponse(res, 'OpenRouter generation'), model };
+      if (kind === 'images') return { url: await mediaResponse(res, 'OpenRouter generation'), model };
+      const queued = await jsonResponse(res, 'OpenRouter video submit');
+      if (!/^[A-Za-z0-9_-]+$/.test(queued.id || '')) throw new Error('OpenRouter returned an invalid video job ID.');
+      // Construct authenticated paths ourselves; returned URLs cannot select a key recipient.
+      const jobUrl = `${base}/${queued.id}`;
+      let waitMs = pollDelay(res, pollMs);
+      while (true) {
+        await delay(waitMs, operation.signal);
+        const statusRes = await request(jobUrl, { headers });
+        const status = await jsonResponse(statusRes, 'OpenRouter video status');
+        waitMs = pollDelay(statusRes, pollMs);
+        if (status.status === 'completed') {
+          const result = await request(`${jobUrl}/content?index=0`, { headers });
+          return { url: await mediaResponse(result, 'OpenRouter video download'), model };
+        }
+        if (!['pending', 'in_progress'].includes(status.status)) throw new Error(`OpenRouter video generation ${status.status || 'returned an unknown status'}.`);
+      }
     }
     if (provider === 'comfyrouter') {
       const base = `https://api.comfy.org/v2/models/${model}/requests`;
@@ -134,15 +162,15 @@ export async function runMediaGeneration({ prompt, config, fetchImpl = fetch, si
       // Build authenticated URLs ourselves; never send the key to returned URLs.
       const resultUrl = `${base}/${queued.request_id}`;
       cancelUrl = `${resultUrl}/cancel`; cancelInit = { method: 'PUT', headers };
-      let waitMs = pollIntervalMs;
+      let waitMs = pollMs;
       while (true) {
         await delay(waitMs, operation.signal);
         const res = await request(`${resultUrl}/status`, { headers });
         const status = await jsonResponse(res, 'Comfy Router status');
-        waitMs = pollDelay(res, pollIntervalMs);
+        waitMs = pollDelay(res, pollMs);
         if (status.status === 'COMPLETED') {
           const result = await request(resultUrl, { headers });
-          if (result.status === 202) { waitMs = pollDelay(result, pollIntervalMs); continue; }
+          if (result.status === 202) { waitMs = pollDelay(result, pollMs); continue; }
           const url = await mediaResponse(result, 'Comfy Router generation');
           completed = true;
           return { url, model };
@@ -160,7 +188,7 @@ export async function runMediaGeneration({ prompt, config, fetchImpl = fetch, si
     // Delete this queued prompt only. /interrupt could stop someone else's running workflow.
     cancelUrl = `${base}/queue`; cancelInit = { method: 'POST', headers, body: JSON.stringify({ delete: [queued.prompt_id] }) };
     while (true) {
-      await delay(pollIntervalMs, operation.signal);
+      await delay(pollMs, operation.signal);
       const history = await jsonResponse(await request(`${base}/history/${queued.prompt_id}`), 'ComfyUI history');
       const item = history[queued.prompt_id];
       if (!item) continue;
@@ -217,8 +245,7 @@ export async function testImageGenProvider(fetchImpl = fetch) {
     if (!res.ok) throw new Error(`${MEDIA_PROVIDERS[provider].label} connection failed (HTTP ${res.status}).`);
     if (provider === 'openrouter') {
       await jsonResponse(res, 'OpenRouter key');
-      const catalog = await jsonResponse(await fetchImpl('https://openrouter.ai/api/v1/images/models', { headers, signal: operation.signal, redirect: 'error', credentials: 'omit' }), 'OpenRouter image models');
-      if (!catalog.data?.some(item => item.id === model)) throw new Error('The selected OpenRouter model is not in the image generation catalog.');
+      await openRouterMediaType(model, headers, (url, init) => fetchImpl(url, { ...init, signal: operation.signal, redirect: 'error', credentials: 'omit' }));
     } else if (provider === 'comfyui') {
       const stats = await jsonResponse(res, 'ComfyUI');
       if (!stats.system || !Array.isArray(stats.devices)) throw new Error('The endpoint did not return ComfyUI system information.');

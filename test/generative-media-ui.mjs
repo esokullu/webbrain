@@ -124,7 +124,8 @@ try {
           const dataUrl = canvas.toDataURL('image/png');
           const result = await generateImage({ prompt: 'test image' }, {
             config: { provider: 'openrouter', apiKey: 'synthetic-key', model: 'image-model' },
-            fetchImpl: async () => new Response(JSON.stringify({ data: [{ b64_json: dataUrl.split(',')[1], media_type: 'image/png' }] }), { headers: { 'Content-Type': 'application/json' } }),
+            fetchImpl: async url => new Response(JSON.stringify({ data: url.endsWith('/models')
+              ? [{ id: 'image-model' }] : [{ b64_json: dataUrl.split(',')[1], media_type: 'image/png' }] }), { headers: { 'Content-Type': 'application/json' } }),
           });
           if (!result.success) throw new Error(result.error);
           const div = document.createElement('div'); div.id = 'media-test-preview'; document.querySelector('#image-gen-card').appendChild(div);
