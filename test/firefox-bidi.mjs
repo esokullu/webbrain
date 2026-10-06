@@ -182,6 +182,30 @@ test('stop during target preparation prevents input dispatch', async () => {
   await assert.rejects(session.perform(runId, 'click', {}), /stopped/);
   assert.equal(sent.includes('input.performActions'), false);
 });
+test('BiDi navigation revalidates the page feedback guard before native dispatch', async () => {
+  const session = new BidiSession(), runId = id(), sent = [];
+  session.runs.set(runId, { context: 'a' });
+  session.send = async (method, params) => { sent.push({ method, params }); return {}; };
+  const guard = { documentToken: 'doc', revision: 4, operationId: 'op' };
+  await assert.rejects(session.perform(runId, 'navigate', { url: 'https://example.com/next', pageFeedbackGuard: guard },
+    async (_id, received, kind, rebindFocus) => {
+      assert.equal(received, guard);
+      assert.equal(kind, 'navigate');
+      assert.equal(rebindFocus, false);
+      return false;
+    }), error => {
+    assert.equal(error.code, 'page_feedback_pending');
+    assert.equal(error.dispatchState.noDispatch, true);
+    assert.equal(error.dispatchState.outcomeUnknown, false);
+    return true;
+  });
+  assert.equal(sent.some(call => call.method === 'browsingContext.navigate'), false,
+    'A stale guard must be rejected before the native navigation command is sent');
+
+  await session.perform(runId, 'navigate', { url: 'https://example.com/next', pageFeedbackGuard: guard },
+    async (_id, _guard, kind) => kind === 'navigate');
+  assert.equal(sent.filter(call => call.method === 'browsingContext.navigate').length, 1);
+});
 for (const failAt of [1, 2]) {
   test(`page feedback change before native input ${failAt} preserves dispatch evidence`, async () => {
     const session = new BidiSession(), runId = id();

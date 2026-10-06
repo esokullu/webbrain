@@ -266,6 +266,13 @@ export class BidiSession {
     assertLive();
     if (action === 'navigate') {
       if (!/^https?:\/\//.test(payload.url)) throw new Error('Invalid navigation URL');
+      const guard = payload.pageFeedbackGuard;
+      if (guard && (typeof validatePageDispatch !== 'function'
+          || !await validatePageDispatch(id, guard, 'navigate', false))) {
+        const error = new Error('Page changed during native preparation; navigation was not sent');
+        error.code = 'page_feedback_pending'; throw error;
+      }
+      assertLive();
       run.navigation = true;
       try { dispatch.started = true; await this.send('browsingContext.navigate', { context: run.context, url: payload.url, wait: 'interactive' }); }
       finally { run.navigation = false; }

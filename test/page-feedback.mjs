@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import vm from 'node:vm';
 import { test } from 'node:test';
 import { makeSchedulerHarness } from './lib/scheduler-harness.mjs';
+import { cdpClient } from '../src/chrome/src/cdp/cdp-client.js';
 
 const area = { get: async () => ({}), set: async () => {}, remove: async () => {} };
 const api = { storage: { local: area, session: area },
@@ -65,6 +66,45 @@ function allowBatchPreparation(agent) {
 for (const build of ['chrome', 'firefox']) {
   const { Agent } = await import(`../src/${build}/src/agent/agent.js`);
   const { beforePageAgentDispatch } = await import(`../src/${build}/src/agent/page-feedback.js`);
+
+  if (build === 'chrome') {
+    test('Chrome execute_js returns without dispatch when the page-side revision gate rejects it', async () => {
+      const tab = nextTab++, agent = setup(Agent);
+      const previousSendMessage = api.tabs.sendMessage;
+      const previousEnable = cdpClient.enableDevDiagnostics, previousEvaluate = cdpClient.evaluate;
+      let expression = '';
+      try {
+        await agent._claimRunEntry(tab, 'interactive');
+        await agent._beginPageFeedbackRun(tab, 'interactive');
+        const run = agent._pageFeedbackRuns.get(tab);
+        run.frames.set(0, { token: 'execute-js-document', id: 'document-1' });
+        api.tabs.sendMessage = async (_tab, message) => message.action === 'page_monitor_dispatch'
+          ? { ready: true, guard: { runToken: run.token, documentToken: 'execute-js-document',
+            revision: 7, operationId: message.params.operationId } }
+          : { ready: true };
+        cdpClient.enableDevDiagnostics = async () => {};
+        cdpClient.evaluate = async (_tab, value) => {
+          expression = value;
+          const token = value.match(/__webbrainPageFeedbackAborted: "([^"]+)"/)?.[1];
+          assert.ok(token, 'The wrapped page expression must have a unique aborted-dispatch result');
+          return { result: { value: { __webbrainPageFeedbackAborted: token } } };
+        };
+        const result = await agent._executeDevJavaScript(tab, { code: 'window.__shouldNotRun = true;' });
+        assert.equal(result.dispatched, false);
+        assert.equal(result.noDispatch, true);
+        assert.match(result.error, /page changed during JavaScript preparation/i);
+        assert.match(expression, /cancelable: true/);
+        assert.match(expression, /if \(!window\.dispatchEvent\(gate\)\) return/);
+        assert.ok(expression.indexOf('return (async () =>') > expression.indexOf('dispatchEvent(gate)'));
+      } finally {
+        cdpClient.enableDevDiagnostics = previousEnable;
+        cdpClient.evaluate = previousEvaluate;
+        api.tabs.sendMessage = previousSendMessage;
+        if (agent._pageFeedbackRuns.has(tab)) agent._finishPageFeedbackRun(tab);
+        agent._releaseRunEntry(tab);
+      }
+    });
+  }
 
   test(`${build}: observations are isolated by run, frame, document and sequence`, async () => {
     const agent = setup(Agent), tab = nextTab++;
@@ -145,6 +185,63 @@ for (const build of ['chrome', 'firefox']) {
       assert.equal(agent._pageFeedbackRuns.get(tab).events.size, 0);
     } finally { agent._releaseRunEntry(tab); }
   });
+
+  for (const streaming of [false, true]) {
+    test(`${build}/${streaming ? 'stream' : 'chat'}: final-step page feedback suppresses a superseded completion`, async () => {
+      const tab = nextTab++, entered = deferred(), release = deferred(), staleCompletion = 'The task is complete on the old page.';
+      let providerCalls = 0, recoveryPrompt = '';
+      const provider = { name: 'feedback final-step test', model: 'test', promptTier: 'full', contextWindow: 128000,
+        supportsTools: true, supportsVision: false };
+      provider.chat = async function (messages) {
+        providerCalls++;
+        if (providerCalls === 1 && !streaming) {
+          entered.resolve(); await release.promise;
+          return { content: staleCompletion, toolCalls: null };
+        }
+        recoveryPrompt = JSON.stringify(messages);
+        return { content: null, toolCalls: [{ id: 'feedback_recovery_done',
+          function: { name: 'done', arguments: JSON.stringify({ summary: 'The page changed before the task was verified.', outcome: 'partial' }) } }] };
+      };
+      if (streaming) {
+        provider.chatStream = async function* () {
+          providerCalls++;
+          entered.resolve(); await release.promise;
+          yield { type: 'text', content: staleCompletion };
+          yield { type: 'done' };
+        };
+      }
+      const agent = setup(Agent, provider), updates = [];
+      agent.planBeforeAct = false;
+      agent.maxSteps = 1;
+      agent.autoScreenshot = 'off';
+      agent._skipPermissionGate = true;
+      agent._maybeRunPlannerGate = async () => ({ proceed: true, requestKind: 'execute', requiresStateChange: true });
+      agent._maybeReinjectAdapter = async () => {};
+      agent._ensureProgressSessionForCurrentTask = async () => ({ mode: 'inactive' });
+      agent._currentTaskLedgerRows = () => [];
+      agent._persist = () => {};
+      const run = streaming ? agent.processMessageStream.bind(agent) : agent.processMessage.bind(agent);
+      const running = run(tab, 'finish the existing task', (type, data) => updates.push({ type, data }), 'act');
+      try {
+        await entered.promise;
+        const binding = bind(agent, tab);
+        assert.equal(binding.send({ kind: 'input', source: 'user', target: 'input#filter' }).accepted, true);
+        release.resolve();
+        const final = await running;
+        assert.equal(providerCalls, 2, 'Only the bounded step-limit handoff may follow the one allowed agent step');
+        assert.equal(String(final).includes(staleCompletion), false, 'A completion formed against the previous page must be discarded');
+        assert.ok(updates.some(update => update.type === 'page_feedback'), 'The current page observation should be delivered');
+        assert.match(final, /page changed before the task was verified/i, 'The handoff must be based on the refreshed page context');
+        assert.ok(recoveryPrompt.includes('BROWSER STATE UPDATE'), 'The bounded recovery receives the page feedback in its model context');
+        assert.ok((agent.conversations.get(tab) || []).some(message => String(message.content || '').includes('BROWSER STATE UPDATE')),
+          'The changed page state should be appended to the active model context');
+      } finally {
+        release.resolve();
+        if (agent._pageFeedbackRuns.has(tab)) agent._finishPageFeedbackRun(tab);
+        agent._releaseRunEntry(tab);
+      }
+    });
+  }
 
   test(`${build}: viewport resize invalidates coordinates and waits for geometry to settle`, async () => {
     const agent = setup(Agent), tab = nextTab++;

@@ -33565,9 +33565,11 @@ If the user has already named or confirmed this exact recipient, do NOT ask agai
       // Match Firefox's function-body contract while adding async/await:
       // callers use an explicit `return` for readback instead of having to
       // squeeze a multi-statement edit into one JavaScript expression.
-      let expression = `(async () => {\n${code}\n})()\n//# sourceURL=webbrain-dev-execute.js`;
+      let expression = `(async () => {\n${code}\n})()`;
       const pageGuard = await beforePageAgentDispatch(globalThis.chrome, tabId, { kind: 'dom' });
-      if (pageGuard) expression = `document.dispatchEvent(new CustomEvent('webbrain-agent-dom-dispatch', { detail: ${JSON.stringify(JSON.stringify(pageGuard))} }));\n${expression}`;
+      const abortedDispatchToken = pageGuard ? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}` : null;
+      if (pageGuard) expression = `(() => { const gate = new CustomEvent('webbrain-agent-dom-dispatch', { detail: ${JSON.stringify(JSON.stringify(pageGuard))}, cancelable: true }); if (!window.dispatchEvent(gate)) return { __webbrainPageFeedbackAborted: ${JSON.stringify(abortedDispatchToken)} }; return ${expression}; })()`;
+      expression += '\n//# sourceURL=webbrain-dev-execute.js';
       dispatched = true;
       const response = await cdpClient.evaluate(tabId, expression, true, { timeoutMs: 15000 });
       if (response?.exceptionDetails) {
@@ -33593,6 +33595,11 @@ If the user has already named or confirmed this exact recipient, do NOT ask agai
         };
       }
       const remote = response?.result || {};
+      if (pageGuard && remote.value?.__webbrainPageFeedbackAborted === abortedDispatchToken) {
+        dispatched = false;
+        return { success: false, dispatched: false, noDispatch: true, retryable: true,
+          error: 'The page changed during JavaScript preparation. Re-read the page and retry.' };
+      }
       let result = null;
       let truncated = false;
       let resultFormat = 'undefined';
@@ -43961,7 +43968,7 @@ If the user has already named or confirmed this exact recipient, do NOT ask agai
         break;
       }
 
-      if ((steps < this.maxSteps && await this._applyPendingPageFeedback(tabId, messages, onUpdate))
+      if ((await this._applyPendingPageFeedback(tabId, messages, onUpdate))
           || this._applyPendingSteering(tabId, messages, onUpdate)) {
         onUpdate('text', { content: '', replace: true });
         continue;
@@ -44067,7 +44074,7 @@ If the user has already named or confirmed this exact recipient, do NOT ask agai
           tabId, result.toolCalls, messages, onUpdate, provider, assistantToolContent, allowedToolNames, steps, runOptions, toolSchemas
         );
         if (['continue', 'return'].includes(batchResult.action) && !batchResult.status
-            && ((steps < this.maxSteps && await this._applyPendingPageFeedback(tabId, messages, onUpdate))
+            && ((await this._applyPendingPageFeedback(tabId, messages, onUpdate))
               || this._applyPendingSteering(tabId, messages, onUpdate))) {
           onUpdate('text', { content: '', replace: true });
           continue;
@@ -45116,7 +45123,7 @@ If the user has already named or confirmed this exact recipient, do NOT ask agai
           toolCalls: streamedToolCalls,
         }));
 
-        if ((steps < this.maxSteps && await this._applyPendingPageFeedback(tabId, messages, onUpdate))
+        if ((await this._applyPendingPageFeedback(tabId, messages, onUpdate))
             || this._applyPendingSteering(tabId, messages, onUpdate)) {
           onUpdate('text', { content: '', replace: true });
           continue;
@@ -45208,7 +45215,7 @@ If the user has already named or confirmed this exact recipient, do NOT ask agai
             tabId, toolCalls, messages, onUpdate, provider, fullText, allowedToolNames, steps, runOptions, toolSchemas
           );
           if (['continue', 'return'].includes(batchResult.action) && !batchResult.status
-              && ((steps < this.maxSteps && await this._applyPendingPageFeedback(tabId, messages, onUpdate))
+              && ((await this._applyPendingPageFeedback(tabId, messages, onUpdate))
                 || this._applyPendingSteering(tabId, messages, onUpdate))) {
             onUpdate('text', { content: '', replace: true });
             continue;

@@ -433,6 +433,24 @@ test('Firefox native preparation keeps same-target user edits and sends no stale
 });
 
 for (const [build, engine] of [['chrome', chromium], ['firefox', firefox]]) {
+  test(`${build}: click-driven programmatic focus checks the monitor fence before focusin`, () => {
+    const source = read(build, 'content/content.js');
+    const clickStart = source.indexOf('function clickElement(params, actionDeadlineExpired = () => false)');
+    const typeStart = source.indexOf('function typeText(params, actionDeadlineExpired = () => false)', clickStart);
+    assert.ok(clickStart >= 0 && typeStart > clickStart, `${build}: click/type content action boundaries should be present`);
+    const clickBody = source.slice(clickStart, typeStart);
+    for (const [target, expected] of [['inp', 2], ['target', 1], ['sel', 1], ['el', 1], ['nearbySel', 1]]) {
+      const focusCount = [...clickBody.matchAll(new RegExp(`\\b${target}\\.focus\\(\\)`, 'g'))].length;
+      const marker = target === 'target'
+        ? /beforeLocalDispatch\(\{ kind: 'focus', target \}\);\s*target\.focus\(\)/g
+        : new RegExp(`beforeLocalDispatch\\(\\{ kind: 'focus', target: ${target} \\}\\);\\s*${target}\\.focus\\(\\)`, 'g');
+      const guardedCount = [...clickBody.matchAll(marker)].length;
+      assert.equal(focusCount, expected, `${build}: clickElement should account for ${expected} ${target}.focus() calls`);
+      assert.equal(guardedCount, focusCount,
+        `${build}: each ${target}.focus() must pass through the prepared dispatch boundary first`);
+    }
+  });
+
   test(`${build}: content-script recovery preserves a live page monitor`, async () => {
     const { browser, page } = await fixture(engine, build);
     try {
@@ -993,6 +1011,46 @@ for (const [build, engine] of [['chrome', chromium], ['firefox', firefox]]) {
       });
       assert.equal(result, 'page_feedback_pending', 'The final dispatch check must sample property-only changes');
       assert.equal(JSON.stringify(await page.evaluate(() => feedback)).includes('changed-during-preparation'), false);
+    } finally { await browser.close(); }
+  });
+
+  test(`${build}: dispatch preflight samples its form target beyond the round-robin batch`, async () => {
+    const { browser, page } = await fixture(engine, build);
+    try {
+      const result = await page.evaluate(async () => {
+        const controls = document.createElement('div');
+        controls.innerHTML = `${'<input>'.repeat(450)}<input id="prepared-tail-control">`;
+        document.body.append(controls);
+        await Promise.resolve();
+        feedback = [];
+        deliver('page_monitor_prepare', { operationId: 'late-form-target', tool: 'click', selector: '#prepared-tail-control' });
+        document.getElementById('prepared-tail-control').value = 'private-late-value';
+        try { __wbPageMonitor.activatePreparedDispatch({ operationId: 'late-form-target', kind: 'click' }); return null; }
+        catch (error) { return error.code; }
+      });
+      assert.equal(result, 'page_feedback_pending', 'The target control must be checked even when it falls outside the current batch');
+      assert.equal(JSON.stringify(await page.evaluate(() => feedback)).includes('private-late-value'), false);
+    } finally { await browser.close(); }
+  });
+
+  test(`${build}: ARIA value changes invalidate prepared controls`, async () => {
+    const { browser, page } = await fixture(engine, build);
+    try {
+      await page.evaluate(() => {
+        const slider = document.createElement('div');
+        slider.id = 'custom-slider'; slider.setAttribute('role', 'slider');
+        slider.setAttribute('aria-valuenow', '10'); slider.setAttribute('aria-valuetext', 'Ten');
+        document.body.append(slider);
+      });
+      await page.waitForTimeout(100);
+      await page.evaluate(() => {
+        feedback = [];
+        const slider = document.getElementById('custom-slider');
+        slider.setAttribute('aria-valuenow', '20'); slider.setAttribute('aria-valuetext', 'Twenty');
+      });
+      await page.waitForFunction(() => feedback.some(event => event.kind === 'dom' && event.source === 'page'), null, { timeout: 1000 });
+      assert.equal(JSON.stringify(await page.evaluate(() => feedback)).includes('Twenty'), false,
+        'ARIA value text is observed internally but is not copied into feedback');
     } finally { await browser.close(); }
   });
 
@@ -1752,17 +1810,59 @@ for (const [build, engine] of [['chrome', chromium], ['firefox', firefox]]) {
   test(`${build}: marked synchronous DOM writes suppress their own effects and retain later edits`, async () => {
     const { browser, page } = await fixture(engine, build);
     try {
-      await page.evaluate(() => {
+      const gates = await page.evaluate(() => {
         feedback = [];
+        window.pageSawAgentGate = false;
+        window.addEventListener('webbrain-agent-dom-dispatch', () => { window.pageSawAgentGate = true; }, true);
         deliver('page_monitor_prepare', { operationId: 'dom-write', tool: 'execute_js' });
         deliver('page_monitor_dispatch', { operationId: 'dom-write', kind: 'dom' });
-        document.dispatchEvent(new CustomEvent('webbrain-agent-dom-dispatch', { detail: JSON.stringify(lastMonitorResponse.guard) }));
+        const detail = JSON.stringify(lastMonitorResponse.guard);
+        const accepted = window.dispatchEvent(new CustomEvent('webbrain-agent-dom-dispatch', { detail, cancelable: true }));
+        const replayed = window.dispatchEvent(new CustomEvent('webbrain-agent-dom-dispatch', { detail, cancelable: true }));
         document.getElementById('status').textContent = 'Own DOM write';
+        return { accepted, replayed, pageSawGate: window.pageSawAgentGate };
       });
+      assert.deepEqual(gates, { accepted: true, replayed: false, pageSawGate: false },
+        'The one-use gate authorizes the agent write without exposing its revision token to page listeners');
       await page.waitForTimeout(200);
       assert.equal((await page.evaluate(() => feedback)).length, 0);
       await page.evaluate(() => { document.getElementById('status').textContent = 'External DOM edit'; });
       await page.waitForFunction(() => feedback.some(event => event.kind === 'dom'));
+    } finally { await browser.close(); }
+  });
+
+  test(`${build}: stale execute_js dispatch gates are cancelled before page code runs`, async () => {
+    const { browser, page } = await fixture(engine, build);
+    try {
+      const guard = await page.evaluate(() => {
+        deliver('page_monitor_prepare', { operationId: 'stale-js', tool: 'execute_js' });
+        deliver('page_monitor_dispatch', { operationId: 'stale-js', kind: 'dom' });
+        return lastMonitorResponse.guard;
+      });
+      await page.locator('#human').click();
+      const result = await page.evaluate(guard => {
+        const gate = new CustomEvent('webbrain-agent-dom-dispatch', { detail: JSON.stringify(guard), cancelable: true });
+        return { accepted: window.dispatchEvent(gate), prevented: gate.defaultPrevented };
+      }, guard);
+      assert.deepEqual(result, { accepted: false, prevented: true },
+        'The page-side bridge must cancel a guarded DOM write after user input invalidates its revision');
+    } finally { await browser.close(); }
+  });
+
+  test(`${build}: explicit agent focus is attributed before focusin`, async () => {
+    const { browser, page } = await fixture(engine, build);
+    try {
+      const events = await page.evaluate(() => {
+        feedback = [];
+        const target = document.getElementById('field');
+        const finish = __wbPageMonitor.beginContentAction('click', { selector: '#agent', _bidiPrepare: true });
+        try {
+          __wbPageMonitor.beforeLocalDispatch({ kind: 'focus', target });
+          target.focus();
+          return feedback;
+        } finally { finish(); }
+      });
+      assert.deepEqual(events, [], 'A focus event emitted immediately after its exact dispatch marker is agent activity');
     } finally { await browser.close(); }
   });
 

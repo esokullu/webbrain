@@ -2056,6 +2056,7 @@
             if (actionDeadlineExpired()) return deadlineFailure();
             inp.scrollIntoView({ block: 'center', inline: 'center' });
             if (actionDeadlineExpired()) return deadlineFailure();
+            window.__wbPageMonitor?.beforeLocalDispatch({ kind: 'focus', target: inp });
             inp.focus();
             el = inp;
             textResolvedExact = (needle === ltxt);
@@ -2099,6 +2100,7 @@
                 if (actionDeadlineExpired()) return deadlineFailure();
                 inp.scrollIntoView({ block: 'center', inline: 'center' });
                 if (actionDeadlineExpired()) return deadlineFailure();
+                window.__wbPageMonitor?.beforeLocalDispatch({ kind: 'focus', target: inp });
                 inp.focus();
                 el = inp;
                 textResolvedExact = (needle === ltxt);
@@ -2275,6 +2277,7 @@
           }
           if (target) {
             if (actionDeadlineExpired()) return deadlineFailure();
+            window.__wbPageMonitor?.beforeLocalDispatch({ kind: 'focus', target });
             target.focus();
             resolved = target;
           }
@@ -2349,6 +2352,7 @@
           return { success: true, method: 'select-already-set', selectedText: match.text.trim(), selectedValue: match.value };
         }
         if (actionDeadlineExpired()) return deadlineFailure();
+        window.__wbPageMonitor?.beforeLocalDispatch({ kind: 'focus', target: sel });
         sel.focus();
         if (actionDeadlineExpired()) return deadlineFailure();
         const nativeSetter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')?.set;
@@ -2373,6 +2377,7 @@
     // Do NOT scrollIntoView (hidden selects inside modals scroll to wrong position).
     if (el instanceof HTMLSelectElement) {
       if (actionDeadlineExpired()) return deadlineFailure();
+      window.__wbPageMonitor?.beforeLocalDispatch({ kind: 'focus', target: el });
       el.focus();
       if (actionDeadlineExpired()) return deadlineFailure();
       const options = Array.from(el.options).map(o => o.text.trim());
@@ -2396,6 +2401,7 @@
       }
       if (nearbySel) {
         if (actionDeadlineExpired()) return deadlineFailure();
+        window.__wbPageMonitor?.beforeLocalDispatch({ kind: 'focus', target: nearbySel });
         nearbySel.focus();
         if (actionDeadlineExpired()) return deadlineFailure();
         const options = Array.from(nearbySel.options).map(o => o.text.trim());

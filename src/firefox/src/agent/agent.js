@@ -36886,7 +36886,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
         break;
       }
 
-      if ((steps < this.maxSteps && await this._applyPendingPageFeedback(tabId, messages, onUpdate))
+      if ((await this._applyPendingPageFeedback(tabId, messages, onUpdate))
           || this._applyPendingSteering(tabId, messages, onUpdate)) {
         onUpdate('text', { content: '', replace: true });
         continue;
@@ -36944,7 +36944,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
           tabId, result.toolCalls, messages, onUpdate, provider, assistantToolContent, allowedToolNames, steps, runOptions, toolSchemas
         );
         if (['continue', 'return'].includes(batchResult.action) && !batchResult.status
-            && ((steps < this.maxSteps && await this._applyPendingPageFeedback(tabId, messages, onUpdate))
+            && ((await this._applyPendingPageFeedback(tabId, messages, onUpdate))
               || this._applyPendingSteering(tabId, messages, onUpdate))) {
           onUpdate('text', { content: '', replace: true });
           continue;
@@ -37892,7 +37892,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
           toolCalls: streamedToolCalls,
         }));
 
-        if ((steps < this.maxSteps && await this._applyPendingPageFeedback(tabId, messages, onUpdate))
+        if ((await this._applyPendingPageFeedback(tabId, messages, onUpdate))
             || this._applyPendingSteering(tabId, messages, onUpdate)) {
           onUpdate('text', { content: '', replace: true });
           continue;
@@ -37937,7 +37937,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
             tabId, toolCalls, messages, onUpdate, provider, fullText, allowedToolNames, steps, runOptions, toolSchemas
           );
         if (['continue', 'return'].includes(batchResult.action) && !batchResult.status
-            && ((steps < this.maxSteps && await this._applyPendingPageFeedback(tabId, messages, onUpdate))
+            && ((await this._applyPendingPageFeedback(tabId, messages, onUpdate))
               || this._applyPendingSteering(tabId, messages, onUpdate))) {
             onUpdate('text', { content: '', replace: true });
             continue;

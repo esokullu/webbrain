@@ -355,6 +355,7 @@
     const controlValue = controlValueFingerprint(el);
     return JSON.stringify([shown, content, el.children.length + (el.shadowRoot?.children.length || 0), el.getAttribute('role'), el.getAttribute('aria-label'),
       el.getAttribute('aria-expanded'), el.getAttribute('aria-selected'), el.getAttribute('aria-checked'),
+      el.getAttribute('aria-valuenow'), el.getAttribute('aria-valuetext'),
       el.getAttribute('aria-pressed'),
       el.getAttribute('href'), el.getAttribute('target'), el.getAttribute('download'), el.getAttribute('action'),
       el.getAttribute('formaction'), el.getAttribute('formtarget'),
@@ -375,18 +376,32 @@
       if (el.shadowRoot && !ignored(el)) observeRoot(el.shadowRoot, budget);
     }
   }
-  function sampleFormControls() {
-    if (!active || !liveControls.size) return;
+  function sampleFormControls(...targets) {
+    const extraTargets = targets.flat().filter(el => el instanceof Element);
+    if (!active || (!liveControls.size && !extraTargets.length)) return;
     const controls = [...liveControls];
-    if (controlCursor >= controls.length) controlCursor = 0;
+    if (!controls.length || controlCursor >= controls.length) controlCursor = 0;
     const batchSize = Math.min(200, controls.length);
     const batch = Array.from({ length: batchSize }, (_, index) => controls[(controlCursor + index) % controls.length]);
-    controlCursor = (controlCursor + batchSize) % controls.length;
+    if (controls.length) controlCursor = (controlCursor + batchSize) % controls.length;
+    const sampled = new Set(batch);
     const records = [];
     for (const el of batch) {
       if (!el.isConnected) { liveControls.delete(el); continue; }
       if (!ignored(el)) records.push({ type: 'control', target: el });
     }
+    for (const el of extraTargets) {
+      if (sampled.has(el) || !el.isConnected || !/^(INPUT|TEXTAREA|SELECT|OPTION)$/.test(el.tagName) || ignored(el)) continue;
+      sampled.add(el);
+      const previous = controlSignatures.get(el)
+        ?? [...operations.values()].find(op => op.target === el && op.controlStateAtPrepare !== undefined)?.controlStateAtPrepare;
+      if (previous !== undefined && controlState(el) !== previous) records.push({ type: 'control', target: el });
+    }
+    if (records.length) onMutations(records);
+  }
+  function flushPendingMutations() {
+    if (!active || !observer) return;
+    const records = observer.takeRecords();
     if (records.length) onMutations(records);
   }
   function sampleDescendants(root, limit = 100) {
@@ -417,7 +432,7 @@
     observer.observe(root, { childList: true, subtree: true, characterData: true, attributes: true, attributeOldValue: true,
       attributeFilter: ['role', 'aria-label', 'aria-expanded', 'aria-selected', 'aria-checked', 'aria-pressed', 'aria-disabled',
         'href', 'target', 'download', 'action', 'formaction', 'formtarget',
-        'aria-hidden', 'hidden', 'disabled', 'readonly', 'checked', 'selected', 'open', 'popover', 'inert', 'class', 'style'] });
+        'aria-valuenow', 'aria-valuetext', 'aria-hidden', 'hidden', 'disabled', 'readonly', 'checked', 'selected', 'open', 'popover', 'inert', 'class', 'style'] });
     listen(root, 'beforetoggle', event => {
       const el = elementFor(event);
       if (ignored(el) || !el.hasAttribute('popover') || !('popover' in el)) return;
@@ -604,14 +619,22 @@
       observeRoot(root);
       onMutations([{ type: 'shadow', target: host }]);
     });
-    listen(document, 'webbrain-agent-dom-dispatch', event => {
+    listen(window, 'webbrain-agent-dom-dispatch', event => {
       try {
         const guard = JSON.parse(String(event.detail));
-        if (guard.documentToken !== documentToken || guard.revision !== revision || !operations.has(guard.operationId)) return;
+        const op = operations.get(guard.operationId);
+        event.stopImmediatePropagation();
+        flushPendingMutations();
+        sampleFormControls(op?.target);
+        if (!active || guard.runToken !== runToken || guard.documentToken !== documentToken || guard.revision !== revision
+            || !op || op.domDispatchConsumed || op.preparedRevision !== revision || domTimer || unreported || lastUserAt > op.userAt) {
+          event.preventDefault(); return;
+        }
+        op.domDispatchConsumed = true;
         const marker = { userAt: lastUserAt }; agentTurn = marker;
         setTimeout(() => { if (agentTurn === marker) agentTurn = null; }, 0);
-      } catch { /* Only a current prepared operation can mark a DOM write. */ }
-    });
+      } catch { event.stopImmediatePropagation(); event.preventDefault(); /* Only a current prepared operation can mark a DOM write. */ }
+    }, false);
     listen(document, 'webbrain-agent-scroll-dispatch', event => {
       try {
         const guard = JSON.parse(String(event.detail));
@@ -780,7 +803,10 @@
     const coordinateHit = coordinateSensitive ? document.elementFromPoint(params.x, params.y) : null;
     const coordinateTarget = coordinateSensitive ? target || coordinateHit : null;
     const coordinateTargetAtPoint = !target || !coordinateHit || target === coordinateHit || target.contains?.(coordinateHit);
-    operations.set(params.operationId, { ...params, target: target || focusTarget, focusTarget, focusEligible, kinds: new Set(),
+    const operationTarget = target || focusTarget;
+    const controlStateAtPrepare = operationTarget && /^(INPUT|TEXTAREA|SELECT|OPTION)$/.test(operationTarget.tagName)
+      ? controlState(operationTarget) : undefined;
+    operations.set(params.operationId, { ...params, target: operationTarget, focusTarget, focusEligible, controlStateAtPrepare, kinds: new Set(),
       coordinateSensitive, coordinateTarget, coordinateHit, coordinateTargetAtPoint,
       coordinatePoint: coordinateSensitive ? { x: params.x, y: params.y } : null,
       coordinateRect: rectFor(coordinateTarget),
@@ -793,6 +819,7 @@
     op.blurTarget ??= document.activeElement;
     op.target = resolveTarget(params) || (params.kind === 'input' ? op.focusTarget || deepActiveElement() : op.target);
     if (params.kind === 'input' && !op.focusTarget) op.focusTarget = op.target;
+    if (params.kind === 'focus') { op.focusTarget = op.target; op.focusEligible = !!op.target; }
     op.x = params.x; op.y = params.y;
     if (!params.release || !op.seenEvents) op.seenEvents = new Set();
     if (!params.release) op.eventTypes = Array.isArray(params.eventTypes) ? new Set(params.eventTypes) : null;
@@ -815,8 +842,9 @@
     operations.set(op.operationId, op);
   }
   function activatePreparedDispatch(params = {}) {
-    sampleFormControls();
     const op = operations.get(params.operationId);
+    flushPendingMutations();
+    sampleFormControls(op?.target);
     const layoutChanged = coordinatePreparationShifted(op);
     if (!active || !op || layoutChanged || domTimer || unreported
         || lastUserAt > op.userAt
@@ -831,8 +859,9 @@
     return { ready: true, operationId: op.operationId, revision };
   }
   function validateNativeDispatch(params = {}) {
-    sampleFormControls();
     const op = operations.get(params.operationId);
+    flushPendingMutations();
+    sampleFormControls(op?.target);
     const shifted = coordinatePreparationShifted(op);
     if (!active || params.runToken !== runToken || params.documentToken !== documentToken || !op || shifted
         || Number(params.revision) !== op.preparedRevision || op.preparedRevision !== revision
@@ -875,7 +904,8 @@
   }
   function beforeLocalDispatch({ preparation = false, kind, target } = {}) {
     if (!active || !localOperation) return;
-    sampleFormControls();
+    flushPendingMutations();
+    sampleFormControls(operations.get(localOperation.operationId)?.target);
     const layoutChanged = coordinatePreparationShifted(operations.get(localOperation.operationId));
     if (layoutChanged || domTimer || unreported || lastUserAt > localOperation.userAt || revision !== localOperation.revision) {
       const error = new Error('Browser changed during action preparation. Re-observe before acting.');
@@ -913,8 +943,8 @@
     else if (msg.action === 'page_monitor_validate') { respond({ ready: validateNativeDispatch(msg.params || {}) }); }
     else if (msg.action === 'page_monitor_dispatch') {
       const params = msg.params || {};
-      if (!params.release) sampleFormControls();
       const prepared = operations.get(params.operationId);
+      if (!params.release) { flushPendingMutations(); sampleFormControls(prepared?.target); }
       const layoutChanged = !params.release && active && coordinatePreparationShifted(prepared);
       if (!params.release && active && (layoutChanged || domTimer || unreported || (prepared && prepared.preparedRevision !== revision)
           || (params.documentToken && (params.documentToken !== documentToken || params.documentRevision !== revision)))) {
