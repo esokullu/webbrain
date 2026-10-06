@@ -404,6 +404,105 @@ test('Firefox native preparation keeps same-target user edits and sends no stale
 });
 
 for (const [build, engine] of [['chrome', chromium], ['firefox', firefox]]) {
+  test(`${build}: a pointer gesture ending on owned UI releases the background idle gate`, async () => {
+    const savedChrome = globalThis.chrome, savedBrowser = globalThis.browser, tab = 945;
+    const host = Object.assign({ isRunning: () => true, _checkAbort: () => false, _runAbortSignal: () => null,
+      _throwIfAborted: () => {}, _pageFeedbackIdleMs: 20 }, pageFeedbackMethods);
+    globalThis.chrome = { runtime: {}, tabs: { get: async () => ({ url: 'https://monitor.test/start' }), sendMessage: async () => ({ ready: true }) } };
+    delete globalThis.browser;
+    let browser;
+    try {
+      await host._beginPageFeedbackRun(tab, 'interactive');
+      const state = await fixture(engine, build, { runToken: host._pageFeedbackRuns.get(tab).token });
+      browser = state.browser; const { page } = state;
+      const documentToken = await page.evaluate(() => document.documentElement.getAttribute('data-webbrain-page-revision').split(':')[0]);
+      const sender = { tab: { id: tab }, frameId: 0 }; host.pageMonitorState(sender, documentToken);
+      await page.exposeFunction('feedbackToHost', feedback => host.observePageFeedback(sender, feedback));
+      await page.evaluate(() => {
+        const original = chrome.runtime.sendMessage;
+        chrome.runtime.sendMessage = async message => {
+          const response = await original(message);
+          return message.action === 'page_feedback' ? await feedbackToHost(message.feedback) : response;
+        };
+        const ui = document.createElement('div'); ui.id = 'owned-capture';
+        ui.style.cssText = 'position:fixed;top:440px;left:20px;width:200px;height:80px;background:red';
+        __wbPageMonitor.registerDecoration(ui); document.body.append(ui);
+        document.getElementById('human').addEventListener('pointerdown', event => ui.setPointerCapture(event.pointerId));
+        feedback = [];
+      });
+      const button = await page.locator('#human').boundingBox();
+      await page.mouse.move(button.x + button.width / 2, button.y + button.height / 2); await page.mouse.down();
+      await page.waitForFunction(() => feedback.some(event => event.interacting === true));
+      assert.ok(host._pageFeedbackRuns.get(tab).gestures.has(0));
+      await page.mouse.move(100, 480); await page.mouse.up();
+      await page.waitForFunction(() => feedback.some(event => event.kind === 'activity' && event.interacting === false), null, { timeout: 1000 });
+      assert.equal(host._pageFeedbackRuns.get(tab).gestures.size, 0);
+      assert.ok(!JSON.stringify(await page.evaluate(() => feedback)).includes('owned-capture'), 'Owned UI must remain absent from event targets');
+      await host._waitForPageFeedbackIdle(tab);
+    } finally { host._finishPageFeedbackRun(tab); await browser?.close(); globalThis.chrome = savedChrome; globalThis.browser = savedBrowser; }
+  });
+
+  test(`${build}: popover transitions fence actions in light/shadow DOM without agent feedback loops`, async () => {
+    const { browser, page } = await fixture(engine, build);
+    try {
+      await page.evaluate(() => {
+        const popup = document.createElement('div'); popup.id = 'light-popup'; popup.popover = 'auto'; popup.innerHTML = '<button>Popup target</button>';
+        document.body.prepend(popup);
+        const host = document.createElement('div'); host.id = 'popup-host'; document.body.prepend(host);
+        host.attachShadow({ mode: 'open' }).innerHTML = '<div id="shadow-popup" popover><button>Shadow target</button></div>';
+        window.popups = [popup, host.shadowRoot.querySelector('[popover]')];
+        const filler = document.createElement('div'); filler.style.display = 'none'; filler.innerHTML = '<span>Outside signature budget</span>'.repeat(650);
+        document.body.prepend(filler);
+        monitorEnabled = false; deliver('page_monitor_state'); monitorEnabled = true; deliver('page_monitor_state');
+      });
+      await page.waitForTimeout(200);
+      for (const index of [0, 1]) {
+        await page.evaluate(index => {
+          monitorEnabled = false; deliver('page_monitor_state'); popups[index].showPopover();
+          monitorEnabled = true; deliver('page_monitor_state');
+        }, index);
+        await page.waitForTimeout(200);
+        const initialClose = await page.evaluate(async index => {
+          feedback = []; const finish = __wbPageMonitor.beginContentAction('click', { selector: '#agent', _bidiPrepare: true });
+          popups[index].hidePopover(); await Promise.resolve();
+          try { __wbPageMonitor.beforeLocalDispatch(); return null; } catch (error) { return error.code; } finally { finish(); }
+        }, index);
+        assert.equal(initialClose, 'page_feedback_pending', 'Closing an initially open unseeded popover must invalidate actions');
+        await page.waitForFunction(() => feedback.some(event => event.kind === 'dom'), null, { timeout: 1000 });
+        for (const open of [true, false]) {
+          const code = await page.evaluate(async ({ index, open }) => {
+            feedback = []; const finish = __wbPageMonitor.beginContentAction('click', { selector: '#agent', _bidiPrepare: true });
+            popups[index][open ? 'showPopover' : 'hidePopover'](); await Promise.resolve();
+            try { __wbPageMonitor.beforeLocalDispatch(); return null; } catch (error) { return error.code; } finally { finish(); }
+          }, { index, open });
+          assert.equal(code, 'page_feedback_pending');
+          await page.waitForFunction(() => feedback.some(event => event.kind === 'dom'), null, { timeout: 1000 });
+        }
+        await page.evaluate(index => {
+          feedback = []; const finish = __wbPageMonitor.beginContentAction('execute_js');
+          try { __wbPageMonitor.beforeLocalDispatch(); popups[index].showPopover(); } finally { finish(); }
+        }, index);
+        await page.waitForTimeout(220);
+        assert.deepEqual(await page.evaluate(() => feedback), [], 'An agent-opened popover must not feed back during the later toggle task');
+        await page.evaluate(index => { popups[index].querySelector('button').focus(); feedback = []; }, index);
+        await page.keyboard.press('Escape');
+        await page.waitForFunction(index => !popups[index].matches(':popover-open') && feedback.some(event => event.kind === 'dom'), index, { timeout: 1000 });
+        assert.ok((await page.evaluate(() => feedback)).some(event => event.source === 'user' && event.kind === 'activity'));
+        await page.waitForTimeout(200);
+        const cancelled = await page.evaluate(async index => {
+          feedback = []; popups[index].addEventListener('beforetoggle', event => event.preventDefault(), { once: true });
+          const finish = __wbPageMonitor.beginContentAction('click', { selector: '#agent', _bidiPrepare: true });
+          popups[index].showPopover(); await Promise.resolve();
+          try { __wbPageMonitor.beforeLocalDispatch({ preparation: true }); return true; } catch { return false; } finally { finish(); }
+        }, index);
+        assert.equal(cancelled, true, 'A canceled opening must not invalidate the unchanged page');
+        await page.waitForTimeout(220); assert.deepEqual(await page.evaluate(() => feedback), []);
+      }
+      await page.evaluate(() => { monitorEnabled = false; deliver('page_monitor_state'); feedback = []; popups[0].showPopover(); });
+      await page.waitForTimeout(200); assert.deepEqual(await page.evaluate(() => feedback), []);
+    } finally { await browser.close(); }
+  });
+
   test(`${build}: related data/blob frames receive monitor and MAIN shadow hook`, async () => {
     const { browser, page } = await fixture(engine, build, { omitEmptyFrameMonitor: true });
     try {

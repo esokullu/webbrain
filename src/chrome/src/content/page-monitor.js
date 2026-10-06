@@ -16,6 +16,7 @@
   const nativeTargets = new Set();
   let signatures = new WeakMap();
   let textSignatures = new WeakMap();
+  let popoverTurns = new WeakMap();
   let roots = new WeakSet();
   let active = false, disposed = false, runToken = '', seq = 0, revision = 0;
   let observer = null, domTimer = null, scrollTimer = null, lastUserAt = 0;
@@ -75,9 +76,10 @@
       return delivery;
     } catch { stop(); }
   };
-  const interact = (kind, el, extra = {}) => {
-    if (!active || ignored(el)) return;
-    lastUserAt = Date.now(); lastUserTarget = el; revision++;
+  const interact = (kind, el, { completeGesture = false, ...extra } = {}) => {
+    const isIgnored = ignored(el);
+    if (!active || (isIgnored && !completeGesture)) return;
+    lastUserAt = Date.now(); lastUserTarget = isIgnored ? null : el; revision++;
     const marker = {}; userTurn = marker;
     setTimeout(() => { if (userTurn === marker) userTurn = null; }, 0);
     send({ kind, source: 'user', target: targetName(el), interacting: pointerHeld || composing, ...extra });
@@ -180,6 +182,7 @@
     return JSON.stringify([shown, content, el.children.length + (el.shadowRoot?.children.length || 0), el.getAttribute('role'), el.getAttribute('aria-label'),
       el.getAttribute('aria-expanded'), el.getAttribute('aria-selected'), el.getAttribute('aria-checked'),
       el.getAttribute('aria-pressed'),
+      el.getAttribute('popover'), popoverOpen(el),
       el.getAttribute('aria-hidden'), el.hasAttribute('open'), el.inert === true,
       el.getAttribute('aria-disabled'), el.disabled === true, el.readOnly === true, el.checked === true, el.validity?.valid !== false, Math.round((rect.width || 0) / 8), Math.round((rect.height || 0) / 8),
       Math.round(((rect.x || 0) + window.scrollX) / 8), Math.round(((rect.y || 0) + window.scrollY) / 8)]);
@@ -197,8 +200,34 @@
     roots.add(root);
     observer.observe(root, { childList: true, subtree: true, characterData: true, attributes: true, attributeOldValue: true,
       attributeFilter: ['role', 'aria-label', 'aria-expanded', 'aria-selected', 'aria-checked', 'aria-pressed', 'aria-disabled',
-        'aria-hidden', 'hidden', 'disabled', 'readonly', 'checked', 'selected', 'open', 'inert', 'class', 'style'] });
+        'aria-hidden', 'hidden', 'disabled', 'readonly', 'checked', 'selected', 'open', 'popover', 'inert', 'class', 'style'] });
+    listen(root, 'beforetoggle', event => {
+      const el = elementFor(event);
+      if (ignored(el) || !el.hasAttribute('popover') || !('popover' in el)) return;
+      const mark = { observer, oldState: event.oldState, newState: event.newState, notified: false,
+        agentUserAt: agentTurn && lastUserAt <= agentTurn.userAt ? agentTurn.userAt : undefined };
+      popoverTurns.set(el, mark);
+      // Check after page handlers can cancel opening, but before an action can
+      // dispatch in the next task. Retain exact attribution for the later toggle.
+      queueMicrotask(() => {
+        if (!active || observer !== mark.observer || popoverTurns.get(el) !== mark || event.defaultPrevented
+            || popoverOpen(el) !== (mark.newState === 'open')) return;
+        mark.notified = true;
+        onMutations([{ type: 'popover', target: el, stateChanged: mark.oldState !== mark.newState, agentUserAt: mark.agentUserAt }]);
+      });
+    });
+    listen(root, 'toggle', event => {
+      const el = elementFor(event);
+      if (ignored(el) || !el.hasAttribute('popover') || !('popover' in el)
+          || popoverOpen(el) !== (event.newState === 'open')) return;
+      const mark = popoverTurns.get(el);
+      if (mark?.observer === observer && mark.newState === event.newState && mark.notified) return;
+      onMutations([{ type: 'popover', target: el, stateChanged: event.oldState !== event.newState }]);
+    });
     seed(root, budget);
+  }
+  function popoverOpen(el) {
+    return el.hasAttribute('popover') && 'popover' in el && el.matches(':popover-open');
   }
   function subtreeChanged(record, el) {
     const changedNodes = [...record.addedNodes, ...record.removedNodes];
@@ -225,10 +254,10 @@
   function onMutations(records) {
     if (!active) return;
     let changed = false, source = 'page', target = '';
-    const noteChange = el => {
+    const noteChange = (el, agentUserAt) => {
       // Attribute the marked input/write's synchronous handlers to that dispatch.
       // Later DOM writes stay observable, including writes on the same target.
-      if (agentTurn && lastUserAt <= agentTurn.userAt) return;
+      if ((Number.isFinite(agentUserAt) && lastUserAt <= agentUserAt) || (agentTurn && lastUserAt <= agentTurn.userAt)) return;
       changed = true;
       target ||= targetName(el);
       if (userTurn || (Date.now() - lastUserAt < 1500 && related(lastUserTarget, el))) source = 'user';
@@ -236,7 +265,7 @@
     };
     const changes = [...records];
     for (const record of records) {
-      if (record.type !== 'attributes' || !['class', 'style', 'hidden', 'aria-hidden', 'open', 'inert'].includes(record.attributeName)) continue;
+      if (record.type !== 'popover' && (record.type !== 'attributes' || !['class', 'style', 'hidden', 'aria-hidden', 'open', 'inert'].includes(record.attributeName))) continue;
       if (ignored(record.target)) continue;
       if (record.target.getAnimations?.().some(animation => animation.playState === 'running')) continue;
       const interactive = record.target.querySelectorAll?.('button,a,input,textarea,select,[role],[contenteditable]') || [];
@@ -244,13 +273,13 @@
       // A bounded layout sample cannot prove that inherited visibility left a
       // large subtree unchanged. Invalidate conservatively on an actual state
       // change, before the measurement cap can omit a late affected descendant.
-      if (all.length > 100 && record.oldValue !== record.target.getAttribute(record.attributeName)) noteChange(record.target);
+      if (all.length > 100 && (record.type === 'popover' || record.oldValue !== record.target.getAttribute(record.attributeName))) noteChange(record.target, record.agentUserAt);
       const descendants = new Set([
         ...Array.prototype.slice.call(interactive, 0, 100),
         ...Array.prototype.slice.call(all, 0, 100),
       ]);
       for (const el of descendants)
-        changes.push({ type: 'layout', target: el });
+        changes.push({ type: 'layout', target: el, agentUserAt: record.agentUserAt });
     }
     let measured = 0;
     const seedBudget = { remaining: 600 };
@@ -260,7 +289,8 @@
       if (record.type === 'attributes' && ['class', 'style'].includes(record.attributeName)
           && el.getAnimations?.().some(animation => animation.playState === 'running')) continue;
       if (++measured > 300) break;
-      let identityChanged = record.type === 'shadow' && (visible(el) || signatures.get(el)?.startsWith('[true'));
+      let identityChanged = (record.type === 'popover' && record.stateChanged)
+        || (record.type === 'shadow' && (visible(el) || signatures.get(el)?.startsWith('[true')));
       if (record.type === 'childList') {
         identityChanged = subtreeChanged(record, el);
         for (const node of record.addedNodes) {
@@ -276,7 +306,7 @@
       const next = signature(el), previous = signatures.get(el);
       signatures.set(el, next);
       if (!identityChanged && (next === previous || (!visible(el) && !previous?.startsWith('[true')))) continue;
-      noteChange(el);
+      noteChange(el, record.agentUserAt);
     }
     if (!changed) return;
     revision++; publishRevision();
@@ -355,7 +385,7 @@
     });
     for (const name of ['pointerup', 'pointercancel']) listen(document, name, event => {
       if (!pointerHeld || !event.isTrusted) return;
-      pointerHeld = false; interact('activity', elementFor(event), { interacting: composing });
+      pointerHeld = false; interact('activity', elementFor(event), { interacting: composing, completeGesture: true });
     });
     listen(document, 'click', event => {
       const el = elementFor(event);
@@ -382,7 +412,7 @@
       if (!event.isTrusted || expected('input', el, event)) return;
       // Key names identify scrolling and focus movement locally, never transmitted.
       if (editable(el)) interact('activity', el);
-      else if (['Tab', 'ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' '].includes(event.key)) interact('activity', el);
+      else if (['Tab', 'Escape', 'ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' '].includes(event.key)) interact('activity', el);
     });
     for (const name of ['wheel', 'touchmove']) listen(document, name, event => {
       const el = elementFor(event);
@@ -441,7 +471,7 @@
     clearTimeout(domTimer); clearTimeout(scrollTimer); domTimer = null; scrollTimer = null; unreported = 0; pendingDOM = null; lastFeedbackDelivery = Promise.resolve();
     listeners.splice(0).forEach(remove => remove());
     operations.clear(); localOperation = null; agentTurn = null;
-    roots = new WeakSet(); signatures = new WeakMap(); textSignatures = new WeakMap();
+    roots = new WeakSet(); signatures = new WeakMap(); textSignatures = new WeakMap(); popoverTurns = new WeakMap();
   }
   async function requestState() {
     const generation = ++requestGeneration;

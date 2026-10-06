@@ -148,5 +148,10 @@ Text signatures cover the whole non-editable text with a cached fixed-size
 fingerprint, so middle/suffix edits and appends beyond the first 200 characters
 invalidate prepared actions even when geometry stays fixed. Accessibility-state
 regressions also cover aria-pressed-only toggle changes and their agent attribution.
+Popover opening/closing is observed in document and open shadow roots before the
+next dispatch task, after cancellable page handlers finish. The later toggle event
+keeps the same action attribution; canceled openings and owned UI remain quiet.
+Trusted gesture endings always release the owning frame's idle gate, including
+pointer capture/release over extension-owned UI, without exposing that UI's target.
 
 The monitor regressions are also included in `npm run test:runtime-lifecycle`.
