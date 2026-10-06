@@ -15,19 +15,57 @@
   const listeners = [];
   const operations = new Map();
   const nativeTargets = new Set();
+  const liveControls = new Set();
   let signatures = new WeakMap();
+  let controlSignatures = new WeakMap();
   let textSignatures = new WeakMap();
   let popoverTurns = new WeakMap();
   let roots = new WeakSet();
   let active = false, disposed = false, runToken = '', seq = 0, revision = 0;
-  let observer = null, layoutObserver = null, domTimer = null, scrollTimer = null, lastUserAt = 0;
-  let pointerHeld = false, composing = false, localOperation = null;
+  let observer = null, layoutObserver = null, domTimer = null, scrollTimer = null, controlTimer = null, lastUserAt = 0;
+  let pointerHeld = false, composing = false, localOperation = null, controlCursor = 0;
   let requestGeneration = 0, unreported = 0, pendingDOM = null;
   let lastViewport = '';
   let lastFeedbackDelivery = Promise.resolve();
   let agentTurn = null, userTurn = null, lastUserTarget = null;
-  let matchedEvents = new WeakMap(), nativeMarks = new WeakMap();
+  let matchedEvents = new WeakMap();
+  const activePointers = new Set();
   const fenceAttribute = 'data-webbrain-page-revision';
+  const nativeMarkerAttribute = 'data-webbrain-native-action';
+  const nativeMarkerMask = (1n << 64n) - 1n;
+  const nativeMarkerRotate = (value, bits) => ((value << BigInt(bits)) | (value >> BigInt(64 - bits))) & nativeMarkerMask;
+  function nativeMarkerSignature(secret, data) {
+    if (!/^[a-f\d]{32}$/i.test(secret || '')) return '';
+    const key = Uint8Array.from(secret.match(/.{2}/g), byte => parseInt(byte, 16));
+    const read64 = offset => {
+      let value = 0n;
+      for (let index = 0; index < 8; index++) value |= BigInt(key[offset + index]) << BigInt(index * 8);
+      return value;
+    };
+    const k0 = read64(0), k1 = read64(8);
+    const rotate = nativeMarkerRotate;
+    let v0 = 0x736f6d6570736575n ^ k0, v1 = 0x646f72616e646f6dn ^ k1;
+    let v2 = 0x6c7967656e657261n ^ k0, v3 = 0x7465646279746573n ^ k1;
+    const round = () => {
+      v0 = (v0 + v1) & nativeMarkerMask; v1 = rotate(v1, 13); v1 ^= v0; v0 = rotate(v0, 32);
+      v2 = (v2 + v3) & nativeMarkerMask; v3 = rotate(v3, 16); v3 ^= v2;
+      v0 = (v0 + v3) & nativeMarkerMask; v3 = rotate(v3, 21); v3 ^= v0;
+      v2 = (v2 + v1) & nativeMarkerMask; v1 = rotate(v1, 17); v1 ^= v2; v2 = rotate(v2, 32);
+    };
+    const bytes = new TextEncoder().encode(JSON.stringify([data.documentToken, data.runToken, data.operationId, data.kind, data.sequence,
+      data.navigationCandidate === true]));
+    let offset = 0;
+    while (offset + 8 <= bytes.length) {
+      let block = 0n;
+      for (let index = 0; index < 8; index++) block |= BigInt(bytes[offset + index]) << BigInt(index * 8);
+      v3 ^= block; round(); round(); v0 ^= block; offset += 8;
+    }
+    let tail = BigInt(bytes.length) << 56n;
+    for (let index = 0; offset + index < bytes.length; index++) tail |= BigInt(bytes[offset + index]) << BigInt(index * 8);
+    v3 ^= tail; round(); round(); v0 ^= tail; v2 ^= 0xffn;
+    round(); round(); round(); round();
+    return (v0 ^ v1 ^ v2 ^ v3).toString(16).padStart(16, '0');
+  }
   const publishRevision = () => {
     const value = `${documentToken}:${revision}`;
     if (active && document.documentElement?.getAttribute(fenceAttribute) !== value) document.documentElement?.setAttribute(fenceAttribute, value);
@@ -194,20 +232,32 @@
     return true;
   }
   function expected(kind, el, event) {
-    const marker = el?.getAttribute?.('data-webbrain-native-action');
-    if (marker && nativeMarks.get(el) !== marker) {
-      nativeMarks.set(el, marker); nativeTargets.add(el);
+    const markerNode = event?.composedPath?.().find(node => node instanceof Element && node.hasAttribute(nativeMarkerAttribute))
+      || (el?.hasAttribute?.(nativeMarkerAttribute) ? el : null);
+    const marker = markerNode?.getAttribute(nativeMarkerAttribute);
+    if (marker && event?.isTrusted === true) {
       try {
         const data = JSON.parse(marker);
-        if (data.documentToken === documentToken && operations.has(data.operationId) && ['input', 'click', 'scroll'].includes(data.kind)) {
+        const op = operations.get(data.operationId);
+        const markerTarget = op && (markerNode === op.target || markerNode === op.focusTarget);
+        const nextSequence = Number.isSafeInteger(data.sequence) && data.sequence === (op?.nativeSequence || 0) + 1;
+        const allowedEvent = data.kind === 'input'
+          ? ['keydown', 'beforeinput', 'input', 'change', 'compositionstart', 'compositionend'].includes(event.type)
+          : data.kind === 'click' ? ['pointerdown', 'mousedown', 'click'].includes(event.type) : false;
+        const signed = op && nativeMarkerSignature(op.nativeSecret, data) === data.signature;
+        if (data.documentToken === documentToken && data.runToken === runToken && op && markerTarget && nextSequence
+            && signed && allowedEvent && ['input', 'click'].includes(data.kind)) {
+          // The capability is bound to the isolated-world prepared node and consumed once.
+          op.nativeSequence = data.sequence;
+          markerNode.removeAttribute(nativeMarkerAttribute);
           dispatch({ operationId: data.operationId, kind: data.kind, runToken, navigationCandidate: data.navigationCandidate === true });
-          operations.get(data.operationId).target = el;
         }
       } catch { /* Page markers are hints; malformed ones grant no expectation. */ }
     }
     if (event && matchedEvents.has(event)) return matchedEvents.get(event);
     prune();
     const match = op => {
+      if (event && !event.isTrusted && !op.synchronous) return null;
       if (event) {
         if (op.eventTypes && !op.eventTypes.has(event.type)) return null;
         // One native dispatch owns one occurrence of each input phase. A later
@@ -258,13 +308,49 @@
     while (el?.shadowRoot?.activeElement) el = el.shadowRoot.activeElement;
     return el;
   }
+  function controlValueFingerprint(el) {
+    let controlValue = null;
+    if ((el.tagName === 'TEXTAREA' || (el.tagName === 'INPUT'
+        && !['password', 'file', 'hidden', 'checkbox', 'radio', 'button', 'submit', 'reset', 'image'].includes(el.type)))) {
+      const value = el.value || '', samples = Math.min(value.length, 8192);
+      let first = 0x811c9dc5, second = 0x9e3779b9;
+      // Hash locally only; feedback contains a generic target and never the value or typed keys.
+      for (let index = 0; index < samples; index++) {
+        const code = value.charCodeAt(samples === value.length ? index : Math.floor(index * value.length / samples));
+        first = Math.imul(first ^ code, 16777619) >>> 0;
+        second = Math.imul(second ^ (code + index), 2246822519) >>> 0;
+      }
+      controlValue = [value.length, first, second];
+    }
+    return controlValue;
+  }
+  function controlState(el) {
+    return JSON.stringify([el.getAttribute('value'), el.selected === true, el.defaultSelected === true,
+      Number.isInteger(el.selectedIndex) ? el.selectedIndex : null, el.checked === true,
+      el.disabled === true, el.readOnly === true, el.required === true, el.validity?.valid !== false,
+      controlValueFingerprint(el)]);
+  }
+  function trackControl(el) {
+    if (!/^(INPUT|TEXTAREA|SELECT|OPTION)$/.test(el.tagName) || liveControls.has(el) || liveControls.size >= 600) return;
+    liveControls.add(el);
+    controlSignatures.set(el, controlState(el));
+  }
+  function refreshControl(el) {
+    if (/^(INPUT|TEXTAREA|SELECT|OPTION)$/.test(el.tagName)) {
+      trackControl(el);
+      controlSignatures.set(el, controlState(el));
+    }
+    signatures.set(el, signature(el));
+  }
   function signature(el) {
     if (ignored(el)) return '';
+    trackControl(el);
     const shown = visible(el);
     const rect = shown ? el.getBoundingClientRect() : {};
     const content = editable(el) ? '' : [...el.childNodes, ...(el.shadowRoot?.childNodes || [])].filter(node => node.nodeType === 3)
       .map(textSignature).reduce(([size, hash], [length, part, power]) =>
         [size + length, (Math.imul(hash, power) + part) >>> 0], [0, 0]);
+    const controlValue = controlValueFingerprint(el);
     return JSON.stringify([shown, content, el.children.length + (el.shadowRoot?.children.length || 0), el.getAttribute('role'), el.getAttribute('aria-label'),
       el.getAttribute('aria-expanded'), el.getAttribute('aria-selected'), el.getAttribute('aria-checked'),
       el.getAttribute('aria-pressed'),
@@ -272,16 +358,32 @@
       el.selected === true, el.defaultSelected === true,
       Number.isInteger(el.selectedIndex) ? el.selectedIndex : null,
       el.getAttribute('aria-hidden'), el.hasAttribute('open'), el.inert === true,
-      el.getAttribute('aria-disabled'), el.disabled === true, el.readOnly === true, el.checked === true, el.validity?.valid !== false, Math.round((rect.width || 0) / 8), Math.round((rect.height || 0) / 8),
+      el.getAttribute('aria-disabled'), el.getAttribute('value'), controlValue, el.disabled === true, el.readOnly === true, el.checked === true, el.validity?.valid !== false, Math.round((rect.width || 0) / 8), Math.round((rect.height || 0) / 8),
       Math.round(((rect.x || 0) + window.scrollX) / 8), Math.round(((rect.y || 0) + window.scrollY) / 8)]);
   }
   function seed(root, budget = { remaining: 600 }) {
     const nodes = root.querySelectorAll?.('*') || [];
     for (const el of nodes) {
+      // Form-state tracking has its own cap, separate from bounded layout reads.
+      trackControl(el);
       if (budget.remaining > 0) { budget.remaining--; signatures.set(el, signature(el)); }
       // Root discovery is cheap and must not share the layout-measurement cap.
       if (el.shadowRoot && !ignored(el)) observeRoot(el.shadowRoot, budget);
     }
+  }
+  function sampleFormControls() {
+    if (!active || !liveControls.size) return;
+    const controls = [...liveControls];
+    if (controlCursor >= controls.length) controlCursor = 0;
+    const batchSize = Math.min(200, controls.length);
+    const batch = Array.from({ length: batchSize }, (_, index) => controls[(controlCursor + index) % controls.length]);
+    controlCursor = (controlCursor + batchSize) % controls.length;
+    const records = [];
+    for (const el of batch) {
+      if (!el.isConnected) { liveControls.delete(el); continue; }
+      if (!ignored(el)) records.push({ type: 'control', target: el });
+    }
+    if (records.length) onMutations(records);
   }
   function sampleDescendants(root, limit = 100) {
     const nodes = [];
@@ -417,6 +519,13 @@
         target ||= targetName(el);
         break;
       }
+      if (record.type === 'control') {
+        const nextControl = controlState(el), previousControl = controlSignatures.get(el);
+        controlSignatures.set(el, nextControl);
+        signatures.set(el, signature(el));
+        if (nextControl !== previousControl) noteChange(el, record.agentUserAt);
+        continue;
+      }
       let identityChanged = (record.type === 'popover' && record.stateChanged)
         || (record.type === 'layout' && record.layoutChanged)
         || (record.type === 'shadow' && (visible(el) || signatures.get(el)?.startsWith('[true')));
@@ -434,6 +543,7 @@
       }
       const next = signature(el), previous = signatures.get(el);
       signatures.set(el, next);
+      if (/^(INPUT|TEXTAREA|SELECT|OPTION)$/.test(el.tagName)) controlSignatures.set(el, controlState(el));
       if (!identityChanged && (next === previous || (!visible(el) && !previous?.startsWith('[true')))) continue;
       noteChange(el, record.agentUserAt);
     }
@@ -479,6 +589,7 @@
     active = true; runToken = state.runToken; seq = 0; revision = 0; publishRevision();
     observer = new MutationObserver(onMutations);
     observeRoot(document);
+    controlTimer = setInterval(sampleFormControls, 250);
     observeLayoutShifts();
     listen(document, 'webbrain-shadow-root-attached', event => {
       const path = event.composedPath();
@@ -531,17 +642,21 @@
     listen(document, 'pointerdown', event => {
       const el = elementFor(event);
       if (!event.isTrusted || ignored(el) || expected('click', el, event)) return;
+      activePointers.add(event.pointerId);
       pointerHeld = true; interact('activity', el);
     });
     listen(document, 'pointermove', event => {
-      if (pointerHeld && event.isTrusted) {
-        if (!event.buttons) pointerHeld = false;
+      if (activePointers.has(event.pointerId) && event.isTrusted) {
+        if (!event.buttons) activePointers.delete(event.pointerId);
+        pointerHeld = activePointers.size > 0;
         interact('activity', elementFor(event));
       }
     });
     for (const name of ['pointerup', 'pointercancel']) listen(document, name, event => {
-      if (!pointerHeld || !event.isTrusted) return;
-      pointerHeld = false; interact('activity', elementFor(event), { interacting: composing, completeGesture: true });
+      if (!activePointers.has(event.pointerId) || !event.isTrusted) return;
+      activePointers.delete(event.pointerId);
+      pointerHeld = activePointers.size > 0;
+      interact('activity', elementFor(event), { completeGesture: activePointers.size === 0 });
     });
     listen(document, 'click', event => {
       const el = elementFor(event);
@@ -559,10 +674,14 @@
     });
     for (const name of ['beforeinput', 'input', 'change']) listen(document, name, event => {
       const el = elementFor(event);
-      if (ignored(el) || expected('input', el, event)
-          || (el.matches?.('input[type="checkbox"],input[type="radio"],select,option') && expected('click', el, event))) return;
+      const expectedInput = expected('input', el, event);
+      const expectedClick = !expectedInput && el.matches?.('input[type="checkbox"],input[type="radio"],select,option')
+        ? expected('click', el, event) : null;
+      if (ignored(el)) return;
+      if (expectedInput || expectedClick) { refreshControl(el); return; }
       if (event.isTrusted) interact('input', el);
       else { revision++; send({ kind: 'input', source: 'page', target: targetName(el) }); }
+      refreshControl(el);
     });
     listen(document, 'compositionstart', event => {
       const el = elementFor(event);
@@ -619,13 +738,13 @@
       if (Date.now() - lastUserAt < 1000 && !editable(document.activeElement)) interact('selection', document.activeElement || document.body);
     });
     listen(window, 'blur', () => {
-      if (pointerHeld || composing) { pointerHeld = false; composing = false; interact('activity', document.body, { interacting: false }); }
+      if (pointerHeld || composing) { activePointers.clear(); pointerHeld = false; composing = false; interact('activity', document.body, { interacting: false }); }
     });
     listen(window, 'pagehide', () => stop());
   }
   function stop() {
-    active = false; runToken = ''; pointerHeld = false; composing = false;
-    lastUserAt = 0; lastViewport = ''; userTurn = null; lastUserTarget = null; matchedEvents = new WeakMap(); nativeMarks = new WeakMap();
+    active = false; runToken = ''; activePointers.clear(); pointerHeld = false; composing = false;
+    lastUserAt = 0; lastViewport = ''; userTurn = null; lastUserTarget = null; matchedEvents = new WeakMap(); controlCursor = 0;
     document.documentElement?.removeAttribute(fenceAttribute);
     for (const el of nativeTargets) {
       el.removeAttribute?.('data-webbrain-native-action');
@@ -634,10 +753,10 @@
     nativeTargets.clear();
     observer?.disconnect(); observer = null;
     layoutObserver?.disconnect(); layoutObserver = null;
-    clearTimeout(domTimer); clearTimeout(scrollTimer); domTimer = null; scrollTimer = null; unreported = 0; pendingDOM = null; lastFeedbackDelivery = Promise.resolve();
+    clearTimeout(domTimer); clearTimeout(scrollTimer); clearInterval(controlTimer); domTimer = null; scrollTimer = null; controlTimer = null; unreported = 0; pendingDOM = null; lastFeedbackDelivery = Promise.resolve();
     listeners.splice(0).forEach(remove => remove());
     operations.clear(); localOperation = null; agentTurn = null;
-    roots = new WeakSet(); signatures = new WeakMap(); textSignatures = new WeakMap(); popoverTurns = new WeakMap();
+    roots = new WeakSet(); signatures = new WeakMap(); controlSignatures = new WeakMap(); textSignatures = new WeakMap(); popoverTurns = new WeakMap(); liveControls.clear();
   }
   async function requestState() {
     const generation = ++requestGeneration;
@@ -665,6 +784,7 @@
   function dispatch(params) {
     if (!active || (params.runToken && params.runToken !== runToken)) return;
     const op = operations.get(params.operationId) || { operationId: params.operationId, userAt: lastUserAt };
+    if (params.fenceOnly && !op.nativeSecret) op.nativeSecret = Array.from(crypto.getRandomValues(new Uint8Array(16)), byte => byte.toString(16).padStart(2, '0')).join('');
     op.blurTarget ??= document.activeElement;
     op.target = resolveTarget(params) || (params.kind === 'input' ? op.focusTarget || deepActiveElement() : op.target);
     if (params.kind === 'input' && !op.focusTarget) op.focusTarget = op.target;
@@ -690,6 +810,7 @@
     operations.set(op.operationId, op);
   }
   function activatePreparedDispatch(params = {}) {
+    sampleFormControls();
     const op = operations.get(params.operationId);
     const layoutChanged = coordinatePreparationShifted(op);
     if (!active || !op || layoutChanged || domTimer || unreported
@@ -703,6 +824,14 @@
     dispatch({ ...params, runToken });
     publishRevision();
     return { ready: true, operationId: op.operationId, revision };
+  }
+  function withPreparedDispatch(operationId, callback) {
+    const op = operations.get(operationId);
+    if (!op?.dispatched || typeof callback !== 'function') return callback?.();
+    const previous = op.synchronous;
+    op.synchronous = true;
+    try { return callback(); }
+    finally { op.synchronous = previous; }
   }
   const localMutations = new Set(['click', 'click_ax', 'type', 'type_ax', 'set_field', 'set_checked', 'press_keys', 'scroll',
     'hover', 'drag_drop', 'patch_element', 'revert_patch', 'highlight_element', 'execute_js',
@@ -726,6 +855,7 @@
   }
   function beforeLocalDispatch({ preparation = false, kind, target } = {}) {
     if (!active || !localOperation) return;
+    sampleFormControls();
     const layoutChanged = coordinatePreparationShifted(operations.get(localOperation.operationId));
     if (layoutChanged || domTimer || unreported || lastUserAt > localOperation.userAt || revision !== localOperation.revision) {
       const error = new Error('Browser changed during action preparation. Re-observe before acting.');
@@ -762,6 +892,7 @@
     } else if (msg.action === 'page_monitor_prepare') { prepare(msg.params || {}); respond({ ready: true }); }
     else if (msg.action === 'page_monitor_dispatch') {
       const params = msg.params || {};
+      if (!params.release) sampleFormControls();
       const prepared = operations.get(params.operationId);
       const layoutChanged = !params.release && active && coordinatePreparationShifted(prepared);
       if (!params.release && active && (layoutChanged || domTimer || unreported || (prepared && prepared.preparedRevision !== revision)
@@ -775,7 +906,9 @@
       }
       dispatch(params); publishRevision();
       respond({ ready: true, ...(active && params.runToken === runToken ? { guard: {
-        documentToken, revision, operationId: params.operationId, navigationCandidate: params.navigationCandidate !== false,
+        documentToken, revision, operationId: params.operationId, runToken,
+        navigationCandidate: params.navigationCandidate !== false,
+        ...(operations.get(params.operationId)?.nativeSecret ? { nativeSecret: operations.get(params.operationId).nativeSecret } : {}),
       } } : {}) });
     }
     else if (msg.action === 'page_monitor_finish') {
@@ -785,7 +918,7 @@
     }
   };
   api.runtime.onMessage.addListener(onMessage);
-  window.__wbPageMonitor = { beginContentAction, beforeLocalDispatch, withLocalDispatch, dispatch, activatePreparedDispatch, registerDecoration,
+  window.__wbPageMonitor = { beginContentAction, beforeLocalDispatch, withLocalDispatch, dispatch, activatePreparedDispatch, withPreparedDispatch, registerDecoration,
     get active() { return active; },
     get disposed() { return disposed; },
     dispose() { disposed = true; requestGeneration++; stop(); api.runtime.onMessage.removeListener?.(onMessage); } };

@@ -4,7 +4,7 @@ import { test } from 'node:test';
 import { chromium, firefox } from 'playwright';
 import { CDPClient } from '../src/chrome/src/cdp/cdp-client.js';
 import { pageFeedbackMethods } from '../src/chrome/src/agent/page-feedback.js';
-import { BidiSession } from '../firefox-companion/session.mjs';
+import { BidiSession, createNativeActionMarker } from '../firefox-companion/session.mjs';
 
 const read = (build, file) => fs.readFileSync(new URL(`../src/${build}/src/${file}`, import.meta.url), 'utf8');
 const html = `<!doctype html><style>
@@ -17,11 +17,21 @@ body { margin: 0; } button,input { margin: 12px; }
 <div id="moving">Animated</div><div style="height:3000px"></div>
 <script>document.getElementById('agent').addEventListener('click', () => { document.getElementById('status').textContent = 'Agent changed this'; });</script>`;
 
-async function fixture(engine, build, { runToken = 'test-run', siteIsolation = false, omitEmptyFrameMonitor = false } = {}) {
+async function fixture(engine, build, { runToken = 'test-run', siteIsolation = false, omitEmptyFrameMonitor = false,
+  capturePointerHandlers = false } = {}) {
   const browser = await engine.launch({ headless: true, ...(siteIsolation ? { args: ['--site-per-process'] } : {}) });
   const context = await browser.newContext();
   await context.route('https://monitor.test/**', route => route.fulfill({ contentType: 'text/html', body: html }));
   await context.addInitScript(token => { window.monitorRunToken = token; }, runToken);
+  if (capturePointerHandlers) await context.addInitScript(() => {
+    window.monitorPointerHandlers = {};
+    const add = EventTarget.prototype.addEventListener;
+    EventTarget.prototype.addEventListener = function(type, handler, options) {
+      if (this === document && ['pointerdown', 'pointermove', 'pointerup', 'pointercancel'].includes(type)
+          && options?.capture && typeof handler === 'function') (monitorPointerHandlers[type] ||= []).push(handler);
+      return add.call(this, type, handler, options);
+    };
+  });
   await context.addInitScript(() => {
     window.monitorEnabled = true;
     window.feedback = [];
@@ -505,7 +515,7 @@ for (const [build, engine] of [['chrome', chromium], ['firefox', firefox]]) {
         try {
           __wbPageMonitor.activatePreparedDispatch({ operationId: 'iframe-click-live', kind: 'click',
             element: document.getElementById('agent'), navigationCandidate: true });
-          document.getElementById('agent').click();
+          __wbPageMonitor.withPreparedDispatch('iframe-click-live', () => document.getElementById('agent').click());
           return true;
         } catch { return false; }
       });
@@ -870,8 +880,10 @@ for (const [build, engine] of [['chrome', chromium], ['firefox', firefox]]) {
       await page.evaluate(() => {
         feedback = []; deliver('page_monitor_prepare', { operationId: 'agent-tab', tool: 'press_keys', selector: '#human' });
         deliver('page_monitor_dispatch', { operationId: 'agent-tab', kind: 'input', selector: '#human', fenceOnly: true });
-        document.getElementById('human').setAttribute('data-webbrain-native-action', JSON.stringify({ ...lastMonitorResponse.guard, kind: 'input', sequence: 1 }));
       });
+      const tabGuard = await page.evaluate(() => lastMonitorResponse.guard);
+      await page.evaluate(marker => document.getElementById('human').setAttribute('data-webbrain-native-action', marker),
+        createNativeActionMarker(tabGuard, 'input', 1));
       await page.keyboard.press('Tab');
       await page.waitForTimeout(80);
       assert.equal((await page.evaluate(() => feedback)).some(event => event.source !== 'agent'), false,
@@ -889,6 +901,7 @@ for (const [build, engine] of [['chrome', chromium], ['firefox', firefox]]) {
       assert.ok(input.some(event => event.kind === 'input' && event.source === 'user'));
       assert.equal(JSON.stringify(input).includes('private-field-value'), false);
       assert.equal(JSON.stringify(input).includes('password-never-recorded'), false);
+      await page.waitForTimeout(1100);
 
       await page.evaluate(() => {
         feedback = [];
@@ -908,6 +921,7 @@ for (const [build, engine] of [['chrome', chromium], ['firefox', firefox]]) {
         && event.target === 'button#agent'), 'A later human click on the same target must survive attribution');
       await page.locator('#human').click();
       assert.ok((await page.evaluate(() => feedback)).some(event => event.source === 'user' && event.target === 'button#human'));
+      await page.waitForTimeout(1100);
 
       await page.evaluate(() => {
         feedback = [];
@@ -920,6 +934,7 @@ for (const [build, engine] of [['chrome', chromium], ['firefox', firefox]]) {
       assert.equal(ownTyping.some(event => event.source !== 'agent'), false, JSON.stringify(ownTyping));
       await page.locator('#human').click();
       assert.ok((await page.evaluate(() => feedback)).some(event => event.source === 'user'));
+      await page.waitForTimeout(1100);
       await page.evaluate(() => {
         feedback = [];
         deliver('page_monitor_prepare', { operationId: 'click-with-external-dom', tool: 'click', selector: '#agent' });
@@ -929,6 +944,96 @@ for (const [build, engine] of [['chrome', chromium], ['firefox', firefox]]) {
       await page.waitForFunction(() => feedback.some(event => event.kind === 'dom'));
       assert.ok((await page.evaluate(() => feedback)).some(event => event.kind === 'dom' && event.source !== 'agent'),
         'A dispatched click must not silence unrelated DOM writes on its target');
+    } finally { await browser.close(); }
+  });
+
+  test(`${build}: property-only form changes invalidate the prepared page without exposing values`, async () => {
+    const { browser, page } = await fixture(engine, build);
+    try {
+      await page.evaluate(() => {
+        const dense = document.createElement('div');
+        dense.innerHTML = `${'<span></span>'.repeat(650)}<input id="late-control">`;
+        document.body.append(dense);
+      });
+      await page.waitForFunction(() => feedback.some(event => event.kind === 'dom'), null, { timeout: 1000 });
+      await page.evaluate(() => { feedback = []; document.getElementById('late-control').value = 'late-private-value'; });
+      await page.waitForFunction(() => feedback.some(event => event.kind === 'dom'), null, { timeout: 1500 });
+      assert.equal(JSON.stringify(await page.evaluate(() => feedback)).includes('late-private-value'), false,
+        'Controls beyond the layout-sampling budget still receive bounded state monitoring');
+
+      await page.evaluate(() => {
+        feedback = [];
+        document.getElementById('field').value = 'private-property-only-value';
+        document.getElementById('select').selectedIndex = 1;
+        const check = document.createElement('input'); check.type = 'checkbox'; check.id = 'property-check';
+        document.body.append(check); check.checked = true;
+      });
+      await page.waitForFunction(() => feedback.some(event => event.kind === 'dom'), null, { timeout: 1500 });
+      const observed = await page.evaluate(() => feedback);
+      assert.equal(JSON.stringify(observed).includes('private-property-only-value'), false);
+      assert.ok(observed.some(event => event.kind === 'dom' && event.source === 'page'));
+
+      const result = await page.evaluate(() => {
+        feedback = [];
+        deliver('page_monitor_prepare', { operationId: 'property-preflight', tool: 'click', selector: '#agent' });
+        document.getElementById('field').value = 'changed-during-preparation';
+        try { __wbPageMonitor.activatePreparedDispatch({ operationId: 'property-preflight', kind: 'click' }); return null; }
+        catch (error) { return error.code; }
+      });
+      assert.equal(result, 'page_feedback_pending', 'The final dispatch check must sample property-only changes');
+      assert.equal(JSON.stringify(await page.evaluate(() => feedback)).includes('changed-during-preparation'), false);
+    } finally { await browser.close(); }
+  });
+
+  test(`${build}: native markers reject replay, tampering and copied targets`, async () => {
+    const { browser, page } = await fixture(engine, build);
+    try {
+      const guard = await page.evaluate(() => {
+        deliver('page_monitor_prepare', { operationId: 'native-target', tool: 'type_text', selector: '#field' });
+        deliver('page_monitor_dispatch', { operationId: 'native-target', kind: 'input', selector: '#field', fenceOnly: true });
+        feedback = []; return lastMonitorResponse.guard;
+      });
+      const copiedMarker = createNativeActionMarker(guard, 'input', 1);
+      await page.evaluate(marker => document.getElementById('secret').setAttribute('data-webbrain-native-action', marker), copiedMarker);
+      await page.locator('#secret').fill('target-must-stay-bound');
+      let events = await page.evaluate(() => feedback);
+      assert.ok(events.some(event => event.kind === 'input' && event.source === 'user' && event.target === 'input#secret'),
+        'A valid capability copied to another control cannot retarget the isolated operation');
+      assert.equal(JSON.stringify(events).includes('target-must-stay-bound'), false);
+
+      const marker = JSON.parse(createNativeActionMarker(guard, 'input', 1));
+      marker.sequence = 999;
+      await page.evaluate(value => {
+        feedback = [];
+        const field = document.getElementById('field');
+        field.setAttribute('data-webbrain-native-action', JSON.stringify(value));
+        field.dispatchEvent(new Event('input', { bubbles: true }));
+      }, marker);
+      events = await page.evaluate(() => feedback);
+      assert.ok(events.some(event => event.kind === 'input' && event.source === 'page'),
+        'A modified sequence and script-generated event cannot be attributed to the agent');
+      assert.equal(events.some(event => event.source === 'agent'), false);
+    } finally { await browser.close(); }
+  });
+
+  test(`${build}: a multi-pointer gesture stays active until the last pointer is released`, async () => {
+    const { browser, page } = await fixture(engine, build, { capturePointerHandlers: true });
+    try {
+      const states = await page.evaluate(() => {
+        feedback = [];
+        const target = document.getElementById('human');
+        const emit = (type, pointerId, buttons) => {
+          const event = { type, pointerId, buttons, isTrusted: true, target, composedPath: () => [target] };
+          for (const listener of monitorPointerHandlers[type] || []) listener.call(document, event);
+        };
+        emit('pointerdown', 11, 1);
+        emit('pointerdown', 12, 1);
+        emit('pointerup', 11, 0);
+        const afterFirstRelease = feedback.at(-1)?.interacting;
+        emit('pointerup', 12, 0);
+        return { afterFirstRelease, afterLastRelease: feedback.at(-1)?.interacting };
+      });
+      assert.deepEqual(states, { afterFirstRelease: true, afterLastRelease: false });
     } finally { await browser.close(); }
   });
 
@@ -1305,12 +1410,15 @@ for (const [build, engine] of [['chrome', chromium], ['firefox', firefox]]) {
         feedback = []; return lastMonitorResponse.guard;
       });
       await page.locator('#field').focus();
+      let replayedMarker;
       for (let i = 0; i < 3; i++) {
-        await page.evaluate(({ guard, i }) => document.getElementById('field').setAttribute('data-webbrain-native-action',
-          JSON.stringify({ ...guard, kind: 'input', sequence: i })), { guard, i });
+        replayedMarker = createNativeActionMarker(guard, 'input', i + 1);
+        await page.evaluate(marker => document.getElementById('field').setAttribute('data-webbrain-native-action', marker), replayedMarker);
         await page.keyboard.insertText('a');
       }
-      assert.equal((await page.evaluate(() => feedback)).some(event => event.source !== 'agent'), false);
+      assert.equal((await page.evaluate(() => feedback)).some(event => event.source !== 'agent'), false,
+        JSON.stringify(await page.evaluate(() => feedback)));
+      await page.evaluate(marker => document.getElementById('field').setAttribute('data-webbrain-native-action', marker), replayedMarker);
       await page.keyboard.insertText('human-private');
       assert.ok((await page.evaluate(() => feedback)).some(event => event.source === 'user'));
       assert.equal(JSON.stringify(await page.evaluate(() => feedback)).includes('human-private'), false);
@@ -1621,8 +1729,8 @@ for (const [build, engine] of [['chrome', chromium], ['firefox', firefox]]) {
         deliver('page_monitor_dispatch', { operationId: 'clear-chord', kind: 'input', selector: '#field', fenceOnly: true });
         feedback = []; return lastMonitorResponse.guard;
       });
-      const mark = sequence => page.evaluate(({ guard, sequence }) => document.getElementById('field')
-        .setAttribute('data-webbrain-native-action', JSON.stringify({ ...guard, kind: 'input', sequence })), { guard, sequence });
+      const mark = sequence => page.evaluate(marker => document.getElementById('field')
+        .setAttribute('data-webbrain-native-action', marker), createNativeActionMarker(guard, 'input', sequence));
       await mark(1); await page.keyboard.down('Control');
       await mark(2); await page.keyboard.press('a'); await page.keyboard.up('Control');
       await mark(3); await page.keyboard.press('Delete');

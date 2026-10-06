@@ -37807,12 +37807,17 @@ If the user has already named or confirmed this exact recipient, do NOT ask agai
                   operationId: monitorGuard.operationId, kind: 'click', element: el, navigationCandidate: true,
                 });
               }
-              targetDispatched = true;
-              try { el.dispatchEvent(new PointerEvent('pointerdown', opts)); } catch (e) {}
-              el.dispatchEvent(new MouseEvent('mousedown', opts));
-              try { el.dispatchEvent(new PointerEvent('pointerup', opts)); } catch (e) {}
-              el.dispatchEvent(new MouseEvent('mouseup', opts));
-              el.click();
+              const dispatch = () => {
+                targetDispatched = true;
+                try { el.dispatchEvent(new PointerEvent('pointerdown', opts)); } catch (e) {}
+                el.dispatchEvent(new MouseEvent('mousedown', opts));
+                try { el.dispatchEvent(new PointerEvent('pointerup', opts)); } catch (e) {}
+                el.dispatchEvent(new MouseEvent('mouseup', opts));
+                el.click();
+              };
+              if (monitorGuard?.operationId && window.__wbPageMonitor?.withPreparedDispatch)
+                window.__wbPageMonitor.withPreparedDispatch(monitorGuard.operationId, dispatch);
+              else dispatch();
               return { ok: true, url: location.href, tag: el.tagName, text: (el.innerText || el.value || '').slice(0, 80), dispatched: true };
             } catch (e) {
               return { ok: false, url: location.href, dispatched: targetDispatched, error: e.message };

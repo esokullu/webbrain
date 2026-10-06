@@ -2354,9 +2354,11 @@
       // the editor's undo stack. Its beforeinput behavior differs by browser,
       // so offer the page a cancellable gate BEFORE invoking the command.
       window.__wbPageMonitor?.beforeLocalDispatch();
-      const accepted = el.dispatchEvent(new InputEvent('beforeinput', {
+      const beforeInputGate = () => el.dispatchEvent(new InputEvent('beforeinput', {
         bubbles: true, composed: true, cancelable: true, inputType, data,
       }));
+      const accepted = window.__wbPageMonitor?.withLocalDispatch
+        ? window.__wbPageMonitor.withLocalDispatch(beforeInputGate) : beforeInputGate();
       if (el.innerHTML !== htmlBefore || !el.isConnected) {
         window.__wbPageMonitor?.beforeLocalDispatch();
         dispatched = true;
