@@ -39890,8 +39890,10 @@ If the user has already named or confirmed this exact recipient, do NOT ask agai
               return { success: true };
             },
           });
-          if (selResult?.deadlineExpired === true && selResult?.dispatched !== true) {
+          if ((selResult?.noDispatch === true || selResult?.dispatched === false) && selResult?.outcomeUnknown !== true) {
             earlyCdpDispatchState.started = false;
+          }
+          if (selResult?.deadlineExpired === true && selResult?.dispatched !== true) {
             return {
               ...selResult,
               success: false,

@@ -1532,6 +1532,32 @@ for (const [build, engine] of [['chrome', chromium], ['firefox', firefox]]) {
     } finally { await browser.close(); }
   });
 
+  test(`${build}: button type changes invalidate a prepared click`, async () => {
+    const { browser, page } = await fixture(engine, build);
+    try {
+      await page.evaluate(() => {
+        const form = document.createElement('form');
+        form.innerHTML = '<button id="guarded-submit" type="button">Save</button>';
+        form.addEventListener('submit', event => { event.preventDefault(); window.formWasSubmitted = true; });
+        document.body.append(form);
+      });
+      await page.waitForTimeout(150);
+      const guard = await page.evaluate(() => {
+        feedback = [];
+        deliver('page_monitor_prepare', { operationId: 'button-type', tool: 'click', selector: '#guarded-submit' });
+        deliver('page_monitor_dispatch', { operationId: 'button-type', kind: 'click', selector: '#guarded-submit' });
+        return lastMonitorResponse.guard;
+      });
+      await page.locator('#guarded-submit').evaluate(element => element.setAttribute('type', 'submit'));
+      await page.waitForFunction(() => feedback.some(event => event.kind === 'dom' && event.target === 'button#guarded-submit'));
+      const accepted = await page.evaluate(value => window.dispatchEvent(new CustomEvent('webbrain-agent-dom-dispatch', {
+        detail: JSON.stringify({ ...value, dispatchPhase: 'focus' }), cancelable: true,
+      })), guard);
+      assert.equal(accepted, false, 'A type mutation must make the prepared focus/click guard stale');
+      assert.equal(await page.evaluate(() => window.formWasSubmitted === true), false);
+    } finally { await browser.close(); }
+  });
+
   for (const action of ['click', 'type']) {
     test(`${build}: ${action} preparation preserves same-target human input`, async () => {
       const { browser, page } = await fixture(engine, build);
@@ -1846,6 +1872,33 @@ for (const [build, engine] of [['chrome', chromium], ['firefox', firefox]]) {
       }, guard);
       assert.deepEqual(result, { accepted: false, prevented: true },
         'The page-side bridge must cancel a guarded DOM write after user input invalidates its revision');
+    } finally { await browser.close(); }
+  });
+
+  test(`${build}: guarded DOM-click fallback gates focus and click once each`, async () => {
+    const { browser, page } = await fixture(engine, build);
+    try {
+      const guard = await page.evaluate(() => {
+        feedback = [];
+        deliver('page_monitor_prepare', { operationId: 'dom-click-phases', tool: 'click', selector: '#agent' });
+        deliver('page_monitor_dispatch', { operationId: 'dom-click-phases', kind: 'click', selector: '#agent' });
+        return lastMonitorResponse.guard;
+      });
+      const phases = await page.evaluate(value => {
+        const dispatch = phase => window.dispatchEvent(new CustomEvent('webbrain-agent-dom-dispatch', {
+          detail: JSON.stringify({ ...value, dispatchPhase: phase }), cancelable: true,
+        }));
+        const focus = dispatch('focus');
+        document.getElementById('agent').focus();
+        const click = dispatch('click');
+        if (click) document.getElementById('agent').click();
+        const replay = dispatch('click');
+        return { focus, click, replay };
+      }, guard);
+      assert.deepEqual(phases, { focus: true, click: true, replay: false });
+      assert.equal(await page.locator('#status').textContent(), 'Agent changed this');
+      await page.waitForTimeout(150);
+      assert.equal((await page.evaluate(() => feedback)).some(event => event.source !== 'agent'), false);
     } finally { await browser.close(); }
   });
 

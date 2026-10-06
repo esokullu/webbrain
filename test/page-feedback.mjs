@@ -135,6 +135,72 @@ for (const build of ['chrome', 'firefox']) {
         agent._releaseRunEntry(tab);
       }
     });
+
+    test('Chrome CDP click fallbacks pass the monitor guard and skip stale DOM clicks', async () => {
+      const tab = nextTab++;
+      const previousSendMessage = api.tabs.sendMessage;
+      const responses = [];
+      const { pageFeedbackMethods } = await import('../src/chrome/src/agent/page-feedback.js');
+      class ClickAgent {
+        static STATE_CHANGE_TOOLS = new Set(['click']);
+        isRunning() { return true; }
+        _checkAbort() { return false; }
+        _persist() {}
+      }
+      Object.assign(ClickAgent.prototype, pageFeedbackMethods);
+      const agent = new ClickAgent();
+      api.tabs.sendMessage = async (_tab, message) => {
+        if (message.action === 'page_monitor_dispatch') {
+          const guard = { runToken: message.params.runToken, documentToken: 'click-document',
+            revision: 9, operationId: message.params.operationId };
+          responses.push(guard);
+          return { ready: true, guard };
+        }
+        return { ready: true };
+      };
+      await agent._beginPageFeedbackRun(tab, 'interactive');
+      try {
+        for (const fallback of ['closed-shadow-node', 'open-shadow-selector']) {
+          const client = new CDPClient(), declarationCalls = [];
+          client.resolveSelector = async () => ({ inViewport: false, hitOk: false, nodeId: fallback === 'closed-shadow-node' ? 42 : null,
+            tag: 'BUTTON', x: 20, y: 30, width: 40, height: 20, text: 'Save' });
+          client.armFileInputClickGuard = async () => {};
+          client.consumeFileInputClickGuard = async () => ({ blocked: false });
+          client.sendCommand = async (_tab, method, params) => {
+            if (method === 'DOM.resolveNode') return { object: { objectId: 'click-target' } };
+            if (method === 'Runtime.callFunctionOn') {
+              declarationCalls.push({ method, params });
+              return { result: { value: { pageFeedbackPending: true, noDispatch: true, dispatched: false } } };
+            }
+            return {};
+          };
+          client.evaluateFunction = async (_tab, functionDeclaration, args) => {
+            declarationCalls.push({ method: 'Runtime.callFunctionOn-global', functionDeclaration, args });
+            return { result: { value: { pageFeedbackPending: true, noDispatch: true, dispatched: false } } };
+          };
+          client.evaluate = async () => { throw new Error('Fallback must pass guarded arguments, not build Runtime.evaluate source'); };
+          const result = await client.clickElement(tab, '#target', { beforeDispatch: async () => ({ success: true }) });
+          assert.equal(result.pageFeedbackPending, true);
+          assert.equal(result.noDispatch, true);
+          assert.equal(result.dispatched, false);
+          const call = declarationCalls[0];
+          const functionDeclaration = call.functionDeclaration || call.params.functionDeclaration;
+          assert.match(functionDeclaration, /beforePageAgentDomAction\(pageGuard, 'focus'\)/);
+          assert.match(functionDeclaration, /beforePageAgentDomAction\(pageGuard, 'click'\)/);
+          const focusCall = functionDeclaration.includes('this.focus()') ? 'this.focus()' : 'el.focus()';
+          const clickCall = functionDeclaration.includes('this.click()') ? 'this.click()' : 'el.click()';
+          assert.ok(functionDeclaration.lastIndexOf("beforePageAgentDomAction(pageGuard, 'focus')") < functionDeclaration.indexOf(focusCall));
+          assert.ok(functionDeclaration.lastIndexOf("beforePageAgentDomAction(pageGuard, 'click')") < functionDeclaration.indexOf(clickCall));
+          const passedGuard = call.args
+            ? call.args.at(-1)
+            : call.params.arguments.at(-1).value;
+          assert.deepEqual(passedGuard, responses.at(-1));
+        }
+      } finally {
+        agent._finishPageFeedbackRun(tab);
+        api.tabs.sendMessage = previousSendMessage;
+      }
+    });
   }
 
   test(`${build}: observations are isolated by run, frame, document and sequence`, async () => {

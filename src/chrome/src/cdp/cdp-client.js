@@ -18,6 +18,16 @@ const SELECTOR_SCROLL_DISPATCH_SOURCE = `
   };
 `;
 
+const PAGE_AGENT_DOM_ACTION_SOURCE = `
+  const beforePageAgentDomAction = (guard, phase) => {
+    if (!guard) return true;
+    const event = new CustomEvent('webbrain-agent-dom-dispatch', {
+      detail: JSON.stringify({ ...guard, dispatchPhase: phase }), cancelable: true,
+    });
+    return window.dispatchEvent(event);
+  };
+`;
+
 function throwIfPageFeedbackPending(result) {
   if (!result?.pageFeedbackPending) return;
   const error = new Error(pageFeedbackPendingResult().error);
@@ -4444,6 +4454,17 @@ export class CDPClient {
           deadlineExpired: true,
           error: error || 'Click action deadline expired before click dispatch',
         };
+    const pageFeedbackClickResult = (priorDispatchAttempted, focusDispatched = false) => {
+      if (!priorDispatchAttempted && !focusDispatched) return pageFeedbackPendingResult();
+      return {
+        success: false,
+        dispatched: true,
+        outcomeUnknown: true,
+        retryable: false,
+        pageFeedbackPending: true,
+        error: 'The page changed during click preparation. A prior click or focus may have taken effect; inspect the page before retrying.',
+      };
+    };
     if (info.inViewport && info.hitOk) {
       try {
         await this.armFileInputClickGuard(tabId);
@@ -4534,21 +4555,31 @@ export class CDPClient {
           const priorDispatchAttempted = dispatchAttempted;
           const validation = await authorizeDispatch({ x: info.x, y: info.y, tag: info.tag });
           if (validation.success !== true) return validation;
-          await beforePageAgentDispatch(globalThis.chrome, tabId, { kind: 'click', selector, x: info.x, y: info.y });
+          const pageGuard = await beforePageAgentDispatch(globalThis.chrome, tabId, { kind: 'click', selector, x: info.x, y: info.y });
           dispatchAttempted = true;
           const clicked = await this.sendCommand(tabId, 'Runtime.callFunctionOn', {
             objectId,
-            functionDeclaration: `function(actionDeadlineAt) {
+            functionDeclaration: `function(actionDeadlineAt, pageGuard) {
+              ${PAGE_AGENT_DOM_ACTION_SOURCE}
               if (actionDeadlineAt > 0 && Date.now() >= actionDeadlineAt) return false;
+              if (!this || !this.isConnected) return false;
+              if (!beforePageAgentDomAction(pageGuard, 'focus'))
+                return { pageFeedbackPending: true, noDispatch: true, dispatched: false };
               try { this.focus(); } catch {}
               if (actionDeadlineAt > 0 && Date.now() >= actionDeadlineAt) return false;
+              if (!this.isConnected || !beforePageAgentDomAction(pageGuard, 'click'))
+                return { pageFeedbackPending: true, noDispatch: false, dispatched: true };
               this.click();
               return true;
             }`,
-            arguments: [{ value: deadlineAt }],
+            arguments: [{ value: deadlineAt }, { value: pageGuard || null }],
             returnByValue: true,
             awaitPromise: false,
           });
+          if (clicked?.result?.value?.pageFeedbackPending === true) {
+            await this.consumeFileInputClickGuard(tabId);
+            return pageFeedbackClickResult(priorDispatchAttempted, clicked.result.value.dispatched === true);
+          }
           if (clicked?.result?.value === false) {
             return pageDeadlineResult(priorDispatchAttempted, 'Click action deadline expired before click dispatch');
           }
@@ -4585,22 +4616,19 @@ export class CDPClient {
     }
 
     // Step 3: JS fallback for open shadow roots.
-    const selectorJSON = JSON.stringify(selector);
     throwIfAborted();
     await this.armFileInputClickGuard(tabId);
     throwIfAborted();
     const fallbackValidation = await authorizeDispatch({ x: info.x, y: info.y, tag: info.tag });
     if (fallbackValidation.success !== true) return fallbackValidation;
     const priorDispatchAttempted = dispatchAttempted;
-    await beforePageAgentDispatch(globalThis.chrome, tabId, { kind: 'click', selector, x: info.x, y: info.y });
+    const pageGuard = await beforePageAgentDispatch(globalThis.chrome, tabId, { kind: 'click', selector, x: info.x, y: info.y });
     dispatchAttempted = true;
-    const fb = await this.evaluate(tabId, `
-      (() => {
-        const actionDeadlineAt = ${deadlineAt};
+    const fb = await this.evaluateFunction(tabId, `function (sel, actionDeadlineAt, pageGuard) {
+        ${PAGE_AGENT_DOM_ACTION_SOURCE}
         const deadlineExpired = () => actionDeadlineAt > 0 && Date.now() >= actionDeadlineAt;
         const deadlineFailure = () => ({ success: false, dispatched: false, noDispatch: true, deadlineExpired: true, error: 'Click action deadline expired' });
         if (deadlineExpired()) return deadlineFailure();
-        const sel = ${selectorJSON};
         const queryDeep = (root) => {
           try { const h = root.querySelector(sel); if (h) return h; } catch (e) { return null; }
           const w = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT);
@@ -4618,12 +4646,19 @@ export class CDPClient {
             ? type === 'submit' || (!type && !!(el.form || el.closest?.('form')))
             : false;
         if (deadlineExpired()) return deadlineFailure();
+        if (!beforePageAgentDomAction(pageGuard, 'focus'))
+          return { success: false, pageFeedbackPending: true, noDispatch: true, dispatched: false };
         try { el.focus(); } catch (e) {}
         if (deadlineExpired()) return deadlineFailure();
+        if (!el.isConnected)
+          return { success: false, dispatched: true, outcomeUnknown: true, retryable: false, error: 'Click target changed during focus.' };
+        if (!beforePageAgentDomAction(pageGuard, 'click'))
+          return { success: false, pageFeedbackPending: true, noDispatch: false, dispatched: true };
         el.click();
         const r = el.getBoundingClientRect();
         return {
           success: true,
+          dispatched: true,
           method: 'js-click',
           tag,
           type,
@@ -4631,9 +4666,13 @@ export class CDPClient {
           text: (el.innerText || '').slice(0, 80),
           rect: { x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height) },
         };
-      })()
-    `);
+      }`, [selector, deadlineAt, pageGuard || null], { timeoutMs: deadlineAt > 0 ? Math.max(1, Math.min(15000, deadlineAt - Date.now())) : 15000 });
     const fallbackResult = fb?.result?.value || { success: false, error: 'Click failed' };
+    if (fallbackResult.pageFeedbackPending === true) {
+      await this.consumeFileInputClickGuard(tabId);
+      return pageFeedbackClickResult(priorDispatchAttempted, fallbackResult.dispatched === true);
+    }
+    if (fallbackResult.outcomeUnknown === true && fallbackResult.dispatched === true) return fallbackResult;
     if (fallbackResult.deadlineExpired === true && fallbackResult.dispatched !== true) {
       return pageDeadlineResult(priorDispatchAttempted, fallbackResult.error);
     }

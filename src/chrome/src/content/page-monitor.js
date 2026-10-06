@@ -363,6 +363,7 @@
       el.getAttribute('aria-expanded'), el.getAttribute('aria-selected'), el.getAttribute('aria-checked'),
       el.getAttribute('aria-valuenow'), el.getAttribute('aria-valuetext'),
       el.getAttribute('aria-pressed'),
+      el.getAttribute('type'),
       el.getAttribute('href'), el.getAttribute('target'), el.getAttribute('download'), el.getAttribute('action'),
       el.getAttribute('formaction'), el.getAttribute('formtarget'),
       el.getAttribute('popover'), popoverOpen(el),
@@ -437,7 +438,7 @@
     roots.add(root);
     observer.observe(root, { childList: true, subtree: true, characterData: true, attributes: true, attributeOldValue: true,
       attributeFilter: ['role', 'aria-label', 'aria-expanded', 'aria-selected', 'aria-checked', 'aria-pressed', 'aria-disabled',
-        'href', 'target', 'download', 'action', 'formaction', 'formtarget',
+        'type', 'href', 'target', 'download', 'action', 'formaction', 'formtarget',
         'aria-valuenow', 'aria-valuetext', 'aria-hidden', 'hidden', 'disabled', 'readonly', 'checked', 'selected', 'open', 'popover', 'inert', 'class', 'style'] });
     listen(root, 'beforetoggle', event => {
       const el = elementFor(event);
@@ -629,14 +630,24 @@
       try {
         const guard = JSON.parse(String(event.detail));
         const op = operations.get(guard.operationId);
+        const phase = ['focus', 'click'].includes(guard.dispatchPhase) ? guard.dispatchPhase : 'dom';
+        const actionPhase = phase !== 'dom';
+        const phaseAlreadyConsumed = phase === 'dom'
+          ? op?.domDispatchConsumed === true
+          : op?.domDispatchConsumed === true || op?.domDispatchPhases?.has(phase) === true;
         event.stopImmediatePropagation();
         flushPendingMutations();
         sampleFormControls(op?.target);
         if (!active || guard.runToken !== runToken || guard.documentToken !== documentToken || guard.revision !== revision
-            || !op || op.domDispatchConsumed || op.preparedRevision !== revision || domTimer || unreported || lastUserAt > op.userAt) {
+            || !op || phaseAlreadyConsumed || (actionPhase ? op.kind !== 'click' : op.kind !== 'dom')
+            || op.preparedRevision !== revision || domTimer || unreported || lastUserAt > op.userAt) {
           event.preventDefault(); return;
         }
-        op.domDispatchConsumed = true;
+        if (actionPhase) {
+          op.domDispatchPhases ||= new Set();
+          op.domDispatchPhases.add(phase);
+          if (!op.dispatched) dispatch({ operationId: op.operationId, kind: 'click', runToken });
+        } else op.domDispatchConsumed = true;
         const marker = { userAt: lastUserAt }; agentTurn = marker;
         setTimeout(() => { if (agentTurn === marker) agentTurn = null; }, 0);
       } catch { event.stopImmediatePropagation(); event.preventDefault(); /* Only a current prepared operation can mark a DOM write. */ }
