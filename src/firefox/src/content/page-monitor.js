@@ -352,7 +352,7 @@
       controlValueFingerprint(el)]);
   }
   function trackControl(el) {
-    if (!/^(INPUT|TEXTAREA|SELECT|OPTION)$/.test(el.tagName) || liveControls.has(el) || liveControls.size >= 600) return;
+    if (!/^(INPUT|TEXTAREA|SELECT|OPTION)$/.test(el.tagName) || liveControls.has(el)) return;
     liveControls.add(el);
     controlSignatures.set(el, controlState(el));
   }
@@ -398,7 +398,7 @@
   function seed(root, budget = { remaining: 600 }) {
     const nodes = root.querySelectorAll?.('*') || [];
     for (const el of nodes) {
-      // Form-state tracking has its own cap, separate from bounded layout reads.
+      // Keep a baseline for every control; periodic reads rotate through them in bounded batches.
       trackControl(el);
       if (budget.remaining > 0) { budget.remaining--; signatures.set(el, signature(el)); }
       // Root discovery is cheap and must not share the layout-measurement cap.
@@ -529,6 +529,20 @@
     }
     return false;
   }
+  function hasVisibleNativeLabelConsumer(el, previousFor = '') {
+    let label = null;
+    for (let node = el; node; node = node.parentElement || node.getRootNode?.().host) {
+      if (node.tagName === 'LABEL') { label = node; break; }
+    }
+    if (!label) return false;
+    const visibleControl = control => control instanceof Element && !ignored(control) && visible(control);
+    if (visibleControl(label.control)) return true;
+    if (label !== el || !previousFor) return false;
+    const root = label.getRootNode?.();
+    const priorControl = root?.getElementById?.(previousFor)
+      || (root === document ? document.getElementById(previousFor) : null);
+    return visibleControl(priorControl);
+  }
   function onMutations(records) {
     if (!active) return;
     let changed = false, source = 'page', target = '';
@@ -598,9 +612,13 @@
         if (nextControl !== previousControl) noteChange(el, record.agentUserAt);
         continue;
       }
+      const accessibleNameContentMutation = ['characterData', 'childList'].includes(record.type);
+      const nativeLabelAssociationMutation = record.type === 'attributes'
+        && record.attributeName === 'for' && el.tagName === 'LABEL';
       const hiddenAccessibleNameChanged = !visible(el)
-        && ['characterData', 'childList'].includes(record.type)
-        && hasVisibleAriaLabelledbyConsumer(el);
+        && ((accessibleNameContentMutation && hasVisibleAriaLabelledbyConsumer(el))
+          || ((accessibleNameContentMutation || nativeLabelAssociationMutation)
+            && hasVisibleNativeLabelConsumer(el, nativeLabelAssociationMutation ? record.oldValue : '')));
       let identityChanged = (record.type === 'popover' && record.stateChanged)
         || (record.type === 'layout' && record.layoutChanged)
         || editableTextMutation || hiddenAccessibleNameChanged

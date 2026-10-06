@@ -1808,6 +1808,68 @@ for (const [build, engine] of [['chrome', chromium], ['firefox', firefox]]) {
     } finally { await browser.close(); }
   });
 
+  test(`${build}: hidden native label changes invalidate visible control clicks`, async () => {
+    const { browser, page } = await fixture(engine, build);
+    try {
+      await page.evaluate(() => {
+        const form = document.createElement('form');
+        form.innerHTML = '<label id="hidden-native-label" for="native-field" style="display:none">Before</label>'
+          + '<input id="native-field"><input id="other-field">';
+        document.body.append(form);
+      });
+      await page.waitForFunction(() => feedback.some(event => event.kind === 'dom'));
+      await page.waitForTimeout(180);
+
+      const prepare = operationId => page.evaluate(id => {
+        feedback = [];
+        deliver('page_monitor_prepare', { operationId: id, tool: 'click', selector: '#native-field' });
+        deliver('page_monitor_dispatch', { operationId: id, kind: 'click', selector: '#native-field' });
+        return lastMonitorResponse.guard;
+      }, operationId);
+      const assertStale = guard => page.evaluate(value => window.dispatchEvent(new CustomEvent('webbrain-agent-dom-dispatch', {
+        detail: JSON.stringify({ ...value, dispatchPhase: 'focus' }), cancelable: true,
+      })), guard);
+
+      const textGuard = await prepare('native-label-text');
+      await page.locator('#hidden-native-label').evaluate(label => { label.firstChild.data = 'Updated hidden name'; });
+      await page.waitForFunction(() => feedback.some(event => event.kind === 'dom' && event.target === 'label#hidden-native-label'));
+      assert.equal(await assertStale(textGuard), false, 'Changing hidden native label text must stale its visible control guard');
+
+      const associationGuard = await prepare('native-label-for');
+      await page.locator('#hidden-native-label').evaluate(label => label.setAttribute('for', 'other-field'));
+      await page.waitForFunction(() => feedback.some(event => event.kind === 'dom' && event.target === 'label#hidden-native-label'));
+      assert.equal(await assertStale(associationGuard), false, 'Reassigning a hidden native label must stale its previous control guard');
+      assert.equal(JSON.stringify(await page.evaluate(() => feedback)).includes('Updated hidden name'), false,
+        'Hidden label text must not be copied into feedback');
+    } finally { await browser.close(); }
+  });
+
+  test(`${build}: controls after a large select remain in rotating form-state coverage`, async () => {
+    const { browser, page } = await fixture(engine, build);
+    try {
+      await page.evaluate(() => {
+        const form = document.createElement('form');
+        const select = document.createElement('select');
+        select.id = 'large-select';
+        select.innerHTML = Array.from({ length: 610 }, (_, index) => `<option value="${index}">Option ${index}</option>`).join('');
+        const input = document.createElement('input');
+        input.id = 'late-form-control';
+        input.value = 'before';
+        form.append(select, input);
+        document.body.append(form);
+      });
+      await page.waitForFunction(() => feedback.some(event => event.kind === 'dom'));
+      await page.waitForTimeout(180);
+      await page.evaluate(() => {
+        feedback = [];
+        document.getElementById('late-form-control').value = 'sensitive-after';
+      });
+      await page.waitForFunction(() => feedback.some(event => event.kind === 'dom' && event.target === 'input#late-form-control'), null, { timeout: 5000 });
+      const serialized = JSON.stringify(await page.evaluate(() => feedback));
+      assert.equal(serialized.includes('sensitive-after'), false, 'Detected property values must stay private');
+    } finally { await browser.close(); }
+  });
+
   for (const action of ['click', 'type']) {
     test(`${build}: ${action} preparation preserves same-target human input`, async () => {
       const { browser, page } = await fixture(engine, build);
