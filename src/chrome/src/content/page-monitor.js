@@ -360,7 +360,9 @@
         [size + length, (Math.imul(hash, power) + part) >>> 0], [0, 0]);
     const controlValue = controlValueFingerprint(el);
     return JSON.stringify([shown, content, el.children.length + (el.shadowRoot?.children.length || 0), el.getAttribute('role'), el.getAttribute('aria-label'),
-      el.getAttribute('name'), el.getAttribute('placeholder'), el.getAttribute('aria-required'), el.getAttribute('aria-readonly'),
+      el.getAttribute('id'), el.getAttribute('for'), el.getAttribute('name'), el.getAttribute('placeholder'), el.getAttribute('title'), el.getAttribute('alt'),
+      el.getAttribute('aria-labelledby'), el.getAttribute('aria-required'), el.getAttribute('aria-readonly'),
+      el.getAttribute('contenteditable'), el.getAttribute('tabindex'), el.getAttribute('onclick'), el.getAttribute('required'),
       el.getAttribute('aria-expanded'), el.getAttribute('aria-selected'), el.getAttribute('aria-checked'),
       el.getAttribute('aria-valuenow'), el.getAttribute('aria-valuetext'),
       el.getAttribute('aria-pressed'),
@@ -438,7 +440,8 @@
     if (!root || roots.has(root) || !observer) return;
     roots.add(root);
     observer.observe(root, { childList: true, subtree: true, characterData: true, attributes: true, attributeOldValue: true,
-      attributeFilter: ['role', 'aria-label', 'name', 'placeholder', 'aria-required', 'aria-readonly',
+      attributeFilter: ['role', 'aria-label', 'id', 'for', 'name', 'placeholder', 'title', 'alt', 'aria-labelledby',
+        'aria-required', 'aria-readonly', 'contenteditable', 'tabindex', 'onclick', 'required',
         'aria-expanded', 'aria-selected', 'aria-checked', 'aria-pressed', 'aria-disabled',
         'type', 'href', 'target', 'download', 'action', 'formaction', 'formtarget',
         'aria-valuenow', 'aria-valuetext', 'aria-hidden', 'hidden', 'disabled', 'readonly', 'checked', 'selected', 'open', 'popover', 'inert', 'class', 'style'] });

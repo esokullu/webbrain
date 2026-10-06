@@ -1564,7 +1564,7 @@ for (const [build, engine] of [['chrome', chromium], ['firefox', firefox]]) {
       await page.waitForTimeout(180);
       const changes = [
         ['name', 'updated-name'], ['placeholder', 'Updated placeholder'],
-        ['aria-required', 'true'], ['aria-readonly', 'true'],
+        ['aria-required', 'true'], ['aria-readonly', 'true'], ['aria-labelledby', 'updated-accessible-name'],
       ];
       for (const [attribute, value] of changes) {
         const guard = await page.evaluate(attribute => {
