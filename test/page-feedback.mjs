@@ -886,6 +886,60 @@ test('monitor registrations include related-origin frames in both execution worl
   }
 });
 
+test('Chrome WebMCP invocation rechecks feedback immediately before CDP dispatch', async () => {
+  const { Agent } = await import('../src/chrome/src/agent/agent.js');
+  const agent = setup(Agent), tab = nextTab++;
+  agent.executeTool = Agent.prototype.executeTool;
+  const originalGetContext = cdpClient.getWebMCPToolContext;
+  const originalEnable = cdpClient.enableWebMCP;
+  const originalFrameUrls = cdpClient._webMCPFrameUrls;
+  const originalSendCommand = cdpClient.sendCommand;
+  const previousSession = cdpClient.webMcpSessions.get(tab);
+  const calls = [];
+  const tool = { toolId: 'wmcp_guarded', name: 'submit', frameId: 'main-frame', sessionId: 'session-main', annotations: {} };
+  const state = { closed: false, toolsById: new Map([[tool.toolId, tool]]), pendingInvocations: new Map(), completedResponses: new Map() };
+  let contextReads = 0;
+  try {
+    await agent._claimRunEntry(tab, 'interactive');
+    agent.setWebMCPEnabled(true);
+    agent.conversationModes.set(tab, 'act');
+    await agent._beginPageFeedbackRun(tab, 'chat');
+    cdpClient.webMcpSessions.set(tab, state);
+    cdpClient.enableWebMCP = async () => state;
+    cdpClient._webMCPFrameUrls = async () => new Map([[tool.frameId, 'https://example.com/checkout']]);
+    cdpClient.getWebMCPToolContext = async () => {
+      contextReads++;
+      if (contextReads === 2) {
+        // Arrives after agent-side context/permission preparation but before the
+        // CDP client's own asynchronous validation finishes.
+        agent._queuePageFeedback(tab, { kind: 'input', source: 'user', frameId: 0, revision: 1, target: 'input#address' });
+      }
+      return { toolId: tool.toolId, frameId: tool.frameId, targetUrl: 'https://example.com/checkout', declaredReadOnly: false };
+    };
+    cdpClient.sendCommand = async (_tabId, method) => {
+      calls.push(method);
+      if (method === 'WebMCP.invokeTool') return { invocationId: 'should-not-dispatch' };
+      return {};
+    };
+
+    const prepared = await agent._prepareWebMCPToolCall(tab, 'execute_webmcp_tool', { tool_id: tool.toolId, input: {} });
+    const result = await agent.executeTool(tab, 'execute_webmcp_tool', prepared.args);
+
+    assert.equal(result.pageFeedbackPending, true);
+    assert.equal(result.noDispatch, true);
+    assert.equal(calls.includes('WebMCP.invokeTool'), false, 'stale WebMCP invocation must be stopped at the CDP boundary');
+  } finally {
+    agent._finishPageFeedbackRun(tab);
+    agent._releaseRunEntry(tab);
+    cdpClient.getWebMCPToolContext = originalGetContext;
+    cdpClient.enableWebMCP = originalEnable;
+    cdpClient._webMCPFrameUrls = originalFrameUrls;
+    cdpClient.sendCommand = originalSendCommand;
+    if (previousSession) cdpClient.webMcpSessions.set(tab, previousSession);
+    else cdpClient.webMcpSessions.delete(tab);
+  }
+});
+
 for (const path of ['local', 'memory']) {
   for (const intervention of ['preparation', 'handshake', 'none']) {
     test(`Chrome ${path} upload honors feedback arriving during ${intervention}`, async () => {

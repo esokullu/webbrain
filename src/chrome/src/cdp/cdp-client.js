@@ -1610,6 +1610,7 @@ export class CDPClient {
         error: 'The WebMCP session closed before the tool could be dispatched.',
       };
     }
+    if (typeof options.beforeDispatch === 'function') await options.beforeDispatch();
     let invocation;
     try {
       invocation = await this.sendCommand(tabId, 'WebMCP.invokeTool', {

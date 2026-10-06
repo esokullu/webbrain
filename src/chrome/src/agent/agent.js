@@ -34819,6 +34819,11 @@ If the user has already named or confirmed this exact recipient, do NOT ask agai
         }
         return await cdpClient.invokeWebMCPTool(tabId, args?.tool_id, args?.input || {}, {
           abortCheck: () => this._checkAbort(tabId),
+          beforeDispatch: async () => {
+            throwIfEarlyCdpAborted();
+            await beforePageAgentDispatch(globalThis.chrome, tabId, { kind: 'dom' });
+            markEarlyCdpDispatched();
+          },
           expectedFrameId,
           expectedTargetUrl,
         });
