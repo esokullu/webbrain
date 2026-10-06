@@ -1,12 +1,25 @@
 /** Optional native-messaging transport. No raw BiDi commands are exposed to pages. */
-import { beforePageAgentDispatch } from '../agent/page-feedback.js';
+import { beforePageAgentDispatch, validateNativePageDispatch } from '../agent/page-feedback.js';
 export class FirefoxBidiClient {
   constructor(api) { this.apiOverride = api; this.pending = new Map(); this.runs = new Map(); this.captures = new Map(); this.sequence = 0; this.connectionEpoch = 0; }
   get api() { return this.apiOverride || globalThis.browser; }
   request(command, args = {}) {
     if (!this.port) {
       this.port = this.api.runtime.connectNative('one.webbrain.bidi');
-      this.port.onMessage.addListener(message => {
+      const port = this.port;
+      port.onMessage.addListener(message => {
+        if (message?.command === 'validatePageDispatch' && typeof message.id === 'string') {
+          void (async () => {
+            const entry = [...this.runs.entries()].find(([, run]) => run.runId === message.runId);
+            const result = entry ? await validateNativePageDispatch(this.api, entry[0], message.guard, {
+              kind: message.kind, rebindFocus: message.rebindFocus === true,
+            }) : false;
+            try { port.postMessage({ replyTo: message.id, result }); } catch { /* The native host may have disconnected. */ }
+          })().catch(() => {
+            try { port.postMessage({ replyTo: message.id, result: false }); } catch {}
+          });
+          return;
+        }
         const entry = this.pending.get(message.id); if (!entry) return;
         if (typeof message.chunk === 'string') {
           entry.chunks ||= [];
@@ -38,7 +51,6 @@ export class FirefoxBidiClient {
           entry.reject(error);
         } else entry.resolve(message.result);
       });
-      const port = this.port;
       this.port.onDisconnect.addListener(() => {
         if (this.port !== port) return;
         this.port = null; this.connection = null;

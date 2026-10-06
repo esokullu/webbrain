@@ -38212,7 +38212,10 @@ If the user has already named or confirmed this exact recipient, do NOT ask agai
             abortSignal: earlyCdpAbortSignal,
             deadlineAt: Number(CONTENT_ACTION_SIGNAL_DEADLINES.get(earlyCdpAbortSignal)?.deadlineAt) || 0,
             deadlineError: CONTENT_ACTION_SIGNAL_DEADLINES.get(earlyCdpAbortSignal)?.error || null,
-            beforeDispatch: () => {
+            beforeDispatch: async frameId => {
+              await beforePageAgentDispatch(globalThis.chrome, tabId, {
+                kind: 'input', selector, frameId, fenceOnly: true,
+              });
               dispatched = true;
               markEarlyCdpDispatched();
             },
@@ -38224,6 +38227,9 @@ If the user has already named or confirmed this exact recipient, do NOT ask agai
           return legacyResult;
         }
         throwIfEarlyCdpAborted();
+        await beforePageAgentDispatch(globalThis.chrome, tabId, {
+          kind: 'input', selector, frameId: targetFrameId, fenceOnly: true,
+        });
         dispatched = true;
         markEarlyCdpDispatched();
         try {

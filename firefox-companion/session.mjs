@@ -21,8 +21,8 @@ function pageActionSignature(secret, data) {
     v0 = (v0 + v3) & sipMask; v3 = sipRotate(v3, 21); v3 ^= v0;
     v2 = (v2 + v1) & sipMask; v1 = sipRotate(v1, 17); v1 ^= v2; v2 = sipRotate(v2, 32);
   };
-  const bytes = Buffer.from(JSON.stringify([data.documentToken, data.runToken, data.operationId, data.kind, data.sequence,
-    data.navigationCandidate === true]));
+  const bytes = Buffer.from(JSON.stringify([data.documentToken, data.runToken, data.operationId, data.revision,
+    data.kind, data.sequence, data.navigationCandidate === true]));
   let offset = 0;
   while (offset + 8 <= bytes.length) {
     let block = 0n;
@@ -245,9 +245,9 @@ export class BidiSession {
     if (run) await this.send('input.releaseActions', { context: run.context }).catch(() => {});
     return {};
   }
-  async perform(id, action, payload) {
+  async perform(id, action, payload, validatePageDispatch = null) {
     const dispatch = { started: false };
-    try { return await this.performAction(id, action, payload, dispatch); }
+    try { return await this.performAction(id, action, payload, dispatch, validatePageDispatch); }
     catch (error) {
       error.dispatchState = { dispatched: dispatch.started, noDispatch: !dispatch.started,
         outcomeUnknown: dispatch.started, retryable: !dispatch.started,
@@ -255,7 +255,7 @@ export class BidiSession {
       throw error;
     }
   }
-  async performAction(id, action, payload, dispatch) {
+  async performAction(id, action, payload, dispatch, validatePageDispatch = null) {
     if (!['navigate', 'click', 'hover', 'type', 'field', 'key', 'upload'].includes(action)) throw new Error('Unsupported BiDi action');
     if (payload.modifiers) throw new Error('Key modifiers are not supported by this tool');
     const run = this.runs.get(id); if (!run) throw new Error('Run stopped or disconnected');
@@ -274,18 +274,22 @@ export class BidiSession {
     const match = await this.locate(payload.token, payload.url, run.context);
     assertLive();
     let nativeSequence = 0;
-    const markNativeDispatch = async kind => {
+    const markNativeDispatch = async (kind, { rebindFocus = false } = {}) => {
       assertLive();
       const guard = payload.pageFeedbackGuard;
       if (!guard) return; // Compatibility with clients without page monitoring.
+      if (typeof validatePageDispatch !== 'function'
+          || !await validatePageDispatch(id, guard, kind, rebindFocus === true)) {
+        const error = new Error('Page changed during native preparation; no further input sent');
+        error.code = 'page_feedback_pending'; throw error;
+      }
       const marker = createNativeActionMarker(guard, kind, ++nativeSequence);
-      const checked = await this.call(match, `(el, fence, marker, kind, action) => {
-        if (!el.isConnected || document.documentElement.getAttribute('data-webbrain-page-revision') !== fence) return false;
+      const checked = await this.call(match, `(el, marker, kind, action) => {
+        if (!el.isConnected) return false;
         const target = kind === 'input' && action !== 'upload' ? el.getRootNode().activeElement || el : el;
         target.setAttribute('data-webbrain-native-action', marker);
         return true;
-      }`, [{ type: 'string', value: `${guard.documentToken}:${guard.revision}` },
-        { type: 'string', value: marker }, { type: 'string', value: kind }, { type: 'string', value: action }]);
+      }`, [{ type: 'string', value: marker }, { type: 'string', value: kind }, { type: 'string', value: action }]);
       if (checked.result?.value !== true) {
         const error = new Error('Page changed during native preparation; no further input sent');
         error.code = 'page_feedback_pending'; throw error;
@@ -390,7 +394,7 @@ export class BidiSession {
           } finally { await clearNativeDispatch(marker); }
           await assertFocus();
         }
-        const marker = await markNativeDispatch('input');
+        const marker = await markNativeDispatch('input', { rebindFocus: followTabFocus });
         try {
           dispatch.started = true;
           await this.send('input.performActions', { context: match.context, actions: [{ type: 'key', id: 'webbrain-keyboard', actions }] });

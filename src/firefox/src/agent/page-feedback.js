@@ -82,6 +82,23 @@ export async function beforePageAgentDispatch(api, tabId, details = {}) {
   return acknowledgement?.guard;
 }
 
+/** Validate a BiDi native action against the isolated monitor's private revision at dispatch time. */
+export async function validateNativePageDispatch(api, tabId, guard, { kind = 'input', rebindFocus = false } = {}) {
+  const owner = dispatchOwners.get(tabId);
+  if (!owner || owner.runToken !== guard?.runToken || owner.operationId !== guard?.operationId || owner.pending()) return false;
+  const frameId = owner.frameForDocument(guard.documentToken);
+  if (!Number.isSafeInteger(frameId) || frameId < 0) return false;
+  owner.operationFrames.get(owner.operationId)?.add(frameId);
+  let acknowledgement;
+  try {
+    acknowledgement = await api.tabs.sendMessage(tabId, { target: 'content', action: 'page_monitor_validate', params: {
+      runToken: guard.runToken, documentToken: guard.documentToken, operationId: guard.operationId,
+      revision: guard.revision, kind, rebindFocus: rebindFocus === true,
+    } }, { frameId });
+  } catch { return false; }
+  return dispatchOwners.get(tabId) === owner && !owner.pending() && acknowledgement?.ready === true;
+}
+
 function safeAction(tool, args = {}) {
   const target = {};
   for (const key of ['selector', 'ref_id', 'textMatch', 'urlFilter']) {

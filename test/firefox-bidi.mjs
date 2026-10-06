@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import vm from 'node:vm';
 import { FirefoxBidiClient } from '../src/firefox/src/bidi/client.js';
 import { BidiSession } from '../firefox-companion/session.mjs';
-import { pageFeedbackMethods } from '../src/firefox/src/agent/page-feedback.js';
+import { installPageFeedback, pageFeedbackMethods } from '../src/firefox/src/agent/page-feedback.js';
 
 const id = () => crypto.randomUUID();
 
@@ -48,7 +48,7 @@ test('an unfocused upload marks the file input instead of the active control', a
     return {};
   };
   try {
-    assert.equal((await session.perform(runId, 'upload', { token, base64: 'eA==', filename: 'test.txt', pageFeedbackGuard: guard })).success, true);
+    assert.equal((await session.perform(runId, 'upload', { token, base64: 'eA==', filename: 'test.txt', pageFeedbackGuard: guard }, async () => true)).success, true);
   } finally { await session.close(); }
 });
 test('connection loss cannot fall through to synthetic input', async () => {
@@ -83,6 +83,77 @@ test('stopping during native tab binding prevents late ownership', async () => {
   await assert.rejects(opening, /stopped/);
   assert.equal(session.runs.size, 0);
 });
+test('native dispatch validation returns through the extension-owned frame monitor', async () => {
+  const originalBrowser = globalThis.browser;
+  const tabId = 956, runId = id(), posts = [], monitorChecks = [];
+  let onMessage, preparedOperationId, enterAction, releaseAction;
+  const entered = new Promise(resolve => { enterAction = resolve; });
+  const release = new Promise(resolve => { releaseAction = resolve; });
+  const port = {
+    onMessage: { addListener(listener) { onMessage = listener; } },
+    onDisconnect: { addListener() {} },
+    postMessage(message) { posts.push(message); },
+    disconnect() {},
+  };
+  const api = {
+    runtime: { connectNative: () => port },
+    tabs: {
+      get: async () => ({ url: 'https://example.test/' }),
+      sendMessage: async (tab, message, options) => {
+        if (message.action === 'page_monitor_prepare') preparedOperationId = message.params.operationId;
+        if (message.action === 'page_monitor_validate') {
+          monitorChecks.push({ tab, frameId: options?.frameId, params: message.params });
+          return { ready: true };
+        }
+        return {};
+      },
+    },
+    webNavigation: { getAllFrames: async () => [{ frameId: 0 }, { frameId: 9 }] },
+  };
+  class TestAgent {
+    static STATE_CHANGE_TOOLS = new Set(['click']);
+    isRunning() { return true; }
+    _checkAbort() { return false; }
+    _hasPendingPageFeedback() { return false; }
+    async executeTool() {
+      this.pageMonitorState({ tab: { id: tabId }, frameId: 9, documentId: 'document-9', url: 'https://frame.test/' }, 'monitor-document');
+      enterAction();
+      await release;
+      return { success: true, dispatched: true };
+    }
+  }
+  installPageFeedback(TestAgent);
+  const agent = new TestAgent();
+  globalThis.browser = api;
+  const client = new FirefoxBidiClient(api);
+  client.runs.set(tabId, { runId, bound: true });
+  try {
+    await agent._beginPageFeedbackRun(tabId, 'interactive');
+    const action = agent.executeTool(tabId, 'click', { selector: '#target' });
+    await entered;
+    const request = client.request('ready');
+    onMessage({ id: 1, result: true });
+    assert.equal(await request, true);
+    onMessage({ command: 'validatePageDispatch', id: 'private-check', runId,
+      guard: { runToken: agent._pageFeedbackRuns.get(tabId).token, documentToken: 'monitor-document', operationId: preparedOperationId, revision: 4 },
+      kind: 'input', rebindFocus: false });
+    for (let attempt = 0; attempt < 10 && !posts.some(message => message.replyTo === 'private-check'); attempt++)
+      await new Promise(resolve => setTimeout(resolve, 0));
+    const response = posts.find(message => message.replyTo === 'private-check');
+    assert.deepEqual(response, { replyTo: 'private-check', result: true });
+    assert.deepEqual(monitorChecks, [{ tab: tabId, frameId: 9, params: {
+      runToken: agent._pageFeedbackRuns.get(tabId).token, documentToken: 'monitor-document',
+      operationId: preparedOperationId, revision: 4, kind: 'input', rebindFocus: false,
+    } }]);
+    releaseAction();
+    await action;
+  } finally {
+    releaseAction();
+    agent._finishPageFeedbackRun(tabId);
+    if (originalBrowser === undefined) delete globalThis.browser;
+    else globalThis.browser = originalBrowser;
+  }
+});
 test('dialogs are scoped to a live run and navigation permission is single use', () => {
   const session = new BidiSession(); const replies = [];
   session.send = async (method, params) => { replies.push({ method, ...params }); };
@@ -112,17 +183,15 @@ test('stop during target preparation prevents input dispatch', async () => {
   assert.equal(sent.includes('input.performActions'), false);
 });
 for (const failAt of [1, 2]) {
-  test(`page revision change before native input ${failAt} preserves dispatch evidence`, async () => {
+  test(`page feedback change before native input ${failAt} preserves dispatch evidence`, async () => {
     const session = new BidiSession(), runId = id();
     session.runs.set(runId, { context: 'a' });
     session.locate = async () => ({ context: 'a', node: { sharedId: 'el' } });
-    let marks = 0, inputs = 0;
-    session.call = async (_match, declaration) => ({ result: { value:
-      declaration.includes('data-webbrain-page-revision') ? ++marks < failAt
-        : declaration.includes('el.innerText : el.value') ? '' : true } });
+    let checks = 0, inputs = 0;
+    session.call = async (_match, declaration) => ({ result: { value: declaration.includes('el.innerText : el.value') ? '' : true } });
     session.send = async method => { if (method === 'input.performActions') inputs++; return {}; };
     await assert.rejects(session.perform(runId, 'type', { text: 'ab', clear: false,
-      pageFeedbackGuard: { documentToken: 'doc', revision: 7, operationId: 'op' } }), error => {
+      pageFeedbackGuard: { documentToken: 'doc', revision: 7, operationId: 'op' } }, async () => ++checks < failAt), error => {
       assert.equal(error.code, 'page_feedback_pending');
       assert.equal(error.dispatchState.noDispatch, failAt === 1);
       assert.equal(error.dispatchState.dispatched, failAt === 2);
@@ -137,13 +206,12 @@ for (const platform of ['Win32', 'MacIntel']) {
     const session = new BidiSession(), runId = id(), sent = [];
     session.runs.set(runId, { context: 'a' });
     session.locate = async () => ({ context: 'a', node: { sharedId: 'el' } });
-    let marks = 0;
+    let checks = 0;
     session.call = async (_match, declaration) => ({ result: { value:
-      declaration.includes('data-webbrain-page-revision') ? (++marks, true)
-        : declaration.includes('navigator.platform') ? platform
+      declaration.includes('navigator.platform') ? platform
           : declaration.includes('el.innerText : el.value') ? '' : true } });
-    session.send = async (method, params) => { if (method === 'input.performActions') sent.push({ marks, actions: params.actions[0].actions }); return {}; };
-    await session.perform(runId, 'field', { text: 'x', pageFeedbackGuard: { documentToken: 'doc', revision: 0, operationId: 'op' } });
+    session.send = async (method, params) => { if (method === 'input.performActions') sent.push({ marks: checks, actions: params.actions[0].actions }); return {}; };
+    await session.perform(runId, 'field', { text: 'x', pageFeedbackGuard: { documentToken: 'doc', revision: 0, operationId: 'op' } }, async () => { checks++; return true; });
     assert.deepEqual(sent.map(item => item.marks), [1, 2, 3, 4]);
     assert.deepEqual(sent[0].actions, [{ type: 'keyDown', value: platform === 'MacIntel' ? '\uE03D' : '\uE009' }]);
     assert.equal(sent[1].actions[0].value, 'a');
@@ -154,14 +222,13 @@ test('human intervention after the clear modifier blocks A and releases held key
   const session = new BidiSession(), runId = id(), sent = [];
   session.runs.set(runId, { context: 'a' });
   session.locate = async () => ({ context: 'a', node: { sharedId: 'el' } });
-  let marks = 0;
+  let checks = 0;
   session.call = async (_match, declaration) => ({ result: { value:
-    declaration.includes('data-webbrain-page-revision') ? ++marks < 2
-      : declaration.includes('navigator.platform') ? 'Win32'
+    declaration.includes('navigator.platform') ? 'Win32'
         : declaration.includes('el.innerText : el.value') ? '' : true } });
   session.send = async method => { sent.push(method); return {}; };
   await assert.rejects(session.perform(runId, 'field', { text: 'x',
-    pageFeedbackGuard: { documentToken: 'doc', revision: 0, operationId: 'op' } }), error => {
+    pageFeedbackGuard: { documentToken: 'doc', revision: 0, operationId: 'op' } }, async () => ++checks < 2), error => {
     assert.equal(error.code, 'page_feedback_pending');
     assert.equal(error.dispatchState.dispatched, true);
     assert.equal(error.dispatchState.outcomeUnknown, true);
@@ -169,6 +236,24 @@ test('human intervention after the clear modifier blocks A and releases held key
   });
   assert.equal(sent.filter(method => method === 'input.performActions').length, 1);
   assert.equal(sent.at(-1), 'input.releaseActions');
+});
+test('repeated native Tab validates and rebinds to the focused target before each follow-up', async () => {
+  const session = new BidiSession(), runId = id(), validations = [], sent = [];
+  session.runs.set(runId, { context: 'a' });
+  session.locate = async () => ({ context: 'a', node: { sharedId: 'el' } });
+  session.call = async () => ({ result: { value: true } });
+  session.send = async (method, params) => { if (method === 'input.performActions') sent.push(params); return {}; };
+  const result = await session.perform(runId, 'key', { key: 'Tab', repeat: 3,
+    pageFeedbackGuard: { documentToken: 'doc', revision: 0, operationId: 'op' } }, async (_id, _guard, kind, rebindFocus) => {
+    validations.push({ kind, rebindFocus }); return true;
+  });
+  assert.equal(result.success, true);
+  assert.deepEqual(validations, [
+    { kind: 'input', rebindFocus: false },
+    { kind: 'input', rebindFocus: true },
+    { kind: 'input', rebindFocus: true },
+  ]);
+  assert.equal(sent.length, 3);
 });
 test('unsupported commands and modifiers fail before touching the page', async () => {
   const session = new BidiSession(); const runId = id();

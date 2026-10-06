@@ -2477,6 +2477,7 @@ test('legacy iframe typing marks background dispatch only for its mutation phase
         }
         if (executePhase === 3) {
           assert.equal(dispatchMarks, 1, `${build}: mutation injection started without a dispatch marker`);
+          assert.equal(dispatchedFrameId, 9, `${build}: native preparation fence must target the selected iframe`);
           return build === 'chrome'
             ? [{ frameId: 9, result: { ok: true, dispatched: true, method: 'native-setter', value: 'typed' } }]
             : [{ ok: true, dispatched: true, method: 'native-setter', value: 'typed' }];
@@ -2495,6 +2496,7 @@ test('legacy iframe typing marks background dispatch only for its mutation phase
       const moduleUrl = pathToFileURL(path.join(ROOT, `src/${build}/src/agent/rich-text-toolbar-probe.js`)).href;
       const { RichTextToolbarProbe } = await import(`${moduleUrl}?legacy-mutation-boundary=${build}`);
       let cleanupWatchdog;
+      let dispatchedFrameId = null;
       const result = await Promise.race([
         new RichTextToolbarProbe({}).legacyIframeTypeAllFrames(77, {
           selector: '#editor',
@@ -2502,7 +2504,7 @@ test('legacy iframe typing marks background dispatch only for its mutation phase
           clear: true,
           urlFilter: 'frame.test',
         }, {
-          beforeDispatch: () => { dispatchMarks += 1; },
+          beforeDispatch: async frameId => { await Promise.resolve(); dispatchedFrameId = frameId; dispatchMarks += 1; },
         }),
         new Promise((_, reject) => {
           cleanupWatchdog = setTimeout(() => reject(new Error(`${build}: redundant cleanup blocked a completed mutation`)), 500);
@@ -2521,7 +2523,7 @@ test('legacy iframe typing marks background dispatch only for its mutation phase
         clear: true,
         urlFilter: 'frame.test',
       }, {
-        beforeDispatch: () => { dispatchMarks += 1; },
+        beforeDispatch: async frameId => { await Promise.resolve(); dispatchedFrameId = frameId; dispatchMarks += 1; },
       });
       assert.equal(expired.success, false, `${build}: expired preparation unexpectedly succeeded`);
       assert.equal(expired.deadlineExpired, true, `${build}: preparation expiry was not preserved`);
@@ -113117,7 +113119,7 @@ test('content-script actions have a bounded unknown-outcome timeout', async () =
       `${label}: focus-only iframe expiry is misclassified as a text dispatch`,
     );
     const preparationResult = legacyType.indexOf(label === 'chrome' ? 'const prepared = preparedResults?.[0]?.result;' : 'const prepared = (await browser.tabs.executeScript');
-    const backgroundDispatchMarker = legacyType.indexOf("if (typeof beforeDispatch === 'function') beforeDispatch();", preparationResult);
+    const backgroundDispatchMarker = legacyType.indexOf("if (typeof beforeDispatch === 'function') await beforeDispatch(selected.frameId);", preparationResult);
     const mutationDispatch = legacyType.indexOf(label === 'chrome' ? 'const results = await chrome.scripting.executeScript' : 'code: mutationCode', backgroundDispatchMarker);
     assert.ok(
       preparationResult >= 0 && backgroundDispatchMarker > preparationResult && mutationDispatch > backgroundDispatchMarker,
@@ -113140,10 +113142,14 @@ test('content-script actions have a bounded unknown-outcome timeout', async () =
     assert.match(
       source,
       label === 'chrome'
-        ? /const legacyResult = await this\._legacyIframeTypeAllFrames[\s\S]*beforeDispatch: \(\) => \{\s*dispatched = true;\s*markEarlyCdpDispatched\(\);[\s\S]*legacyResult\?\.dispatched !== true && legacyResult\?\.noDispatch === true[\s\S]*earlyCdpDispatchState\.started = false;/
-        : /const legacyResult = await this\._legacyIframeTypeAllFrames[\s\S]*beforeDispatch: \(\) => \{\s*dispatched = true;\s*markContentPipelineDispatched\(\);[\s\S]*legacyResult\?\.dispatched !== true && legacyResult\?\.noDispatch === true[\s\S]*contentPipelineDispatchState\.started = false;/,
+        ? /const legacyResult = await this\._legacyIframeTypeAllFrames[\s\S]*beforeDispatch: async frameId => \{\s*await beforePageAgentDispatch\(globalThis\.chrome, tabId, \{[\s\S]*kind: 'input', selector, frameId, fenceOnly: true[\s\S]*dispatched = true;\s*markEarlyCdpDispatched\(\);[\s\S]*legacyResult\?\.dispatched !== true && legacyResult\?\.noDispatch === true[\s\S]*earlyCdpDispatchState\.started = false;/
+        : /const legacyResult = await this\._legacyIframeTypeAllFrames[\s\S]*beforeDispatch: async frameId => \{\s*await beforePageAgentDispatch\(globalThis\.browser \|\| globalThis\.chrome, tabId, \{[\s\S]*kind: 'input', selector, frameId, fenceOnly: true[\s\S]*dispatched = true;\s*markContentPipelineDispatched\(\);[\s\S]*legacyResult\?\.dispatched !== true && legacyResult\?\.noDispatch === true[\s\S]*contentPipelineDispatchState\.started = false;/,
       `${label}: legacy iframe typing keeps an optimistic dispatch marker after page-proven expiry`,
     );
+    assert.match(source, label === 'chrome'
+      ? /await beforePageAgentDispatch\(globalThis\.chrome, tabId, \{\s*kind: 'input', selector, frameId: targetFrameId, fenceOnly: true,/g
+      : /await beforePageAgentDispatch\(globalThis\.browser \|\| globalThis\.chrome, tabId, \{\s*kind: 'input', selector, frameId: targetFrameId, fenceOnly: true,/g,
+      `${label}: bound iframe typing skips the target-frame feedback fence`);
 
     const fallbackTypeStart = contentSource.indexOf('async function _typeTextInner(params, actionDeadlineExpired = () => false)');
     const fallbackTypeEnd = contentSource.indexOf('\n\n  /**', fallbackTypeStart + 20);

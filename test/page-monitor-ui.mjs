@@ -888,6 +888,17 @@ for (const [build, engine] of [['chrome', chromium], ['firefox', firefox]]) {
       await page.waitForTimeout(80);
       assert.equal((await page.evaluate(() => feedback)).some(event => event.source !== 'agent'), false,
         'An attributed native Tab must not steer its own run');
+      const rebound = await page.evaluate(guard => {
+        deliver('page_monitor_validate', { ...guard, kind: 'input', rebindFocus: true });
+        return lastMonitorResponse.ready;
+      }, tabGuard);
+      assert.equal(rebound, true, 'A validated follow-up Tab should bind to the newly focused control');
+      await page.evaluate(marker => document.activeElement.setAttribute('data-webbrain-native-action', marker),
+        createNativeActionMarker(tabGuard, 'input', 2));
+      await page.keyboard.press('Tab');
+      await page.waitForTimeout(80);
+      assert.equal((await page.evaluate(() => feedback)).some(event => event.source !== 'agent'), false,
+        'The second Tab must remain attributed after native focus moves');
     } finally { await browser.close(); }
   });
 
@@ -1096,18 +1107,19 @@ for (const [build, engine] of [['chrome', chromium], ['firefox', firefox]]) {
       const tokens = await Promise.all([page.evaluate(() => feedback[0]?.documentToken), child.evaluate(() => feedback[0]?.documentToken)]);
       assert.ok(tokens[0] && tokens[1] && tokens[0] !== tokens[1]);
       await child.evaluate(() => {
-        const link = document.createElement('a'); link.id = 'top-link'; link.href = 'https://monitor.test/destination';
-        link.textContent = 'Top link'; link.addEventListener('click', event => event.preventDefault()); document.body.append(link);
+        for (const [id, target] of [['top-link', '_top'], ['parent-link', '_parent']]) {
+          const link = document.createElement('a'); link.id = id; link.href = 'https://monitor.test/destination';
+          link.setAttribute('target', target); link.textContent = id; link.addEventListener('click', event => event.preventDefault()); document.body.append(link);
+        }
       });
       await page.waitForTimeout(200);
-      for (const target of ['_top', '_parent']) {
-        await child.evaluate(target => {
-          document.getElementById('top-link').target = target;
-          deliver('page_monitor_prepare', { operationId: `link-${target}`, tool: 'click', selector: '#top-link' });
-          deliver('page_monitor_dispatch', { operationId: `link-${target}`, kind: 'click', selector: '#top-link' });
+      for (const [target, id] of [['_top', 'top-link'], ['_parent', 'parent-link']]) {
+        await child.evaluate(({ target, id }) => {
+          deliver('page_monitor_prepare', { operationId: `link-${target}`, tool: 'click', selector: `#${id}` });
+          deliver('page_monitor_dispatch', { operationId: `link-${target}`, kind: 'click', selector: `#${id}` });
           feedback = [];
-        }, target);
-        await child.locator('#top-link').click();
+        }, { target, id });
+        await child.locator(`#${id}`).click();
         assert.ok((await child.evaluate(() => feedback)).some(event => event.source === 'agent' && event.navigationTarget === '_top'),
           `${target} navigation must carry the compatible top-frame target`);
       }
@@ -1424,6 +1436,41 @@ for (const [build, engine] of [['chrome', chromium], ['firefox', firefox]]) {
       assert.equal(JSON.stringify(await page.evaluate(() => feedback)).includes('human-private'), false);
       assert.notEqual(await page.evaluate(() => document.documentElement.getAttribute('data-webbrain-page-revision')),
         `${guard.documentToken}:${guard.revision}`);
+    } finally { await browser.close(); }
+  });
+
+  test(`${build}: native dispatch validation ignores a page-restored revision attribute`, async () => {
+    const { browser, page } = await fixture(engine, build);
+    try {
+      const guard = await page.evaluate(() => {
+        deliver('page_monitor_prepare', { operationId: 'private-revision', tool: 'type_text', selector: '#field' });
+        deliver('page_monitor_dispatch', { operationId: 'private-revision', kind: 'input', selector: '#field', fenceOnly: true });
+        feedback = []; return lastMonitorResponse.guard;
+      });
+      await page.evaluate(() => { document.getElementById('status').textContent = 'Page changed after native preparation'; });
+      await page.waitForFunction(() => feedback.some(event => event.kind === 'dom'), null, { timeout: 1000 });
+      const ready = await page.evaluate(guard => {
+        // The page can rewrite its visible marker, but cannot rewind the monitor's
+        // private revision used by the extension-side native dispatch check.
+        document.documentElement.setAttribute('data-webbrain-page-revision', `${guard.documentToken}:${guard.revision}`);
+        deliver('page_monitor_validate', { ...guard, kind: 'input' });
+        return lastMonitorResponse.ready;
+      }, guard);
+      assert.equal(ready, false);
+    } finally { await browser.close(); }
+  });
+
+  test(`${build}: link destination mutations are observed`, async () => {
+    const { browser, page } = await fixture(engine, build);
+    try {
+      await page.evaluate(() => { const link = document.createElement('a'); link.id = 'destination'; link.href = '/before'; link.textContent = 'Destination'; document.body.append(link); });
+      await page.waitForTimeout(120);
+      await page.evaluate(() => { feedback = []; document.getElementById('destination').href = '/after'; });
+      await page.waitForFunction(() => feedback.some(event => event.kind === 'dom'), null, { timeout: 1000 });
+      assert.ok((await page.evaluate(() => feedback)).some(event => event.kind === 'dom' && event.target === 'a#destination'));
+      await page.evaluate(() => { feedback = []; document.getElementById('destination').setAttribute('target', '_blank'); });
+      await page.waitForFunction(() => feedback.some(event => event.kind === 'dom'), null, { timeout: 1000 });
+      assert.ok((await page.evaluate(() => feedback)).some(event => event.kind === 'dom' && event.target === 'a#destination'));
     } finally { await browser.close(); }
   });
 
@@ -1767,7 +1814,10 @@ for (const [build, engine] of [['chrome', chromium], ['firefox', firefox]]) {
         deliver('page_monitor_dispatch', { operationId: 'upload', kind: 'input', selector: '#upload', navigationCandidate: false, fenceOnly: true });
         feedback = []; return lastMonitorResponse.guard;
       });
-      assert.equal((await session.perform(runId, 'upload', { token, base64: 'eA==', filename: 'test.txt', pageFeedbackGuard: guard })).success, true);
+      assert.equal((await session.perform(runId, 'upload', { token, base64: 'eA==', filename: 'test.txt', pageFeedbackGuard: guard },
+        async (_runId, currentGuard, kind) => page.evaluate(({ currentGuard, kind }) => {
+          deliver('page_monitor_validate', { ...currentGuard, kind }); return lastMonitorResponse.ready;
+        }, { currentGuard, kind }))).success, true);
       await page.waitForTimeout(200);
       assert.equal((await page.evaluate(() => feedback)).some(event => event.source !== 'agent'), false);
       assert.equal(await page.evaluate(() => document.activeElement.id), 'field');

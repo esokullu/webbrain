@@ -35265,7 +35265,10 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
             abortSignal: contentPipelineAbortSignal,
             deadlineAt: Number(CONTENT_ACTION_SIGNAL_DEADLINES.get(contentPipelineAbortSignal)?.deadlineAt) || 0,
             deadlineError: CONTENT_ACTION_SIGNAL_DEADLINES.get(contentPipelineAbortSignal)?.error || null,
-            beforeDispatch: () => {
+            beforeDispatch: async frameId => {
+              await beforePageAgentDispatch(globalThis.browser || globalThis.chrome, tabId, {
+                kind: 'input', selector, frameId, fenceOnly: true,
+              });
               dispatched = true;
               markContentPipelineDispatched();
             },
@@ -35277,6 +35280,9 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
           return legacyResult;
         }
         throwIfContentPipelineAborted();
+        await beforePageAgentDispatch(globalThis.browser || globalThis.chrome, tabId, {
+          kind: 'input', selector, frameId: targetFrameId, fenceOnly: true,
+        });
         dispatched = true;
         markContentPipelineDispatched();
         try {

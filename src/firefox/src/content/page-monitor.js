@@ -52,8 +52,8 @@
       v0 = (v0 + v3) & nativeMarkerMask; v3 = rotate(v3, 21); v3 ^= v0;
       v2 = (v2 + v1) & nativeMarkerMask; v1 = rotate(v1, 17); v1 ^= v2; v2 = rotate(v2, 32);
     };
-    const bytes = new TextEncoder().encode(JSON.stringify([data.documentToken, data.runToken, data.operationId, data.kind, data.sequence,
-      data.navigationCandidate === true]));
+    const bytes = new TextEncoder().encode(JSON.stringify([data.documentToken, data.runToken, data.operationId, data.revision,
+      data.kind, data.sequence, data.navigationCandidate === true]));
     let offset = 0;
     while (offset + 8 <= bytes.length) {
       let block = 0n;
@@ -244,9 +244,11 @@
         const allowedEvent = data.kind === 'input'
           ? ['keydown', 'beforeinput', 'input', 'change', 'compositionstart', 'compositionend'].includes(event.type)
           : data.kind === 'click' ? ['pointerdown', 'mousedown', 'click'].includes(event.type) : false;
+        const fresh = op && data.revision === op.preparedRevision && op.preparedRevision === revision
+          && !domTimer && !unreported && lastUserAt <= op.userAt;
         const signed = op && nativeMarkerSignature(op.nativeSecret, data) === data.signature;
         if (data.documentToken === documentToken && data.runToken === runToken && op && markerTarget && nextSequence
-            && signed && allowedEvent && ['input', 'click'].includes(data.kind)) {
+            && fresh && signed && allowedEvent && ['input', 'click'].includes(data.kind)) {
           // The capability is bound to the isolated-world prepared node and consumed once.
           op.nativeSequence = data.sequence;
           markerNode.removeAttribute(nativeMarkerAttribute);
@@ -354,6 +356,8 @@
     return JSON.stringify([shown, content, el.children.length + (el.shadowRoot?.children.length || 0), el.getAttribute('role'), el.getAttribute('aria-label'),
       el.getAttribute('aria-expanded'), el.getAttribute('aria-selected'), el.getAttribute('aria-checked'),
       el.getAttribute('aria-pressed'),
+      el.getAttribute('href'), el.getAttribute('target'), el.getAttribute('download'), el.getAttribute('action'),
+      el.getAttribute('formaction'), el.getAttribute('formtarget'),
       el.getAttribute('popover'), popoverOpen(el),
       el.selected === true, el.defaultSelected === true,
       Number.isInteger(el.selectedIndex) ? el.selectedIndex : null,
@@ -412,6 +416,7 @@
     roots.add(root);
     observer.observe(root, { childList: true, subtree: true, characterData: true, attributes: true, attributeOldValue: true,
       attributeFilter: ['role', 'aria-label', 'aria-expanded', 'aria-selected', 'aria-checked', 'aria-pressed', 'aria-disabled',
+        'href', 'target', 'download', 'action', 'formaction', 'formtarget',
         'aria-hidden', 'hidden', 'disabled', 'readonly', 'checked', 'selected', 'open', 'popover', 'inert', 'class', 'style'] });
     listen(root, 'beforetoggle', event => {
       const el = elementFor(event);
@@ -825,6 +830,21 @@
     publishRevision();
     return { ready: true, operationId: op.operationId, revision };
   }
+  function validateNativeDispatch(params = {}) {
+    sampleFormControls();
+    const op = operations.get(params.operationId);
+    const shifted = coordinatePreparationShifted(op);
+    if (!active || params.runToken !== runToken || params.documentToken !== documentToken || !op || shifted
+        || Number(params.revision) !== op.preparedRevision || op.preparedRevision !== revision
+        || domTimer || unreported || lastUserAt > op.userAt) return false;
+    if (params.rebindFocus === true) {
+      const target = deepActiveElement();
+      if (!(op.nativeSequence > 0) || !target || target === document.body || target === document.documentElement) return false;
+      op.target = target;
+      op.focusTarget = target;
+    }
+    return true;
+  }
   function withPreparedDispatch(operationId, callback) {
     const op = operations.get(operationId);
     if (!op?.dispatched || typeof callback !== 'function') return callback?.();
@@ -890,6 +910,7 @@
       if (msg.active) { void requestState().then(() => respond({ ready: true })); return true; }
       else if (!msg.runToken || msg.runToken === runToken) { requestGeneration++; stop(); respond({ ready: true }); }
     } else if (msg.action === 'page_monitor_prepare') { prepare(msg.params || {}); respond({ ready: true }); }
+    else if (msg.action === 'page_monitor_validate') { respond({ ready: validateNativeDispatch(msg.params || {}) }); }
     else if (msg.action === 'page_monitor_dispatch') {
       const params = msg.params || {};
       if (!params.release) sampleFormControls();

@@ -291,7 +291,7 @@ export class RichTextToolbarProbe {
       }
       markerPrepared = true;
       throwIfAborted();
-      if (typeof beforeDispatch === 'function') beforeDispatch();
+      if (typeof beforeDispatch === 'function') await beforeDispatch(selected.frameId);
       const results = await chrome.scripting.executeScript({
         target: { tabId, frameIds: [selected.frameId] },
         func: (markerAttribute, markerValue, txt, clr, actionDeadlineAt) => {
