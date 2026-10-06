@@ -1964,6 +1964,33 @@ for (const [build, engine] of [['chrome', chromium], ['firefox', firefox]]) {
     } finally { await browser.close(); }
   });
 
+  test(`${build}: submitter form association changes invalidate a prepared click`, async () => {
+    const { browser, page } = await fixture(engine, build);
+    try {
+      await page.evaluate(() => {
+        const first = document.createElement('form'); first.id = 'first-submit-form';
+        const second = document.createElement('form'); second.id = 'second-submit-form';
+        const button = document.createElement('button');
+        button.id = 'associated-submit'; button.type = 'submit'; button.setAttribute('form', first.id); button.textContent = 'Save';
+        document.body.append(first, second, button);
+      });
+      await page.waitForTimeout(120);
+
+      const guard = await page.evaluate(() => {
+        feedback = [];
+        deliver('page_monitor_prepare', { operationId: 'submit-form-association', tool: 'click', selector: '#associated-submit' });
+        deliver('page_monitor_dispatch', { operationId: 'submit-form-association', kind: 'click', selector: '#associated-submit' });
+        return lastMonitorResponse.guard;
+      });
+      await page.locator('#associated-submit').evaluate(button => button.setAttribute('form', 'second-submit-form'));
+      await page.waitForFunction(() => feedback.some(event => event.kind === 'dom' && event.target === 'button#associated-submit'));
+      const accepted = await page.evaluate(value => window.dispatchEvent(new CustomEvent('webbrain-agent-dom-dispatch', {
+        detail: JSON.stringify({ ...value, dispatchPhase: 'focus' }), cancelable: true,
+      })), guard);
+      assert.equal(accepted, false, 'Reassociating a submitter must invalidate the prepared click guard');
+    } finally { await browser.close(); }
+  });
+
   test(`${build}: hidden native label changes invalidate visible control clicks`, async () => {
     const { browser, page } = await fixture(engine, build);
     try {
