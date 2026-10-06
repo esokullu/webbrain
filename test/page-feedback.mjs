@@ -467,6 +467,38 @@ for (const build of ['chrome', 'firefox']) {
     } finally { agent._releaseRunEntry(tab); }
   });
 
+  test(`${build}: click navigation markers expire after one event and redirects stay document-scoped`, async () => {
+    const agent = setup(Agent), tab = nextTab++;
+    await agent._claimRunEntry(tab, 'interactive');
+    try {
+      let binding = bind(agent, tab);
+      binding.send({ kind: 'activity', source: 'agent', operation: 'click' });
+      agent.observePageNavigation({ tabId: tab, frameId: 0, documentId: 'agent-document',
+        url: 'https://example.com/destination', transitionType: 'link' }, 'committed');
+      assert.equal(agent._hasPendingPageFeedback(tab), false, 'The click-caused commit is correlated');
+      assert.equal(agent._pageFeedbackRuns.get(tab).navigation, null, 'The click marker is consumed after commit');
+      agent.observePageNavigation({ tabId: tab, frameId: 0, documentId: 'timer-reload',
+        url: 'https://example.com/destination', transitionType: 'reload' }, 'committed');
+      assert.equal(agent._hasPendingPageFeedback(tab), true, 'A later reload to the same URL is still visible');
+      assert.equal([...agent._pageFeedbackRuns.get(tab).events.values()].at(-1).source, 'unknown');
+
+      agent._pageFeedbackRuns.get(tab).events.clear();
+      binding = bind(agent, tab, 0, 'timer-reload', 'content-timer-reload');
+      binding.send({ kind: 'activity', source: 'agent', operation: 'click' });
+      agent.observePageNavigation({ tabId: tab, frameId: 0, documentId: 'redirected-document',
+        url: 'https://example.com/final', transitionType: 'link', transitionQualifiers: ['server_redirect'] }, 'committed');
+      assert.equal(agent._hasPendingPageFeedback(tab), false, 'An identified redirect is part of the click navigation');
+      assert.equal(agent._pageFeedbackRuns.get(tab).navigation.documentId, 'redirected-document');
+      agent.observePageNavigation({ tabId: tab, frameId: 0, documentId: 'redirected-document',
+        url: 'https://example.com/final-two', transitionType: 'link', transitionQualifiers: ['client_redirect'] }, 'committed');
+      assert.equal(agent._hasPendingPageFeedback(tab), false, 'Redirect continuation stays on its exact document');
+      agent.observePageNavigation({ tabId: tab, frameId: 0, documentId: 'later-navigation',
+        url: 'https://example.com/automatic', transitionType: 'reload' }, 'committed');
+      assert.equal(agent._hasPendingPageFeedback(tab), true, 'A later navigation outside the redirect chain is visible');
+      assert.equal(agent._pageFeedbackRuns.get(tab).navigation, null);
+    } finally { agent._releaseRunEntry(tab); }
+  });
+
   test(`${build}: content feedback uses authenticated sender identity; composer delivery never gates monitoring`, async () => {
     const agent = setup(Agent), tab = nextTab++;
     await agent._claimRunEntry(tab, 'cloud', { cloudRun: true });

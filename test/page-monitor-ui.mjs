@@ -404,6 +404,85 @@ test('Firefox native preparation keeps same-target user edits and sends no stale
 });
 
 for (const [build, engine] of [['chrome', chromium], ['firefox', firefox]]) {
+  test(`${build}: page focus theft fences a selectorless input while the identified agent target stays quiet`, async () => {
+    const { browser, page } = await fixture(engine, build);
+    try {
+      await page.evaluate(() => {
+        document.getElementById('field').focus();
+        monitorEnabled = false; deliver('page_monitor_state'); monitorEnabled = true; deliver('page_monitor_state');
+      });
+      await page.waitForTimeout(200);
+      await page.evaluate(() => {
+        feedback = [];
+        deliver('page_monitor_prepare', { operationId: 'selectorless-type', tool: 'type_text' });
+        deliver('page_monitor_dispatch', { operationId: 'selectorless-type', kind: 'input', fenceOnly: true });
+        document.getElementById('secret').focus();
+      });
+      await page.waitForFunction(() => feedback.some(event => event.kind === 'activity'
+        && event.source === 'page' && event.target === 'input#secret'), null, { timeout: 1000 });
+      const observed = await page.evaluate(() => feedback);
+      assert.equal(JSON.stringify(observed).includes('password-never-recorded'), false);
+      const blocked = await page.evaluate(() => new Promise(resolve => {
+        deliver('page_monitor_dispatch', { operationId: 'selectorless-type', kind: 'input' });
+        setTimeout(() => resolve(lastMonitorResponse), 0);
+      }));
+      assert.equal(blocked.pageFeedbackPending, true);
+
+      await page.evaluate(() => {
+        monitorEnabled = false; deliver('page_monitor_state'); document.getElementById('field').focus();
+        monitorEnabled = true; deliver('page_monitor_state');
+      });
+      await page.waitForTimeout(100);
+      const accepted = await page.evaluate(() => {
+        feedback = []; deliver('page_monitor_prepare', { operationId: 'agent-focus', tool: 'type_text', selector: '#field' });
+        deliver('page_monitor_dispatch', { operationId: 'agent-focus', kind: 'input', fenceOnly: true });
+        document.getElementById('field').blur(); document.getElementById('field').focus();
+        return lastMonitorResponse;
+      });
+      assert.equal(accepted.ready, true);
+      await page.waitForTimeout(200);
+      assert.deepEqual(await page.evaluate(() => feedback), [], 'The active operation may focus its exact prepared target without looping');
+    } finally { await browser.close(); }
+  });
+
+  test(`${build}: mutation batches over the inspection cap invalidate pending actions`, async () => {
+    const { browser, page } = await fixture(engine, build);
+    try {
+      await page.evaluate(() => {
+        const hidden = document.createElement('div'); hidden.style.display = 'none';
+        hidden.innerHTML = '<span></span>'.repeat(320); document.body.prepend(hidden);
+      });
+      await page.waitForTimeout(200);
+      const result = await page.evaluate(async () => {
+        feedback = [];
+        const finish = __wbPageMonitor.beginContentAction('click', { selector: '#agent', _bidiPrepare: true });
+        for (const [index, node] of [...document.querySelectorAll('body > div[style*="display: none"] span')].entries())
+          node.setAttribute('aria-label', `hidden ${index}`);
+        document.getElementById('status').textContent = 'Visible tail mutation';
+        await Promise.resolve();
+        let code; try { __wbPageMonitor.beforeLocalDispatch(); } catch (error) { code = error.code; } finally { finish(); }
+        return { code, events: feedback };
+      });
+      assert.equal(result.code, 'page_feedback_pending');
+      await page.waitForFunction(() => feedback.some(event => event.kind === 'dom' && event.source === 'unknown'), null, { timeout: 1000 });
+      assert.equal(JSON.stringify(result.events).includes('Visible tail mutation'), false);
+      assert.equal(JSON.stringify(await page.evaluate(() => feedback)).includes('Visible tail mutation'), false);
+
+      await page.evaluate(() => {
+        feedback = [];
+        deliver('page_monitor_prepare', { operationId: 'agent-large-write', tool: 'execute_js' });
+        deliver('page_monitor_dispatch', { operationId: 'agent-large-write', kind: 'dom' });
+        document.dispatchEvent(new CustomEvent('webbrain-agent-dom-dispatch', { detail: JSON.stringify(lastMonitorResponse.guard) }));
+        for (const [index, node] of [...document.querySelectorAll('body > div[style*="display: none"] span')].entries())
+          node.setAttribute('aria-label', `agent hidden ${index}`);
+        document.getElementById('status').textContent = 'Agent visible tail mutation';
+      });
+      await page.waitForTimeout(200);
+      assert.equal((await page.evaluate(() => feedback)).some(event => event.kind === 'dom' && event.source !== 'agent'), false,
+        'Overflow in a marked agent write keeps the event attributable instead of creating page feedback');
+    } finally { await browser.close(); }
+  });
+
   test(`${build}: a pointer gesture ending on owned UI releases the background idle gate`, async () => {
     const savedChrome = globalThis.chrome, savedBrowser = globalThis.browser, tab = 945;
     const host = Object.assign({ isRunning: () => true, _checkAbort: () => false, _runAbortSignal: () => null,

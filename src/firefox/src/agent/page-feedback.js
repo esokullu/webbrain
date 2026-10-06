@@ -191,11 +191,23 @@ export const pageFeedbackMethods = {
     const explicit = ['typed', 'auto_bookmark', 'generated', 'keyword', 'keyword_generated'].includes(details.transitionType)
       || qualifiers.includes('from_address_bar');
     const navigation = run.navigation;
+    const redirect = qualifiers.some(q => /redirect$/.test(q));
+    const sameNavigation = !navigation?.redirectChain
+      ? (!navigation?.url || navigation.url === details.url || redirect)
+      : redirect && !!navigation.documentId && navigation.documentId === details.documentId;
     const agentNavigation = !explicit && navigation && navigation.frameId === frameId && Date.now() - navigation.at < 10000
       && (!qualifiers.includes('forward_back') || navigation.history)
-      && (!navigation.url || navigation.url === details.url || qualifiers.some(q => /redirect$/.test(q)));
+      && sameNavigation;
+    // A completed click/navigation consumes its marker. Retain it only for a
+    // redirect explicitly tied to the same committed browser document.
+    if (navigation?.frameId === frameId) {
+      if (agentNavigation && redirect && details.documentId) {
+        run.navigation = { ...navigation, at: Date.now(), url: details.url || navigation.url,
+          redirectChain: true, documentId: details.documentId };
+      } else run.navigation = null;
+    }
     if (agentNavigation) return;
-    const source = explicit || (!navigation && (Date.now() - run.lastUserAt < 2000 || qualifiers.includes('forward_back'))) ? 'user' : 'unknown';
+    const source = explicit || (!run.navigation && (Date.now() - run.lastUserAt < 2000 || qualifiers.includes('forward_back'))) ? 'user' : 'unknown';
     if (source === 'user') run.lastUserAt = Date.now();
     run.lastActivityAt = Date.now();
     this._queuePageFeedback(details.tabId, { kind: 'navigation', source, frameId,

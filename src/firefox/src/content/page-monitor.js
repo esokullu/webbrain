@@ -142,6 +142,11 @@
       return op;
     };
     for (const op of operations.values()) {
+      // Preparation can focus only the field that was already identified for
+      // this input action. A page script moving focus elsewhere stays visible.
+      if (kind === 'focus' && op.focusEligible && op.focusTarget === el && lastUserAt <= op.userAt) {
+        const found = match(op); if (found) return found;
+      }
       if (!op.dispatched) continue;
       if (lastUserAt > op.userAt) continue;
       // Moving agent focus commits the previous field's native change event.
@@ -171,6 +176,11 @@
     const value = [text.length, hash, power];
     textSignatures.set(node, { text, signature: value });
     return value;
+  }
+  function deepActiveElement() {
+    let el = document.activeElement;
+    while (el?.shadowRoot?.activeElement) el = el.shadowRoot.activeElement;
+    return el;
   }
   function signature(el) {
     if (ignored(el)) return '';
@@ -288,7 +298,15 @@
       if (ignored(el) || (record.type === 'characterData' && editable(el))) continue;
       if (record.type === 'attributes' && ['class', 'style'].includes(record.attributeName)
           && el.getAnimations?.().some(animation => animation.playState === 'running')) continue;
-      if (++measured > 300) break;
+      if (++measured > 300) {
+        // The remaining records are intentionally uninspected. Invalidate the
+        // prepared page conservatively so a later visible target cannot vanish
+        // silently at the end of a large, same-task update.
+        changed = true;
+        if (source !== 'user') source = agentTurn && lastUserAt <= agentTurn.userAt ? 'agent' : 'unknown';
+        target ||= targetName(el);
+        break;
+      }
       let identityChanged = (record.type === 'popover' && record.stateChanged)
         || (record.type === 'shadow' && (visible(el) || signatures.get(el)?.startsWith('[true')));
       if (record.type === 'childList') {
@@ -392,6 +410,15 @@
       if (!event.isTrusted || expected('click', el, event)) return;
       interact('click', el);
     });
+    listen(document, 'focusin', event => {
+      const el = elementFor(event);
+      if (!event.isTrusted || ignored(el) || deepActiveElement() !== el || expected('focus', el, event)) return;
+      if (agentTurn && lastUserAt <= agentTurn.userAt) return;
+      // The pointer/key that led to a same-turn focus is already reported.
+      if (userTurn) return;
+      revision++; publishRevision();
+      send({ kind: 'activity', source: 'page', target: targetName(el) });
+    });
     for (const name of ['beforeinput', 'input', 'change']) listen(document, name, event => {
       const el = elementFor(event);
       if (ignored(el) || expected('input', el, event)
@@ -483,14 +510,18 @@
   function prepare(params) {
     if (!active || params.runToken !== runToken) return;
     prune();
-    operations.set(params.operationId, { ...params, target: resolveTarget(params), kinds: new Set(),
+    const target = resolveTarget(params);
+    const focusEligible = kindFor(params.tool) === 'input';
+    const focusTarget = target || (focusEligible ? deepActiveElement() : null);
+    operations.set(params.operationId, { ...params, target: target || focusTarget, focusTarget, focusEligible, kinds: new Set(),
       until: Date.now() + 30000, dispatched: false, userAt: lastUserAt, preparedRevision: revision });
   }
   function dispatch(params) {
     if (!active || (params.runToken && params.runToken !== runToken)) return;
     const op = operations.get(params.operationId) || { operationId: params.operationId, userAt: lastUserAt };
     op.blurTarget ??= document.activeElement;
-    op.target = resolveTarget(params) || (params.kind === 'input' ? document.activeElement : op.target);
+    op.target = resolveTarget(params) || (params.kind === 'input' ? op.focusTarget || deepActiveElement() : op.target);
+    if (params.kind === 'input' && !op.focusTarget) op.focusTarget = op.target;
     op.x = params.x; op.y = params.y;
     if (!params.release || !op.seenEvents) op.seenEvents = new Set();
     if (!params.release) op.eventTypes = Array.isArray(params.eventTypes) ? new Set(params.eventTypes) : null;
