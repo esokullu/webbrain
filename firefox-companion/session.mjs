@@ -293,7 +293,13 @@ export class BidiSession {
       const marker = createNativeActionMarker(guard, kind, ++nativeSequence);
       const checked = await this.call(match, `(el, marker, kind, action) => {
         if (!el.isConnected) return false;
-        const target = kind === 'input' && action !== 'upload' ? el.getRootNode().activeElement || el : el;
+        const deepActiveElement = () => {
+          let active = document.activeElement;
+          while (active?.shadowRoot?.activeElement) active = active.shadowRoot.activeElement;
+          return active;
+        };
+        const target = kind === 'input' && action !== 'upload' ? deepActiveElement() || el : el;
+        if (!target?.isConnected) return false;
         target.setAttribute('data-webbrain-native-action', marker);
         return true;
       }`, [{ type: 'string', value: marker }, { type: 'string', value: kind }, { type: 'string', value: action }]);
@@ -319,7 +325,12 @@ export class BidiSession {
       try {
         await this.call(match, `(el, marker, action) => {
           const kind = JSON.parse(marker).kind;
-          const targets = kind === 'input' && action !== 'upload' ? [el, el.getRootNode().activeElement] : [el];
+          const deepActiveElement = () => {
+            let active = document.activeElement;
+            while (active?.shadowRoot?.activeElement) active = active.shadowRoot.activeElement;
+            return active;
+          };
+          const targets = kind === 'input' && action !== 'upload' ? [el, deepActiveElement()] : [el];
           for (const target of new Set(targets))
             if (target?.getAttribute('data-webbrain-native-action') === marker) target.removeAttribute('data-webbrain-native-action');
         }`, [{ type: 'string', value: marker }, { type: 'string', value: action }]);

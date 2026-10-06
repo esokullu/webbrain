@@ -478,7 +478,116 @@ test('Firefox native preparation keeps same-target user edits and sends no stale
   }
 });
 
+test('Firefox repeated native Tab marks the deeply focused control across shadow boundaries', async () => {
+  const { page, browser } = await fixture(firefox, 'firefox');
+  const savedChrome = globalThis.chrome, savedBrowser = globalThis.browser;
+  const { pageFeedbackMethods: methods } = await import('../src/firefox/src/agent/page-feedback.js');
+  const tab = 961, runId = crypto.randomUUID(), token = crypto.randomUUID(), operationId = 'shadow-tab-operation', session = new BidiSession();
+  const host = { ...methods, isRunning: () => true, _checkAbort: () => false };
+  const api = { tabs: {
+    get: async () => ({ url: page.url() }),
+    sendMessage: async (_tab, message) => page.evaluate(message => {
+      deliver(message.action, message.params || {}); return lastMonitorResponse;
+    }, message),
+  }, webNavigation: { getAllFrames: async () => [{ frameId: 0 }] } };
+  globalThis.chrome = api; globalThis.browser = api;
+  session.runs.set(runId, { context: 'tab' });
+  session.locate = async () => ({ context: 'tab', node: { sharedId: 'shadow-field' } });
+  session.call = async (_match, declaration, args = []) => ({ result: { value: await page.evaluate(({ declaration, args }) => {
+    const el = document.getElementById('tab-shadow-host').shadowRoot.getElementById('shadow-field');
+    return (0, eval)(`(${declaration})`)(el, ...args.map(arg => arg.value));
+  }, { declaration, args }) } });
+  session.send = async method => { if (method === 'input.performActions') await page.keyboard.press('Tab'); return {}; };
+  try {
+    await page.evaluate(() => {
+      const shadowHost = document.createElement('div'); shadowHost.id = 'tab-shadow-host';
+      shadowHost.style.cssText = 'position:fixed;left:10px;top:120px';
+      shadowHost.attachShadow({ mode: 'open' }).innerHTML = '<input id="shadow-field">';
+      const first = document.createElement('input'); first.id = 'outside-shadow-first';
+      first.style.cssText = 'position:fixed;left:10px;top:160px';
+      const second = document.createElement('input'); second.id = 'outside-shadow-second';
+      second.style.cssText = 'position:fixed;left:10px;top:200px';
+      document.body.append(shadowHost, first, second);
+    });
+    await page.waitForTimeout(180);
+    await host._beginPageFeedbackRun(tab, 'interactive');
+    const runToken = host._pageFeedbackRuns.get(tab).token;
+    await page.evaluate(token => {
+      monitorEnabled = false; deliver('page_monitor_state');
+      monitorRunToken = token; monitorEnabled = true; deliver('page_monitor_state');
+    }, runToken);
+    await page.waitForTimeout(100);
+    const documentToken = await page.evaluate(() => document.documentElement.getAttribute('data-webbrain-page-revision').split(':')[0]);
+    host.pageMonitorState({ tab: { id: tab }, frameId: 0 }, documentToken);
+    await page.evaluate(operationId => {
+      feedback = [];
+      const element = document.getElementById('tab-shadow-host').shadowRoot.getElementById('shadow-field');
+      const params = { operationId, tool: 'press_keys', element };
+      deliver('page_monitor_prepare', params);
+      deliver('page_monitor_dispatch', { ...params, kind: 'input', fenceOnly: true });
+    }, operationId);
+    const guard = await page.evaluate(() => lastMonitorResponse.guard);
+    assert.ok(guard?.nativeSecret, 'the prepared action should carry the monitor capability');
+    await page.evaluate(token => document.getElementById('tab-shadow-host').shadowRoot.getElementById('shadow-field')
+      .setAttribute('data-webbrain-bidi', token), token);
+    await page.locator('#tab-shadow-host').evaluate(hostElement => hostElement.shadowRoot.getElementById('shadow-field').focus());
+
+    const result = await session.perform(runId, 'key', { token, key: 'Tab', repeat: 2, pageFeedbackGuard: guard },
+      async (_id, received, kind, rebindFocus) => (await api.tabs.sendMessage(tab, { target: 'content', action: 'page_monitor_validate',
+        params: { ...received, kind, rebindFocus } }, { frameId: 0 }))?.ready === true);
+    assert.equal(result.success, true);
+    assert.equal(await page.evaluate(() => document.activeElement.id), 'outside-shadow-second',
+      'both native Tab presses should follow the focus across the shadow boundary');
+    assert.equal((await page.evaluate(() => feedback)).some(event => event.source !== 'agent'), false,
+      'rebound native input must not be reported as a user intervention');
+    assert.equal(await page.evaluate(() => [...document.querySelectorAll('[data-webbrain-native-action]'),
+      ...document.getElementById('tab-shadow-host').shadowRoot.querySelectorAll('[data-webbrain-native-action]')].length), 0,
+      'consumed native markers must be removed');
+  } finally {
+    await session.close();
+    if (host._pageFeedbackRuns.has(tab)) host._finishPageFeedbackRun(tab);
+    if (savedChrome === undefined) delete globalThis.chrome; else globalThis.chrome = savedChrome;
+    if (savedBrowser === undefined) delete globalThis.browser; else globalThis.browser = savedBrowser;
+    await browser.close();
+  }
+});
+
 for (const [build, engine] of [['chrome', chromium], ['firefox', firefox]]) {
+  test(`${build}: synthetic local form input stays attributed to its dispatch`, async () => {
+    const source = read(build, 'content/content.js');
+    const typeStart = source.indexOf('async function _typeTextInner(');
+    const findTextStart = source.indexOf('\n  function findText(', typeStart);
+    assert.ok(typeStart >= 0 && findTextStart > typeStart);
+    assert.equal((source.slice(typeStart, findTextStart).match(/withLocalInputDispatch\(\(\) => \{/g) || []).length, 2,
+      `${build}: both native form and select setters must include their synthetic events in the local dispatch`);
+    const helper = source.match(/^  function withLocalInputDispatch\(callback\) \{[\s\S]*?^  \}/m)?.[0];
+    assert.ok(helper, `${build}: local input events must use the production monitor boundary`);
+
+    const { browser, page } = await fixture(engine, build);
+    try {
+      await page.addScriptTag({ content: `window.withLocalInputDispatch = ${helper};` });
+      for (const [selector, tag, value] of [['#field', 'input', 'agent-synthetic-value'], ['#select', 'select', 'B']]) {
+        await page.evaluate(() => { feedback = []; });
+        await page.evaluate(({ selector, tag, value }) => {
+          const field = document.querySelector(selector);
+          const finish = __wbPageMonitor.beginContentAction('type', { selector });
+          try {
+            withLocalInputDispatch(() => {
+              const prototype = tag === 'select' ? HTMLSelectElement.prototype : HTMLInputElement.prototype;
+              Object.getOwnPropertyDescriptor(prototype, 'value').set.call(field, value);
+              field.dispatchEvent(new Event('input', { bubbles: true }));
+              field.dispatchEvent(new Event('change', { bubbles: true }));
+            });
+          } finally { finish(); }
+        }, { selector, tag, value });
+        await page.waitForTimeout(220);
+        const events = await page.evaluate(() => feedback);
+        assert.equal(events.some(event => event.source !== 'agent'), false, `${build}: synthetic ${tag} events must not become page feedback`);
+        assert.equal(JSON.stringify(events).includes(value), false, `${build}: page feedback must not include form values`);
+      }
+    } finally { await browser.close(); }
+  });
+
   test(`${build}: click-driven programmatic focus checks the monitor fence before focusin`, () => {
     const source = read(build, 'content/content.js');
     const clickStart = source.indexOf('function clickElement(params, actionDeadlineExpired = () => false)');

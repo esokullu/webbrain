@@ -2293,6 +2293,13 @@
     return _typeTextInner(params, actionDeadlineExpired);
   }
 
+  function withLocalInputDispatch(callback) {
+    const monitor = window.__wbPageMonitor;
+    if (typeof monitor?.withLocalDispatch === 'function') return monitor.withLocalDispatch(callback);
+    monitor?.beforeLocalDispatch();
+    return callback();
+  }
+
   async function _insertContentEditableText(el, text, clear, actionDeadlineExpired = () => false) {
     const doc = el.ownerDocument;
     let dispatched = false;
@@ -2540,24 +2547,19 @@
       }
       const nativeSetter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')?.set;
       if (actionDeadlineExpired()) return deadlineFailure();
-      window.__wbPageMonitor?.beforeLocalDispatch();
-      dispatched = true;
-      if (nativeSetter) nativeSetter.call(el, match.value);
-      else el.value = match.value;
-      if (actionDeadlineExpired()) return deadlineFailure();
-      el.dispatchEvent(new Event('input', { bubbles: true }));
-      if (actionDeadlineExpired()) return deadlineFailure();
-      el.dispatchEvent(new Event('change', { bubbles: true }));
+      const dispatchResult = withLocalInputDispatch(() => {
+        dispatched = true;
+        if (nativeSetter) nativeSetter.call(el, match.value);
+        else el.value = match.value;
+        if (actionDeadlineExpired()) return deadlineFailure();
+        el.dispatchEvent(new Event('input', { bubbles: true }));
+        if (actionDeadlineExpired()) return deadlineFailure();
+        el.dispatchEvent(new Event('change', { bubbles: true }));
+      });
+      if (dispatchResult) return dispatchResult;
       await new Promise(resolve => setTimeout(resolve, 30));
       if (actionDeadlineExpired()) return deadlineFailure();
       return { success: true, ...(el.isConnected && el.value === match.value ? { verified: true } : {}), method: 'select', value: el.value };
-    }
-
-    if (params.clear) {
-      if (actionDeadlineExpired()) return deadlineFailure();
-      window.__wbPageMonitor?.beforeLocalDispatch();
-      dispatched = true;
-      el.value = '';
     }
 
     const proto = el instanceof HTMLTextAreaElement
@@ -2566,18 +2568,19 @@
     const nativeInputValueSetter = Object.getOwnPropertyDescriptor(proto, 'value')?.set;
 
     if (actionDeadlineExpired()) return deadlineFailure();
-    window.__wbPageMonitor?.beforeLocalDispatch();
-    dispatched = true;
-    if (nativeInputValueSetter) {
-      nativeInputValueSetter.call(el, (params.clear ? '' : (el.value || '')) + params.text);
-    } else {
-      el.value = (params.clear ? '' : (el.value || '')) + params.text;
-    }
-
-    if (actionDeadlineExpired()) return deadlineFailure();
-    el.dispatchEvent(new Event('input', { bubbles: true }));
-    if (actionDeadlineExpired()) return deadlineFailure();
-    el.dispatchEvent(new Event('change', { bubbles: true }));
+    const dispatchResult = withLocalInputDispatch(() => {
+      dispatched = true;
+      if (nativeInputValueSetter) {
+        nativeInputValueSetter.call(el, (params.clear ? '' : (el.value || '')) + params.text);
+      } else {
+        el.value = (params.clear ? '' : (el.value || '')) + params.text;
+      }
+      if (actionDeadlineExpired()) return deadlineFailure();
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+      if (actionDeadlineExpired()) return deadlineFailure();
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    if (dispatchResult) return dispatchResult;
     const verified = await verifyValue(el, typedText, params.clear === true, beforeValue);
     if (actionDeadlineExpired()) return deadlineFailure();
 
