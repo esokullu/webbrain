@@ -526,6 +526,58 @@ for (const [build, engine] of [['chrome', chromium], ['firefox', firefox]]) {
     } finally { await browser.close(); }
   });
 
+  test(`${build}: direct shadow-root text changes reach the host feedback target`, async () => {
+    const { browser, page } = await fixture(engine, build);
+    try {
+      await page.evaluate(() => {
+        const host = document.createElement('div'); host.id = 'shadow-text-host';
+        host.attachShadow({ mode: 'open' }).append(document.createTextNode('Initial result'));
+        document.body.append(host);
+      });
+      await page.waitForTimeout(150);
+      await page.evaluate(() => {
+        feedback = [];
+        deliver('page_monitor_prepare', { operationId: 'shadow-text', tool: 'execute_js' });
+        deliver('page_monitor_dispatch', { operationId: 'shadow-text', kind: 'dom', fenceOnly: true });
+        document.getElementById('shadow-text-host').shadowRoot.firstChild.data = 'Updated result without an element wrapper';
+      });
+      await page.waitForFunction(() => feedback.some(event => event.kind === 'dom'
+        && event.source === 'page' && event.target === 'div#shadow-text-host'), null, { timeout: 1000 });
+      const blocked = await page.evaluate(() => new Promise(resolve => {
+        deliver('page_monitor_dispatch', { operationId: 'shadow-text', kind: 'dom' });
+        setTimeout(() => resolve(lastMonitorResponse), 0);
+      }));
+      assert.equal(blocked.pageFeedbackPending, true, 'The text-node mutation must invalidate the prepared revision');
+      assert.equal(JSON.stringify(await page.evaluate(() => feedback)).includes('Updated result'), false,
+        'Feedback identifies the host without copying page text');
+    } finally { await browser.close(); }
+  });
+
+  test(`${build}: native option selection mutations invalidate prepared state`, async () => {
+    const { browser, page } = await fixture(engine, build);
+    try {
+      await page.evaluate(() => {
+        const select = document.createElement('select'); select.id = 'state-select';
+        select.innerHTML = '<option>First</option><option id="second-option">Second</option>';
+        document.body.append(select);
+      });
+      await page.waitForTimeout(150);
+      await page.evaluate(() => {
+        feedback = [];
+        deliver('page_monitor_prepare', { operationId: 'select-state', tool: 'click', selector: '#agent' });
+        deliver('page_monitor_dispatch', { operationId: 'select-state', kind: 'click', selector: '#agent', fenceOnly: true });
+        document.getElementById('second-option').setAttribute('selected', '');
+      });
+      await page.waitForFunction(() => feedback.some(event => event.kind === 'dom'
+        && event.source === 'page' && event.target === 'select#state-select'), null, { timeout: 1000 });
+      const blocked = await page.evaluate(() => new Promise(resolve => {
+        deliver('page_monitor_dispatch', { operationId: 'select-state', kind: 'click', selector: '#agent' });
+        setTimeout(() => resolve(lastMonitorResponse), 0);
+      }));
+      assert.equal(blocked.pageFeedbackPending, true, 'Changing defaultSelected must not leave the observed select state current');
+    } finally { await browser.close(); }
+  });
+
   test(`${build}: opacity-only visibility changes invalidate prepared actions`, async () => {
     const { browser, page } = await fixture(engine, build);
     try {

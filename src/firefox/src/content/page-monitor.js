@@ -228,6 +228,8 @@
       el.getAttribute('aria-expanded'), el.getAttribute('aria-selected'), el.getAttribute('aria-checked'),
       el.getAttribute('aria-pressed'),
       el.getAttribute('popover'), popoverOpen(el),
+      el.selected === true, el.defaultSelected === true,
+      Number.isInteger(el.selectedIndex) ? el.selectedIndex : null,
       el.getAttribute('aria-hidden'), el.hasAttribute('open'), el.inert === true,
       el.getAttribute('aria-disabled'), el.disabled === true, el.readOnly === true, el.checked === true, el.validity?.valid !== false, Math.round((rect.width || 0) / 8), Math.round((rect.height || 0) / 8),
       Math.round(((rect.x || 0) + window.scrollX) / 8), Math.round(((rect.y || 0) + window.scrollY) / 8)]);
@@ -325,9 +327,14 @@
     };
     const changes = [...records];
     for (const record of records) {
-      if (record.type !== 'popover' && (record.type !== 'attributes' || !['class', 'style', 'hidden', 'aria-hidden', 'open', 'inert'].includes(record.attributeName))) continue;
+      if (record.type !== 'popover' && (record.type !== 'attributes' || !['class', 'style', 'hidden', 'aria-hidden', 'open', 'inert', 'selected'].includes(record.attributeName))) continue;
       if (ignored(record.target)) continue;
       if (record.target.getAnimations?.().some(animation => animation.playState === 'running')) continue;
+      if (record.type === 'attributes' && record.attributeName === 'selected'
+          && record.oldValue !== record.target.getAttribute('selected')) {
+        const select = record.target.closest?.('select');
+        if (select && !ignored(select)) noteChange(select, record.agentUserAt);
+      }
       const sample = sampleDescendants(record.target);
       // A bounded layout sample cannot prove that inherited visibility left a
       // large subtree unchanged. Invalidate conservatively on an actual state
@@ -344,7 +351,8 @@
     let measured = 0;
     const seedBudget = { remaining: 600 };
     for (const record of changes) {
-      const el = record.target.nodeType === 1 ? record.target : record.target.host || record.target.parentElement;
+      const el = record.target.nodeType === 1 ? record.target
+        : record.target.host || record.target.parentElement || record.target.getRootNode?.().host;
       if (ignored(el) || (record.type === 'characterData' && editable(el))) continue;
       if (record.type === 'attributes' && ['class', 'style'].includes(record.attributeName)
           && el.getAnimations?.().some(animation => animation.playState === 'running')) continue;
