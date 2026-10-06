@@ -31181,9 +31181,8 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
   }
 
   async _executeToolImpl(tabId, name, args, onUpdate = null, executionContext = null) {
-    if (['navigate', 'go_back', 'go_forward', 'execute_js', 'inject_css', 'remove_injected_css'].includes(name)) {
-      await beforePageAgentDispatch(browser, tabId, { kind: ['navigate', 'go_back', 'go_forward'].includes(name) ? 'navigate' : 'dom',
-        url: name === 'navigate' ? args?.url : undefined });
+    if (['execute_js', 'inject_css', 'remove_injected_css'].includes(name)) {
+      await beforePageAgentDispatch(browser, tabId, { kind: 'dom' });
     }
     const dispatchContext = executionContext && typeof executionContext === 'object'
       ? executionContext
@@ -31916,9 +31915,13 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
 
       try {
         if (firefoxBidi.runs.has(tabId)) await firefoxBidi.perform(tabId, 'navigate', { url: rawUrl });
-        else await browser.tabs.update(tabId, { url: rawUrl });
+        else {
+          await beforePageAgentDispatch(browser, tabId, { kind: 'navigate', url: rawUrl });
+          await browser.tabs.update(tabId, { url: rawUrl });
+        }
       } catch (e) {
         removeNavigationListener();
+        if (e?.code === 'page_feedback_pending') throw e;
         return {
           success: false,
           dispatched: false,

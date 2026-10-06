@@ -75,6 +75,7 @@ export const pageFeedbackMethods = {
       dispatched: details => {
         if (details.kind === 'navigate') {
           run.navigation = { at: Date.now(), url: details.url || '', kind: details.kind, history: details.history === true,
+            frameId: Number(details.frameId) || 0,
             operationId: dispatchOwners.get(tabId)?.operationId || '' };
         }
       } });
@@ -130,6 +131,7 @@ export const pageFeedbackMethods = {
     frame.seq = seq;
     if (feedback.source === 'agent') {
       if (feedback.operation === 'click') run.navigation = { at: Date.now(), url: '', kind: 'click',
+        frameId: feedback.navigationTarget === '_top' ? 0 : frameId,
         operationId: dispatchOwners.get(tabId)?.operationId || '' };
       return { accepted: true };
     }
@@ -168,7 +170,7 @@ export const pageFeedbackMethods = {
     const explicit = ['typed', 'auto_bookmark', 'generated', 'keyword', 'keyword_generated'].includes(details.transitionType)
       || qualifiers.includes('from_address_bar');
     const navigation = run.navigation;
-    const agentNavigation = !explicit && navigation && Date.now() - navigation.at < 10000
+    const agentNavigation = !explicit && navigation && navigation.frameId === frameId && Date.now() - navigation.at < 10000
       && (!qualifiers.includes('forward_back') || navigation.history)
       && (!navigation.url || navigation.url === details.url || qualifiers.some(q => /redirect$/.test(q)));
     if (agentNavigation) return;

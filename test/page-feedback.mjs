@@ -134,6 +134,78 @@ for (const build of ['chrome', 'firefox']) {
     } finally { agent._releaseRunEntry(tab); }
   });
 
+  for (const tool of ['navigate', 'go_back', 'go_forward']) {
+    test(`${build}: ${tool} does not hide navigation during the unsaved-changes probe`, async () => {
+      const agent = setup(Agent), tab = nextTab++, entered = deferred(), release = deferred();
+      delete agent.executeTool;
+      allowBatchPreparation(agent);
+      const destination = 'https://example.com/destination';
+      agent._probeUnsavedChanges = async () => {
+        entered.resolve(); await release.promise;
+        return { success: false, dispatched: false, noDispatch: true, error: 'Unsaved fields block navigation' };
+      };
+      await agent._claimRunEntry(tab, 'interactive');
+      try {
+        const action = agent.executeTool(tab, tool, { url: destination });
+        await entered.promise;
+        agent.observePageNavigation({ tabId: tab, frameId: 0, url: destination, transitionType: 'reload' }, 'history');
+        const queuedDuringPreparation = agent._hasPendingPageFeedback(tab);
+        release.resolve();
+        assert.equal((await action).noDispatch, true);
+        assert.equal(queuedDuringPreparation, true, 'Only a dispatched navigation may hide its own browser event');
+      } finally { release.resolve(); agent._releaseRunEntry(tab); }
+    });
+  }
+
+  test(`${build}: a child-frame click only correlates compatible frame navigation`, async () => {
+    const agent = setup(Agent), tab = nextTab++;
+    await agent._claimRunEntry(tab, 'interactive');
+    try {
+      const child = bind(agent, tab, 2, 'child', 'child-token');
+      child.send({ kind: 'activity', source: 'agent', operation: 'click' });
+      for (const frameId of [0, 3, 2]) agent.observePageNavigation({ tabId: tab, frameId,
+        url: `https://example.com/frame-${frameId}`, transitionType: 'link' }, 'history');
+      const events = [...agent._pageFeedbackRuns.get(tab).events.values()];
+      assert.deepEqual(events.map(event => event.frameId), [0, 3], 'Main and sibling changes must survive child-click correlation');
+      agent._pageFeedbackRuns.get(tab).events.clear();
+      child.send({ kind: 'activity', source: 'agent', operation: 'click', navigationTarget: '_top' });
+      agent.observePageNavigation({ tabId: tab, frameId: 0, url: 'https://example.com/top', transitionType: 'link' }, 'history');
+      assert.equal(agent._hasPendingPageFeedback(tab), false, 'An explicit _top click can correlate top-frame navigation');
+      agent.observePageNavigation({ tabId: tab, frameId: 3, url: 'https://example.com/sibling', transitionType: 'link' }, 'history');
+      assert.equal(agent._hasPendingPageFeedback(tab), true, 'A declared top target must still preserve sibling changes');
+    } finally { agent._releaseRunEntry(tab); }
+  });
+
+  if (build === 'firefox') for (const transport of ['content', 'bidi']) {
+    test(`firefox: ${transport} navigation skips dispatch after feedback during an allowed probe`, async () => {
+      const { firefoxBidi } = await import('../src/firefox/src/bidi/client.js');
+      const agent = setup(Agent), tab = nextTab++, entered = deferred(), release = deferred();
+      delete agent.executeTool;
+      allowBatchPreparation(agent);
+      let dispatches = 0;
+      const originalUpdate = api.tabs.update, originalRequest = firefoxBidi.request;
+      api.tabs.update = async () => { dispatches++; return {}; };
+      firefoxBidi.request = async () => { dispatches++; return { success: true }; };
+      if (transport === 'bidi') firefoxBidi.runs.set(tab, { runId: 'native-navigation', bound: true });
+      agent._probeUnsavedChanges = async () => { entered.resolve(); await release.promise; return null; };
+      await agent._claimRunEntry(tab, 'interactive');
+      try {
+        const destination = 'https://example.com/destination';
+        const action = agent.executeTool(tab, 'navigate', { url: destination });
+        await entered.promise;
+        agent.observePageNavigation({ tabId: tab, frameId: 0, url: destination, transitionType: 'reload' }, 'history');
+        release.resolve();
+        const result = await action;
+        assert.equal(dispatches, 0);
+        assert.equal(result.noDispatch, true);
+        assert.equal(result.pageFeedbackPending, true);
+      } finally {
+        release.resolve(); agent._releaseRunEntry(tab);
+        firefoxBidi.runs.delete(tab); firefoxBidi.request = originalRequest; api.tabs.update = originalUpdate;
+      }
+    });
+  }
+
   for (const kind of ['interactive', 'cloud', 'scheduled', 'workflow']) {
     test(`${build}: ${kind} feedback refreshes the page without creating a trusted text correction`, async () => {
       const agent = setup(Agent), tab = nextTab++, updates = [];

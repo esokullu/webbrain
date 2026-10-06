@@ -250,6 +250,22 @@ for (const [build, engine] of [['chrome', chromium], ['firefox', firefox]]) {
       await child.locator('#human').click();
       const tokens = await Promise.all([page.evaluate(() => feedback[0]?.documentToken), child.evaluate(() => feedback[0]?.documentToken)]);
       assert.ok(tokens[0] && tokens[1] && tokens[0] !== tokens[1]);
+      await child.evaluate(() => {
+        const link = document.createElement('a'); link.id = 'top-link'; link.href = 'https://monitor.test/destination';
+        link.textContent = 'Top link'; link.addEventListener('click', event => event.preventDefault()); document.body.append(link);
+      });
+      await page.waitForTimeout(200);
+      for (const target of ['_top', '_parent']) {
+        await child.evaluate(target => {
+          document.getElementById('top-link').target = target;
+          deliver('page_monitor_prepare', { operationId: `link-${target}`, tool: 'click', selector: '#top-link' });
+          deliver('page_monitor_dispatch', { operationId: `link-${target}`, kind: 'click', selector: '#top-link' });
+          feedback = [];
+        }, target);
+        await child.locator('#top-link').click();
+        assert.ok((await child.evaluate(() => feedback)).some(event => event.source === 'agent' && event.navigationTarget === '_top'),
+          `${target} navigation must carry the compatible top-frame target`);
+      }
       await page.waitForTimeout(200);
       await page.evaluate(() => {
         feedback = [];

@@ -263,7 +263,12 @@
       const marker = { userAt: op.userAt };
       agentTurn = marker;
       if (op.navigationCandidate && ['click', 'pointerdown'].includes(event.type)) {
-        send({ kind: 'activity', source: 'agent', operation: 'click' });
+        const link = event.composedPath().find(node => node instanceof Element && node.matches('a[href],area[href]'));
+        const navigationTarget = (link?.getAttribute('target') || el?.form?.getAttribute('target')
+          || (link && document.querySelector('base[target]')?.getAttribute('target')) || '').toLowerCase();
+        send({ kind: 'activity', source: 'agent', operation: 'click',
+          ...(navigationTarget === '_top' || (navigationTarget === '_parent' && window.parent === window.top)
+            ? { navigationTarget: '_top' } : {}) });
       }
       // Native listeners have microtask checkpoints between callbacks. Keep this
       // exact input's attribution through its page handlers, until the next task.

@@ -71,6 +71,10 @@ Click navigation correlation starts with matching page input, rather than the
 preparation handshake. Proven undispatched actions release their navigation
 marker. Notice IDs capture the consumed batch revision before the asynchronous
 page read, so navigation arriving during that read keeps its own persisted note.
+Navigation correlation stays within the dispatched frame; a child link explicitly
+targeting the top frame can correlate that target without hiding sibling changes.
+Firefox arms direct navigation after URL validation and the unsaved-changes probe,
+immediately before the native transport or tab update.
 
 ## Verification
 
