@@ -1170,4 +1170,5 @@ export default {
   "st.sync.consent.legacy": "همگام سازی رمزگذاری شده روشن شود؟ WebBrain یک نسخه رمزگذاری شده سرتاسر از خاطرات، تکمیل خودکار نمایه و تنظیمات ارائه دهنده کلید API شما را به WebBrain Compass منتقل می کند. سابقه گپ و ورود به سیستم OAuth همگام سازی نمی شوند.",
   "st.sync.consent.denied": "مجوز همگام‌سازی رمزگذاری شده داده نشد.",
   'st.providers.webgpu_note.body': '{modelLink} بدون هیچ نقطهٔ پایانی API کاملاً در Chrome اجرا می‌شود. آن را در Settings > Providers > WebGPU یا حالت Apocalypse دانلود کنید، سپس از کنترل nuclear در standalone chat استفاده کنید.',
+  'sp.monitor.navigation': "صفحه هنگام اجرای کار تغییر کرد ({before} → {after}). کار ادامه می‌یابد.",
 };

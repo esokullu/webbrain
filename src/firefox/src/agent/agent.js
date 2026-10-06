@@ -32124,7 +32124,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
               return { before };
             })()
           `;
-          await beforePageAgentDispatch(chrome, tabId, { kind: 'navigate', history: true });
+          await beforePageAgentDispatch(globalThis.browser || globalThis.chrome, tabId, { kind: 'navigate', history: true });
           historyDispatchArmed = true;
           dispatched = true;
           const results = await browser.tabs.executeScript(tabId, { code });

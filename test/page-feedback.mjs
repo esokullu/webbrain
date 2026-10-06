@@ -114,6 +114,26 @@ for (const build of ['chrome', 'firefox']) {
     } finally { agent._releaseRunEntry(tab); }
   });
 
+  test(`${build}: navigation arriving during a page read gets its own feedback ID`, async () => {
+    const agent = setup(Agent), tab = nextTab++, entered = deferred(), release = deferred();
+    const updates = [], messages = [];
+    await agent._claimRunEntry(tab, 'interactive');
+    try {
+      agent.observePageNavigation({ tabId: tab, frameId: 0, url: 'https://example.com/first', transitionType: 'typed' }, 'history');
+      agent.executeTool = async () => { entered.resolve(); await release.promise; return { success: true }; };
+      const first = agent._applyPendingPageFeedback(tab, messages, (_type, data) => updates.push(data));
+      await entered.promise;
+      agent.observePageNavigation({ tabId: tab, frameId: 0, url: 'https://example.com/second', transitionType: 'typed' }, 'history');
+      release.resolve();
+      await first;
+      await agent._applyPendingPageFeedback(tab, messages, (_type, data) => updates.push(data));
+      assert.equal(updates.length, 2);
+      assert.notEqual(updates[0].id, updates[1].id, 'Both navigation notices must survive UI deduplication');
+      assert.equal(updates[0].after, 'https://example.com/first');
+      assert.equal(updates[1].after, 'https://example.com/second');
+    } finally { agent._releaseRunEntry(tab); }
+  });
+
   for (const kind of ['interactive', 'cloud', 'scheduled', 'workflow']) {
     test(`${build}: ${kind} feedback refreshes the page without creating a trusted text correction`, async () => {
       const agent = setup(Agent), tab = nextTab++, updates = [];
@@ -249,6 +269,35 @@ for (const build of ['chrome', 'firefox']) {
       } } }, tab, { kind: 'click', selector: '#old' }), { code: 'page_feedback_pending' });
       assert.equal(agent._hasPendingPageFeedback(tab), true);
     } finally { agent._releaseRunEntry(tab); }
+  });
+
+  test(`${build}: click preparation and proven no-dispatch navigation do not hide external navigation`, async () => {
+    const { installPageFeedback } = await import(`../src/${build}/src/agent/page-feedback.js`);
+    class FixtureAgent {
+      static STATE_CHANGE_TOOLS = new Set(['click', 'navigate']);
+      isRunning() { return true; }
+      _checkAbort() { return false; }
+      async executeTool(tabId, name) {
+        await beforePageAgentDispatch(api, tabId, { kind: name });
+        if (name === 'click') {
+          this.observePageNavigation({ tabId, frameId: 0, url: 'https://example.com/reloaded', transitionType: 'reload' }, 'committed');
+          assert.equal(this._hasPendingPageFeedback(tabId), true, 'Preparation must not arm click navigation correlation');
+        }
+        return { success: false, dispatched: false, noDispatch: true };
+      }
+    }
+    installPageFeedback(FixtureAgent);
+    const agent = new FixtureAgent(), tab = nextTab++;
+    await agent._beginPageFeedbackRun(tab, 'interactive');
+    try {
+      const click = await agent.executeTool(tab, 'click', {});
+      assert.equal(click.pageFeedbackPending, true);
+      agent._pageFeedbackRuns.get(tab).events.clear();
+      await agent.executeTool(tab, 'navigate', {});
+      assert.equal(agent._pageFeedbackRuns.get(tab).navigation, null, 'Failed navigation must release its correlation');
+      agent.observePageNavigation({ tabId: tab, frameId: 0, url: 'https://example.com/automatic', transitionType: 'reload' }, 'committed');
+      assert.equal(agent._hasPendingPageFeedback(tab), true);
+    } finally { agent._finishPageFeedbackRun(tab); }
   });
 
   test(`${build}: finishing an action releases attribution in all dispatched frames`, async () => {

@@ -1201,4 +1201,5 @@ export default {
   'st.providers.webgpu_download.resume': 'Resume',
   'st.providers.webgpu_download.stop': 'Stop & remove',
   'st.providers.webgpu_download.activate_blocked': 'Download the selected model before choosing WebGPU for chat.',
+  'sp.monitor.navigation': "タスク実行中にページが変わりました（{before} → {after}）。タスクを続行します。",
 };

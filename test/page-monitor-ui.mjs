@@ -154,9 +154,13 @@ for (const [build, engine] of [['chrome', chromium], ['firefox', firefox]]) {
         deliver('page_monitor_prepare', { operationId: 'agent-click', tool: 'click', selector: '#agent' });
         deliver('page_monitor_dispatch', { operationId: 'agent-click', kind: 'click', selector: '#agent' });
       });
+      assert.equal((await page.evaluate(() => feedback)).some(event => event.operation === 'click'), false,
+        'A prepared click must not claim navigation before any page input occurs');
       await page.locator('#agent').click();
       await page.waitForTimeout(200);
       const own = await page.evaluate(() => feedback);
+      assert.ok(own.some(event => event.source === 'agent' && event.operation === 'click'),
+        'The actual matching click must supply navigation correlation');
       assert.equal(own.some(event => event.source !== 'agent'), false, JSON.stringify(own));
       await page.locator('#agent').click();
       assert.ok((await page.evaluate(() => feedback)).some(event => event.kind === 'click' && event.source === 'user'

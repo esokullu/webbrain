@@ -1149,4 +1149,5 @@ export default {
   "st.sync.consent.legacy": "¿Activar sincronización cifrada? WebBrain transmitirá una copia cifrada de extremo a extremo de sus recuerdos, el autocompletado de perfiles y la configuración del proveedor de claves API a WebBrain Compass. El historial de chat y los inicios de sesión de OAuth no están sincronizados.",
   "st.sync.consent.denied": "No se concedió el permiso de sincronización cifrada.",
   'st.providers.webgpu_note.body': '{modelLink} runs entirely in Chrome with no API endpoint. Download it in Settings > Providers > WebGPU or Apocalypse Mode, then use the nuclear control in standalone chat.',
+  'sp.monitor.navigation': "La página cambió mientras se ejecutaba la tarea ({before} → {after}). La tarea continúa.",
 };

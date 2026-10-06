@@ -33099,7 +33099,7 @@ If the user has already named or confirmed this exact recipient, do NOT ask agai
       if (!before?.documentId) {
         return { success: false, error: 'inject_css: could not identify the current document.' };
       }
-      await beforePageAgentDispatch(chrome, tabId, { kind: 'dom' });
+      await beforePageAgentDispatch(globalThis.chrome, tabId, { kind: 'dom' });
       await chrome.scripting.insertCSS({ target: { tabId }, css: injectedCss, origin: 'AUTHOR' });
       const after = await this._getDevDocumentIdentity(tabId);
       if (after?.documentId !== before.documentId) {
@@ -33190,7 +33190,7 @@ If the user has already named or confirmed this exact recipient, do NOT ask agai
           error: `remove_injected_css: patchId "${patchId}" belongs to a document that is no longer loaded.`,
         };
       }
-      await beforePageAgentDispatch(chrome, tabId, { kind: 'dom' });
+      await beforePageAgentDispatch(globalThis.chrome, tabId, { kind: 'dom' });
       await chrome.scripting.removeCSS({ target: { tabId }, css: patch.injectedCss || patch.css, origin: 'AUTHOR' });
       this._devCssPatches?.delete(patchId);
       try { await chrome.storage.session.remove(storageKey); } catch {}
@@ -33231,7 +33231,7 @@ If the user has already named or confirmed this exact recipient, do NOT ask agai
       // callers use an explicit `return` for readback instead of having to
       // squeeze a multi-statement edit into one JavaScript expression.
       let expression = `(async () => {\n${code}\n})()\n//# sourceURL=webbrain-dev-execute.js`;
-      const pageGuard = await beforePageAgentDispatch(chrome, tabId, { kind: 'dom' });
+      const pageGuard = await beforePageAgentDispatch(globalThis.chrome, tabId, { kind: 'dom' });
       if (pageGuard) expression = `document.dispatchEvent(new CustomEvent('webbrain-agent-dom-dispatch', { detail: ${JSON.stringify(JSON.stringify(pageGuard))} }));\n${expression}`;
       dispatched = true;
       const response = await cdpClient.evaluate(tabId, expression, true, { timeoutMs: 15000 });
@@ -35162,7 +35162,7 @@ If the user has already named or confirmed this exact recipient, do NOT ask agai
 
       try {
         releaseDialogNavigation = cdpClient.authorizeNavigationDialog(tabId, beforeUrl, earlyCdpAbortSignal);
-        await beforePageAgentDispatch(chrome, tabId, { kind: 'navigate', url: rawUrl });
+        await beforePageAgentDispatch(globalThis.chrome, tabId, { kind: 'navigate', url: rawUrl });
         await chrome.tabs.update(tabId, { url: rawUrl });
       } catch (e) {
         removeNavigationListener();
@@ -35367,7 +35367,7 @@ If the user has already named or confirmed this exact recipient, do NOT ask agai
       try {
         try {
           const delta = direction === 'back' ? -steps : steps;
-          await beforePageAgentDispatch(chrome, tabId, { kind: 'navigate', history: true });
+          await beforePageAgentDispatch(globalThis.chrome, tabId, { kind: 'navigate', history: true });
           historyDispatchArmed = true;
           dispatched = true;
           releaseDialogNavigation = cdpClient.authorizeNavigationDialog(tabId, beforeUrl, earlyCdpAbortSignal);
@@ -37689,7 +37689,7 @@ If the user has already named or confirmed this exact recipient, do NOT ask agai
         }
         if (binding?.token && Number.isInteger(binding.frameId)) {
           throwIfEarlyCdpAborted();
-          await beforePageAgentDispatch(chrome, tabId, { kind: 'click', selector, frameId: binding.frameId });
+          await beforePageAgentDispatch(globalThis.chrome, tabId, { kind: 'click', selector, frameId: binding.frameId });
           dispatched = true;
           markEarlyCdpDispatched();
           const response = await chrome.tabs.sendMessage(tabId, {
@@ -37754,7 +37754,7 @@ If the user has already named or confirmed this exact recipient, do NOT ask agai
         }
         const selected = candidates[0];
         throwIfEarlyCdpAborted();
-        await beforePageAgentDispatch(chrome, tabId, { kind: 'click', selector, frameId: selected.frameId });
+        await beforePageAgentDispatch(globalThis.chrome, tabId, { kind: 'click', selector, frameId: selected.frameId });
         dispatched = true;
         markEarlyCdpDispatched();
         const clicked = await chrome.scripting.executeScript({

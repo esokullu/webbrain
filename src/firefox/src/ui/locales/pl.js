@@ -1110,4 +1110,5 @@ export default {
   "st.sync.consent.legacy": "Włączyć szyfrowaną synchronizację? WebBrain prześle kompleksowo zaszyfrowaną kopię Twoich wspomnień, autouzupełniania profilu i ustawień dostawcy klucza API do WebBrain Compass. Historia czatów i logowania OAuth nie są synchronizowane.",
   "st.sync.consent.denied": "Nie przyznano zezwolenia na szyfrowaną synchronizację.",
   'st.providers.webgpu_note.body': '{modelLink} runs entirely in Chrome with no API endpoint. Download it in Settings > Providers > WebGPU or Apocalypse Mode, then use the nuclear control in standalone chat.',
+  'sp.monitor.navigation': "Strona zmieniła się podczas wykonywania zadania ({before} → {after}). Zadanie jest kontynuowane.",
 };

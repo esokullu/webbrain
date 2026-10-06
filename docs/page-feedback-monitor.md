@@ -65,6 +65,11 @@ job ID and wait for that job's assistant bubble. Cloud updates expose only event
 metadata and a generic navigation message, in both secret modes. Completion and
 cancellation remove the monitor and its pending run state.
 
+Click navigation correlation starts with matching page input, rather than the
+preparation handshake. Proven undispatched actions release their navigation
+marker. Notice IDs capture the consumed batch revision before the asynchronous
+page read, so navigation arriving during that read keeps its own persisted note.
+
 ## Verification
 
 `npm run test:page-feedback` runs the controller/transport/workflow/cloud/scheduler

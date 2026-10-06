@@ -1149,4 +1149,5 @@ export default {
   "st.sync.consent.legacy": "Увімкнути зашифровану синхронізацію? WebBrain передасть наскрізну зашифровану копію ваших спогадів, автозаповнення профілю та налаштувань постачальника ключа API до WebBrain Compass. Історія чату та вхід OAuth не синхронізуються.",
   "st.sync.consent.denied": "Дозвіл на зашифровану синхронізацію не надано.",
   'st.providers.webgpu_note.body': '{modelLink} runs entirely in Chrome with no API endpoint. Download it in Settings > Providers > WebGPU or Apocalypse Mode, then use the nuclear control in standalone chat.',
+  'sp.monitor.navigation': "Сторінка змінилася під час виконання завдання ({before} → {after}). Завдання продовжується.",
 };

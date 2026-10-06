@@ -412,7 +412,7 @@ export class CDPClient {
       let target = {};
       try { target = await this._pageAgentInputTarget(tabId, method, params, sessionId); }
       catch (error) { if (!release) throw error; } // Always allow held input to be released after navigation.
-      await beforePageAgentDispatch(chrome, tabId, {
+      await beforePageAgentDispatch(globalThis.chrome, tabId, {
         kind: method === 'Input.dispatchMouseEvent' ? (params.type === 'mouseWheel' ? 'scroll' : 'click') : 'input',
         nativeWheel: params.type === 'mouseWheel',
         navigationCandidate: params.type === 'mousePressed',
@@ -2505,7 +2505,7 @@ export class CDPClient {
    */
   async setFileInputFiles(tabId, objectId, filePaths, options = {}) {
     const target = hasPageAgentDispatchOwner(tabId) ? await this._pageAgentObjectTarget(tabId, objectId) : {};
-    await beforePageAgentDispatch(chrome, tabId, { kind: 'input', eventTypes: ['input', 'change'], ...target });
+    await beforePageAgentDispatch(globalThis.chrome, tabId, { kind: 'input', eventTypes: ['input', 'change'], ...target });
     options.beforeDispatch?.();
     await this.sendCommand(tabId, 'DOM.setFileInputFiles', {
       objectId,
@@ -2533,7 +2533,7 @@ export class CDPClient {
     await this.sendCommand(tabId, 'Runtime.enable');
     throwIfAborted();
     const target = hasPageAgentDispatchOwner(tabId) ? await this._pageAgentObjectTarget(tabId, objectId) : {};
-    await beforePageAgentDispatch(chrome, tabId, { kind: 'input', eventTypes: ['input', 'change'], ...target });
+    await beforePageAgentDispatch(globalThis.chrome, tabId, { kind: 'input', eventTypes: ['input', 'change'], ...target });
     throwIfAborted();
     if (typeof options?.beforeDispatch === 'function') options.beforeDispatch();
     const res = await this.sendCommand(tabId, 'Runtime.callFunctionOn', {
@@ -3688,7 +3688,7 @@ export class CDPClient {
     let lastResult = null;
     for (let i = 0; i <= retries; i++) {
       deadline.throwIfExpired();
-      await beforePageAgentDispatch(chrome, tabId, { kind: 'scroll', selector, scrollIntoView: true });
+      await beforePageAgentDispatch(globalThis.chrome, tabId, { kind: 'scroll', selector, scrollIntoView: true });
       const result = await this._resolveSelectorOnce(tabId, selector, options);
       deadline.throwIfExpired();
       // Found and usable → done.
@@ -4471,7 +4471,7 @@ export class CDPClient {
           const priorDispatchAttempted = dispatchAttempted;
           const validation = await authorizeDispatch({ x: info.x, y: info.y, tag: info.tag });
           if (validation.success !== true) return validation;
-          await beforePageAgentDispatch(chrome, tabId, { kind: 'click', selector, x: info.x, y: info.y });
+          await beforePageAgentDispatch(globalThis.chrome, tabId, { kind: 'click', selector, x: info.x, y: info.y });
           dispatchAttempted = true;
           const clicked = await this.sendCommand(tabId, 'Runtime.callFunctionOn', {
             objectId,
@@ -4529,7 +4529,7 @@ export class CDPClient {
     const fallbackValidation = await authorizeDispatch({ x: info.x, y: info.y, tag: info.tag });
     if (fallbackValidation.success !== true) return fallbackValidation;
     const priorDispatchAttempted = dispatchAttempted;
-    await beforePageAgentDispatch(chrome, tabId, { kind: 'click', selector, x: info.x, y: info.y });
+    await beforePageAgentDispatch(globalThis.chrome, tabId, { kind: 'click', selector, x: info.x, y: info.y });
     dispatchAttempted = true;
     const fb = await this.evaluate(tabId, `
       (() => {
@@ -5440,7 +5440,7 @@ export class CDPClient {
    * Scroll page.
    */
   async scrollPage(tabId, direction, amount = 500) {
-    await beforePageAgentDispatch(chrome, tabId, { kind: 'scroll' });
+    await beforePageAgentDispatch(globalThis.chrome, tabId, { kind: 'scroll' });
     const scrollCode = {
       down: `window.scrollBy(0, ${amount})`,
       up: `window.scrollBy(0, -${amount})`,

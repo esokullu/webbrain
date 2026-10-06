@@ -8037,7 +8037,7 @@ test('message recipient dispatch binding detects composer and active-thread race
     );
     assert.match(
       pressBranch,
-      /if \(actionDeadlineExpired\(\)\) return deadlineFailure\(\);\s*dispatched = true;\s*target\.dispatchEvent\(down\);[\s\S]*const expiredAfterKeydown = actionDeadlineExpired\(\);\s*target\.dispatchEvent\(up\);\s*if \(expiredAfterKeydown\) return deadlineFailure\(\);/,
+      /if \(actionDeadlineExpired\(\)\) return deadlineFailure\(\);\s*window\.__wbPageMonitor\?\.beforeLocalDispatch\(\);\s*dispatched = true;\s*target\.dispatchEvent\(down\);[\s\S]*const expiredAfterKeydown = actionDeadlineExpired\(\);\s*target\.dispatchEvent\(up\);\s*if \(expiredAfterKeydown\) return deadlineFailure\(\);/,
       `${label}: press_keys must guard keydown and classify deadline-only keyup cleanup as a partial dispatch`,
     );
     assert.match(
@@ -49532,7 +49532,7 @@ test('clarify tool auto-timeout is configurable and mirrored across browsers', (
     );
     assert.match(
       scheduler,
-      /const jobScopedUpdate = type === 'clarify'\s*\|\| type === 'clarify_timeout_extended'\s*\|\| type === 'clarify_auto'/,
+      /const jobScopedUpdate = type === 'page_feedback'\s*\|\| type === 'clarify'\s*\|\| type === 'clarify_timeout_extended'\s*\|\| type === 'clarify_auto'/,
       `${label}: scheduled clarify deadline updates should carry scheduledJobId`,
     );
     assert.match(scheduler, /type === 'clarify_timeout_extended'[\s\S]*?pendingClarify:[\s\S]*?deadlineTs:/, `${label}: scheduled clarifies should persist renewed deadlines`);
@@ -64736,9 +64736,9 @@ test('Chrome Dev patch handlers keep page-local undo state and avoid MV3 eval', 
   const agentSource = fs.readFileSync(path.join(ROOT, 'src/chrome/src/agent/agent.js'), 'utf8');
   assert.match(source, /const devPatchRegistry = new Map\(\)/);
   assert.match(source, /name: change\.name, expected: change\.after, current/);
-  assert.match(source, /'patch_element': \(\) => patchDevElement/);
-  assert.match(source, /'revert_patch': \(\) => revertDevElementPatch/);
-  assert.match(source, /'highlight_element': \(\) => highlightDevElement/);
+  assert.match(source, /'patch_element': \(\) => \{[\s\S]*?beforeLocalDispatch\(\); return patchDevElement/);
+  assert.match(source, /'revert_patch': \(\) => \{[\s\S]*?beforeLocalDispatch\(\); return revertDevElementPatch/);
+  assert.match(source, /'highlight_element': \(\) => \{[\s\S]*?beforeLocalDispatch\(\); return highlightDevElement/);
   assert.doesNotMatch(source, /new Function\(msg\.params\.code\)/);
   assert.match(agentSource, /chrome\.scripting\.insertCSS\(\{ target: \{ tabId \}, css: injectedCss, origin: 'AUTHOR' \}\)/);
   assert.match(agentSource, /chrome\.scripting\.removeCSS\(\{ target: \{ tabId \}, css: patch\.injectedCss \|\| patch\.css, origin: 'AUTHOR' \}\)/);
@@ -81122,6 +81122,7 @@ test('set_field submit chooses exactly one native or page-owned commit path', as
       ${block}
       return { nativeSubmitAttempted, submissionOutcomeUnknown };
     }`, {
+      window: {},
       setTimeout: callback => callback(),
       KeyboardEvent: class KeyboardEvent {
         constructor(type, init = {}) {
@@ -106567,7 +106568,7 @@ test('Chrome click paths suppress native file choosers and redirect to upload_fi
     assert.deepEqual(chromeInjections[0], {
       target: { tabId: 42 },
       world: 'MAIN',
-      files: ['src/content/file-picker-guard-page.js'],
+      files: ['src/content/page-monitor-shadow.js', 'src/content/file-picker-guard-page.js'],
     });
     assert.ok(
       chromeInjections[1].files.includes('src/content/content.js'),
@@ -106589,6 +106590,8 @@ test('Chrome click paths suppress native file choosers and redirect to upload_fi
     const agent = Object.create(AgentFx.prototype);
     await agent._injectCoreContentScripts(43);
     assert.deepEqual(firefoxInjections.map(injection => injection.file), [
+      'src/content/page-monitor-shadow-loader.js',
+      'src/content/page-monitor.js',
       'src/content/file-picker-guard-loader.js',
       'src/content/rich-text-toolbar-heuristic.js',
       'src/content/accessibility-tree.js',
@@ -112657,7 +112660,7 @@ test('content-script actions have a bounded unknown-outcome timeout', async () =
     );
     assert.match(
       pressKeysSource,
-      /if \(actionDeadlineExpired\(\)\) return deadlineFailure\(\);\s*dispatched = true;\s*target\.dispatchEvent\(down\);[\s\S]*const expiredAfterKeydown = actionDeadlineExpired\(\);\s*target\.dispatchEvent\(up\);\s*if \(expiredAfterKeydown\) return deadlineFailure\(\);/,
+      /if \(actionDeadlineExpired\(\)\) return deadlineFailure\(\);\s*window\.__wbPageMonitor\?\.beforeLocalDispatch\(\);\s*dispatched = true;\s*target\.dispatchEvent\(down\);[\s\S]*const expiredAfterKeydown = actionDeadlineExpired\(\);\s*target\.dispatchEvent\(up\);\s*if \(expiredAfterKeydown\) return deadlineFailure\(\);/,
       `${label}: press_keys does not guard dispatch while guaranteeing keyup cleanup`,
     );
     const contentClickStart = contentSource.indexOf('function clickElement(params,');
@@ -112856,7 +112859,7 @@ test('content-script actions have a bounded unknown-outcome timeout', async () =
     assert.ok(fallbackScrollStart >= 0 && fallbackScrollEnd > fallbackScrollStart, `${label}: fallback scroll deadline boundary missing`);
     assert.match(
       fallbackScroll,
-      /if \(actionDeadlineExpired\(\)\) return deadlineFailure\(\);\s*dispatched = true;\s*scrollElementInstant/,
+      /if \(actionDeadlineExpired\(\)\) return deadlineFailure\(\);\s*window\.__wbPageMonitor\?\.beforeLocalDispatch\(\);\s*dispatched = true;\s*scrollElementInstant/,
       `${label}: fallback container scrolling can start after its deadline`,
     );
     assert.match(
@@ -113134,7 +113137,8 @@ test('Chrome upload_file deadline distinguishes preparation from file-input disp
         }
         return { objectIds: ['input-1'], objectGroup: 'upload-deadline' };
       };
-      cdpClientCh.setFileInputFiles = async () => {
+      cdpClientCh.setFileInputFiles = async (_tabId, _objectId, _paths, options) => {
+        options.beforeDispatch();
         fileInputDispatches += 1;
         if (stallStage === 'dispatch') {
           markStageStarted();

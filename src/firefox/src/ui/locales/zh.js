@@ -1149,4 +1149,5 @@ export default {
   "st.sync.consent.legacy": "开启加密同步？ WebBrain 会将您的记忆、个人资料自动填充和 API 密钥提供商设置的端到端加密副本传输到 WebBrain Compass。聊天历史记录和 OAuth 登录不同步。",
   "st.sync.consent.denied": "未授予加密同步权限。",
   'st.providers.webgpu_note.body': '{modelLink} runs entirely in Chrome with no API endpoint. Download it in Settings > Providers > WebGPU or Apocalypse Mode, then use the nuclear control in standalone chat.',
+  'sp.monitor.navigation': "任务运行期间页面发生了变化（{before} → {after}）。正在继续任务。",
 };

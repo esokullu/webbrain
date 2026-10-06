@@ -1149,4 +1149,5 @@ export default {
   "st.sync.consent.legacy": "I-on ang naka-encrypt na pag-sync? Magpapadala ang WebBrain ng end-to-end na naka-encrypt na kopya ng iyong mga alaala, profile autofill, at API-key na mga setting ng provider sa WebBrain Compass. Hindi naka-sync ang history ng chat at OAuth sign-in.",
   "st.sync.consent.denied": "Hindi ibinigay ang naka-encrypt na pahintulot sa pag-sync.",
   'st.providers.webgpu_note.body': '{modelLink} runs entirely in Chrome with no API endpoint. Download it in Settings > Providers > WebGPU or Apocalypse Mode, then use the nuclear control in standalone chat.',
+  'sp.monitor.navigation': "Nagbago ang pahina habang tumatakbo ang gawain ({before} → {after}). Nagpapatuloy ang gawain.",
 };

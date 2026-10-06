@@ -22,6 +22,7 @@ export async function beforePageAgentDispatch(api, tabId, details = {}) {
     error.code = 'page_feedback_pending';
     throw error;
   }
+  if (!details.release && details.kind === 'click' && details.navigationCandidate !== false) owner.clearNavigation();
   if (details.documentToken) {
     const frameId = owner.frameForDocument(details.documentToken);
     if (frameId === undefined && !details.release) {
@@ -30,7 +31,6 @@ export async function beforePageAgentDispatch(api, tabId, details = {}) {
     }
     details = { ...details, ...(frameId === undefined ? {} : { frameId }) };
   }
-  owner.dispatched(details);
   owner.operationFrames.get(owner.operationId)?.add(Number(details.frameId) || 0);
   let acknowledgement;
   try {
@@ -46,6 +46,8 @@ export async function beforePageAgentDispatch(api, tabId, details = {}) {
     error.code = 'page_feedback_pending';
     throw error;
   }
+  // Clicks are correlated by the matching page event, not selector preparation.
+  if (!details.release && details.kind === 'navigate') owner.dispatched(details);
   return acknowledgement?.guard;
 }
 
@@ -68,10 +70,12 @@ export const pageFeedbackMethods = {
     this._pageFeedbackRuns.set(tabId, run);
     dispatchOwners.set(tabId, { runToken: run.token, operationId: '', operationFrames: new Map(),
       pending: () => this._hasPendingPageFeedback(tabId),
+      clearNavigation: () => { run.navigation = null; },
       frameForDocument: documentToken => [...run.frames].find(([, frame]) => frame.token === documentToken)?.[0],
       dispatched: details => {
-        if (details.kind === 'navigate' || (details.kind === 'click' && !details.release && details.navigationCandidate !== false)) {
-          run.navigation = { at: Date.now(), url: details.url || '', kind: details.kind, history: details.history === true };
+        if (details.kind === 'navigate') {
+          run.navigation = { at: Date.now(), url: details.url || '', kind: details.kind, history: details.history === true,
+            operationId: dispatchOwners.get(tabId)?.operationId || '' };
         }
       } });
     const api = apiFor();
@@ -125,7 +129,8 @@ export const pageFeedbackMethods = {
         || !['user', 'agent', 'page', 'unknown'].includes(feedback.source)) return { accepted: false, reason: 'invalid-observation' };
     frame.seq = seq;
     if (feedback.source === 'agent') {
-      if (feedback.operation === 'click') run.navigation = { at: Date.now(), url: '', kind: 'click' };
+      if (feedback.operation === 'click') run.navigation = { at: Date.now(), url: '', kind: 'click',
+        operationId: dispatchOwners.get(tabId)?.operationId || '' };
       return { accepted: true };
     }
     const item = { kind: feedback.kind, source: feedback.source, frameId,
@@ -230,6 +235,7 @@ export const pageFeedbackMethods = {
     const run = this._pageFeedbackRuns?.get(tabId);
     if (!run || this._checkAbort(tabId)) return false;
     const events = [...run.events.values()];
+    const batchRevision = run.revision;
     run.events.clear();
     let page;
     try {
@@ -247,7 +253,7 @@ export const pageFeedbackMethods = {
       + 'You may return to a previous page if the task requires it.]\n'
       + wrap('page_feedback', { events, currentUrl: url, page: this._limitToolResult ? this._limitToolResult(page) : page }) });
     run.latestObservation = messages.at(-1).content;
-    const id = `${run.token}:${run.revision}`;
+    const id = `${run.token}:${batchRevision}`;
     const navigation = events.filter(event => event.kind === 'navigation' && event.frameId === 0).at(-1);
     onUpdate('page_feedback', { id, kinds: [...new Set(events.map(event => event.kind))],
       source: navigation?.source || events[0]?.source || 'unknown',
@@ -285,6 +291,7 @@ export function installPageFeedback(Agent) {
     const owner = dispatchOwners.get(tabId);
     const previousOperation = owner?.operationId;
     const operationId = run && mutation ? token() : '';
+    let noDispatch = false;
     if (run && mutation && owner) {
       owner.operationId = operationId;
       owner.operationFrames.set(operationId, new Set([0]));
@@ -294,10 +301,12 @@ export function installPageFeedback(Agent) {
     try {
       if (run && mutation && this._hasPendingPageFeedback(tabId)) return pageFeedbackPendingResult();
       const result = await execute.call(this, tabId, name, args, onUpdate, executionContext);
+      noDispatch = result?.noDispatch === true || result?.dispatched === false;
       if (run && mutation && this._hasPendingPageFeedback(tabId) && result?.noDispatch === true
           && !result.denied && !result.cancelled && !result.outcomeUnknown) return { ...result, pageFeedbackPending: true };
       return result;
     } catch (error) {
+      noDispatch = !dispatchState.started;
       if (error?.code === 'page_feedback_pending') {
         if (!dispatchState.started) return pageFeedbackPendingResult();
         const interrupted = { success: false, dispatched: true, outcomeUnknown: true, retryable: false,
@@ -307,6 +316,7 @@ export function installPageFeedback(Agent) {
       throw error;
     } finally {
       if (run && mutation && owner) {
+        if (noDispatch && run.navigation?.operationId === operationId) run.navigation = null;
         owner.operationId = previousOperation;
         const frames = owner.operationFrames.get(operationId) || new Set([0]);
         owner.operationFrames.delete(operationId);

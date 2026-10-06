@@ -1200,4 +1200,5 @@ export default {
   'st.providers.webgpu_download.resume': 'Resume',
   'st.providers.webgpu_download.stop': 'Stop & remove',
   'st.providers.webgpu_download.activate_blocked': 'Download the selected model before choosing WebGPU for chat.',
+  'sp.monitor.navigation': "A página mudou enquanto a tarefa estava em execução ({before} → {after}). A tarefa continua.",
 };

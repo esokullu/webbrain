@@ -262,6 +262,9 @@
       if (!op) return;
       const marker = { userAt: op.userAt };
       agentTurn = marker;
+      if (op.navigationCandidate && ['click', 'pointerdown'].includes(event.type)) {
+        send({ kind: 'activity', source: 'agent', operation: 'click' });
+      }
       // Native listeners have microtask checkpoints between callbacks. Keep this
       // exact input's attribution through its page handlers, until the next task.
       setTimeout(() => { if (agentTurn === marker) agentTurn = null; }, 0);
@@ -376,6 +379,7 @@
     if (!params.release) op.eventTypes = Array.isArray(params.eventTypes) ? new Set(params.eventTypes) : null;
     op.focused = params.kind === 'input'; op.kind = params.kind;
     op.nativeWheel = params.nativeWheel === true;
+    if (!params.release) op.navigationCandidate = params.kind === 'click' && params.navigationCandidate !== false;
     op.scrollAncestors = new Set();
     if (params.scrollIntoView || params.nativeWheel || ['input', 'click'].includes(params.kind)) {
       for (let node = op.target?.parentElement; node; node = node.parentElement) op.scrollAncestors.add(node);
@@ -384,8 +388,6 @@
     op.kinds = new Set([params.kind, 'dom', ...(params.kind === 'input' ? ['selection'] : []), 'scroll']);
     op.until = Date.now() + 1500; op.dispatched = true;
     operations.set(op.operationId, op);
-    // Background navigation correlation needs the actual content dispatch as well as CDP/BiDi.
-    if (params.kind === 'click' && params.navigationCandidate !== false) send({ kind: 'activity', source: 'agent', operation: 'click' });
   }
   const localMutations = new Set(['click', 'click_ax', 'type', 'type_ax', 'set_field', 'set_checked', 'press_keys', 'scroll',
     'hover', 'drag_drop', 'patch_element', 'revert_patch', 'highlight_element', 'execute_js',
