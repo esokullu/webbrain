@@ -167,6 +167,11 @@ function redactStrictStructuredValues(value) {
 
 function cloudSafeUpdateData(type, data, { strictSecretMode = false } = {}) {
   if (!data || typeof data !== 'object') return data;
+  if (type === 'page_feedback') {
+    return { id: String(data.id || ''), source: data.source, kinds: data.kinds,
+      navigation: data.navigation === true,
+      ...(data.navigation ? { message: 'Page changed while the task was running. Continuing the task.' } : {}) };
+  }
   const name = String(data.name || data.tool || '');
   if (strictSecretMode && CLOUD_STRICT_MODEL_TEXT_TYPES.has(type)) {
     return {

@@ -21,6 +21,7 @@
     if (!el) {
       el = document.createElement('div');
       el.id = 'webbrain-ollama-launch-status';
+      (window.__wbPageMonitorDecorations ??= new WeakSet()).add(el);
       el.style.cssText = [
         'position:fixed',
         'z-index:2147483647',

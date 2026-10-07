@@ -185,6 +185,7 @@ host.lang = localization.locale;
     if (host?.isConnected) return;
     host = document.createElement('div');
     host.id = 'webbrain-selection-shortcut-host';
+    (window.__wbPageMonitorDecorations ??= new WeakSet()).add(host);
     host.style.cssText = 'position:fixed;inset:0;width:100vw;height:100vh;display:block;pointer-events:none;z-index:2147483647';
     shadow = host.attachShadow({ mode: 'closed' });
     shadow.innerHTML = `

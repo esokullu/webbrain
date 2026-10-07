@@ -1162,4 +1162,5 @@ export default {
   "st.sync.consent.legacy": "암호화된 동기화를 사용하시겠습니까? WebBrain은 추억, 프로필 자동 완성 및 API 키 제공자 설정의 엔드 투 엔드 암호화 사본을 WebBrain Compass로 전송합니다. 채팅 기록과 OAuth 로그인은 동기화되지 않습니다.",
   "st.sync.consent.denied": "암호화된 동기화 권한이 부여되지 않았습니다.",
   'st.providers.webgpu_note.body': '{modelLink} runs entirely in Chrome with no API endpoint. Download it in Settings > Providers > WebGPU or Apocalypse Mode, then use the nuclear control in standalone chat.',
+  'sp.monitor.navigation': "작업 실행 중 페이지가 변경되었습니다({before} → {after}). 작업을 계속합니다.",
 };

@@ -1180,4 +1180,5 @@ export default {
   "st.sync.consent.legacy": "Bật đồng bộ hóa được mã hóa? WebBrain sẽ truyền bản sao được mã hóa nối đầu các ký ức của bạn, tự động điền hồ sơ và cài đặt nhà cung cấp khóa API tới WebBrain Compass. Lịch sử trò chuyện và thông tin đăng nhập OAuth không được đồng bộ hóa.",
   "st.sync.consent.denied": "Quyền đồng bộ hóa được mã hóa không được cấp.",
   'st.providers.webgpu_note.body': '{modelLink} chạy hoàn toàn trong Chrome mà không cần điểm cuối API. Tải mô hình trong Settings > Providers > WebGPU hoặc Chế độ Apocalypse, rồi dùng nút nuclear trong standalone chat.',
+  'sp.monitor.navigation': "Trang đã thay đổi khi tác vụ đang chạy ({before} → {after}). Tiếp tục tác vụ.",
 };

@@ -1,5 +1,5 @@
 {
-  "retrievedAt": "2026-10-07T00:18:39.126Z",
+  "retrievedAt": "2026-10-07T00:40:11.831Z",
   "url": "https://openrouter.ai/api/v1/models/inclusionai/ling-3.0-flash-vl/endpoints",
   "status": 200,
   "data": {
@@ -62,9 +62,9 @@
             "function": true
           },
           "status": 0,
-          "uptime_last_30m": 99.92563476043769,
-          "uptime_last_5m": 99.87740089906008,
-          "uptime_last_1d": 99.65869803990948,
+          "uptime_last_30m": 99.8768712332318,
+          "uptime_last_5m": 99.96572995202193,
+          "uptime_last_1d": 99.65962981575247,
           "supports_implicit_caching": false,
           "native_tools": {},
           "supports_voice_cloning": false,
@@ -115,9 +115,9 @@
             "function": true
           },
           "status": 0,
-          "uptime_last_30m": 100,
+          "uptime_last_30m": 99.93014320642682,
           "uptime_last_5m": 100,
-          "uptime_last_1d": 99.84113590735838,
+          "uptime_last_1d": 99.84195878145572,
           "supports_implicit_caching": false,
           "native_tools": {},
           "supports_voice_cloning": false,

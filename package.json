@@ -5,13 +5,13 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "npm run test:cms && npm run test:markdown && npm run test:generative-media && npm run test:systemone && npm run test:systemone:fast && node --test test/browser-dialogs.mjs test/capsolver-cloud-broker.mjs test/captcha-providers.mjs test/captcha-weighted-fallback.mjs test/captcha-hcaptcha-providers.mjs test/captcha-native-providers.mjs test/captcha-runtime-policy.mjs test/captcha-callback-bridge.mjs test/captcha-aws-recovery.mjs test/captcha-documented-contracts.mjs test/huggingface-signup-recovery.mjs test/trace-full-export.mjs && npm run test:firefox-bidi && npm run test:runtime-lifecycle && npm run test:billing-notice && npm run test:compass-quota && npm run test:provider-limits && npm run test:provider-catalog && npm run test:openrouter-capabilities && npm run test:accessibility-tree-benchmark && npm run test:toolbar-guard && npm run test:cloud-bridge-approval && npm run test:discord && npm run test:pdf-read && npm run test:pdf-selection && npm run test:social-contract && npm run test:safesocial && npm run test:build-unpacked && npm run test:attachment-drop && npm run test:workflow-editor && node --test test/profile-sync-stats.mjs && node --test test/memcode-recall.mjs && node test/run.js && node test/selection-scope-restoration.mjs && node scripts/benchmark-offline-relevance.mjs && npm run test:security",
+    "test": "npm run test:cms && npm run test:markdown && npm run test:generative-media && npm run test:systemone && npm run test:systemone:fast && node --test test/browser-dialogs.mjs test/capsolver-cloud-broker.mjs test/captcha-providers.mjs test/captcha-weighted-fallback.mjs test/captcha-hcaptcha-providers.mjs test/captcha-native-providers.mjs test/captcha-runtime-policy.mjs test/captcha-callback-bridge.mjs test/captcha-aws-recovery.mjs test/captcha-documented-contracts.mjs test/huggingface-signup-recovery.mjs test/trace-full-export.mjs test/feedback-traces.mjs && npm run test:firefox-bidi && npm run test:runtime-lifecycle && npm run test:billing-notice && npm run test:compass-quota && npm run test:provider-limits && npm run test:provider-catalog && npm run test:openrouter-capabilities && npm run test:accessibility-tree-benchmark && npm run test:toolbar-guard && npm run test:cloud-bridge-approval && npm run test:discord && npm run test:pdf-read && npm run test:pdf-selection && npm run test:social-contract && npm run test:safesocial && npm run test:build-unpacked && npm run test:attachment-drop && npm run test:workflow-editor && node --test test/profile-sync-stats.mjs && node --test test/memcode-recall.mjs && node test/run.js && node test/selection-scope-restoration.mjs && node scripts/benchmark-offline-relevance.mjs && npm run test:security",
     "test:captcha:ui": "node test/captcha-settings-ui.mjs && node test/captcha-application-ui.mjs",
     "test:captcha:bridge:ui": "node test/captcha-callback-bridge-ui.mjs",
     "test:billing-notice": "node test/billing-payment-notice.mjs",
     "test:provider-limits": "node test/provider-model-limits.mjs",
     "test:provider-catalog": "node test/provider-catalog-integrations.mjs",
-    "test:openrouter-capabilities": "node --test test/openrouter-model-capabilities.mjs test/muse-tool-choice.mjs",
+    "test:openrouter-capabilities": "node --test test/openrouter-model-capabilities.mjs test/muse-tool-choice.mjs test/model-retry.mjs",
     "test:markdown": "node --test test/markdown-render.mjs",
     "test:accessibility-tree-benchmark": "node --test test/llm/lib/accessibility-tree-formats.test.mjs && node test/llm/accessibility-tree-benchmark.mjs --no-exact-tokenizer --check",
     "test:attachment-drop": "node test/attachment-drop.mjs",
@@ -53,7 +53,8 @@
     "benchmark:relevance": "node scripts/benchmark-offline-relevance.mjs --verbose",
     "test:social-contract": "node --test test/social-publish-contract.mjs",
     "test:social-contract:dom": "node test/social-publish-contract-dom.mjs",
-    "test:runtime-lifecycle": "node --test test/agent-lifecycle.mjs test/runtime-lifecycle.mjs test/network-lifecycle.mjs test/text-write-cancellation.mjs test/chat-steering.mjs && node test/ui-content-lifecycle.mjs && node --test test/chat-steering-ui.mjs",
+    "test:runtime-lifecycle": "node --test test/agent-lifecycle.mjs test/runtime-lifecycle.mjs test/network-lifecycle.mjs test/text-write-cancellation.mjs test/chat-steering.mjs test/page-feedback.mjs && node test/ui-content-lifecycle.mjs && node --test test/chat-steering-ui.mjs test/page-monitor-ui.mjs",
+    "test:page-feedback": "node --test test/page-feedback.mjs test/page-monitor-ui.mjs",
     "test:chat-steering": "node --test test/chat-steering.mjs test/chat-steering-ui.mjs",
     "test:rich-text-dom": "node test/ui-content-lifecycle.mjs --dom",
     "test:firefox-bidi": "node --test test/firefox-bidi.mjs test/firefox-full-page-screenshot.mjs",
@@ -71,7 +72,8 @@
     "test:compass-quota:ui": "node test/compass-quota-ui.mjs",
     "test:generative-media": "node --test test/generative-media.mjs test/generative-media-availability.mjs",
     "test:generative-media:ui": "node test/generative-media-ui.mjs",
-    "test:generative-media:extension": "node test/generative-media-extension.mjs"
+    "test:generative-media:extension": "node test/generative-media-extension.mjs",
+    "test:feedback": "node --test test/feedback-traces.mjs"
   },
   "devDependencies": {
     "playwright": "^1.48.0",

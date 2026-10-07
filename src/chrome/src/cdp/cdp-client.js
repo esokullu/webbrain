@@ -5,6 +5,34 @@
  */
 
 import { combineImages } from './image-utils.js';
+import { beforePageAgentDispatch, hasPageAgentDispatchOwner, pageFeedbackPendingResult } from '../agent/page-feedback.js';
+
+const SELECTOR_SCROLL_DISPATCH_SOURCE = `
+  const beforeSelectorScroll = (element, guard) => {
+    if (!guard) return true;
+    const doc = element.ownerDocument;
+    if (!element.isConnected || doc.documentElement?.getAttribute('data-webbrain-page-revision') !== guard.documentToken + ':' + guard.revision) return false;
+    return element.dispatchEvent(new doc.defaultView.CustomEvent('webbrain-agent-scroll-dispatch', {
+      bubbles: true, composed: true, cancelable: true, detail: JSON.stringify(guard),
+    }));
+  };
+`;
+
+const PAGE_AGENT_DOM_ACTION_SOURCE = `
+  const beforePageAgentDomAction = (guard, phase, target = window) => {
+    if (!guard) return true;
+    const event = new CustomEvent('webbrain-agent-dom-dispatch', {
+      detail: JSON.stringify({ ...guard, dispatchPhase: phase }), bubbles: true, composed: true, cancelable: true,
+    });
+    return target.dispatchEvent(event);
+  };
+`;
+
+function throwIfPageFeedbackPending(result) {
+  if (!result?.pageFeedbackPending) return;
+  const error = new Error(pageFeedbackPendingResult().error);
+  error.code = 'page_feedback_pending'; throw error;
+}
 
 function readProseMirrorText(el) {
   if (!el?.isContentEditable || !el.classList?.contains('ProseMirror')) return null;
@@ -139,6 +167,7 @@ export class CDPClient {
     try {
       chrome.debugger.onDetach.addListener(this._onDebuggerDetach);
     } catch (error) {
+      if (error?.code === 'page_feedback_pending') throw error;
       chrome.debugger.onEvent.removeListener(this._onDebuggerEvent);
       throw error;
     }
@@ -335,6 +364,7 @@ export class CDPClient {
       // must release the run even when Chrome never answers this command.
       await Promise.race([this.sendCommand(tabId, 'Page.enable'), interrupted]);
     } catch (error) {
+      if (error?.code === 'page_feedback_pending') throw error;
       markPendingAttachCancelled();
       if (this.dialogRuns.get(tabId) === owner) this.stopDialogHandling(tabId);
       throw error;
@@ -404,6 +434,26 @@ export class CDPClient {
       throw new Error(`Not attached to tab ${tabId}`);
     }
 
+    if (['Input.dispatchMouseEvent', 'Input.dispatchKeyEvent', 'Input.insertText'].includes(method)) {
+      const release = ['mouseReleased', 'keyUp'].includes(params.type);
+      let target = {};
+      try { target = await this._pageAgentInputTarget(tabId, method, params, sessionId); }
+      catch (error) { if (!release) throw error; } // Always allow held input to be released after navigation.
+      await beforePageAgentDispatch(globalThis.chrome, tabId, {
+        kind: method === 'Input.dispatchMouseEvent' ? (params.type === 'mouseWheel' ? 'scroll' : 'click') : 'input',
+        nativeWheel: params.type === 'mouseWheel',
+        navigationCandidate: params.type === 'mousePressed',
+        ...(Number.isFinite(params.x) ? { x: params.x, y: params.y } : {}),
+        release,
+        ...(method === 'Input.insertText' ? { eventTypes: ['beforeinput', 'input', 'change'] } : {}),
+        ...(method === 'Input.dispatchMouseEvent' ? { eventTypes: params.type === 'mouseMoved'
+          ? ['pointerover', 'pointerenter', 'mouseover', 'mouseenter', 'pointermove', 'mousemove']
+          : params.type === 'mousePressed' ? ['pointerover', 'pointerenter', 'mouseover', 'mouseenter', 'pointerdown', 'mousedown', 'click', 'input', 'change']
+            : params.type === 'mouseWheel' ? ['wheel'] : ['pointerup', 'mouseup', 'click', 'input', 'change'] } : {}),
+        ...target,
+      });
+    }
+
     return new Promise((resolve, reject) => {
       chrome.debugger.sendCommand(
         { tabId, ...(sessionId ? { sessionId } : {}) },
@@ -423,6 +473,92 @@ export class CDPClient {
         },
       );
     });
+  }
+
+  async _pageAgentObjectTarget(tabId, objectId, sessionId = '') {
+    const nativeTarget = globalThis.crypto.randomUUID();
+    const result = await this.sendCommand(tabId, 'Runtime.callFunctionOn', {
+      objectId, returnByValue: true,
+      functionDeclaration: `function (marker) {
+        const fence = this.ownerDocument?.documentElement?.getAttribute('data-webbrain-page-revision');
+        if (!fence || !this.isConnected) return null;
+        this.setAttribute('data-webbrain-native-target', marker);
+        const split = fence.lastIndexOf(':');
+        return { nativeTarget: marker, documentToken: fence.slice(0, split), documentRevision: Number(fence.slice(split + 1)) };
+      }`,
+      arguments: [{ value: nativeTarget }],
+    }, sessionId);
+    return result?.result?.value || {};
+  }
+
+  async _pageAgentInputTarget(tabId, method, params, sessionId = '') {
+    if (!hasPageAgentDispatchOwner(tabId)) return {};
+    const keyboard = method !== 'Input.dispatchMouseEvent';
+    let x = params.x, y = params.y, currentSession = sessionId;
+    let contextId;
+    const temporarySessions = [];
+    try {
+      // A process-isolated iframe is returned as its owner node. Descend into
+      // that target rather than registering the parent document's expectation.
+      for (let depth = 0; depth < 16; depth++) {
+        let objectId, node;
+        if (keyboard) {
+          // Use the target tab's focused document even when another tab is active.
+          const focused = await this.sendCommand(tabId, 'Runtime.evaluate', {
+            expression: '(() => { let el = document.activeElement; while (el?.shadowRoot?.activeElement) el = el.shadowRoot.activeElement; return el; })()',
+            ...(contextId ? { contextId } : {}),
+          }, currentSession);
+          objectId = focused?.result?.objectId;
+          if (!objectId) return {};
+          ({ node } = await this.sendCommand(tabId, 'DOM.describeNode', { objectId }, currentSession));
+        } else {
+          const hit = await this.sendCommand(tabId, 'DOM.getNodeForLocation', { x: Math.round(x), y: Math.round(y) }, currentSession);
+          ({ node } = await this.sendCommand(tabId, 'DOM.describeNode', { backendNodeId: hit.backendNodeId }, currentSession));
+          const resolved = await this.sendCommand(tabId, 'DOM.resolveNode', { backendNodeId: hit.backendNodeId }, currentSession);
+          objectId = resolved.object.objectId;
+        }
+        if (node?.frameId && /^(IFRAME|FRAME)$/.test(node.nodeName)) {
+          let size;
+          let quads;
+          try {
+            if (!keyboard) {
+              ({ quads } = await this.sendCommand(tabId, 'DOM.getContentQuads', { objectId }, currentSession));
+              size = (await this.sendCommand(tabId, 'Runtime.callFunctionOn', { objectId,
+                functionDeclaration: 'function () { return { width: this.clientWidth, height: this.clientHeight }; }', returnByValue: true }, currentSession))?.result?.value;
+            }
+          } finally { await this.sendCommand(tabId, 'Runtime.releaseObject', { objectId }, currentSession); }
+          if (!keyboard) {
+            const q = quads?.[0];
+            if (!q || !size?.width || !size?.height) throw new Error('Cannot resolve native input frame');
+            const ax = q[2] - q[0], ay = q[3] - q[1], bx = q[6] - q[0], by = q[7] - q[1];
+            const determinant = ax * by - ay * bx, dx = x - q[0], dy = y - q[1];
+            if (!determinant) throw new Error('Cannot resolve native input frame');
+            x = (dx * by - dy * bx) / determinant * size.width;
+            y = (ax * dy - ay * dx) / determinant * size.height;
+          } else {
+            try {
+              ({ executionContextId: contextId } = await this.sendCommand(tabId, 'Page.createIsolatedWorld', { frameId: node.frameId, worldName: 'webbrain-input-attribution' }, currentSession));
+              continue;
+            } catch { /* A process-isolated document requires its child session. */ }
+          }
+          const existing = [...(this.runtimeContexts.get(tabId)?.values() || [])].find(context => context.frameId === node.frameId && context.sessionId);
+          if (existing) currentSession = existing.sessionId;
+          else {
+            const attached = await this.sendCommand(tabId, 'Target.attachToTarget', { targetId: node.frameId, flatten: true });
+            currentSession = attached.sessionId; temporarySessions.push(currentSession);
+          }
+          contextId = undefined;
+          continue;
+        }
+        try { return await this._pageAgentObjectTarget(tabId, objectId, currentSession); }
+        finally { await this.sendCommand(tabId, 'Runtime.releaseObject', { objectId }, currentSession); }
+      }
+      throw new Error('Native input frame nesting exceeds the monitor limit');
+    } finally {
+      for (const id of temporarySessions.reverse()) {
+        try { await this.sendCommand(tabId, 'Target.detachFromTarget', { sessionId: id }); } catch {}
+      }
+    }
   }
 
   /**
@@ -1224,6 +1360,7 @@ export class CDPClient {
         }
         return state;
       } catch (error) {
+        if (error?.code === 'page_feedback_pending') throw error;
         this._removeWebMCPHandlers(tabId, state);
         if (!state.closed && this.webMcpSessions.get(tabId) === state) {
           this.webMcpSessions.delete(tabId);
@@ -1475,6 +1612,7 @@ export class CDPClient {
         error: 'The WebMCP session closed before the tool could be dispatched.',
       };
     }
+    if (typeof options.beforeDispatch === 'function') await options.beforeDispatch();
     let invocation;
     try {
       invocation = await this.sendCommand(tabId, 'WebMCP.invokeTool', {
@@ -1483,6 +1621,7 @@ export class CDPClient {
         input: safeInput,
       }, tool.sessionId);
     } catch (error) {
+      if (error?.code === 'page_feedback_pending') throw error;
       return {
         success: false,
         dispatched: true,
@@ -2076,6 +2215,7 @@ export class CDPClient {
       }
       return { objectIds, objectGroup };
     } catch (error) {
+      if (error?.code === 'page_feedback_pending') throw error;
       await this.releaseObjectGroup(tabId, objectGroup);
       throw error;
     }
@@ -2125,6 +2265,36 @@ export class CDPClient {
     }
     const result = await this.sendCommand(tabId, 'Runtime.evaluate', params);
     return result;
+  }
+
+  /** Evaluate a function on the page global, passing data as protocol arguments. */
+  async evaluateFunction(tabId, functionDeclaration, args = [], options = {}) {
+    await this.sendCommand(tabId, 'Runtime.enable');
+    const global = await this.sendCommand(tabId, 'Runtime.evaluate', {
+      expression: 'globalThis',
+      returnByValue: false,
+      userGesture: true,
+    });
+    const objectId = global?.result?.objectId;
+    if (!objectId) return global;
+    const requestedTimeout = Number(options?.timeoutMs);
+    const params = {
+      functionDeclaration,
+      objectId,
+      arguments: args.map(value => ({ value })),
+      returnByValue: true,
+      awaitPromise: true,
+      userGesture: true,
+      allowUnsafeEvalBlockedByCSP: true,
+    };
+    if (Number.isFinite(requestedTimeout) && requestedTimeout > 0) {
+      params.timeout = Math.max(1, Math.min(30000, Math.round(requestedTimeout)));
+    }
+    try {
+      return await this.sendCommand(tabId, 'Runtime.callFunctionOn', params);
+    } finally {
+      await this.sendCommand(tabId, 'Runtime.releaseObject', { objectId }).catch(() => {});
+    }
   }
 
   /**
@@ -2178,6 +2348,32 @@ export class CDPClient {
    *   captureBounds:{x:number,y:number,width:number,height:number}
    * }>} Capture bounds are CSS pixels in top-page coordinates.
    */
+  async _scrollForFullPageCapture(tabId, x, y, captureState) {
+    const guard = await beforePageAgentDispatch(globalThis.chrome, tabId, {
+      kind: 'scroll', scrollIntoView: true, fenceOnly: true,
+      ...(captureState.operationId ? { operationId: captureState.operationId } : {}),
+    });
+    if (guard?.operationId) captureState.operationId = guard.operationId;
+    if (guard?.runToken) captureState.runToken = guard.runToken;
+    const result = await this.evaluateFunction(tabId, `function (pageGuard, x, y) {
+      ${SELECTOR_SCROLL_DISPATCH_SOURCE}
+      if (!beforeSelectorScroll(document.documentElement, pageGuard)) return { scrolled: false, pageFeedbackPending: true };
+      window.scrollTo(x, y);
+      return { scrolled: true };
+    }`, [guard || null, x, y]);
+    const value = result?.result?.value;
+    throwIfPageFeedbackPending(value);
+    if (value?.scrolled !== true) throw new Error('Could not scroll the page for full-page capture');
+  }
+
+  async _finishFullPageCaptureScroll(tabId, captureState) {
+    if (!captureState.runToken || !captureState.operationId || !hasPageAgentDispatchOwner(tabId)) return;
+    try {
+      await globalThis.chrome?.tabs?.sendMessage(tabId, { target: 'content', action: 'page_monitor_finish',
+        params: { runToken: captureState.runToken, operationId: captureState.operationId } }, { frameId: 0 });
+    } catch { /* The page may have navigated or the run may have ended. */ }
+  }
+
   async captureFullPageScreenshot(tabId, options = {}) {
     await this.sendCommand(tabId, 'Page.enable');
     const metrics = await this.sendCommand(tabId, 'Page.getLayoutMetrics');
@@ -2206,6 +2402,7 @@ export class CDPClient {
     let contentGrowths = 0;
     let captureBoundsFrozen = false;
     let infiniteScrollWarningAdded = false;
+    const captureState = {};
     const addInfiniteScrollWarning = () => {
       if (infiniteScrollWarningAdded) return;
       infiniteScrollWarningAdded = true;
@@ -2252,7 +2449,7 @@ export class CDPClient {
       ) {
         const bottomY = contentY + Math.max(0, contentHeight - tileHeight);
         const targetY = Math.min(contentY + discoveryOffsetY, bottomY);
-        await this.evaluate(tabId, `window.scrollTo(${contentX}, ${targetY})`);
+        await this._scrollForFullPageCapture(tabId, contentX, targetY, captureState);
         await new Promise(resolve => setTimeout(resolve, FULL_PAGE_SCROLL_SETTLE_MS));
         const grew = updateContentBounds(await this.sendCommand(tabId, 'Page.getLayoutMetrics'));
         const updatedBottomY = contentY + Math.max(0, contentHeight - tileHeight);
@@ -2278,7 +2475,7 @@ export class CDPClient {
           }
           const clipX = contentX + x;
           const clipY = contentY + y;
-          await this.evaluate(tabId, `window.scrollTo(${clipX}, ${clipY})`);
+          await this._scrollForFullPageCapture(tabId, clipX, clipY, captureState);
           await new Promise(resolve => setTimeout(resolve, FULL_PAGE_SCROLL_SETTLE_MS));
           // The page can still grow during the capture pass. Expand the loop
           // bounds before sizing this tile so a newly moved footer is included,
@@ -2335,7 +2532,12 @@ export class CDPClient {
         },
       };
     } finally {
-      await this.evaluate(tabId, `window.scrollTo(${originalScrollX}, ${originalScrollY})`).catch(() => {});
+      try {
+        if (!captureState.runToken || hasPageAgentDispatchOwner(tabId)) {
+          await this._scrollForFullPageCapture(tabId, originalScrollX, originalScrollY, captureState);
+        }
+      } catch { /* Preserve the user's new position if the page changed during capture. */ }
+      await this._finishFullPageCaptureScroll(tabId, captureState);
     }
   }
 
@@ -2393,7 +2595,10 @@ export class CDPClient {
   /**
    * Set file input files (for upload).
    */
-  async setFileInputFiles(tabId, objectId, filePaths) {
+  async setFileInputFiles(tabId, objectId, filePaths, options = {}) {
+    const target = hasPageAgentDispatchOwner(tabId) ? await this._pageAgentObjectTarget(tabId, objectId) : {};
+    await beforePageAgentDispatch(globalThis.chrome, tabId, { kind: 'input', eventTypes: ['input', 'change'], ...target });
+    options.beforeDispatch?.();
     await this.sendCommand(tabId, 'DOM.setFileInputFiles', {
       objectId,
       files: filePaths,
@@ -2419,9 +2624,15 @@ export class CDPClient {
     throwIfAborted();
     await this.sendCommand(tabId, 'Runtime.enable');
     throwIfAborted();
+    const target = hasPageAgentDispatchOwner(tabId) ? await this._pageAgentObjectTarget(tabId, objectId) : {};
+    const pageGuard = await beforePageAgentDispatch(globalThis.chrome, tabId, {
+      kind: 'input', eventTypes: ['input', 'change'], fenceOnly: true, prepareMonitor: true, ...target,
+    });
+    throwIfAborted();
     if (typeof options?.beforeDispatch === 'function') options.beforeDispatch();
     const res = await this.sendCommand(tabId, 'Runtime.callFunctionOn', {
-      functionDeclaration: `function (base64, filename, mimeType, actionDeadlineAt) {
+      functionDeclaration: `function (base64, filename, mimeType, actionDeadlineAt, pageGuard) {
+        ${PAGE_AGENT_DOM_ACTION_SOURCE}
         const deadlineExpired = () => Number(actionDeadlineAt) > 0 && Date.now() >= Number(actionDeadlineAt);
         if (deadlineExpired()) {
           return { success: false, dispatched: false, deadlineExpired: true, error: 'Upload action deadline expired before dispatch' };
@@ -2440,12 +2651,17 @@ export class CDPClient {
           if (deadlineExpired()) {
             return { success: false, dispatched: false, deadlineExpired: true, error: 'Upload action deadline expired before dispatch' };
           }
+          if (!beforePageAgentDomAction(pageGuard, 'input', this)) {
+            return { success: false, dispatched: false, noDispatch: true, pageFeedbackPending: true,
+              error: 'The page changed before the in-memory upload could dispatch.' };
+          }
           this.files = transfer.files;
           dispatched = true;
           this.dispatchEvent(new Event('input', { bubbles: true }));
           this.dispatchEvent(new Event('change', { bubbles: true }));
           return { success: true, dispatched: true, name: file.name, size: file.size, type: file.type };
         } catch (error) {
+          if (error?.code === 'page_feedback_pending') throw error;
           return { success: false, dispatched, error: error?.message || String(error) };
         }
       }`,
@@ -2455,6 +2671,7 @@ export class CDPClient {
         { value: String(filename || 'attachment') },
         { value: String(mimeType || 'application/octet-stream') },
         { value: deadlineAt },
+        { value: pageGuard || null },
       ],
       returnByValue: true,
     });
@@ -2784,6 +3001,7 @@ export class CDPClient {
             await f.slice(0, 1).arrayBuffer();
             readable = true;
           } catch (e) {
+            if (e?.code === 'page_feedback_pending') throw e;
             readable = false;
           }
           out.push({ name: f.name, size: f.size, type: f.type, readable });
@@ -2830,6 +3048,7 @@ export class CDPClient {
           contextId = isolated?.executionContextId || null;
         }
       } catch (e) {
+        if (e?.code === 'page_feedback_pending') throw e;
         contextId = null;
       }
 
@@ -2860,6 +3079,7 @@ export class CDPClient {
       });
       return res?.result?.value ?? null;
     } catch (e) {
+      if (e?.code === 'page_feedback_pending') throw e;
       return null;
     } finally {
       if (objectId) {
@@ -3100,6 +3320,7 @@ export class CDPClient {
           try {
             if (!el.matches(selector)) return false;
           } catch (e) {
+            if (e?.code === 'page_feedback_pending') throw e;
             return false;
           }
           if (!iconHref) return true;
@@ -3114,6 +3335,7 @@ export class CDPClient {
             try {
               return el.matches(selector);
             } catch (e) {
+              if (e?.code === 'page_feedback_pending') throw e;
               return false;
             }
           });
@@ -3124,6 +3346,7 @@ export class CDPClient {
             try {
               return el.matches(selector);
             } catch (e) {
+              if (e?.code === 'page_feedback_pending') throw e;
               return false;
             }
           });
@@ -3135,6 +3358,7 @@ export class CDPClient {
             try {
               if (!matchesSiteRule(el, rule)) continue;
             } catch (e) {
+              if (e?.code === 'page_feedback_pending') throw e;
               continue;
             }
             const explicit = String(el.getAttribute('aria-label') || el.getAttribute('title') || '').replace(/\\s+/g, ' ').trim();
@@ -3844,12 +4068,19 @@ export class CDPClient {
     await this.sendCommand(tabId, 'Runtime.enable');
     deadline.throwIfExpired();
 
+    const scrollGuard = scrollRequested ? await beforePageAgentDispatch(globalThis.chrome, tabId, {
+      kind: 'scroll', selector, scrollIntoView: true, fenceOnly: true,
+    }) : null;
+    deadline.throwIfExpired();
+
     const selectorJSON = JSON.stringify(selector);
     const requireUnique = options?.requireUnique === true;
 
     // ---- Strategy 1: JS walker (open shadow roots) ----
     const jsExpr = `
       (() => {
+        ${SELECTOR_SCROLL_DISPATCH_SOURCE}
+        const pageGuard = ${JSON.stringify(scrollGuard || null)};
         const sel = ${selectorJSON};
         const requireUnique = ${requireUnique};
         const scrollRequested = ${scrollRequested};
@@ -3865,6 +4096,7 @@ export class CDPClient {
               matches.push(...hits);
             }
           } catch (e) {
+            if (e?.code === 'page_feedback_pending') throw e;
             return { __error: 'Invalid selector: ' + e.message };
           }
           const walker = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT);
@@ -3900,6 +4132,7 @@ export class CDPClient {
         if (deadlineExpired()) return { found: false, deadlineExpired: true };
         if (scrollRequested && found.tagName !== 'SELECT') {
           if (deadlineExpired()) return { found: false, deadlineExpired: true };
+          if (!beforeSelectorScroll(found, pageGuard)) return { found: false, pageFeedbackPending: true };
           try { found.scrollIntoView({ block: 'center', inline: 'center' }); } catch (e) {}
         }
         const r = found.getBoundingClientRect();
@@ -3933,6 +4166,7 @@ export class CDPClient {
     const jsRes = await this.evaluate(tabId, jsExpr);
     deadline.throwIfExpired();
     const jsInfo = jsRes?.result?.value;
+    throwIfPageFeedbackPending(jsInfo);
     if (jsInfo?.deadlineExpired) deadline.throwIfExpired(true);
     if (jsInfo?.error) return jsInfo;
     if (jsInfo?.found) {
@@ -4054,7 +4288,7 @@ export class CDPClient {
       // deadline when a frozen renderer resumes, so deadline-bound callers use
       // a guarded Runtime function on the exact closed-shadow node instead.
       if (scrollRequested) {
-        if (deadline.deadlineAt > 0) {
+        if (deadline.deadlineAt > 0 || hasPageAgentDispatchOwner(tabId)) {
           let scrollObjectId = null;
           try {
             deadline.throwIfExpired();
@@ -4062,12 +4296,19 @@ export class CDPClient {
             deadline.throwIfExpired();
             scrollObjectId = resolved?.object?.objectId || null;
             if (scrollObjectId) {
+              const target = hasPageAgentDispatchOwner(tabId) ? await this._pageAgentObjectTarget(tabId, scrollObjectId) : {};
+              const guard = await beforePageAgentDispatch(globalThis.chrome, tabId, {
+                kind: 'scroll', scrollIntoView: true, fenceOnly: true, ...target,
+              });
+              deadline.throwIfExpired();
               const scrolled = await this.sendCommand(tabId, 'Runtime.callFunctionOn', {
                 objectId: scrollObjectId,
                 returnByValue: true,
-                functionDeclaration: `function (actionDeadlineAt) {
+                functionDeclaration: `function (actionDeadlineAt, pageGuard) {
+                  ${SELECTOR_SCROLL_DISPATCH_SOURCE}
                   const deadlineExpired = () => actionDeadlineAt > 0 && Date.now() >= actionDeadlineAt;
                   if (deadlineExpired()) return { scrolled: false, deadlineExpired: true };
+                  if (!beforeSelectorScroll(this, pageGuard)) return { scrolled: false, pageFeedbackPending: true };
                   try {
                     this.scrollIntoView({ block: 'center', inline: 'center' });
                   } catch {
@@ -4075,9 +4316,10 @@ export class CDPClient {
                   }
                   return { scrolled: true };
                 }`,
-                arguments: [{ value: deadline.deadlineAt }],
+                arguments: [{ value: deadline.deadlineAt }, { value: guard || null }],
               });
               deadline.throwIfExpired();
+              throwIfPageFeedbackPending(scrolled?.result?.value);
               if (scrolled?.result?.value?.deadlineExpired) deadline.throwIfExpired(true);
             }
           } finally {
@@ -4091,6 +4333,7 @@ export class CDPClient {
             await this.sendCommand(tabId, 'DOM.scrollIntoViewIfNeeded', { nodeId: foundNodeId });
             deadline.throwIfExpired();
           } catch (error) {
+            if (error?.code === 'page_feedback_pending') throw error;
             deadline.throwIfExpired();
             // Not all targets support this command.
           }
@@ -4126,6 +4369,7 @@ export class CDPClient {
         viaCDP: true,
       };
     } catch (e) {
+      if (e?.code === 'page_feedback_pending') throw e;
       if (
         e === options?.deadlineError
         || e === options?.abortSignal?.reason
@@ -4253,6 +4497,17 @@ export class CDPClient {
           deadlineExpired: true,
           error: error || 'Click action deadline expired before click dispatch',
         };
+    const pageFeedbackClickResult = (priorDispatchAttempted, focusDispatched = false) => {
+      if (!priorDispatchAttempted && !focusDispatched) return pageFeedbackPendingResult();
+      return {
+        success: false,
+        dispatched: true,
+        outcomeUnknown: true,
+        retryable: false,
+        pageFeedbackPending: true,
+        error: 'The page changed during click preparation. A prior click or focus may have taken effect; inspect the page before retrying.',
+      };
+    };
     if (info.inViewport && info.hitOk) {
       try {
         await this.armFileInputClickGuard(tabId);
@@ -4281,6 +4536,7 @@ export class CDPClient {
         try {
           throwIfAborted();
         } catch (error) {
+          if (error?.code === 'page_feedback_pending') throw error;
           await cancelPressedPointer();
           throw error;
         }
@@ -4307,6 +4563,7 @@ export class CDPClient {
           rect,
         };
       } catch (e) {
+        if (e?.code === 'page_feedback_pending') throw e;
         if (actionExpired()) throwIfAborted();
         // fall through to fallback
       }
@@ -4341,20 +4598,31 @@ export class CDPClient {
           const priorDispatchAttempted = dispatchAttempted;
           const validation = await authorizeDispatch({ x: info.x, y: info.y, tag: info.tag });
           if (validation.success !== true) return validation;
+          const pageGuard = await beforePageAgentDispatch(globalThis.chrome, tabId, { kind: 'click', selector, x: info.x, y: info.y });
           dispatchAttempted = true;
           const clicked = await this.sendCommand(tabId, 'Runtime.callFunctionOn', {
             objectId,
-            functionDeclaration: `function(actionDeadlineAt) {
+            functionDeclaration: `function(actionDeadlineAt, pageGuard) {
+              ${PAGE_AGENT_DOM_ACTION_SOURCE}
               if (actionDeadlineAt > 0 && Date.now() >= actionDeadlineAt) return false;
+              if (!this || !this.isConnected) return false;
+              if (!beforePageAgentDomAction(pageGuard, 'focus'))
+                return { pageFeedbackPending: true, noDispatch: true, dispatched: false };
               try { this.focus(); } catch {}
               if (actionDeadlineAt > 0 && Date.now() >= actionDeadlineAt) return false;
+              if (!this.isConnected || !beforePageAgentDomAction(pageGuard, 'click'))
+                return { pageFeedbackPending: true, noDispatch: false, dispatched: true };
               this.click();
               return true;
             }`,
-            arguments: [{ value: deadlineAt }],
+            arguments: [{ value: deadlineAt }, { value: pageGuard || null }],
             returnByValue: true,
             awaitPromise: false,
           });
+          if (clicked?.result?.value?.pageFeedbackPending === true) {
+            await this.consumeFileInputClickGuard(tabId);
+            return pageFeedbackClickResult(priorDispatchAttempted, clicked.result.value.dispatched === true);
+          }
           if (clicked?.result?.value === false) {
             return pageDeadlineResult(priorDispatchAttempted, 'Click action deadline expired before click dispatch');
           }
@@ -4380,6 +4648,7 @@ export class CDPClient {
           };
         }
       } catch (e) {
+        if (e?.code === 'page_feedback_pending') throw e;
         if (actionExpired()) throwIfAborted();
         // fall through
       } finally {
@@ -4390,21 +4659,19 @@ export class CDPClient {
     }
 
     // Step 3: JS fallback for open shadow roots.
-    const selectorJSON = JSON.stringify(selector);
     throwIfAborted();
     await this.armFileInputClickGuard(tabId);
     throwIfAborted();
     const fallbackValidation = await authorizeDispatch({ x: info.x, y: info.y, tag: info.tag });
     if (fallbackValidation.success !== true) return fallbackValidation;
     const priorDispatchAttempted = dispatchAttempted;
+    const pageGuard = await beforePageAgentDispatch(globalThis.chrome, tabId, { kind: 'click', selector, x: info.x, y: info.y });
     dispatchAttempted = true;
-    const fb = await this.evaluate(tabId, `
-      (() => {
-        const actionDeadlineAt = ${deadlineAt};
+    const fb = await this.evaluateFunction(tabId, `function (sel, actionDeadlineAt, pageGuard) {
+        ${PAGE_AGENT_DOM_ACTION_SOURCE}
         const deadlineExpired = () => actionDeadlineAt > 0 && Date.now() >= actionDeadlineAt;
         const deadlineFailure = () => ({ success: false, dispatched: false, noDispatch: true, deadlineExpired: true, error: 'Click action deadline expired' });
         if (deadlineExpired()) return deadlineFailure();
-        const sel = ${selectorJSON};
         const queryDeep = (root) => {
           try { const h = root.querySelector(sel); if (h) return h; } catch (e) { return null; }
           const w = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT);
@@ -4422,12 +4689,19 @@ export class CDPClient {
             ? type === 'submit' || (!type && !!(el.form || el.closest?.('form')))
             : false;
         if (deadlineExpired()) return deadlineFailure();
+        if (!beforePageAgentDomAction(pageGuard, 'focus'))
+          return { success: false, pageFeedbackPending: true, noDispatch: true, dispatched: false };
         try { el.focus(); } catch (e) {}
         if (deadlineExpired()) return deadlineFailure();
+        if (!el.isConnected)
+          return { success: false, dispatched: true, outcomeUnknown: true, retryable: false, error: 'Click target changed during focus.' };
+        if (!beforePageAgentDomAction(pageGuard, 'click'))
+          return { success: false, pageFeedbackPending: true, noDispatch: false, dispatched: true };
         el.click();
         const r = el.getBoundingClientRect();
         return {
           success: true,
+          dispatched: true,
           method: 'js-click',
           tag,
           type,
@@ -4435,9 +4709,13 @@ export class CDPClient {
           text: (el.innerText || '').slice(0, 80),
           rect: { x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height) },
         };
-      })()
-    `);
+      }`, [selector, deadlineAt, pageGuard || null], { timeoutMs: deadlineAt > 0 ? Math.max(1, Math.min(15000, deadlineAt - Date.now())) : 15000 });
     const fallbackResult = fb?.result?.value || { success: false, error: 'Click failed' };
+    if (fallbackResult.pageFeedbackPending === true) {
+      await this.consumeFileInputClickGuard(tabId);
+      return pageFeedbackClickResult(priorDispatchAttempted, fallbackResult.dispatched === true);
+    }
+    if (fallbackResult.outcomeUnknown === true && fallbackResult.dispatched === true) return fallbackResult;
     if (fallbackResult.deadlineExpired === true && fallbackResult.dispatched !== true) {
       return pageDeadlineResult(priorDispatchAttempted, fallbackResult.error);
     }
@@ -4782,6 +5060,7 @@ export class CDPClient {
           ...(commands.length ? { commands } : {}),
         });
       } catch (error) {
+        if (error?.code === 'page_feedback_pending') throw error;
         if (actionExpired()) {
           // A delayed debugger response can mean keyDown reached the page even
           // though the action deadline already expired. Release defensively so
@@ -4801,6 +5080,7 @@ export class CDPClient {
           ...keyParams,
         });
       } catch (error) {
+        if (error?.code === 'page_feedback_pending') throw error;
         if (actionExpired()) {
           await releaseKey();
           throwIfAborted();
@@ -5137,6 +5417,7 @@ export class CDPClient {
         throwIfAborted();
         focused = true;
       } catch (e) {
+        if (e?.code === 'page_feedback_pending') throw e;
         if (actionExpired()) {
           if (pointerPressed) await cancelPressedPointer();
           throwIfAborted();
@@ -5169,6 +5450,7 @@ export class CDPClient {
           focused = focusResult?.result?.value === true;
         }
       } catch (e) {
+        if (e?.code === 'page_feedback_pending') throw e;
         if (e?.code === 'content_action_timeout' || actionExpired()) throw e;
         // try next
       }
@@ -5222,6 +5504,7 @@ export class CDPClient {
           key: 'Delete', code: 'Delete', windowsVirtualKeyCode: 46,
         });
       } catch (e) {
+        if (e?.code === 'page_feedback_pending') throw e;
         if (actionExpired()) throwIfAborted();
         return {
           success: false,
@@ -5257,6 +5540,7 @@ export class CDPClient {
       await this.sendCommand(tabId, 'Input.insertText', { text });
       throwIfAborted();
     } catch (e) {
+      if (e?.code === 'page_feedback_pending') throw e;
       if (actionExpired()) throwIfAborted();
       return {
         success: false,
@@ -5301,6 +5585,7 @@ export class CDPClient {
    * Scroll page.
    */
   async scrollPage(tabId, direction, amount = 500) {
+    await beforePageAgentDispatch(globalThis.chrome, tabId, { kind: 'scroll' });
     const scrollCode = {
       down: `window.scrollBy(0, ${amount})`,
       up: `window.scrollBy(0, -${amount})`,

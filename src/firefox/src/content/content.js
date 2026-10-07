@@ -684,15 +684,20 @@
       const fullyVisible = _isFullyVisibleForInteraction(el, insets);
       const coveredByFixed = fullyVisible && _isCoveredByFixedNonModalSurface(el, view);
       if (!fullyVisible || coveredByFixed) {
+        window.__wbPageMonitor?.beforeLocalDispatch({ kind: 'scroll', target: el });
         el.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' });
         const rAfter = el.getBoundingClientRect();
         if (rAfter.top < insets.top) {
+          window.__wbPageMonitor?.beforeLocalDispatch({ kind: 'scroll', target: el });
           view.scrollBy({ top: rAfter.top - insets.top - 16, behavior: 'instant' });
         } else if (rAfter.bottom > view.innerHeight - insets.bottom) {
+          window.__wbPageMonitor?.beforeLocalDispatch({ kind: 'scroll', target: el });
           view.scrollBy({ top: rAfter.bottom - (view.innerHeight - insets.bottom) + 16, behavior: 'instant' });
         }
       }
-    } catch {
+    } catch (error) {
+      if (error?.code === 'page_feedback_pending') throw error;
+      window.__wbPageMonitor?.beforeLocalDispatch({ kind: 'scroll', target: el });
       try { el.scrollIntoView({ block: 'center', inline: 'center' }); } catch {}
     }
   }
@@ -1894,6 +1899,7 @@
     try {
       runClick();
     } catch (error) {
+      if (error?.code === 'page_feedback_pending') throw error;
       cleanupGuard();
       _filePickerGuardStates.delete(guardId);
       throw error;
@@ -2050,6 +2056,7 @@
             if (actionDeadlineExpired()) return deadlineFailure();
             inp.scrollIntoView({ block: 'center', inline: 'center' });
             if (actionDeadlineExpired()) return deadlineFailure();
+            window.__wbPageMonitor?.beforeLocalDispatch({ kind: 'focus', target: inp });
             inp.focus();
             el = inp;
             textResolvedExact = (needle === ltxt);
@@ -2093,6 +2100,7 @@
                 if (actionDeadlineExpired()) return deadlineFailure();
                 inp.scrollIntoView({ block: 'center', inline: 'center' });
                 if (actionDeadlineExpired()) return deadlineFailure();
+                window.__wbPageMonitor?.beforeLocalDispatch({ kind: 'focus', target: inp });
                 inp.focus();
                 el = inp;
                 textResolvedExact = (needle === ltxt);
@@ -2269,6 +2277,7 @@
           }
           if (target) {
             if (actionDeadlineExpired()) return deadlineFailure();
+            window.__wbPageMonitor?.beforeLocalDispatch({ kind: 'focus', target });
             target.focus();
             resolved = target;
           }
@@ -2343,9 +2352,11 @@
           return { success: true, method: 'select-already-set', selectedText: match.text.trim(), selectedValue: match.value };
         }
         if (actionDeadlineExpired()) return deadlineFailure();
+        window.__wbPageMonitor?.beforeLocalDispatch({ kind: 'focus', target: sel });
         sel.focus();
         if (actionDeadlineExpired()) return deadlineFailure();
         const nativeSetter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')?.set;
+        window.__wbPageMonitor?.beforeLocalDispatch();
         dispatched = true;
         if (nativeSetter) nativeSetter.call(sel, match.value);
         else sel.value = match.value;
@@ -2366,6 +2377,7 @@
     // Do NOT scrollIntoView (hidden selects inside modals scroll to wrong position).
     if (el instanceof HTMLSelectElement) {
       if (actionDeadlineExpired()) return deadlineFailure();
+      window.__wbPageMonitor?.beforeLocalDispatch({ kind: 'focus', target: el });
       el.focus();
       if (actionDeadlineExpired()) return deadlineFailure();
       const options = Array.from(el.options).map(o => o.text.trim());
@@ -2389,6 +2401,7 @@
       }
       if (nearbySel) {
         if (actionDeadlineExpired()) return deadlineFailure();
+        window.__wbPageMonitor?.beforeLocalDispatch({ kind: 'focus', target: nearbySel });
         nearbySel.focus();
         if (actionDeadlineExpired()) return deadlineFailure();
         const options = Array.from(nearbySel.options).map(o => o.text.trim());
@@ -2522,8 +2535,10 @@
         ...(coordinateClick ? { point: { x: Math.round(params.x), y: Math.round(params.y) } } : {}),
         _filePickerGuardId: clickWithoutNativeFilePicker(() => {}).guardId };
     }
-    dispatched = true;
-    const filePickerGuard = clickWithoutNativeFilePicker(() => el.click());
+    const filePickerGuard = withLocalPageDispatch(() => {
+      dispatched = true;
+      return clickWithoutNativeFilePicker(() => el.click());
+    });
     if (filePickerGuard.blocked) {
       return {
         ...filePickerBlockedResponse(filePickerGuard.blocked, params.text || el.innerText?.trim() || ''),
@@ -2595,6 +2610,13 @@
     return _typeTextInner(params, actionDeadlineExpired);
   }
 
+  function withLocalPageDispatch(callback) {
+    const monitor = window.__wbPageMonitor;
+    if (typeof monitor?.withLocalDispatch === 'function') return monitor.withLocalDispatch(callback);
+    monitor?.beforeLocalDispatch();
+    return callback();
+  }
+
   async function _insertContentEditableText(el, text, clear, actionDeadlineExpired = () => false) {
     const doc = el.ownerDocument;
     let dispatched = false;
@@ -2661,10 +2683,14 @@
       // execCommand is the native editing fallback: it preserves markup and
       // the editor's undo stack. Its beforeinput behavior differs by browser,
       // so offer the page a cancellable gate BEFORE invoking the command.
-      const accepted = el.dispatchEvent(new InputEvent('beforeinput', {
+      window.__wbPageMonitor?.beforeLocalDispatch();
+      const beforeInputGate = () => el.dispatchEvent(new InputEvent('beforeinput', {
         bubbles: true, composed: true, cancelable: true, inputType, data,
       }));
+      const accepted = window.__wbPageMonitor?.withLocalDispatch
+        ? window.__wbPageMonitor.withLocalDispatch(beforeInputGate) : beforeInputGate();
       if (el.innerHTML !== htmlBefore || !el.isConnected) {
+        window.__wbPageMonitor?.beforeLocalDispatch();
         dispatched = true;
         return failure('The editor changed while handling beforeinput. No additional text was dispatched.');
       }
@@ -2678,12 +2704,16 @@
           || range.endContainer !== rangeBefore.endContainer || range.endOffset !== rangeBefore.endOffset) {
         return failure('The editor focus or selection changed before text insertion.');
       }
+      window.__wbPageMonitor?.beforeLocalDispatch();
       dispatched = true;
       try {
-        if (!doc.execCommand(command, false, data)) {
+        const execute = () => doc.execCommand(command, false, data);
+        const inserted = window.__wbPageMonitor?.withLocalDispatch ? window.__wbPageMonitor.withLocalDispatch(execute) : execute();
+        if (!inserted) {
           return failure('The editor rejected native text entry. No DOM replacement was attempted.');
         }
       } catch (error) {
+        if (error?.code === 'page_feedback_pending') throw error;
         return failure(`Native text entry failed: ${error?.message || String(error)}`);
       }
       return null;
@@ -2837,22 +2867,19 @@
       }
       const nativeSetter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')?.set;
       if (actionDeadlineExpired()) return deadlineFailure();
-      dispatched = true;
-      if (nativeSetter) nativeSetter.call(el, match.value);
-      else el.value = match.value;
-      if (actionDeadlineExpired()) return deadlineFailure();
-      el.dispatchEvent(new Event('input', { bubbles: true }));
-      if (actionDeadlineExpired()) return deadlineFailure();
-      el.dispatchEvent(new Event('change', { bubbles: true }));
+      const dispatchResult = withLocalPageDispatch(() => {
+        dispatched = true;
+        if (nativeSetter) nativeSetter.call(el, match.value);
+        else el.value = match.value;
+        if (actionDeadlineExpired()) return deadlineFailure();
+        el.dispatchEvent(new Event('input', { bubbles: true }));
+        if (actionDeadlineExpired()) return deadlineFailure();
+        el.dispatchEvent(new Event('change', { bubbles: true }));
+      });
+      if (dispatchResult) return dispatchResult;
       await new Promise(resolve => setTimeout(resolve, 30));
       if (actionDeadlineExpired()) return deadlineFailure();
       return { success: true, ...(el.isConnected && el.value === match.value ? { verified: true } : {}), method: 'select', value: el.value };
-    }
-
-    if (params.clear) {
-      if (actionDeadlineExpired()) return deadlineFailure();
-      dispatched = true;
-      el.value = '';
     }
 
     // Use input events for React/Vue compatibility
@@ -2862,17 +2889,19 @@
     const nativeInputValueSetter = Object.getOwnPropertyDescriptor(proto, 'value')?.set;
 
     if (actionDeadlineExpired()) return deadlineFailure();
-    dispatched = true;
-    if (nativeInputValueSetter) {
-      nativeInputValueSetter.call(el, (params.clear ? '' : (el.value || '')) + params.text);
-    } else {
-      el.value = (params.clear ? '' : (el.value || '')) + params.text;
-    }
-
-    if (actionDeadlineExpired()) return deadlineFailure();
-    el.dispatchEvent(new Event('input', { bubbles: true }));
-    if (actionDeadlineExpired()) return deadlineFailure();
-    el.dispatchEvent(new Event('change', { bubbles: true }));
+    const dispatchResult = withLocalPageDispatch(() => {
+      dispatched = true;
+      if (nativeInputValueSetter) {
+        nativeInputValueSetter.call(el, (params.clear ? '' : (el.value || '')) + params.text);
+      } else {
+        el.value = (params.clear ? '' : (el.value || '')) + params.text;
+      }
+      if (actionDeadlineExpired()) return deadlineFailure();
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+      if (actionDeadlineExpired()) return deadlineFailure();
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    if (dispatchResult) return dispatchResult;
     const verified = await verifyValue(el, typedText, params.clear === true, beforeValue);
     if (actionDeadlineExpired()) return deadlineFailure();
 
@@ -3021,6 +3050,7 @@
           : 'window.find reported a match, but WebBrain could not verify a visible current selection in the top document (for example, the active match may be inside a frame while an older top-document selection remains). Do not claim it is visibly highlighted. The browser Find UI was not opened.',
       };
     } catch (error) {
+      if (error?.code === 'page_feedback_pending') throw error;
       return { success: false, found: false, dispatched: false, noDispatch: true, error: `find_text failed: ${error.message || error}` };
     }
   }
@@ -3130,6 +3160,7 @@
       // the same event object on document again would fire those listeners
       // twice per key (double-advancing ARIA listboxes, menus, etc.).
       if (actionDeadlineExpired()) return deadlineFailure();
+      window.__wbPageMonitor?.beforeLocalDispatch();
       dispatched = true;
       target.dispatchEvent(down);
       // A keydown listener may run across the deadline. Always release the
@@ -3227,6 +3258,7 @@
 
     if (target) {
       if (actionDeadlineExpired()) return deadlineFailure();
+      window.__wbPageMonitor?.beforeLocalDispatch();
       dispatched = true;
       if (direction === 'down') target.scrollBy(0, amount);
       else if (direction === 'up') target.scrollBy(0, -amount);
@@ -3237,6 +3269,7 @@
 
     // Always also scroll the window in case both are needed.
     if (actionDeadlineExpired()) return deadlineFailure();
+    window.__wbPageMonitor?.beforeLocalDispatch();
     dispatched = true;
     if (direction === 'down') window.scrollBy(0, amount);
     else if (direction === 'up') window.scrollBy(0, -amount);
@@ -3425,6 +3458,7 @@
     if (target) {
       containerBefore = target.scrollTop;
       if (actionDeadlineExpired()) return deadlineFailure();
+      window.__wbPageMonitor?.beforeLocalDispatch();
       dispatched = true;
       scrollElementInstant(target, direction, amount);
       containerAfter = target.scrollTop;
@@ -3435,6 +3469,7 @@
     const shouldScrollWindow = params.alsoWindow === true || !movedContainer;
     if (shouldScrollWindow && windowCanMove) {
       if (actionDeadlineExpired()) return deadlineFailure();
+      window.__wbPageMonitor?.beforeLocalDispatch();
       dispatched = true;
       if (direction === 'down') window.scrollBy(0, amount);
       else if (direction === 'up') window.scrollBy(0, -amount);
@@ -3487,6 +3522,8 @@
     try {
       return smartScrollPage(params, actionDeadlineExpired);
     } catch (e) {
+     if (e?.code === 'page_feedback_pending') throw e;
+      if (e?.code === 'page_feedback_pending') throw e;
       const fallback = legacyScrollPage(params || {}, actionDeadlineExpired);
       return {
         ...fallback,
@@ -3542,6 +3579,7 @@
       try {
         existing = document.querySelector(params.selector);
       } catch (e) {
+        if (e?.code === 'page_feedback_pending') throw e;
         resolve({
           success: false,
           found: false,
@@ -3711,6 +3749,7 @@
           warnings.push(`No element matched selector "${selector}".`);
         }
       } catch (e) {
+        if (e?.code === 'page_feedback_pending') throw e;
         warnings.push(`Invalid selector: ${e.message}`);
       }
     }
@@ -3773,6 +3812,7 @@
             media: sheet.media ? Array.from(sheet.media).join(', ') : '',
           });
         } catch (e) {
+          if (e?.code === 'page_feedback_pending') throw e;
           if (warnings.length < 10) {
             warnings.push(`Could not read stylesheet ${sheet.href || 'inline'}: ${e.name || e.message}`);
           }
@@ -5964,6 +6004,7 @@
           : {}),
       };
     } catch (error) {
+      if (error?.code === 'page_feedback_pending') throw error;
       return {
         success: false,
         messageSend: null,
@@ -5979,7 +6020,7 @@
 
   // --- Message handler ---
   browser.runtime.onMessage.addListener((msg, sender, sendResponse) => {
-    if (msg.target !== 'content') return;
+    if (msg.target !== 'content' || msg.action?.startsWith('page_monitor_')) return;
     if (WEBBRAIN_GENERATION !== (Number(window.__webbrain_generation) || 0)) return;
     const actionDeadlineAt = Number(msg.actionDeadlineAt) || 0;
     const actionDeadlineExpired = () => actionDeadlineAt > 0 && Date.now() >= actionDeadlineAt;
@@ -6041,6 +6082,7 @@
         try {
           return { success: true, started: startAttentionFlash() };
         } catch (error) {
+          if (error?.code === 'page_feedback_pending') throw error;
           return { success: false, error: error?.message || String(error) };
         }
       },
@@ -6049,6 +6091,7 @@
           stopAttentionFlash();
           return { success: true };
         } catch (error) {
+          if (error?.code === 'page_feedback_pending') throw error;
           return { success: false, error: error?.message || String(error) };
         }
       },
@@ -6074,9 +6117,11 @@
         let dispatched = false;
         try {
           const fn = new Function(msg.params.code);
+          window.__wbPageMonitor?.beforeLocalDispatch();
           dispatched = true;
           return { success: true, dispatched: true, result: fn() };
         } catch (e) {
+          if (e?.code === 'page_feedback_pending') throw e;
           const errMsg = (e && e.message) || String(e);
           const isCspBlock =
             (e && e.name === 'EvalError') ||
@@ -6155,6 +6200,7 @@
             refScopeUrl,
           };
         } catch (e) {
+          if (e?.code === 'page_feedback_pending') throw e;
           return { error: 'Failed to build accessibility tree: ' + (e && e.message || String(e)) };
         }
       },
@@ -6178,6 +6224,7 @@
               }
             : { success: true };
         } catch (e) {
+          if (e?.code === 'page_feedback_pending') throw e;
           return { success: false, error: e?.message || String(e) };
         }
       },
@@ -6205,6 +6252,7 @@
             refScopeUrl: location.href,
           };
         } catch (error) {
+          if (error?.code === 'page_feedback_pending') throw error;
           return { success: false, error: error?.message || String(error) };
         }
       },
@@ -6275,6 +6323,7 @@
               _scrollElementIntoClearView(el);
             } catch {}
           }
+          window.__wbPageMonitor?.beforeLocalDispatch({ preparation: true, kind: 'focus', target: el });
           try { el.focus({ preventScroll: true }); } catch {}
           const rect = el.getBoundingClientRect();
           if (!el.isConnected || rect.width < 1 || rect.height < 1) {
@@ -6419,10 +6468,12 @@
               _filePickerGuardId: clickWithoutNativeFilePicker(() => {}).guardId,
             };
           }
-          dispatched = true;
           const syntheticClickStartedAt = Date.now();
           const syntheticClickDispatchStartedAt = performance.now();
-          const filePickerGuard = clickWithoutNativeFilePicker(() => el.click());
+          const filePickerGuard = withLocalPageDispatch(() => {
+            dispatched = true;
+            return clickWithoutNativeFilePicker(() => el.click());
+          });
           const syntheticClickDispatchMs = Math.max(0, performance.now() - syntheticClickDispatchStartedAt);
           if (filePickerGuard.blocked) {
             return failure(
@@ -6543,6 +6594,7 @@
                 try {
                   resolve(buildResponse());
                 } catch (e) {
+                  if (e?.code === 'page_feedback_pending') throw e;
                   resolve(failure(e && e.message || String(e)));
                 }
               }, responseDelayMs);
@@ -6550,6 +6602,7 @@
           }
           return buildResponse();
         } catch (e) {
+          if (e?.code === 'page_feedback_pending') throw e;
           return failure(e && e.message || String(e));
         }
       },
@@ -6596,8 +6649,9 @@
             return failure(`set_checked only supports native input[type="checkbox"] controls; ${ref_id} resolved to ${tag || 'unknown'}${inputType ? `[type="${inputType}"]` : ''}.`);
           }
           if (actionDeadlineExpired()) return deadlineFailure();
-          try { _scrollElementIntoClearView(el); } catch {}
+          try { _scrollElementIntoClearView(el); } catch (error) { if (error?.code === 'page_feedback_pending') throw error; }
           if (actionDeadlineExpired()) return deadlineFailure();
+          window.__wbPageMonitor?.beforeLocalDispatch({ preparation: true, kind: 'focus', target: el });
           try { el.focus({ preventScroll: true }); } catch {}
           if (actionDeadlineExpired()) return deadlineFailure();
           const rect = el.getBoundingClientRect();
@@ -6638,8 +6692,10 @@
             };
           }
           if (actionDeadlineExpired()) return deadlineFailure();
-          dispatched = true;
-          el.click();
+          withLocalPageDispatch(() => {
+            dispatched = true;
+            el.click();
+          });
           if (actionDeadlineExpired()) return deadlineFailure();
           await new Promise(resolve => setTimeout(resolve, SET_FIELD_VERIFY_DELAY_MS));
           if (actionDeadlineExpired()) return deadlineFailure();
@@ -6673,6 +6729,7 @@
             }),
           };
         } catch (e) {
+          if (e?.code === 'page_feedback_pending') throw e;
           return failure(e && e.message || String(e));
         }
       },
@@ -6714,7 +6771,7 @@
             return failure(`ref_id ${ref_id} not found. Re-read the accessibility tree to get fresh ids.`, { suggestions });
           }
           if (actionDeadlineExpired()) return deadlineFailure();
-          try { _scrollElementIntoClearView(el); } catch {}
+          try { _scrollElementIntoClearView(el); } catch (error) { if (error?.code === 'page_feedback_pending') throw error; }
           if (actionDeadlineExpired()) return deadlineFailure();
           try { el.focus({ preventScroll: true }); } catch {}
           if (actionDeadlineExpired()) return deadlineFailure();
@@ -6735,6 +6792,7 @@
           let selectExpected = null;
           if (el.isContentEditable) {
             if (actionDeadlineExpired()) return deadlineFailure();
+            window.__wbPageMonitor?.beforeLocalDispatch();
             dispatched = true;
             previous = _editableTextValue(el);
             if (clear) {
@@ -6779,6 +6837,7 @@
                 return failure(`No <option> matching "${text}" in select ref_id ${ref_id}.`);
               }
               if (actionDeadlineExpired()) return deadlineFailure();
+              window.__wbPageMonitor?.beforeLocalDispatch();
               dispatched = true;
               const selSetter = Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype, 'value')?.set;
               if (selSetter) selSetter.call(el, match.value); else el.value = match.value;
@@ -6790,6 +6849,7 @@
               method = 'type_ax_select';
             } else {
               if (actionDeadlineExpired()) return deadlineFailure();
+              window.__wbPageMonitor?.beforeLocalDispatch();
               dispatched = true;
               previous = el.value || '';
               if (clear) el.value = '';
@@ -6852,6 +6912,7 @@
             fallbackAttempted,
           };
         } catch (e) {
+          if (e?.code === 'page_feedback_pending') throw e;
           return failure(e && e.message || String(e));
         }
       },
@@ -6888,7 +6949,7 @@
           const el = window.__wb_ax_lookup(ref_id);
           if (!el) return failure(`ref_id ${ref_id} not found. Re-read the accessibility tree.`);
           if (actionDeadlineExpired()) return deadlineFailure();
-          try { _scrollElementIntoClearView(el); } catch {}
+          try { _scrollElementIntoClearView(el); } catch (error) { if (error?.code === 'page_feedback_pending') throw error; }
           if (actionDeadlineExpired()) return deadlineFailure();
           try { el.focus({ preventScroll: true }); } catch {}
           if (actionDeadlineExpired()) return deadlineFailure();
@@ -6926,6 +6987,7 @@
           }
           let prevValue = '';
           if (actionDeadlineExpired()) return deadlineFailure();
+          window.__wbPageMonitor?.beforeLocalDispatch();
           dispatched = true;
           if (el.isContentEditable) {
             prevValue = _editableTextValue(el);
@@ -7017,6 +7079,7 @@
                 const result = { dispatched: false, completedWithinDeadline: false };
                 if (actionDeadlineExpired()) return result;
                 const eventInit = { key, code: key, keyCode, bubbles: true, cancelable: true };
+                window.__wbPageMonitor?.beforeLocalDispatch();
                 result.dispatched = true;
                 el.dispatchEvent(new KeyboardEvent('keydown', eventInit));
                 const expiredAfterKeydown = actionDeadlineExpired();
@@ -7140,6 +7203,7 @@
             outcomeUnknown: submissionOutcomeUnknown || undefined,
           };
         } catch (e) {
+          if (e?.code === 'page_feedback_pending') throw e;
           return failure(e && e.message || String(e));
         }
       },
@@ -7172,6 +7236,7 @@
             fieldMeta: _fieldMeta(el),
           };
         } catch (error) {
+          if (error?.code === 'page_feedback_pending') throw error;
           return { success: false, verified: false, error: error && error.message || String(error) };
         }
       },
@@ -7237,6 +7302,7 @@
             stableSelector: _stableFieldSelector(el),
           };
         } catch (error) {
+          if (error?.code === 'page_feedback_pending') throw error;
           return { success: false, error: error && error.message || String(error) };
         }
       },
@@ -7274,7 +7340,7 @@
             return { success: false, error: `ref_id ${ref_id} not found.`, suggestions };
           }
           if (actionDeadlineExpired()) return deadlineFailure();
-          try { _scrollElementIntoClearView(el); } catch {}
+          try { _scrollElementIntoClearView(el); } catch (error) { if (error?.code === 'page_feedback_pending') throw error; }
           if (actionDeadlineExpired()) return deadlineFailure();
           const r = el.getBoundingClientRect();
           const cx = r.left + r.width / 2;
@@ -7283,6 +7349,7 @@
           const eventInit = { bubbles: true, cancelable: true, view: window, clientX: cx, clientY: cy };
           const dispatchHover = (EventType, type) => {
             if (actionDeadlineExpired()) return false;
+            window.__wbPageMonitor?.beforeLocalDispatch();
             dispatched = true;
             el.dispatchEvent(new EventType(type, eventInit));
             return !actionDeadlineExpired();
@@ -7312,6 +7379,7 @@
             note: 'Synthetic hover (Firefox has no CDP). isTrusted=false — sites that gate hover-reveal on event.isTrusted will not respond. Re-read the tree to confirm a menu/tooltip appeared.',
           };
         } catch (e) {
+          if (e?.code === 'page_feedback_pending') throw e;
           return { success: false, error: e && e.message || String(e) };
         }
       },
@@ -7384,6 +7452,7 @@
             if (actionDeadlineExpired()) return false;
             const ev = mk(type, x, y, target);
             if (ev) {
+              window.__wbPageMonitor?.beforeLocalDispatch();
               dispatched = true;
               try { target.dispatchEvent(ev); } catch {}
             }
@@ -7392,6 +7461,7 @@
           const dispatchCleanup = (type, x, y, target) => {
             const ev = mk(type, x, y, target);
             if (!ev) return;
+            window.__wbPageMonitor?.beforeLocalDispatch();
             dispatched = true;
             try { target.dispatchEvent(ev); } catch {}
           };
@@ -7452,6 +7522,7 @@
             note: 'Synthetic drag (Firefox has no CDP). isTrusted=false — some sites with strict event verification will not respond. Re-read the tree to confirm the order/position changed. If nothing moved, the site needs Chrome (CDP-trusted) drag.',
           };
         } catch (e) {
+          if (e?.code === 'page_feedback_pending') throw e;
           return { success: false, error: e && e.message || String(e) };
         }
       },
@@ -7585,6 +7656,7 @@
     // guards) from a full navigation no AX scope ever observed (drop stale
     // debt). Attach on every return path, including failures.
     const withLiveDocumentScope = (value) => {
+      finishPageAction();
       if ((msg.action === 'field_value_digest' || msg.action === 'ax_verify_field_value')
           && value && typeof value === 'object') {
         try {
@@ -7596,11 +7668,14 @@
     };
 
     let result;
+    let finishPageAction = () => {};
     try {
+      finishPageAction = window.__wbPageMonitor?.beginContentAction(msg.action, msg.params || {}) || finishPageAction;
       result = handler();
     } catch (err) {
       sendResponse(withLiveDocumentScope({
         success: false,
+        ...(err?.code === 'page_feedback_pending' ? { dispatched: err.dispatched === true, noDispatch: err.dispatched !== true, pageFeedbackPending: true, outcomeUnknown: err.dispatched === true } : {}),
         error: `${msg.action} failed: ${err?.message || String(err)}`,
       }));
       return;
@@ -7612,6 +7687,7 @@
         (value) => sendResponse(withLiveDocumentScope(value)),
         (err) => sendResponse(withLiveDocumentScope({
           success: false,
+          ...(err?.code === 'page_feedback_pending' ? { dispatched: err.dispatched === true, noDispatch: err.dispatched !== true, pageFeedbackPending: true, outcomeUnknown: err.dispatched === true } : {}),
           error: `${msg.action} failed: ${err?.message || String(err)}`,
         })),
       );

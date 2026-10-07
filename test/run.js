@@ -2477,6 +2477,7 @@ test('legacy iframe typing marks background dispatch only for its mutation phase
         }
         if (executePhase === 3) {
           assert.equal(dispatchMarks, 1, `${build}: mutation injection started without a dispatch marker`);
+          assert.equal(dispatchedFrameId, 9, `${build}: native preparation fence must target the selected iframe`);
           return build === 'chrome'
             ? [{ frameId: 9, result: { ok: true, dispatched: true, method: 'native-setter', value: 'typed' } }]
             : [{ ok: true, dispatched: true, method: 'native-setter', value: 'typed' }];
@@ -2495,6 +2496,7 @@ test('legacy iframe typing marks background dispatch only for its mutation phase
       const moduleUrl = pathToFileURL(path.join(ROOT, `src/${build}/src/agent/rich-text-toolbar-probe.js`)).href;
       const { RichTextToolbarProbe } = await import(`${moduleUrl}?legacy-mutation-boundary=${build}`);
       let cleanupWatchdog;
+      let dispatchedFrameId = null;
       const result = await Promise.race([
         new RichTextToolbarProbe({}).legacyIframeTypeAllFrames(77, {
           selector: '#editor',
@@ -2502,7 +2504,7 @@ test('legacy iframe typing marks background dispatch only for its mutation phase
           clear: true,
           urlFilter: 'frame.test',
         }, {
-          beforeDispatch: () => { dispatchMarks += 1; },
+          beforeDispatch: async frameId => { await Promise.resolve(); dispatchedFrameId = frameId; dispatchMarks += 1; },
         }),
         new Promise((_, reject) => {
           cleanupWatchdog = setTimeout(() => reject(new Error(`${build}: redundant cleanup blocked a completed mutation`)), 500);
@@ -2521,7 +2523,7 @@ test('legacy iframe typing marks background dispatch only for its mutation phase
         clear: true,
         urlFilter: 'frame.test',
       }, {
-        beforeDispatch: () => { dispatchMarks += 1; },
+        beforeDispatch: async frameId => { await Promise.resolve(); dispatchedFrameId = frameId; dispatchMarks += 1; },
       });
       assert.equal(expired.success, false, `${build}: expired preparation unexpectedly succeeded`);
       assert.equal(expired.deadlineExpired, true, `${build}: preparation expiry was not preserved`);
@@ -8047,7 +8049,7 @@ test('message recipient dispatch binding detects composer and active-thread race
     );
     assert.match(
       pressBranch,
-      /if \(actionDeadlineExpired\(\)\) return deadlineFailure\(\);\s*dispatched = true;\s*target\.dispatchEvent\(down\);[\s\S]*const expiredAfterKeydown = actionDeadlineExpired\(\);\s*target\.dispatchEvent\(up\);\s*if \(expiredAfterKeydown\) return deadlineFailure\(\);/,
+      /if \(actionDeadlineExpired\(\)\) return deadlineFailure\(\);\s*window\.__wbPageMonitor\?\.beforeLocalDispatch\(\);\s*dispatched = true;\s*target\.dispatchEvent\(down\);[\s\S]*const expiredAfterKeydown = actionDeadlineExpired\(\);\s*target\.dispatchEvent\(up\);\s*if \(expiredAfterKeydown\) return deadlineFailure\(\);/,
       `${label}: press_keys must guard keydown and classify deadline-only keyup cleanup as a partial dispatch`,
     );
     assert.match(
@@ -15227,8 +15229,8 @@ test('trace lossless tier: runtime-config accepts the boolean and defaults stay 
 test('trace lossless tier: recorder branches on the tier and clamps payloads', () => {
   for (const browser of ['chrome', 'firefox']) {
     const recorderSource = fs.readFileSync(path.join(ROOT, `src/${browser}/src/trace/recorder.js`), 'utf8');
-    assert.match(recorderSource, /async function losslessTraceEnabled\(\)/, `${browser}: losslessTraceEnabled missing`);
-    assert.match(recorderSource, /const lossless = meta\.lossless === true \|\| await losslessTraceEnabled\(\);/, `${browser}: tier decision missing in startRun`);
+    assert.match(recorderSource, /feedbackRecordingPolicy\(settings, meta\.force === true\)/, `${browser}: recording policy missing`);
+    assert.match(recorderSource, /const lossless = !policy\.feedbackOnly && \(meta\.lossless === true \|\| policy\.lossless\);/, `${browser}: tier decision must exclude automatic diagnostics`);
     assert.match(recorderSource, /\.\.\.\(lossless \? \{ lossless: true, losslessBytes: 0, losslessBytesEncoding: 'utf8' \} : \{\}\)/, `${browser}: run record does not stamp the tier and UTF-8 accounting unit`);
     assert.match(recorderSource, /const LOSSILESS_RESULT_CAP = 200_000;/, `${browser}: lossless result cap missing`);
     assert.match(recorderSource, /const LOSSILESS_REQUEST_CAP = 500_000;/, `${browser}: lossless request cap missing`);
@@ -16221,7 +16223,9 @@ test('agent trace instrumentation: turn/step boundaries, retries-before-wait, an
     const streamedClose = streamingBody.indexOf('closeTraceStep(this._traceStepEndForResult');
     const streamedToolBatch = streamingBody.indexOf('await this._executeToolBatch(');
     assert.ok(streamedClose >= 0 && streamedClose < streamedToolBatch, `${browser}: streaming LLM step stays open through terminal tool exits`);
-    assert.match(nonStreamingBody, /await trace\.recordLLMRetry\(runId, steps, \{ delayMs: 2000,[\s\S]*?await new Promise\(r => setTimeout\(r, 2000\)\)/, `${browser}: retry record is not durable before backoff`);
+    assert.match(nonStreamingBody, /retryModelCall\(e,[\s\S]*?onRetry: async[\s\S]*?await trace\.recordLLMRetry\(runId, steps, \{ delayMs,/, `${browser}: retry hook must durably record the actual backoff`);
+    const retrySource = fs.readFileSync(path.join(ROOT, `src/${browser}/src/providers/model-retry.js`), 'utf8');
+    assert.match(retrySource, /await onRetry\([\s\S]*?await sleep\(delayMs\)/, `${browser}: retry record is not durable before backoff`);
     assert.match(nonStreamingBody, /await trace\.recordTurnEnd\([\s\S]*?await this\._endTraceRun/, `${browser}: non-streaming turn_end is not flushed before run close`);
     assert.match(streamingBody, /await trace\.recordTurnEnd\([\s\S]*?await this\._endTraceRun/, `${browser}: streaming turn_end is not flushed before run close`);
     const finishStart = streamingBody.indexOf('const finish = (response, status = _traceStatus) => {');
@@ -27003,11 +27007,12 @@ test('cloud runs force trace capture without changing the interactive opt-in def
     'utf8',
   );
   assert.match(agentSource, /force:\s*runOptions\?\.cloudRun === true/);
-  assert.match(recorderSource, /if \(!forced && !\(await tracingEnabled\(\)\)\) return null/);
+  assert.match(recorderSource, /feedbackRecordingPolicy\(settings, meta\.force === true\)/);
+  assert.match(recorderSource, /if \(!policy\.enabled\) return null/);
   assert.match(recorderSource, /tracingEnabledForRun\(runId\)/);
   // The forced flag is restored from the durable run record after SW eviction
   // (peekRunFlags), keeping forced-capture semantics without an in-memory map.
-  assert.match(recorderSource, /forced: flags\.forced, lossless: flags\.lossless/);
+  assert.match(recorderSource, /forced: flags\.forced,[^\n]*lossless: flags\.lossless/);
 });
 
 test('cloud trace keeps CAPTCHA frame/vendor diagnostics after the rolling update window drops the event', async () => {
@@ -49638,7 +49643,7 @@ test('clarify tool auto-timeout is configurable and mirrored across browsers', (
     );
     assert.match(
       scheduler,
-      /const jobScopedUpdate = type === 'clarify'\s*\|\| type === 'clarify_timeout_extended'\s*\|\| type === 'clarify_auto'/,
+      /const jobScopedUpdate = type === 'page_feedback'\s*\|\| type === 'clarify'\s*\|\| type === 'clarify_timeout_extended'\s*\|\| type === 'clarify_auto'/,
       `${label}: scheduled clarify deadline updates should carry scheduledJobId`,
     );
     assert.match(scheduler, /type === 'clarify_timeout_extended'[\s\S]*?pendingClarify:[\s\S]*?deadlineTs:/, `${label}: scheduled clarifies should persist renewed deadlines`);
@@ -58114,7 +58119,7 @@ test('CDP selector resolution rejects queued open- and closed-shadow scrolls aft
     if (method === 'DOM.resolveNode') return { object: { objectId: 'late-closed-shadow-target' } };
     if (method === 'Runtime.callFunctionOn') {
       assert.match(params.functionDeclaration, /deadlineExpired[\s\S]*scrollIntoView/);
-      assert.deepEqual(params.arguments, [{ value: deadlineAt }]);
+      assert.deepEqual(params.arguments, [{ value: deadlineAt }, { value: null }]);
       return { result: { value: { scrolled: false, deadlineExpired: true } } };
     }
     return {};
@@ -64846,9 +64851,9 @@ test('Chrome Dev patch handlers keep page-local undo state and avoid MV3 eval', 
   const agentSource = fs.readFileSync(path.join(ROOT, 'src/chrome/src/agent/agent.js'), 'utf8');
   assert.match(source, /const devPatchRegistry = new Map\(\)/);
   assert.match(source, /name: change\.name, expected: change\.after, current/);
-  assert.match(source, /'patch_element': \(\) => patchDevElement/);
-  assert.match(source, /'revert_patch': \(\) => revertDevElementPatch/);
-  assert.match(source, /'highlight_element': \(\) => highlightDevElement/);
+  assert.match(source, /'patch_element': \(\) => \{[\s\S]*?beforeLocalDispatch\(\); return patchDevElement/);
+  assert.match(source, /'revert_patch': \(\) => \{[\s\S]*?beforeLocalDispatch\(\); return revertDevElementPatch/);
+  assert.match(source, /'highlight_element': \(\) => \{[\s\S]*?beforeLocalDispatch\(\); return highlightDevElement/);
   assert.doesNotMatch(source, /new Function\(msg\.params\.code\)/);
   assert.match(agentSource, /chrome\.scripting\.insertCSS\(\{ target: \{ tabId \}, css: injectedCss, origin: 'AUTHOR' \}\)/);
   assert.match(agentSource, /chrome\.scripting\.removeCSS\(\{ target: \{ tabId \}, css: patch\.injectedCss \|\| patch\.css, origin: 'AUTHOR' \}\)/);
@@ -81343,6 +81348,7 @@ test('set_field submit chooses exactly one native or page-owned commit path', as
       ${block}
       return { nativeSubmitAttempted, submissionOutcomeUnknown };
     }`, {
+      window: {},
       setTimeout: callback => callback(),
       KeyboardEvent: class KeyboardEvent {
         constructor(type, init = {}) {
@@ -107009,7 +107015,7 @@ test('Chrome click paths suppress native file choosers and redirect to upload_fi
     assert.deepEqual(chromeInjections[0], {
       target: { tabId: 42 },
       world: 'MAIN',
-      files: ['src/content/file-picker-guard-page.js'],
+      files: ['src/content/page-monitor-shadow.js', 'src/content/file-picker-guard-page.js'],
     });
     assert.ok(
       chromeInjections[1].files.includes('src/content/content.js'),
@@ -107031,6 +107037,8 @@ test('Chrome click paths suppress native file choosers and redirect to upload_fi
     const agent = Object.create(AgentFx.prototype);
     await agent._injectCoreContentScripts(43);
     assert.deepEqual(firefoxInjections.map(injection => injection.file), [
+      'src/content/page-monitor-shadow-loader.js',
+      'src/content/page-monitor.js',
       'src/content/file-picker-guard-loader.js',
       'src/content/rich-text-toolbar-heuristic.js',
       'src/content/accessibility-tree.js',
@@ -107550,6 +107558,113 @@ test('Firefox upload_file injects the exact user attachment bytes without re-fet
     else globalThis.browser = originalBrowser;
     if (originalFetch === undefined) delete globalThis.fetch;
     else globalThis.fetch = originalFetch;
+  }
+});
+
+test('Firefox fallback upload aborts before FileList assignment when the prepared monitor target is stale', async () => {
+  const originalBrowser = globalThis.browser;
+  const messages = [];
+  const scripts = [];
+  class MockFileInput {
+    constructor() { this.type = 'file'; this.id = 'upload'; this.labels = []; this.assignmentAttempts = 0; this._files = { length: 0 }; }
+    get files() { return this._files; }
+    set files(value) { this.assignmentAttempts++; this._files = value; }
+    getAttribute() { return null; }
+    dispatchEvent() { return true; }
+  }
+  const fileInput = new MockFileInput();
+  class MockDataTransfer {
+    constructor() {
+      const files = [];
+      files.item = index => files[index] || null;
+      this.files = files;
+      this.items = { add: file => { files.push(file); } };
+    }
+  }
+  class MockFile {
+    constructor(_bytes, name, options = {}) { this.name = name; this.type = options.type || ''; this.size = 1; }
+  }
+  const pageMonitor = {
+    activatePreparedDispatch({ operationId, kind, element }) {
+      assert.ok(operationId, 'the upload must carry its run-owned operation id');
+      assert.equal(kind, 'input');
+      assert.equal(element, fileInput, 'the final guard must bind to the probed file input');
+      const error = new Error('Browser changed during upload preparation. Re-observe before acting.');
+      error.code = 'page_feedback_pending';
+      throw error;
+    },
+    withPreparedDispatch() { assert.fail('stale upload must not enter the assignment callback'); },
+  };
+  const browser = {
+    tabs: {
+      async get(tabId) { return { id: tabId, url: 'https://example.com/upload' }; },
+      async sendMessage(_tabId, message) {
+        messages.push(message);
+        if (message.action === 'page_monitor_dispatch') {
+          return { ready: true, guard: {
+            operationId: message.params.operationId,
+            runToken: message.params.runToken,
+            documentToken: 'upload-document',
+            revision: 12,
+          } };
+        }
+        return { ready: true };
+      },
+      async executeScript(_tabId, details) {
+        scripts.push(details.code);
+        if (details.code.includes('WebBrain file attachment target probe')) {
+          return [{ success: true, dispatched: false }];
+        }
+        if (details.code.includes('WebBrain file attachment settle probe')) {
+          return [{ attachmentState: 'input_attached' }];
+        }
+        const document = {
+          querySelectorAll(selector) {
+            if (selector === 'input[type=file]') return [fileInput];
+            return [];
+          },
+        };
+        const result = vm.runInNewContext(details.code, {
+          window: { __wbPageMonitor: pageMonitor },
+          document,
+          HTMLInputElement: MockFileInput,
+          File: MockFile,
+          DataTransfer: MockDataTransfer,
+          Uint8Array,
+          Event: class MockEvent {},
+        });
+        return [result];
+      },
+    },
+    webNavigation: { async getAllFrames() { return [{ frameId: 0 }]; } },
+  };
+  let agent;
+  try {
+    globalThis.browser = browser;
+    agent = new AgentFx({});
+    await agent._beginPageFeedbackRun(42, 'chat');
+    const [attachment] = agent._registerUserAttachments(42, [{
+      kind: 'document', name: 'report.txt', mimeType: 'text/plain', dataUrl: 'data:text/plain;base64,cmVwb3J0',
+    }]);
+    const result = await agent.executeTool(42, 'upload_file', {
+      selector: 'input[type=file]', attachmentId: attachment.attachmentId,
+    }, null, { promptTier: 'mid' });
+
+    assert.equal(result.success, false);
+    assert.equal(result.pageFeedbackPending, true);
+    assert.equal(result.noDispatch, true);
+    assert.equal(result.dispatched, false);
+    assert.equal(fileInput.assignmentAttempts, 0, 'stale feedback must prevent FileList assignment');
+    assert.equal(fileInput.files.length, 0);
+    assert.equal(scripts.length, 2, 'the stale injection must not run the settle probe');
+    const boundary = messages.find(message => message.action === 'page_monitor_dispatch');
+    assert.equal(boundary.params.kind, 'input');
+    assert.equal(boundary.params.fenceOnly, true);
+    assert.ok(scripts[1].includes('activatePreparedDispatch'), 'the page-side injection must revalidate the monitor guard');
+  } finally {
+    try { agent?._finishPageFeedbackRun(42); } catch {}
+    if (originalBrowser === undefined) delete globalThis.browser;
+    else globalThis.browser = originalBrowser;
   }
 });
 
@@ -113137,7 +113252,7 @@ test('content-script actions have a bounded unknown-outcome timeout', async () =
     );
     assert.match(
       pressKeysSource,
-      /if \(actionDeadlineExpired\(\)\) return deadlineFailure\(\);\s*dispatched = true;\s*target\.dispatchEvent\(down\);[\s\S]*const expiredAfterKeydown = actionDeadlineExpired\(\);\s*target\.dispatchEvent\(up\);\s*if \(expiredAfterKeydown\) return deadlineFailure\(\);/,
+      /if \(actionDeadlineExpired\(\)\) return deadlineFailure\(\);\s*window\.__wbPageMonitor\?\.beforeLocalDispatch\(\);\s*dispatched = true;\s*target\.dispatchEvent\(down\);[\s\S]*const expiredAfterKeydown = actionDeadlineExpired\(\);\s*target\.dispatchEvent\(up\);\s*if \(expiredAfterKeydown\) return deadlineFailure\(\);/,
       `${label}: press_keys does not guard dispatch while guaranteeing keyup cleanup`,
     );
     const contentClickStart = contentSource.indexOf('function clickElement(params,');
@@ -113283,7 +113398,7 @@ test('content-script actions have a bounded unknown-outcome timeout', async () =
       `${label}: focus-only iframe expiry is misclassified as a text dispatch`,
     );
     const preparationResult = legacyType.indexOf(label === 'chrome' ? 'const prepared = preparedResults?.[0]?.result;' : 'const prepared = (await browser.tabs.executeScript');
-    const backgroundDispatchMarker = legacyType.indexOf("if (typeof beforeDispatch === 'function') beforeDispatch();", preparationResult);
+    const backgroundDispatchMarker = legacyType.indexOf("if (typeof beforeDispatch === 'function') await beforeDispatch(selected.frameId);", preparationResult);
     const mutationDispatch = legacyType.indexOf(label === 'chrome' ? 'const results = await chrome.scripting.executeScript' : 'code: mutationCode', backgroundDispatchMarker);
     assert.ok(
       preparationResult >= 0 && backgroundDispatchMarker > preparationResult && mutationDispatch > backgroundDispatchMarker,
@@ -113306,10 +113421,14 @@ test('content-script actions have a bounded unknown-outcome timeout', async () =
     assert.match(
       source,
       label === 'chrome'
-        ? /const legacyResult = await this\._legacyIframeTypeAllFrames[\s\S]*beforeDispatch: \(\) => \{\s*dispatched = true;\s*markEarlyCdpDispatched\(\);[\s\S]*legacyResult\?\.dispatched !== true && legacyResult\?\.noDispatch === true[\s\S]*earlyCdpDispatchState\.started = false;/
-        : /const legacyResult = await this\._legacyIframeTypeAllFrames[\s\S]*beforeDispatch: \(\) => \{\s*dispatched = true;\s*markContentPipelineDispatched\(\);[\s\S]*legacyResult\?\.dispatched !== true && legacyResult\?\.noDispatch === true[\s\S]*contentPipelineDispatchState\.started = false;/,
+        ? /const legacyResult = await this\._legacyIframeTypeAllFrames[\s\S]*beforeDispatch: async frameId => \{\s*await beforePageAgentDispatch\(globalThis\.chrome, tabId, \{[\s\S]*kind: 'input', selector, frameId, fenceOnly: true[\s\S]*dispatched = true;\s*markEarlyCdpDispatched\(\);[\s\S]*legacyResult\?\.dispatched !== true && legacyResult\?\.noDispatch === true[\s\S]*earlyCdpDispatchState\.started = false;/
+        : /const legacyResult = await this\._legacyIframeTypeAllFrames[\s\S]*beforeDispatch: async frameId => \{\s*await beforePageAgentDispatch\(globalThis\.browser \|\| globalThis\.chrome, tabId, \{[\s\S]*kind: 'input', selector, frameId, fenceOnly: true[\s\S]*dispatched = true;\s*markContentPipelineDispatched\(\);[\s\S]*legacyResult\?\.dispatched !== true && legacyResult\?\.noDispatch === true[\s\S]*contentPipelineDispatchState\.started = false;/,
       `${label}: legacy iframe typing keeps an optimistic dispatch marker after page-proven expiry`,
     );
+    assert.match(source, label === 'chrome'
+      ? /await beforePageAgentDispatch\(globalThis\.chrome, tabId, \{\s*kind: 'input', selector, frameId: targetFrameId, fenceOnly: true,/g
+      : /await beforePageAgentDispatch\(globalThis\.browser \|\| globalThis\.chrome, tabId, \{\s*kind: 'input', selector, frameId: targetFrameId, fenceOnly: true,/g,
+      `${label}: bound iframe typing skips the target-frame feedback fence`);
 
     const fallbackTypeStart = contentSource.indexOf('async function _typeTextInner(params, actionDeadlineExpired = () => false)');
     const fallbackTypeEnd = contentSource.indexOf('\n\n  /**', fallbackTypeStart + 20);
@@ -113336,7 +113455,7 @@ test('content-script actions have a bounded unknown-outcome timeout', async () =
     assert.ok(fallbackScrollStart >= 0 && fallbackScrollEnd > fallbackScrollStart, `${label}: fallback scroll deadline boundary missing`);
     assert.match(
       fallbackScroll,
-      /if \(actionDeadlineExpired\(\)\) return deadlineFailure\(\);\s*dispatched = true;\s*scrollElementInstant/,
+      /if \(actionDeadlineExpired\(\)\) return deadlineFailure\(\);\s*window\.__wbPageMonitor\?\.beforeLocalDispatch\(\);\s*dispatched = true;\s*scrollElementInstant/,
       `${label}: fallback container scrolling can start after its deadline`,
     );
     assert.match(
@@ -113614,7 +113733,8 @@ test('Chrome upload_file deadline distinguishes preparation from file-input disp
         }
         return { objectIds: ['input-1'], objectGroup: 'upload-deadline' };
       };
-      cdpClientCh.setFileInputFiles = async () => {
+      cdpClientCh.setFileInputFiles = async (_tabId, _objectId, _paths, options) => {
+        options.beforeDispatch();
         fileInputDispatches += 1;
         if (stallStage === 'dispatch') {
           markStageStarted();

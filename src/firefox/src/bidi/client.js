@@ -1,11 +1,25 @@
 /** Optional native-messaging transport. No raw BiDi commands are exposed to pages. */
+import { beforePageAgentDispatch, validateNativePageDispatch } from '../agent/page-feedback.js';
 export class FirefoxBidiClient {
   constructor(api) { this.apiOverride = api; this.pending = new Map(); this.runs = new Map(); this.captures = new Map(); this.sequence = 0; this.connectionEpoch = 0; }
   get api() { return this.apiOverride || globalThis.browser; }
   request(command, args = {}) {
     if (!this.port) {
       this.port = this.api.runtime.connectNative('one.webbrain.bidi');
-      this.port.onMessage.addListener(message => {
+      const port = this.port;
+      port.onMessage.addListener(message => {
+        if (message?.command === 'validatePageDispatch' && typeof message.id === 'string') {
+          void (async () => {
+            const entry = [...this.runs.entries()].find(([, run]) => run.runId === message.runId);
+            const result = entry ? await validateNativePageDispatch(this.api, entry[0], message.guard, {
+              kind: message.kind, rebindFocus: message.rebindFocus === true,
+            }) : false;
+            try { port.postMessage({ replyTo: message.id, result }); } catch { /* The native host may have disconnected. */ }
+          })().catch(() => {
+            try { port.postMessage({ replyTo: message.id, result: false }); } catch {}
+          });
+          return;
+        }
         const entry = this.pending.get(message.id); if (!entry) return;
         if (typeof message.chunk === 'string') {
           entry.chunks ||= [];
@@ -32,11 +46,11 @@ export class FirefoxBidiClient {
           const error = new Error(message.error);
           if (message.dispatchState?.dispatched === false && message.dispatchState?.noDispatch === true) {
             error.dispatchState = { dispatched: false, noDispatch: true, outcomeUnknown: false, retryable: true };
+            if (message.dispatchState.pageFeedbackPending === true) error.code = 'page_feedback_pending';
           }
           entry.reject(error);
         } else entry.resolve(message.result);
       });
-      const port = this.port;
       this.port.onDisconnect.addListener(() => {
         if (this.port !== port) return;
         this.port = null; this.connection = null;
@@ -139,12 +153,22 @@ export class FirefoxBidiClient {
     if (!owner || owner.signal?.aborted || owner.disconnected) throw new Error('No connected Firefox BiDi run; restart the task after reconnecting');
     await this.bindRun(tabId, owner);
     if (this.runs.get(tabId) !== owner || owner.disconnected || owner.signal?.aborted) throw new Error('Run stopped');
+    const pageFeedbackGuard = await beforePageAgentDispatch(this.api, tabId, {
+      kind: action === 'navigate' ? 'navigate' : action === 'scroll' ? 'scroll'
+        : ['type', 'field', 'key', 'upload'].includes(action) ? 'input' : 'click',
+      ...(payload.point ? { x: payload.point.x, y: payload.point.y } : {}),
+      selector: payload.selector, ref_id: payload.ref_id, frameId: payload.frameId || 0,
+      tool: action, prepareMonitor: true,
+      navigationCandidate: ['click', 'checked'].includes(action),
+      fenceOnly: true,
+      url: action === 'navigate' ? payload.url : undefined,
+    });
     if (!owner.bound) {
       if (action !== 'navigate' || !/^https?:\/\//.test(payload.url || '')) throw new Error('Navigate to a web page before trusted input');
       await this.api.tabs.update(tabId, { url: payload.url });
       return { success: true, dispatched: true, bindingDeferred: true };
     }
-    return this.request('perform', { runId: owner.runId, action, payload });
+    return this.request('perform', { runId: owner.runId, action, payload: { ...payload, pageFeedbackGuard } });
   }
   async sendContent(tabId, message, options) {
     const actions = { click: 'click', click_ax: 'click', type: 'type', type_ax: 'type', set_field: 'field', press_keys: 'key', hover: 'hover', bidi_prepare_upload: 'upload' };
@@ -163,7 +187,7 @@ export class FirefoxBidiClient {
     try {
       return { ...metadata, ...await this.perform(tabId, action, {
         ...message.params,
-        token,
+        token, frameId: options?.frameId || 0,
         url: prepared.url,
         point: prepared.point || null,
         checkable: prepared.checkable || null,
@@ -171,6 +195,8 @@ export class FirefoxBidiClient {
       }), ...(prepared.rect ? { rect: prepared.rect } : {}), ...(prepared._filePickerGuardId ? { _filePickerGuardId: prepared._filePickerGuardId } : {}) };
     } catch (error) {
       // A transport failure can occur after trusted input was delivered.
+      if (error?.code === 'page_feedback_pending') return { ...metadata, success: false, dispatched: false,
+        noDispatch: true, pageFeedbackPending: true, error: error.message };
       return { ...metadata, success: false, dispatched: true, outcomeUnknown: true, retryable: false, ...(error.dispatchState || {}), error: error.message };
     }
   }

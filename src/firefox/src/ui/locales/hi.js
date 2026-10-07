@@ -1180,4 +1180,5 @@ export default {
   "st.sync.consent.legacy": "एन्क्रिप्टेड सिंक चालू करें? WebBrain आपकी यादों, प्रोफ़ाइल ऑटोफ़िल और API-कुंजी प्रदाता सेटिंग्स की एंड-टू-एंड एन्क्रिप्टेड कॉपी WebBrain Compass को भेजेगा। चैट इतिहास और OAuth साइन-इन सिंक नहीं किए जाते।",
   "st.sync.consent.denied": "एन्क्रिप्टेड सिंक अनुमति नहीं दी गई थी.",
   'st.providers.webgpu_note.body': '{modelLink} बिना किसी API एंडपॉइंट के पूरी तरह Chrome में चलता है। इसे Settings > Providers > WebGPU या Apocalypse Mode में डाउनलोड करें, फिर standalone chat में nuclear control का उपयोग करें।',
+  'sp.monitor.navigation': "काम चलने के दौरान पेज बदल गया ({before} → {after})। काम जारी है।",
 };

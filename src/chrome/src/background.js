@@ -1,6 +1,8 @@
 import { resolveDecisionConfig, listDecisionModels } from './agent/decision-config.js';
 import { probeDecisionVision } from './agent/decision-vision-probe.js';
 import { installSafeSocialBackground } from './safesocial/background.js';
+import { createFeedbackHandoff } from './feedback-handoff.js';
+const feedbackHandoff = createFeedbackHandoff(chrome);
 import { ProviderManager } from './providers/manager.js';
 import {
   WEBGPU_COMPASS_TINY_V2_MODEL_ID,
@@ -2423,6 +2425,7 @@ const TEACHER_EXPLICIT_NAVIGATION_TYPES = new Set([
 ]);
 
 chrome.webNavigation?.onHistoryStateUpdated?.addListener((details) => {
+  agent.observePageNavigation(details, 'history');
   if (details.frameId !== 0) return;
   agent.observeCloudflareManagedChallengeNavigation(details).catch(() => {});
   recordNav(details.tabId, 'history', details.url);
@@ -2430,12 +2433,14 @@ chrome.webNavigation?.onHistoryStateUpdated?.addListener((details) => {
   invalidateContextMenuForTab(details.tabId);
 });
 chrome.webNavigation?.onReferenceFragmentUpdated?.addListener((details) => {
+  agent.observePageNavigation(details, 'fragment');
   if (details.frameId !== 0) return;
   agent.observeCloudflareManagedChallengeNavigation(details).catch(() => {});
   recordNav(details.tabId, 'fragment', details.url);
   invalidateContextMenuForTab(details.tabId);
 });
 chrome.webNavigation?.onCommitted?.addListener((details) => {
+  agent.observePageNavigation(details, 'committed');
   if (details.frameId !== 0) return;
   agent.observeCloudflareManagedChallengeNavigation(details).catch(() => {});
   recordNav(details.tabId, 'committed', details.url);
@@ -2837,6 +2842,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 });
 
 async function handleMessage(msg, sender) {
+  if (msg.action === 'get_page_monitor_state') return agent.pageMonitorState(sender, msg.documentToken, msg.frameName);
+  if (msg.action === 'page_feedback') return agent.observePageFeedback(sender, msg.feedback);
+  if (String(msg.action || '').startsWith('feedback_')) return feedbackHandoff.handle(msg, sender);
   if (msg.action === 'chat_steer') {
     // Content scripts must never turn page text into a trusted human correction.
     if (sender?.url?.split(/[?#]/)[0] !== chrome.runtime.getURL('src/ui/sidepanel.html')) {

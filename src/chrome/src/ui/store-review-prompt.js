@@ -110,16 +110,21 @@ export function getStoreUrl(browserKey = 'chrome') {
   return STORE_URLS[browserKey] || STORE_URLS.chrome;
 }
 
-export function buildFeedbackUrl({ rating, comment = '' } = {}) {
-  const title = encodeURIComponent(`WebBrain feedback (${rating}/5)`);
+export function buildFeedbackBody({ rating, comment = '', traceNote = '' } = {}) {
   const bodyParts = [
     `**Rating:** ${rating}/5`,
     '',
     String(comment || '').trim() || '_No additional comments provided._',
+    ...(traceNote ? ['', `**Trace:** ${String(traceNote)}`] : []),
     '',
     '---',
     '_Submitted from the WebBrain side panel feedback prompt._',
   ];
-  const body = encodeURIComponent(bodyParts.join('\n'));
+  return bodyParts.join('\n');
+}
+
+export function buildFeedbackUrl({ rating, comment = '', traceNote = '' } = {}) {
+  const title = encodeURIComponent(`WebBrain feedback (${rating}/5)`);
+  const body = encodeURIComponent(buildFeedbackBody({ rating, comment, traceNote }));
   return `${FEEDBACK_ISSUES_URL}?title=${title}&body=${body}`;
 }

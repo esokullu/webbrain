@@ -133,6 +133,12 @@ for (const [build, engine] of [['chrome', chromium], ['firefox', firefox]]) {
       assert.equal(await page.locator('#btn-send').getAttribute('title'), 'sp.steer.title · sp.queue.send (Alt+Shift+Enter)',
         'Saved preference hydrates both settings and composer');
       assert.equal(await page.locator('#btn-steer').count(), 0, 'No separate composer Steer button');
+      await input.fill('Queue through the explicit shortcut');
+      await input.press('Alt+Shift+Enter');
+      await page.waitForFunction(() => getQueuedComposerMessages(1).length === 1);
+      assert.equal(await page.evaluate(() => sent.length), 0, 'Alt+Shift+Enter queues even when Steer is the default');
+      assert.equal(await page.evaluate(() => composerDeliveryMode), 'steer', 'The shortcut does not change the saved default');
+      await page.evaluate(() => { queuedComposerMessagesByTab.clear(); renderQueuedComposerMessages(); });
       await deliverySetting.selectOption('queue');
       await page.waitForFunction(() => composerDeliveryMode === 'queue');
       assert.equal(await page.evaluate(() => storageData.composerDeliveryMode), 'queue');

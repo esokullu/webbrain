@@ -136,6 +136,7 @@ const notifySoundToggle = document.getElementById('toggle-notify-sound');
 const completionConfettiToggle = document.getElementById('toggle-completion-confetti');
 const completionFlashTabToggle = document.getElementById('toggle-completion-flash-tab');
 const tracingToggle = document.getElementById('toggle-tracing');
+const feedbackDiagnosticsToggle = document.getElementById('toggle-feedback-diagnostics');
 const losslessTracingToggle = document.getElementById('toggle-lossless-tracing');
 const strictSecretToggle = document.getElementById('toggle-strict-secret');
 const allowLocalNetworkToggle = document.getElementById('toggle-allow-local-network');
@@ -624,7 +625,7 @@ async function init() {
   chrome.storage.local.remove(['authToken', 'authEmail', 'authDefaultModel']).catch(() => {});
 
   // Load display settings
-  const stored = await chrome.storage.local.get([...DECISION_SETTINGS_KEYS, 'verboseMode', 'composerDeliveryMode', 'selectionShortcutEnabled', 'pdfViewerEnabled', AUTO_GROUP_TABS_KEY, 'helpImproveWebBrain', 'screenshotFallback', 'maxAgentSteps', 'autoScreenshot', 'useSiteAdapters', 'researchEscalationEnabled', 'researchEscalationEngine', 'voiceInputEnabled', 'alwaysAllowApiMutations', 'apiMutationObserverEnabled', 'webMcpEnabled', 'openaiAskStreamingEnabled', 'planBeforeActMode', 'planBeforeAct', 'planReviewMode', 'planReviewConfidenceThreshold', DOWNLOAD_DIRECTORY_STORAGE_KEY, 'notifySound', 'completionConfetti', 'completionFlashTab', 'tracingEnabled', 'losslessTrace', 'strictSecretMode', 'agentAllowLocalNetwork', 'scheduledTasksEnabled', 'scheduledRequireConsequentialConfirmation', 'systemOneEnabled', 'systemOneWatchEnabled', 'systemOneCompletionEnabled', 'systemOneFastClassifications', 'systemOneFastBrowser', 'systemOneWatchThreshold', 'systemOneCompletionThreshold', 'typesafeApiKey', 'providerFilter', 'requestTimeoutMs', 'clarifyTimeoutSec', 'clarifyTimeoutSemanticsV2', 'costAllowanceSessionUsd', 'costAllowanceTotalUsd', 'meteredProviderCostSpentUsd', 'screenshotRedaction', 'imageDetail', 'maxScreenshotsPerTurn', 'maxImageDimension']);
+  const stored = await chrome.storage.local.get([...DECISION_SETTINGS_KEYS, 'verboseMode', 'composerDeliveryMode', 'selectionShortcutEnabled', 'pdfViewerEnabled', AUTO_GROUP_TABS_KEY, 'helpImproveWebBrain', 'screenshotFallback', 'maxAgentSteps', 'autoScreenshot', 'useSiteAdapters', 'researchEscalationEnabled', 'researchEscalationEngine', 'voiceInputEnabled', 'alwaysAllowApiMutations', 'apiMutationObserverEnabled', 'webMcpEnabled', 'openaiAskStreamingEnabled', 'planBeforeActMode', 'planBeforeAct', 'planReviewMode', 'planReviewConfidenceThreshold', DOWNLOAD_DIRECTORY_STORAGE_KEY, 'notifySound', 'completionConfetti', 'completionFlashTab', 'tracingEnabled', 'feedbackDiagnosticsEnabled', 'losslessTrace', 'strictSecretMode', 'agentAllowLocalNetwork', 'scheduledTasksEnabled', 'scheduledRequireConsequentialConfirmation', 'systemOneEnabled', 'systemOneWatchEnabled', 'systemOneCompletionEnabled', 'systemOneFastClassifications', 'systemOneFastBrowser', 'systemOneWatchThreshold', 'systemOneCompletionThreshold', 'typesafeApiKey', 'providerFilter', 'requestTimeoutMs', 'clarifyTimeoutSec', 'clarifyTimeoutSemanticsV2', 'costAllowanceSessionUsd', 'costAllowanceTotalUsd', 'meteredProviderCostSpentUsd', 'screenshotRedaction', 'imageDetail', 'maxScreenshotsPerTurn', 'maxImageDimension']);
   if (typeof stored.providerFilter === 'string' && ['all','active','local','cloud','router'].includes(stored.providerFilter)) {
     providerFilter = stored.providerFilter;
   }
@@ -701,6 +702,7 @@ async function init() {
   completionConfettiToggle.checked = stored.completionConfetti ?? true; // on by default
   completionFlashTabToggle.checked = stored.completionFlashTab ?? true; // on by default
   tracingToggle.checked = stored.tracingEnabled === true;
+  if (feedbackDiagnosticsToggle) feedbackDiagnosticsToggle.checked = stored.feedbackDiagnosticsEnabled !== false;
   losslessTracingToggle.checked = stored.losslessTrace === true;
   // Lossless recording only means something when tracing is on; mirror the
   // disabled state so the disclosure reads honestly.
@@ -1492,6 +1494,14 @@ tracingToggle.addEventListener('change', async () => {
 
 losslessTracingToggle.addEventListener('change', async () => {
   await chrome.storage.local.set({ losslessTrace: losslessTracingToggle.checked }).catch(() => {});
+});
+
+feedbackDiagnosticsToggle?.addEventListener('change', async () => {
+  await chrome.storage.local.set({ feedbackDiagnosticsEnabled: feedbackDiagnosticsToggle.checked });
+  if (!feedbackDiagnosticsToggle.checked) {
+    const response = await chrome.runtime.sendMessage({ target: 'background', action: 'feedback_clear_diagnostics' });
+    if (!response?.ok) console.error('[feedback] Could not clear local diagnostics:', response?.error);
+  }
 });
 
 costSessionLimitInput?.addEventListener('change', async () => {

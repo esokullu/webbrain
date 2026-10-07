@@ -1,3 +1,4 @@
+import { renderPageFeedbackNote } from './page-feedback-ui.js';
 import { appendGeneratedMedia, restoreGeneratedMedia } from './generated-media-view.js';
 /**
  * WebBrain Side Panel — Chat UI logic.
@@ -71,6 +72,8 @@ import {
   normalizeState as normalizeStoreReviewState,
 } from './store-review-prompt.js';
 import { providerIconUrl } from './provider-icons.js';
+import { getFeedbackCopy } from './feedback-copy.js';
+import { requestFeedbackConsent, submitFeedbackWithTrace } from './feedback-consent.js';
 import { parseWatchSlashCommand, WATCH_COMMAND_USAGE } from './watch-command.js';
 import { createSidePanelWindowScope } from './sidepanel-window-scope.js';
 import { visionProviderKind } from '../providers/vision-capabilities.js';
@@ -1798,6 +1801,8 @@ function getExtensionStoreKey() {
 
 let storeReviewState = normalizeStoreReviewState(null);
 let storeReviewSelectedRating = null;
+let storeReviewTraceSource = Promise.resolve(null);
+let storeReviewSending = false;
 
 async function loadStoreReviewState() {
   const stored = await chrome.storage.local.get(STORE_REVIEW_STORAGE_KEY);
@@ -1831,6 +1836,12 @@ function setStoreReviewStarPreview(rating) {
 
 async function openStoreReviewPrompt() {
   if (!storeReviewEl || isProcessing) return;
+  // Capture the conversation and recording cutoff before asynchronous lookup.
+  const sourceTabId = currentTabId;
+  const snapshotAt = Date.now();
+  storeReviewTraceSource = sourceTabId == null ? Promise.resolve(null)
+    : sendToBackground('export_traces', { tabId: sourceTabId, full: true })
+      .then(source => source?.sessionId ? { ...source, snapshotAt } : null).catch(() => null);
   storeReviewSelectedRating = null;
   if (storeReviewFeedbackEl) storeReviewFeedbackEl.value = '';
   setStoreReviewStarPreview(null);
@@ -1876,15 +1887,54 @@ async function handleStoreReviewOpenStore() {
 }
 
 async function handleStoreReviewSendFeedback() {
+  if (storeReviewSending) return;
+  storeReviewSending = true;
   const rating = storeReviewSelectedRating || storeReviewState.rating || 3;
   const comment = storeReviewFeedbackEl?.value || '';
+  const copy = getFeedbackCopy(getLocale());
+  const button = document.getElementById('store-review-send-feedback');
+  const previousLabel = button?.textContent;
+  if (button) { button.disabled = true; button.textContent = copy.preparing; }
   try {
-    chrome.tabs.create({ url: buildFeedbackUrl({ rating, comment }) });
-  } catch { /* ignore */ }
-  const next = markFeedbackSubmitted(storeReviewState);
-  await saveStoreReviewState(next);
-  showStoreReviewStep('thanks');
-  setTimeout(() => hideStoreReviewPrompt(), 2500);
+    const { stageFeedbackTrace, deleteFeedbackDraft } = await import('../feedback-store.js');
+    const source = await storeReviewTraceSource;
+    const completed = await submitFeedbackWithTrace({
+      rating, comment, copy,
+      prepare: async () => {
+        if (!source?.sessionId) return null;
+        const flushed = await sendToBackground('feedback_flush');
+        if (!flushed?.ok) throw new Error(flushed?.error || 'Trace flush failed.');
+        const [store, { prepareFeedbackTrace }] = await Promise.all([
+          import('../trace/recorder.js'), import('../trace/feedback-export.js'),
+        ]);
+        return prepareFeedbackTrace(store, source.sessionId, chrome.runtime.getManifest().version || '', { snapshotAt: source.snapshotAt });
+      },
+      stage: prepared => stageFeedbackTrace({ ...prepared, copy }),
+      discard: deleteFeedbackDraft,
+      consent: (prepared, staged) => requestFeedbackConsent(prepared, copy, () => chrome.tabs.create({
+        url: chrome.runtime.getURL(`src/ui/feedback-trace-preview.html?id=${encodeURIComponent(staged.id)}`),
+      })),
+      open: async params => {
+        if (!params.includeTrace) {
+          await chrome.tabs.create({ url: buildFeedbackUrl(params) });
+          return;
+        }
+        const result = await sendToBackground('feedback_open', params);
+        if (!result?.ok) throw new Error(result?.error || 'Could not open feedback.');
+      },
+    });
+    if (!completed) return;
+    await saveStoreReviewState(markFeedbackSubmitted(storeReviewState));
+    showStoreReviewStep('thanks');
+    const thanks = document.querySelector('#store-review-step-thanks .store-review-body');
+    if (thanks) thanks.textContent = copy.draftReady;
+    setTimeout(() => hideStoreReviewPrompt(), 2500);
+  } catch (error) {
+    showComposerToast(error?.message || String(error));
+  } finally {
+    storeReviewSending = false;
+    if (button) { button.disabled = false; button.textContent = previousLabel; }
+  }
 }
 
 function initStoreReviewPrompt() {
@@ -3309,6 +3359,7 @@ const SCHEDULED_VISIBLE_STATUSES = new Set(['pending', 'queued', 'paused', 'runn
 const COMPLETED_SCHEDULED_JOB_AUTO_HIDE_MS = 15 * 1000;
 const pinnedCompletedScheduledJobIds = new Set();
 const pendingScheduledPlannerFallbackMessages = new Map();
+const pendingScheduledPageFeedback = new Map();
 const scheduledAssistantPreparationJobIds = new Set();
 let scheduledJobAutoHideTimer = null;
 
@@ -3413,6 +3464,15 @@ function flushScheduledPlannerFallbackMessage(jobId, assistantEl = null) {
   return true;
 }
 
+function flushScheduledPageFeedback(jobId, assistantEl) {
+  const id = String(jobId || '');
+  if (!assistantEl || !pendingScheduledPageFeedback.has(id)) return;
+  const events = pendingScheduledPageFeedback.get(id);
+  pendingScheduledPageFeedback.delete(id);
+  for (const data of events.values()) renderPageFeedbackNote(assistantEl, data, t);
+  schedulePersist();
+}
+
 function ensureScheduledTerminalMessage(job) {
   const jobId = job?.id ? String(job.id) : '';
   if (!jobId || !isUrlTargetScheduledJob(job)) return null;
@@ -3420,12 +3480,14 @@ function ensureScheduledTerminalMessage(job) {
   if (existing && scheduledAssistantPreparationJobIds.has(jobId)) return existing;
   if (existing) {
     flushScheduledPlannerFallbackMessage(jobId, existing);
+    flushScheduledPageFeedback(jobId, existing);
     return existing;
   }
   resetChatNavigation();
   const msgEl = addMessage('assistant', '');
   msgEl.dataset.scheduledJobId = jobId;
   flushScheduledPlannerFallbackMessage(jobId, msgEl);
+  flushScheduledPageFeedback(jobId, msgEl);
   return msgEl;
 }
 
@@ -3721,6 +3783,7 @@ async function handleScheduledJobEvent(data, tabId) {
       }
       if (jobId) currentAssistantEl.dataset.scheduledJobId = jobId;
       flushScheduledPlannerFallbackMessage(jobId, currentAssistantEl);
+      flushScheduledPageFeedback(jobId, currentAssistantEl);
       showActivity(t('sp.scheduled.running', { title }));
     } finally {
       if (preparingScheduledAssistant) scheduledAssistantPreparationJobIds.delete(jobId);
@@ -10080,6 +10143,21 @@ function handleAgentUpdateMessage(msg) {
   const { type, data } = msg;
 
   switch (type) {
+    case 'page_feedback': {
+      const jobId = String(data?.scheduledJobId || '');
+      const target = jobId ? findScheduledAssistantMessageForJob(jobId) : eventAssistantEl;
+      if (jobId && (!target || scheduledAssistantPreparationJobIds.has(jobId))) {
+        if (data.navigation && data.id) {
+          const events = pendingScheduledPageFeedback.get(jobId) || new Map();
+          events.set(data.id, data);
+          while (events.size > 32) events.delete(events.keys().next().value);
+          pendingScheduledPageFeedback.set(jobId, events);
+          while (pendingScheduledPageFeedback.size > 50) pendingScheduledPageFeedback.delete(pendingScheduledPageFeedback.keys().next().value);
+        }
+      } else if (renderPageFeedbackNote(target || currentAssistantEl, data, t)) schedulePersist();
+      break;
+    }
+
     case 'steering_applied': {
       const id = String(data?.id || '');
       if (id && !messagesEl.querySelector(`[data-steering-message-id="${CSS.escape(id)}"]`)) {

@@ -411,6 +411,63 @@ function assertCompleteToolHistory(messages) {
   assert.equal(outstanding.size, 0, 'last tool batch has unanswered calls');
 }
 
+test('chrome: rejected WebMCP registrations enter bounded recovery despite invented ID churn and interleaved reads', async () => {
+  const {cdpClient} = await import('../src/chrome/src/cdp/cdp-client.js');
+  const before = cdpClient.getWebMCPToolContext;
+  const Agent = variants.find(([browser]) => browser === 'chrome')[1];
+  const agent = setup(Agent);
+  allowBatchPreparation(agent);
+  agent.webMcpEnabled = true;
+  agent._effectiveRunMode = () => 'act';
+  agent.executeTool = async () => assert.fail('Rejected registration or dependent browser action was dispatched');
+  cdpClient.getWebMCPToolContext = async () => null;
+  const messages = [], updates = [], results = [];
+  try {
+    for(let attempt=1;attempt<=3;attempt++) {
+      if(attempt>1) agent._checkLoop(91,'get_accessibility_tree',{}, {success:true});
+      results.push(await agent._executeToolBatch(91, [
+        {id:'webmcp-'+attempt,function:{name:'execute_webmcp_tool',arguments:JSON.stringify({tool_id:attempt===1?'':`invented-${attempt}`,input:{}})}},
+        {id:'dependent-'+attempt,function:{name:'navigate',arguments:'{"url":"https://example.com/next"}'}},
+      ], messages, (type,data)=>updates.push({type,data}), agent._activeProvider(91),null,new Set(['execute_webmcp_tool','navigate']),attempt));
+    }
+    assert.deepEqual(results.map(r=>r.action),['continue','continue','recover']);
+    assert.equal(results[2].status,'loop_stopped');
+    assert.equal(messages.length,6);
+    assert.match(messages.find(m=>m.tool_call_id==='webmcp-2').content,/FAILED ACTION LOOP/);
+    for(let attempt=1;attempt<=3;attempt++) {
+      const denied=JSON.parse(messages.find(m=>m.tool_call_id==='webmcp-'+attempt).content.split('\n')[0]);
+      assert.equal(denied.noDispatch,true);assert.equal(denied.dispatched,false);
+      assert.match(denied.hint,/ordinary accessibility/);
+      assert.equal(JSON.parse(messages.find(m=>m.tool_call_id==='dependent-'+attempt).content).skipped,true);
+    }
+    assert.equal(updates.filter(u=>u.type==='tool_call'&&u.data.name==='execute_webmcp_tool').length,3);
+    assert.equal(updates.filter(u=>u.type==='tool_result'&&u.data.name==='execute_webmcp_tool').length,3);
+    agent.failedActionLoops.set(91,new Map([['webmcp-tool-registration',2],['unrelated',1]]));
+    cdpClient.getWebMCPToolContext = async () => ({frameId:'trusted-frame',targetUrl:'https://example.com/',declaredReadOnly:false});
+    const valid=await agent._prepareWebMCPToolCall(91,'execute_webmcp_tool',{tool_id:'wmcp_real',_webMcpDeclaredReadOnly:true});
+    assert.equal(valid.args._webMcpDeclaredReadOnly,false);
+    assert.equal(valid.args._webMcpFrameId,'trusted-frame');
+    assert.deepEqual([...agent.failedActionLoops.get(91)],[['unrelated',1]]);
+  } finally {cdpClient.getWebMCPToolContext=before;}
+});
+
+test('chrome: empty WebMCP catalogs give DOM guidance without hiding real registrations', async () => {
+  const {cdpClient} = await import('../src/chrome/src/cdp/cdp-client.js');
+  const before = cdpClient.listWebMCPTools;
+  const Agent = variants.find(([browser]) => browser === 'chrome')[1];
+  const agent = setup(Agent);
+  agent.webMcpEnabled = true;
+  agent._chromeProtectedPageFailure = async () => null;
+  try {
+    cdpClient.listWebMCPTools = async()=>({success:true,total:0,tools:[]});
+    const empty=await agent.executeTool(92,'list_webmcp_tools',{});
+    assert.match(empty.hint,/do not invent tool IDs/);assert.equal(empty.total,0);
+    const real={success:true,total:1,tools:[{tool_id:'wmcp_real'}]};
+    cdpClient.listWebMCPTools = async()=>real;
+    assert.deepEqual(await agent.executeTool(92,'list_webmcp_tools',{}),real);
+  } finally {cdpClient.listWebMCPTools=before;}
+});
+
 for (const [browser, Agent] of variants) {
   for (const streaming of [false, true]) {
     test(`${browser}: unlimited ${streaming ? 'stream' : 'chat'} run recovers from repeated rejected clicks`, async () => {

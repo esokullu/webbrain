@@ -20,6 +20,7 @@
  */
 
 import { isKnownKind } from '../trace/event-model.js';
+import { isErrorCode } from '../trace/error-codes.js';
 
 const ARGS_LIMIT = 300;
 const RESULT_LIMIT = 600;
@@ -61,15 +62,40 @@ function redactExportValue(value, key = '') {
   return Object.fromEntries(Object.entries(value).map(([childKey, item]) => [childKey, redactExportValue(item, childKey)]));
 }
 
-export function sanitizeTraceExport(payload) {
-  if (payload?.run?.lossless === true) return redactExportValue(payload);
+const DIAGNOSTIC_CODE_KINDS = new Set(['error', 'turn_start', 'turn_end', 'step_start', 'step_end']);
+
+function restoreDiagnosticCodes(entry, redacted) {
+  if (!Array.isArray(entry?.events) || !Array.isArray(redacted?.events)) return;
+  entry.events.forEach((event, index) => {
+    const data = redacted.events[index]?.data;
+    if (!data || typeof data !== 'object') return;
+    // Only catalog codes in recorder metadata are public diagnostics. A code
+    // in tool arguments/results or conversation content remains a credential.
+    if (DIAGNOSTIC_CODE_KINDS.has(event.kind) && isErrorCode(event.data?.code)) data.code = event.data.code;
+    if (event.kind === 'note' && data.extra && isErrorCode(event.data?.extra?.code)) data.extra.code = event.data.extra.code;
+  });
+}
+
+function redactTraceExport(payload) {
+  const redacted = redactExportValue(payload);
+  restoreDiagnosticCodes(payload, redacted);
+  if (Array.isArray(payload?.runs) && Array.isArray(redacted?.runs)) {
+    payload.runs.forEach((entry, index) => restoreDiagnosticCodes(entry, redacted.runs[index]));
+  }
+  return redacted;
+}
+
+export function sanitizeTraceExport(payload, { allRuns = false } = {}) {
+  // Feedback can include legacy rows that predate the lossless marker.
+  if (allRuns) return redactTraceExport(payload);
+  if (payload?.run?.lossless === true) return redactTraceExport(payload);
   if (!Array.isArray(payload?.runs)) return payload;
 
   let changed = false;
   const runs = payload.runs.map((entry) => {
     if (entry?.run?.lossless !== true) return entry;
     changed = true;
-    return redactExportValue(entry);
+    return redactTraceExport(entry);
   });
 
   return changed ? { ...payload, runs } : payload;

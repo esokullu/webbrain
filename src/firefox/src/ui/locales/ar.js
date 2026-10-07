@@ -1162,4 +1162,5 @@ export default {
   "st.sync.consent.legacy": "هل تريد تفعيل المزامنة المشفرة؟ سيرسل WebBrain نسخة مشفرة من طرف إلى طرف من ذكرياتك، والملء التلقائي لملفك الشخصي، وإعدادات موفر مفتاح واجهة برمجة التطبيقات (API) إلى WebBrain Compass. لا تتم مزامنة سجل الدردشة وتسجيلات الدخول عبر OAuth.",
   "st.sync.consent.denied": "لم يتم منح إذن المزامنة المشفرة.",
   'st.providers.webgpu_note.body': '{modelLink} runs entirely in Chrome with no API endpoint. Download it in Settings > Providers > WebGPU or Apocalypse Mode, then use the nuclear control in standalone chat.',
+  'sp.monitor.navigation': "تغيّرت الصفحة أثناء تنفيذ المهمة ({before} → {after}). جارٍ متابعة المهمة.",
 };
