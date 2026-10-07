@@ -283,7 +283,8 @@
     const match = op => {
       if (event && !event.isTrusted && !op.synchronous) return null;
       if (event) {
-        if (op.eventTypes && !op.eventTypes.has(event.type)) return null;
+        if (op.eventTypes && !op.eventTypes.has(event.type)
+            && !(kind === 'click' && event.detail === 0 && op.submitTarget && related(op.submitTarget, el))) return null;
         // One native dispatch owns one occurrence of each input phase. A later
         // human action on the same target must not fit that expectation again.
         if (!op.synchronous && event.type !== 'pointermove' && op.seenEvents?.has(event.type)) return null;
@@ -305,6 +306,9 @@
       if (!op.kinds.has(kind)) continue;
       if (['wheel', 'touchmove'].includes(event?.type) && !op.nativeWheel) continue;
       const target = op.target || (op.focused ? document.activeElement : null);
+      if (kind === 'click' && event?.detail === 0 && op.submitTarget && related(op.submitTarget, el)) {
+        const found = match(op); if (found) return found;
+      }
       if (kind === 'scroll' && op.scrollAncestors?.has(el)) { const found = match(op); if (found) return found; }
       if (kind === 'scroll' && op.windowScroll && (el === document.documentElement || el === document.body)) { const found = match(op); if (found) return found; }
       if (related(target, el)) { const found = match(op); if (found) return found; }
@@ -382,7 +386,7 @@
       .map(textSignature).reduce(([size, hash], [length, part, power]) =>
         [size + length, (Math.imul(hash, power) + part) >>> 0], [0, 0]);
     const controlValue = controlValueFingerprint(el);
-    return JSON.stringify([shown, content, el.children.length + (el.shadowRoot?.children.length || 0), el.getAttribute('role'), el.getAttribute('aria-label'),
+    return JSON.stringify([shown, content, el.children.length + (el.shadowRoot?.children.length || 0), el.getAttribute('role'), el.getAttribute('aria-modal'), el.getAttribute('aria-label'),
       el.getAttribute('id'), el.getAttribute('for'), el.getAttribute('form'), el.getAttribute('name'), el.getAttribute('placeholder'), el.getAttribute('title'), el.getAttribute('alt'),
       el.getAttribute('aria-labelledby'), el.getAttribute('aria-required'), el.getAttribute('aria-readonly'),
       el.getAttribute('contenteditable'), el.getAttribute('tabindex'), el.getAttribute('onclick'), el.getAttribute('required'),
@@ -489,7 +493,7 @@
     if (!root || roots.has(root) || !observer) return;
     roots.add(root);
     observer.observe(root, { childList: true, subtree: true, characterData: true, attributes: true, attributeOldValue: true,
-      attributeFilter: ['role', 'aria-label', 'id', 'for', 'form', 'name', 'placeholder', 'title', 'alt', 'aria-labelledby', 'rel', 'media', 'data-selected',
+      attributeFilter: ['role', 'aria-modal', 'aria-label', 'id', 'for', 'form', 'name', 'placeholder', 'title', 'alt', 'aria-labelledby', 'rel', 'media', 'data-selected',
         'aria-required', 'aria-readonly', 'contenteditable', 'tabindex', 'onclick', 'required',
         'aria-expanded', 'aria-selected', 'aria-checked', 'aria-pressed', 'aria-disabled',
         'type', 'href', 'target', 'download', 'action', 'method', 'formaction', 'formmethod', 'formtarget', 'novalidate', 'formnovalidate',
@@ -546,8 +550,9 @@
         return false;
       }));
   }
-  function hasVisibleAriaLabelledbyConsumer(el) {
+  function hasVisibleAriaLabelledbyConsumer(el, previousId = '') {
     const ids = new Set();
+    if (previousId) ids.add(previousId);
     for (let node = el; node; node = node.parentElement || node.getRootNode?.().host) {
       if (node.id) ids.add(node.id);
     }
@@ -716,8 +721,10 @@
       const accessibleNameContentMutation = ['characterData', 'childList'].includes(record.type);
       const nativeLabelAssociationMutation = record.type === 'attributes'
         && record.attributeName === 'for' && el.tagName === 'LABEL';
+      const hiddenAriaLabelIdMutation = record.type === 'attributes' && record.attributeName === 'id';
       const hiddenAccessibleNameChanged = !visible(el)
         && ((accessibleNameContentMutation && hasVisibleAriaLabelledbyConsumer(el))
+          || (hiddenAriaLabelIdMutation && hasVisibleAriaLabelledbyConsumer(el, record.oldValue))
           || ((accessibleNameContentMutation || nativeLabelAssociationMutation)
             && hasVisibleNativeLabelConsumer(el, nativeLabelAssociationMutation ? record.oldValue : '')));
       let identityChanged = (record.type === 'popover' && record.stateChanged)
@@ -847,11 +854,19 @@
       if (['input', 'beforeinput', 'change'].includes(event.type)) rememberAgentLayout(op);
       const marker = { userAt: op.userAt };
       agentTurn = marker;
-      if (op.navigationCandidate && ['click', 'pointerdown'].includes(event.type)) {
+      const enterFormSubmit = event.type === 'keydown' && event.key === 'Enter' && op.kind === 'input'
+        && el?.tagName !== 'TEXTAREA' && !el?.isContentEditable && !!el?.form;
+      if ((op.navigationCandidate && ['click', 'pointerdown'].includes(event.type)) || enterFormSubmit) {
         const path = event.composedPath();
-        const link = path.find(node => node instanceof Element && node.matches('a[href],area[href]'));
-        const submitter = path.find(node => node instanceof Element && node.matches('button,input[type="submit"],input[type="image"]') && node.form);
-        const form = submitter?.form;
+        const link = enterFormSubmit ? null : path.find(node => node instanceof Element && node.matches('a[href],area[href]'));
+        let submitter = path.find(node => node instanceof Element
+          && node.matches('button:not([type]),button[type="submit"],input[type="submit"],input[type="image"]') && node.form);
+        const form = submitter?.form || (enterFormSubmit ? el.form : null);
+        if (enterFormSubmit && form && !submitter) {
+          submitter = [...form.elements].find(node => !node.disabled && node.matches?.(
+            'button:not([type]),button[type="submit"],input[type="submit"],input[type="image"]')) || null;
+        }
+        if (enterFormSubmit && submitter) { op.submitTarget = submitter; op.kinds.add('click'); }
         const formMethod = submitter?.hasAttribute('formmethod') ? submitter.formMethod : form?.method;
         const navigationFormGet = !link && !!form && String(formMethod || 'get').toLowerCase() === 'get';
         const formTarget = submitter?.getAttribute('formtarget') || form?.getAttribute('target');
@@ -860,13 +875,13 @@
         const normalizedTarget = navigationTarget.toLowerCase();
         let navigationUrl = '';
         try {
-          const rawUrl = link?.href || (form ? (submitter.hasAttribute('formaction') ? submitter.formAction : form.action) : '');
+          const rawUrl = link?.href || (form ? (submitter?.hasAttribute('formaction') ? submitter.formAction : form.action) : '');
           const destination = new URL(rawUrl, document.baseURI);
           if (navigationFormGet) { destination.search = ''; destination.hash = ''; }
           if (['http:', 'https:'].includes(destination.protocol) && !destination.username && !destination.password
               && destination.href.length <= 2000) navigationUrl = destination.href;
         } catch { /* Non-web and malformed targets are not navigation correlations. */ }
-        send({ kind: 'activity', source: 'agent', operation: 'click',
+        send({ kind: 'activity', source: 'agent', operation: enterFormSubmit ? 'submit' : 'click',
           ...(navigationUrl ? { navigationUrl } : {}),
           ...(navigationUrl && navigationFormGet ? { navigationFormGet: true } : {}),
           ...(['_top', '_parent', '_self', '_blank'].includes(normalizedTarget)

@@ -2002,6 +2002,57 @@ for (const [build, engine] of [['chrome', chromium], ['firefox', firefox]]) {
     } finally { await browser.close(); }
   });
 
+  test(`${build}: hidden aria-labelledby ID changes invalidate visible targets`, async () => {
+    const { browser, page } = await fixture(engine, build);
+    try {
+      await page.evaluate(() => {
+        const label = document.createElement('span'); label.id = 'hidden-id-label'; label.textContent = 'Accessible name';
+        label.style.display = 'none';
+        const button = document.createElement('button'); button.id = 'id-labelled-button'; button.setAttribute('aria-labelledby', label.id);
+        document.body.append(label, button);
+      });
+      await page.waitForTimeout(180);
+      await page.evaluate(() => {
+        feedback = [];
+        deliver('page_monitor_prepare', { operationId: 'hidden-label-id', tool: 'click', selector: '#id-labelled-button' });
+        deliver('page_monitor_dispatch', { operationId: 'hidden-label-id', kind: 'click', selector: '#id-labelled-button', fenceOnly: true });
+        document.getElementById('hidden-id-label').id = 'renamed-hidden-id-label';
+      });
+      await page.waitForFunction(() => feedback.some(event => event.kind === 'dom' && event.source === 'page'), null, { timeout: 1000 });
+      const blocked = await page.evaluate(() => {
+        try { __wbPageMonitor.activatePreparedDispatch({ operationId: 'hidden-label-id', kind: 'click' }); return null; }
+        catch (error) { return error.code; }
+      });
+      assert.equal(blocked, 'page_feedback_pending', 'Changing a hidden referenced ID must stale the prepared action');
+      assert.equal(JSON.stringify(await page.evaluate(() => feedback)).includes('Accessible name'), false,
+        'The hidden label text must stay out of feedback');
+    } finally { await browser.close(); }
+  });
+
+  test(`${build}: aria-modal changes invalidate prepared page context`, async () => {
+    const { browser, page } = await fixture(engine, build);
+    try {
+      await page.evaluate(() => {
+        const modal = document.createElement('div'); modal.id = 'modal-container'; modal.setAttribute('role', 'dialog');
+        modal.textContent = 'Dialog'; document.body.append(modal);
+      });
+      await page.waitForTimeout(180);
+      await page.evaluate(() => {
+        feedback = [];
+        deliver('page_monitor_prepare', { operationId: 'aria-modal', tool: 'click', selector: '#agent' });
+        deliver('page_monitor_dispatch', { operationId: 'aria-modal', kind: 'click', selector: '#agent', fenceOnly: true });
+        document.getElementById('modal-container').setAttribute('aria-modal', 'true');
+      });
+      await page.waitForFunction(() => feedback.some(event => event.kind === 'dom' && event.source === 'page'
+        && event.target === 'div#modal-container [dialog]'), null, { timeout: 1000 });
+      const blocked = await page.evaluate(() => {
+        try { __wbPageMonitor.activatePreparedDispatch({ operationId: 'aria-modal', kind: 'click' }); return null; }
+        catch (error) { return error.code; }
+      });
+      assert.equal(blocked, 'page_feedback_pending', 'Changing modal semantics must stale a prepared action');
+    } finally { await browser.close(); }
+  });
+
   test(`${build}: guarded synthetic file input events are attributed once`, async () => {
     const { browser, page } = await fixture(engine, build);
     try {
@@ -2204,6 +2255,37 @@ for (const [build, engine] of [['chrome', chromium], ['firefox', firefox]]) {
       assert.equal(marker.navigationUrl, 'https://monitor.test/search');
       assert.equal(JSON.stringify(events).includes('private-form-value'), false);
       assert.equal(JSON.stringify(events).includes('private-action-value'), false);
+    } finally { await browser.close(); }
+  });
+
+  test(`${build}: Enter-triggered form submissions carry agent navigation context`, async () => {
+    const { browser, page } = await fixture(engine, build);
+    try {
+      await page.evaluate(() => {
+        const form = document.createElement('form'); form.id = 'enter-submit-form';
+        form.method = 'get'; form.action = '/enter-search?fixed=private-action-value#result'; form.target = '_parent';
+        form.innerHTML = '<input id="enter-submit-input" name="query" value="private-form-value">'
+          + '<button id="enter-submit-button" type="submit">Search</button>';
+        form.addEventListener('submit', event => event.preventDefault());
+        document.body.append(form);
+      });
+      await page.waitForTimeout(180);
+      await page.evaluate(() => {
+        feedback = [];
+        deliver('page_monitor_prepare', { operationId: 'enter-submit', tool: 'press_keys', selector: '#enter-submit-input' });
+        deliver('page_monitor_dispatch', { operationId: 'enter-submit', kind: 'input', selector: '#enter-submit-input' });
+      });
+      await page.locator('#enter-submit-input').press('Enter');
+      await page.waitForFunction(() => feedback.some(event => event.source === 'agent' && event.operation === 'submit'), null, { timeout: 1000 });
+      const marker = await page.evaluate(() => feedback.find(event => event.source === 'agent' && event.operation === 'submit'));
+      assert.equal(marker.navigationUrl, 'https://monitor.test/enter-search');
+      assert.equal(marker.navigationFormGet, true);
+      assert.equal(marker.navigationTarget, '_parent');
+      const events = await page.evaluate(() => feedback);
+      assert.equal(JSON.stringify(events).includes('private-form-value'), false);
+      assert.equal(JSON.stringify(events).includes('private-action-value'), false);
+      assert.equal(events.some(event => event.kind === 'click' && event.source === 'user'), false,
+        `The browser-generated default submit click stays attributed to the agent Enter action: ${JSON.stringify(events)}`);
     } finally { await browser.close(); }
   });
 

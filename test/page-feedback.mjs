@@ -785,10 +785,11 @@ for (const build of ['chrome', 'firefox']) {
     try {
       await agent._beginPageFeedbackRun(tab, 'interactive');
       let binding = bind(agent, tab);
-      binding.send({ kind: 'activity', source: 'agent', operation: 'click', navigationUrl: 'https://example.com/search',
+      binding.send({ kind: 'activity', source: 'agent', operation: 'submit', navigationUrl: 'https://example.com/search',
         navigationFormGet: true });
       const armed = agent._pageFeedbackRuns.get(tab).navigation;
       assert.equal(armed.url, 'https://example.com/search', 'The correlation marker contains only the action path');
+      assert.equal(armed.kind, 'submit');
       assert.equal(armed.formGet, true);
       agent.observePageNavigation({ tabId: tab, frameId: 0, documentId: 'form-result',
         url: 'https://example.com/search?q=private-form-value', transitionType: 'form_submit' }, 'committed');
@@ -796,7 +797,7 @@ for (const build of ['chrome', 'firefox']) {
       assert.equal(agent._pageFeedbackRuns.get(tab).navigation, null);
 
       binding = bind(agent, tab, 0, 'form-result', 'form-result-token');
-      binding.send({ kind: 'activity', source: 'agent', operation: 'click', navigationUrl: 'https://example.com/search',
+      binding.send({ kind: 'activity', source: 'agent', operation: 'submit', navigationUrl: 'https://example.com/search',
         navigationFormGet: true });
       agent.observePageNavigation({ tabId: tab, frameId: 0, documentId: 'wrong-form-result',
         url: 'https://example.com/other?q=value', transitionType: 'form_submit' }, 'committed');

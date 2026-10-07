@@ -192,7 +192,7 @@ export const pageFeedbackMethods = {
         || !['user', 'agent', 'page', 'unknown'].includes(feedback.source)) return { accepted: false, reason: 'invalid-observation' };
     frame.seq = seq;
     if (feedback.source === 'agent') {
-      if (feedback.operation === 'click') {
+      if (['click', 'submit'].includes(feedback.operation)) {
         let url = '';
         try {
           const destination = new URL(String(feedback.navigationUrl || ''));
@@ -216,7 +216,7 @@ export const pageFeedbackMethods = {
             if (matches.length === 1) destinationFrameId = matches[0][0];
           } else if (!target) destinationFrameId = frameId;
         }
-        run.navigation = url && Number.isSafeInteger(destinationFrameId) ? { at: Date.now(), url, kind: 'click',
+        run.navigation = url && Number.isSafeInteger(destinationFrameId) ? { at: Date.now(), url, kind: feedback.operation,
           frameId: destinationFrameId,
           ...(feedback.navigationFormGet === true ? { formGet: true } : {}),
           operationId: dispatchOwners.get(tabId)?.operationId || '' } : null;
@@ -264,7 +264,7 @@ export const pageFeedbackMethods = {
     const navigation = run.navigation;
     const redirect = qualifiers.some(q => /redirect$/.test(q));
     const firstRedirect = type === 'committed' && !navigation?.redirectChain && redirect
-      && !!navigation?.url && ['click', 'navigate'].includes(navigation.kind);
+      && !!navigation?.url && ['click', 'submit', 'navigate'].includes(navigation.kind);
     const formGetDestination = type === 'committed' && details.transitionType === 'form_submit'
       && navigation?.formGet === true && navigation.frameId === frameId && sameOriginPath(navigation.url, details.url);
     const sameNavigation = navigation?.redirectChain
