@@ -37245,7 +37245,9 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
 
       const feedbackCalls = result?.toolCalls?.length ? result.toolCalls
         : !this._containsProviderReplayState(result?.responseItems) ? this._tryParseToolCallsFromText(result?.content || '', allowedToolNames) : [];
-      if ((await this._applyPendingPageFeedback(tabId, messages, onUpdate, { responseToolCalls: feedbackCalls }))
+      if ((await this._applyPendingPageFeedback(tabId, messages, onUpdate, {
+        responseToolCalls: feedbackCalls, responseWithoutTools: feedbackCalls.length === 0,
+      }))
           || this._applyPendingSteering(tabId, messages, onUpdate)) {
         const recovery = this._pageFeedbackRecoveryResult(tabId, messages, onUpdate);
         if (recovery) {
@@ -38271,7 +38273,9 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
 
         const feedbackCalls = streamedToolCalls?.length ? streamedToolCalls
           : !this._containsProviderReplayState(responseItems) ? this._tryParseToolCallsFromText(fullText || '', allowedToolNames) : [];
-        if ((await this._applyPendingPageFeedback(tabId, messages, onUpdate, { responseToolCalls: feedbackCalls }))
+        if ((await this._applyPendingPageFeedback(tabId, messages, onUpdate, {
+          responseToolCalls: feedbackCalls, responseWithoutTools: feedbackCalls.length === 0,
+        }))
             || this._applyPendingSteering(tabId, messages, onUpdate)) {
           const recovery = this._pageFeedbackRecoveryResult(tabId, messages, onUpdate);
           if (recovery) {

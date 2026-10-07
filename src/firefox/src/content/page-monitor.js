@@ -632,6 +632,47 @@
       return context;
     } catch { return null; }
   }
+  function dialogTextIsCovered(owner, boundTextNodes, addNode) {
+    const stack = [...owner.childNodes];
+    let visited = 0;
+    while (stack.length) {
+      if (++visited > 256) return false;
+      const node = stack.pop();
+      if (node.nodeType === 3) {
+        // Direct owner text is already bound; generic nested text may name a
+        // destination that the control/heading footprint cannot establish.
+        if (node.data.trim() && node.parentElement !== owner) return false;
+        continue;
+      }
+      if (!(node instanceof Element) || ignored(node)) continue;
+      const style = getComputedStyle(node);
+      if (style.display === 'none' || style.opacity === '0' || style.contentVisibility === 'hidden') continue;
+      // A zero-size/display:contents wrapper can still expose destination
+      // text. Shadow subtrees have no complete text binding here.
+      if (node.shadowRoot) return false;
+      if (boundTextNodes.has(node)) continue;
+      if (node.matches(modelEntityIdentitySelector) || ['aria-label', 'aria-labelledby', 'aria-describedby', 'title', 'alt']
+        .some(attribute => node.getAttribute(attribute)?.trim())) return false;
+      if (visited + stack.length + node.childNodes.length > 256) return false;
+      stack.push(...node.childNodes);
+    }
+    // Raw textContent cannot detect which nested audience label is rendered.
+    // Bind descendant semantics for controls and referenced full-text labels,
+    // including label roots outside the dialog. Editable descendants keep
+    // their existing value continuation instead of acquiring extra bindings.
+    for (const root of boundTextNodes) {
+      const descendants = root.querySelectorAll('*');
+      if (root.shadowRoot || descendants.length > 256) return false;
+      for (const child of descendants) {
+        if (ignored(child)) continue;
+        if (child.shadowRoot || (child.matches(modelEntityIdentitySelector) && !boundTextNodes.has(child))) return false;
+        // An ARIA textbox can be a read-only destination display. Only real
+        // editable DOM hosts need the native value-continuation exemption.
+        if (!child.isContentEditable && !child.closest('input,textarea,select') && !addNode(child)) return false;
+      }
+    }
+    return true;
+  }
   function actionFootprint(target) {
     const structuralFile = target instanceof Element && target.tagName === 'INPUT' && target.type === 'file';
     if (!(target instanceof Element) || target.ownerDocument !== document || !target.isConnected
@@ -670,7 +711,8 @@
       }
       if (!owner) { owner = fallback; unstructuredOwner = true; }
     }
-    const nodes = [], ancestors = [];
+    const nodes = [], ancestors = [], boundTextNodes = new Set();
+    let uncoveredLabel = false;
     const addNode = (node, options = {}) => {
       if (nodes.some(item => item.node === node)) return true;
       if (nodes.length >= 256 || (node.tagName === 'INPUT' && node.type === 'file' && node.files?.length > 32)) return false;
@@ -678,9 +720,12 @@
       if (!labels) return false;
       nodes.push({ node, value: modelSemantic(node, options),
         ...(node.tagName === 'INPUT' && node.type === 'file' ? { files: [...node.files || []] } : {}) });
+      if (options.text) boundTextNodes.add(node);
       for (const label of labels) {
         if (nodes.length >= 256) return false;
-        if (!nodes.some(item => item.node === label.node)) nodes.push(label);
+        if (!nodes.some(item => item.node === label.node)) {
+          nodes.push(label); boundTextNodes.add(label.node);
+        } else if (!boundTextNodes.has(label.node)) uncoveredLabel = true;
       }
       return true;
     };
@@ -716,12 +761,13 @@
       for (const control of controls) if (!addNode(control, { text: true, control: true })) return null;
     } else if (owner) {
       if (!addNode(owner, { directText: true })) return null;
-      const belongs = node => {
+      const belongs = (node, allowNavigation = false) => {
         const closest = node.closest(entityOwnerSelector);
         const relatedForm = node.closest('form,[role="form"]');
         return (!closest || closest === owner || closest.contains(owner))
           && (!relatedForm || relatedForm === form)
-          && !node.closest('aside,nav,[role="navigation"],[role="complementary"]');
+          && !node.closest(allowNavigation === true ? 'aside,[role="complementary"]'
+            : 'aside,nav,[role="navigation"],[role="complementary"]');
       };
       const headings = [...owner.querySelectorAll('h1,h2,h3,h4,h5,h6,[role="heading"],[aria-current]')]
         .filter(belongs);
@@ -733,9 +779,13 @@
       meaningfulOwner ||= headings.length > 0 || identities.length > 0 || owner.matches(modelEntityIdentitySelector);
       // Recipients and attachment/caption editors may live next to the form.
       // Bind every local control, excluding a separate entity, form or sidebar.
+      const headingFreeDialog = !meaningfulOwner && owner.matches('dialog,[role="dialog"],[role="alertdialog"]');
       for (const control of owner.querySelectorAll(modelControlSelector)) {
-        if (belongs(control) && !addNode(control, { text: true, control: true })) return null;
+        if (belongs(control, headingFreeDialog) && !addNode(control, { text: true, control: true })) return null;
       }
+      // A heading-free dialog can supply a boundary for a controls-only
+      // composer. Uncovered generic destination text keeps the strict fence.
+      meaningfulOwner ||= headingFreeDialog && dialogTextIsCovered(owner, boundTextNodes, addNode) && !uncoveredLabel;
     }
     // An arbitrary container/toolbar with no entity anchor cannot establish
     // the recipient or item. Such targets retain strict legacy dispatch only.

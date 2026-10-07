@@ -481,6 +481,10 @@ const CONTENT_ACTION_TIMEOUT_MS = 60_000;
 const CONTENT_ACTION_RESPONSE_GRACE_MS = 5_000;
 const ASK_MODE_HANDOFF_TIMEOUT_MS = 5_000;
 const CONTENT_ACTION_SIGNAL_DEADLINES = new WeakMap();
+// A completed focus click is a browser dispatch, but need not be a text write.
+// Only this module can attest that its exact ref stayed unchanged before any
+// trusted text command was attempted; page/model data cannot forge this proof.
+const TRUSTED_FIELD_PREPARATION_UNCHANGED = Symbol('trustedFieldPreparationUnchanged');
 const EARLY_CDP_ACTION_TOOLS = new Set(['click', 'type_text', 'press_keys', 'hover', 'drag_drop', 'upload_file']);
 const DONE_OUTCOMES = new Set(['success', 'partial', 'failed']);
 const LOCAL_CANCELLATION_ASSISTANT_RE = /^\[?Stopped by user(?: before (?:the run started|executing requested tool calls))?\.?\]?$/;
@@ -27966,6 +27970,14 @@ If the user has already named or confirmed this exact recipient, do NOT ask agai
     if (result.noop === true && result.success === true && result.noDispatch === true) {
       return result;
     }
+    const unchangedPreparation = result[TRUSTED_FIELD_PREPARATION_UNCHANGED];
+    if (unchangedPreparation?.tabId === tabId && unchangedPreparation.tool === name
+        && unchangedPreparation.refId === args.ref_id
+        && result.success === false && result.verified === false) {
+      const unchangedResult = { ...result };
+      delete unchangedResult[TRUSTED_FIELD_PREPARATION_UNCHANGED];
+      return unchangedResult;
+    }
     const enrich = operation => this._readTextMutationEnrichment(operation, enrichmentSignal);
     let target = this._textMutationTarget(tabId, name, args);
     const replacesValue = this._textMutationReplacesValue(name, args);
@@ -42180,7 +42192,32 @@ If the user has already named or confirmed this exact recipient, do NOT ask agai
       recoveryRequired: 'verify_or_restore_field',
     };
     let trustedDispatched = false;
+    let trustedTextAttempted = false;
+    let beforePreparation = null;
+    const digestTarget = { locatorType: 'ax', refId: args.ref_id };
+    const finishPreparationFailure = async failure => {
+      if (!trustedDispatched || trustedTextAttempted || !beforePreparation?.documentToken || abortSignal?.aborted) return failure;
+      const afterPreparation = await this._textMutationValueDigest(tabId, digestTarget);
+      if (abortSignal?.aborted || !afterPreparation?.documentToken
+          || beforePreparation.documentToken !== afterPreparation.documentToken
+          || beforePreparation.pageUrl !== afterPreparation.pageUrl
+          || beforePreparation.valueLength !== afterPreparation.valueLength
+          || beforePreparation.valueSha256 !== afterPreparation.valueSha256) return failure;
+      return {
+        ...failure,
+        [TRUSTED_FIELD_PREPARATION_UNCHANGED]: { tabId, tool: toolName, refId: args.ref_id },
+        textUnchanged: true,
+        outcomeUnknown: false,
+        mutationMayHaveOccurred: false,
+        repeatBlocked: false,
+        retryable: true,
+        recoveryRequired: 'fresh_tree',
+        error: `${failure.error} No trusted text input was sent, and exact readback proves the editor value is unchanged. Re-observe the page before trying the field again.`,
+      };
+    };
     try {
+      this._throwIfAborted(abortSignal);
+      beforePreparation = await this._textMutationValueDigest(tabId, digestTarget);
       this._throwIfAborted(abortSignal);
       let prepared = await chrome.tabs.sendMessage(tabId, {
         target: 'content',
@@ -42191,6 +42228,7 @@ If the user has already named or confirmed this exact recipient, do NOT ask agai
       if (!prepared?.success) {
         return {
           ...failed,
+          ...(prepared?.pageFeedbackPending ? { pageFeedbackPending: true, recoveryRequired: 'fresh_tree' } : {}),
           error: `${response.error || 'Field verification failed'} Trusted retry could not focus the current ref: ${prepared?.error || 'unknown preparation failure'}`,
         };
       }
@@ -42224,12 +42262,13 @@ If the user has already named or confirmed this exact recipient, do NOT ask agai
         });
         this._throwIfAborted(abortSignal);
         if (!reselected?.success) {
-          return {
+          return await finishPreparationFailure({
             ...failed,
             dispatched: true,
             noDispatch: false,
+            ...(reselected?.pageFeedbackPending ? { pageFeedbackPending: true } : {}),
             error: `${response.error || 'Field verification failed'} Trusted retry focused the editor but could not reselect it: ${reselected?.error || 'unknown preparation failure'}`,
-          };
+          });
         }
         prepared = reselected;
       }
@@ -42239,6 +42278,9 @@ If the user has already named or confirmed this exact recipient, do NOT ask agai
         ? (typeof args?.text === 'string' ? args.text : '')
         : expected;
       this._throwIfAborted(abortSignal);
+      // A lost response can precede a delayed applied write. After this
+      // boundary an unchanged sample cannot make the text command retry-safe.
+      trustedTextAttempted = true;
       if (trustedText || appendingContentEditable) {
         await cdpClient.sendCommand(tabId, 'Input.insertText', { text: trustedText });
       } else {
@@ -42344,11 +42386,12 @@ If the user has already named or confirmed this exact recipient, do NOT ask agai
       return recovered;
     } catch (error) {
       if (error?.code === 'content_action_timeout') throw error;
-      return {
+      return await finishPreparationFailure({
         ...failed,
         ...(trustedDispatched ? { dispatched: true, noDispatch: false } : {}),
+        ...(error?.code === 'page_feedback_pending' ? { pageFeedbackPending: true } : {}),
         error: `${response.error || 'Field verification failed'} Trusted Chrome retry failed: ${error?.message || String(error)}`,
-      };
+      });
     }
   }
 
@@ -44330,7 +44373,9 @@ If the user has already named or confirmed this exact recipient, do NOT ask agai
 
       const feedbackCalls = result?.toolCalls?.length ? result.toolCalls
         : !this._containsProviderReplayState(result?.responseItems) ? this._tryParseToolCallsFromText(result?.content || '', allowedToolNames) : [];
-      if ((await this._applyPendingPageFeedback(tabId, messages, onUpdate, { responseToolCalls: feedbackCalls }))
+      if ((await this._applyPendingPageFeedback(tabId, messages, onUpdate, {
+        responseToolCalls: feedbackCalls, responseWithoutTools: feedbackCalls.length === 0,
+      }))
           || this._applyPendingSteering(tabId, messages, onUpdate)) {
         const recovery = this._pageFeedbackRecoveryResult(tabId, messages, onUpdate);
         if (recovery) {
@@ -45505,7 +45550,9 @@ If the user has already named or confirmed this exact recipient, do NOT ask agai
 
         const feedbackCalls = streamedToolCalls?.length ? streamedToolCalls
           : !this._containsProviderReplayState(responseItems) ? this._tryParseToolCallsFromText(fullText || '', allowedToolNames) : [];
-        if ((await this._applyPendingPageFeedback(tabId, messages, onUpdate, { responseToolCalls: feedbackCalls }))
+        if ((await this._applyPendingPageFeedback(tabId, messages, onUpdate, {
+          responseToolCalls: feedbackCalls, responseWithoutTools: feedbackCalls.length === 0,
+        }))
             || this._applyPendingSteering(tabId, messages, onUpdate)) {
           const recovery = this._pageFeedbackRecoveryResult(tabId, messages, onUpdate);
           if (recovery) {

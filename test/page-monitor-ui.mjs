@@ -2,8 +2,9 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { test } from 'node:test';
 import { chromium, firefox } from 'playwright';
-import { CDPClient } from '../src/chrome/src/cdp/cdp-client.js';
-import { pageFeedbackMethods } from '../src/chrome/src/agent/page-feedback.js';
+import { CDPClient, cdpClient } from '../src/chrome/src/cdp/cdp-client.js';
+import { Agent } from '../src/chrome/src/agent/agent.js';
+import { installPageFeedback, pageFeedbackMethods } from '../src/chrome/src/agent/page-feedback.js';
 import { BidiSession, createNativeActionMarker } from '../firefox-companion/session.mjs';
 
 const read = (build, file) => fs.readFileSync(new URL(`../src/${build}/src/${file}`, import.meta.url), 'utf8');
@@ -132,6 +133,171 @@ test('Chrome AX preparation attributes actual scrolling without claiming field i
       }
     }
   } finally { await browser.close(); }
+});
+
+test('Chrome controlled-field trusted typing survives its focus-created formatting toolbar', async () => {
+  const savedChrome = globalThis.chrome, savedBrowser = globalThis.browser, tab = 919;
+  const savedCdpAttach = cdpClient.attach, savedCdpSend = cdpClient.sendCommand;
+  let changeToolbarAfterFocus = false;
+  class FieldHost {
+    static STATE_CHANGE_TOOLS = new Set(['set_field']);
+    isRunning() { return true; }
+    _checkAbort() { return false; }
+    _throwIfAborted() {}
+    _persist() {}
+    async _textMutationValueDigest(...args) { return Agent.prototype._textMutationValueDigest.call(this, ...args); }
+    _appOwnedUserMessage(content) { return { role: 'user', content }; }
+    async executeTool(tabId, name, args, _update, executionContext) {
+      executionContext._contentActionDispatchState.started = true;
+      const result = await Agent.prototype._maybeFallbackFieldWithCdpImpl.call(this, tabId, name, args,
+        { success: false, verified: false, dispatched: false, noDispatch: true, _expectedValue: args.text,
+          error: 'Contenteditable fields require trusted browser typing', trustedTypeRequired: true });
+      return result.textUnchanged === true
+        ? Agent.prototype._finalizeTextMutationResult.call(this, tabId, name, args, result)
+        : result;
+    }
+  }
+  installPageFeedback(FieldHost);
+  const host = new FieldHost();
+  let browser, page, session;
+  const commands = [], preparations = [];
+  const api = { runtime: {}, tabs: {
+    get: async () => ({ url: 'https://monitor.test/start' }),
+    sendMessage: async (_tab, message) => {
+      if (!page) return {};
+      if (message.action.startsWith('ax_') || message.action === 'field_value_digest') return page.evaluate(async message => {
+        window.msg = message;
+        let finish = () => {};
+        try {
+          finish = __wbPageMonitor.beginContentAction(message.action, message.params || {});
+          const result = await axHelpers[message.action]();
+          if (message.action === 'field_value_digest') {
+            result.documentToken = document.documentElement.getAttribute('data-webbrain-page-revision').split(':')[0];
+            result.refScopeUrl = location.href;
+          }
+          return result;
+        } catch (error) {
+          return { success: false, dispatched: error.dispatched === true, noDispatch: error.dispatched !== true,
+            error: `${message.action} failed: ${error.message}` };
+        } finally { finish(); }
+      }, message).then(result => { if (message.action === 'ax_prepare_field_for_trusted_type') preparations.push(result); return result; });
+      return page.evaluate(message => new Promise(resolve => messageListeners.forEach(fn => fn(message, {}, resolve))), message);
+    },
+  }, debugger: { sendCommand(_source, method, params, callback) {
+    commands.push({ method, params });
+    void (async () => {
+      const result = await session.send(method, params);
+      if (changeToolbarAfterFocus && method === 'Input.dispatchMouseEvent' && params.type === 'mouseReleased') {
+        changeToolbarAfterFocus = false;
+        await page.waitForTimeout(30);
+        await page.evaluate(() => document.getElementById('formatting-toolbar').setAttribute('aria-label', 'Text formatting open'));
+      }
+      return result;
+    })().then(callback, error => {
+      api.runtime.lastError = { message: error.message }; callback(); delete api.runtime.lastError;
+    });
+  } } };
+  globalThis.chrome = api; delete globalThis.browser;
+  try {
+    await host._beginPageFeedbackRun(tab, 'interactive');
+    ({ browser, page } = await fixture(chromium, 'chrome', { runToken: host._pageFeedbackRuns.get(tab).token }));
+    const documentToken = await page.evaluate(() => document.documentElement.getAttribute('data-webbrain-page-revision').split(':')[0]);
+    host.pageMonitorState({ tab: { id: tab }, frameId: 0 }, documentToken);
+    await page.exposeFunction('feedbackToHost', feedback => host.observePageFeedback({ tab: { id: tab }, frameId: 0 }, feedback));
+    await page.exposeFunction('monitorStateFromHost', token => host.pageMonitorState({ tab: { id: tab }, frameId: 0 }, token));
+    await page.evaluate(() => {
+      const original = chrome.runtime.sendMessage;
+      chrome.runtime.sendMessage = async message => {
+        if (message.action === 'get_page_monitor_state') return await monitorStateFromHost(message.documentToken);
+        const response = await original(message);
+        return message.action === 'page_feedback' ? await feedbackToHost(message.feedback) : response;
+      };
+      const editor = document.createElement('div');
+      editor.id = 'ref_trusted_editor'; editor.contentEditable = 'true'; editor.setAttribute('role', 'textbox');
+      editor.setAttribute('aria-label', 'Post text'); editor.style.cssText = 'width:500px;height:96px;margin:12px';
+      editor.innerHTML = '<div><br></div>';
+      const dialog = document.createElement('div'); dialog.id = 'ref_compose_dialog'; dialog.setAttribute('role', 'dialog');
+      dialog.setAttribute('aria-modal', 'true'); dialog.append(editor); document.body.prepend(dialog);
+      editor.addEventListener('focus', () => {
+        if (document.getElementById('formatting-toolbar')) return;
+        const toolbar = document.createElement('div'); toolbar.id = 'formatting-toolbar';
+        toolbar.setAttribute('role', 'toolbar'); toolbar.setAttribute('aria-label', 'Text formatting');
+        toolbar.style.cssText = 'position:fixed;left:600px;top:200px';
+        toolbar.innerHTML = '<button aria-label="Bold">B</button><button aria-label="Italic">I</button>';
+        document.body.append(toolbar);
+      });
+      window.__wb_ax_lookup = ref => document.getElementById(ref);
+      window.__wb_ax_ref = node => node.id;
+      window.__generateAccessibilityTree = () => ({ pageContent: 'dialog [ref_compose_dialog]\ntextbox "Post text" [ref_trusted_editor]',
+        viewport: { width: innerWidth, height: innerHeight } });
+      window._fieldMeta = el => ({ tag: 'div', contentEditable: true, ariaLabel: el.getAttribute('aria-label') });
+      window._editableTextValue = el => el.innerText.replace(/\n$/, '');
+      window.readProseMirrorText = () => null;
+      window._stableFieldSelector = el => '#' + el.id;
+      window._setFieldValueMatches = (actual, prefix, text, clear) => actual === (clear ? '' : prefix) + text;
+    });
+    const source = read('chrome', 'content/content.js');
+    const entries = ['ax_prepare_field_for_trusted_type', 'ax_verify_field_value', 'field_value_digest'].map(action => {
+      const start = source.indexOf(`'${action}': ${action === 'field_value_digest' ? 'async ' : ''}() => {`), end = source.indexOf('\n      },', start);
+      assert.ok(start > 0 && end > start); return source.slice(start, end + 8);
+    });
+    await page.addScriptTag({ content: `window.axHelpers = { ${entries.join(',\n')} };` });
+    await page.waitForTimeout(250);
+    await page.evaluate(() => { feedback = []; });
+    host._pageFeedbackRuns.get(tab).events.clear();
+    const client = new CDPClient(); client.sessions.set(tab, { attached: true });
+    session = await page.context().newCDPSession(page);
+    cdpClient.attach = async () => ({ attached: true });
+    cdpClient.sendCommand = (...args) => client.sendCommand(...args);
+    await host._capturePageFeedbackModelState(tab, []);
+    assert.equal(host._pageFeedbackRuns.get(tab).modelState.actionBinding.focusedTargetAvailable, false);
+    const capturedBinding = await page.evaluate(runToken => {
+      deliver('page_monitor_capture_model', { runToken, includeTree: true }); return lastMonitorResponse;
+    }, host._pageFeedbackRuns.get(tab).token);
+    assert.ok(capturedBinding.targetCount > 0, 'The heading-free compose dialog must certify its editor');
+    const result = await host.executeTool(tab, 'set_field',
+      { ref_id: 'ref_trusted_editor', text: 'A verified post', clear: true });
+    assert.equal(result.success, true, JSON.stringify({ result, preparations, feedback: await page.evaluate(() => feedback), commands: commands.filter(item => item.method.startsWith('Input.')) }));
+    assert.equal(await page.locator('#ref_trusted_editor').innerText(), 'A verified post');
+    assert.equal(commands.filter(item => item.method === 'Input.insertText').length, 1);
+
+    await page.waitForTimeout(250);
+    host._pageFeedbackRuns.get(tab).events.clear();
+    await host._capturePageFeedbackModelState(tab, []);
+    commands.length = 0; preparations.length = 0; changeToolbarAfterFocus = true;
+    const interrupted = await host.executeTool(tab, 'set_field',
+      { ref_id: 'ref_trusted_editor', text: 'The next verified post', clear: true });
+    assert.equal(interrupted.success, false);
+    assert.match(interrupted.error, /could not reselect it.*Browser changed during action preparation/);
+    assert.equal(preparations.length, 2);
+    assert.equal(preparations[0].success, true);
+    assert.equal(preparations[1].success, false);
+    assert.equal(commands.some(item => item.method === 'Input.insertText'), false,
+      'A toolbar change between trusted focus and selection must stop text dispatch');
+    assert.equal(interrupted.dispatched, true, 'The trusted focus click remains a real dispatched interaction');
+    assert.equal(interrupted.textUnchanged, true, 'Before/after real SHA-256 readback proves the editor unchanged');
+    assert.equal(interrupted.mutationMayHaveOccurred, false);
+    assert.equal(interrupted.repeatBlocked, false);
+    assert.equal(interrupted.recoveryRequired, 'fresh_tree');
+    assert.equal(host._uncertainTextMutations?.get(tab)?.size || 0, 0);
+    assert.equal(await page.locator('#ref_trusted_editor').innerText(), 'A verified post');
+
+    await page.waitForTimeout(250);
+    host._pageFeedbackRuns.get(tab).events.clear();
+    await host._capturePageFeedbackModelState(tab, []);
+    const retried = await host.executeTool(tab, 'set_field',
+      { ref_id: 'ref_trusted_editor', text: 'The next verified post', clear: true });
+    assert.equal(retried.success, true, JSON.stringify(retried));
+    assert.equal(await page.locator('#ref_trusted_editor').innerText(), 'The next verified post');
+    assert.equal(commands.filter(item => item.method === 'Input.insertText').length, 1);
+  } finally {
+    cdpClient.attach = savedCdpAttach; cdpClient.sendCommand = savedCdpSend;
+    if (session) await session.detach().catch(() => {});
+    if (host._pageFeedbackRuns?.has(tab)) host._finishPageFeedbackRun(tab);
+    if (savedChrome === undefined) delete globalThis.chrome; else globalThis.chrome = savedChrome;
+    if (savedBrowser === undefined) delete globalThis.browser; else globalThis.browser = savedBrowser;
+    if (browser) await browser.close();
+  }
 });
 
 test('Chrome full-page capture marks temporary scrolling without suppressing a later page scroll', async () => {

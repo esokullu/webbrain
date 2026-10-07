@@ -474,7 +474,8 @@ export const pageFeedbackMethods = {
       const frames = await apiFor().webNavigation?.getAllFrames?.({ tabId });
       documentId = frames?.find(frame => frame.frameId === 0)?.documentId || documentId;
     } catch {}
-    const state = { token: run.token, url, documentId, page: run.latestPage,
+    const runMode = this._effectiveRunMode?.(tabId, null) || null;
+    const state = { token: run.token, url, documentId, page: run.latestPage, runMode,
       frames: new Map([...run.frames].map(([id, frame]) => [id, { token: frame.token, id: frame.id }])),
       steeringRevision: this._steeringRuns?.get(tabId)?.acceptedIds.size || 0, mediaBindings: {} };
     // The downloader is lazy-loaded. Capture its private document/node/asset
@@ -577,6 +578,7 @@ export const pageFeedbackMethods = {
 
   _pageFeedbackStateCurrent(tabId, run, state, url = run.url) {
     return !!state && state.token === run.token && state.url === url
+      && (state.runMode === undefined || state.runMode === (this._effectiveRunMode?.(tabId, null) || null))
       && state.steeringRevision === (this._steeringRuns?.get(tabId)?.acceptedIds.size || 0)
       && [...state.frames].every(([id, frame]) => run.frames.get(id)?.token === frame.token
         && run.frames.get(id)?.id === frame.id);
@@ -697,7 +699,8 @@ export const pageFeedbackMethods = {
   },
 
   async _applyPendingPageFeedback(tabId, messages, onUpdate = () => {},
-    { workflow = false, responseToolCalls = null, stage = responseToolCalls === null ? 'observation' : 'response' } = {}) {
+    { workflow = false, responseToolCalls = null, responseWithoutTools = false,
+      stage = responseToolCalls === null ? 'observation' : 'response' } = {}) {
     if (!this._hasPendingPageFeedback(tabId) || this._checkAbort(tabId)) return false;
     const started = Date.now();
     await this._waitForPageFeedbackIdle(tabId);
@@ -730,8 +733,16 @@ export const pageFeedbackMethods = {
     }
     const sameDocument = documentMatches && this._pageFeedbackRuns.get(tabId) === run
       && this._pageFeedbackStateCurrent(tabId, run, state, url);
-    let retained = sameDocument && canRetainPageFeedbackCalls(responseToolCalls, state, page, events)
-      && (!pending.length || canRetainPageFeedbackCalls(responseToolCalls, state, page, pending, { pending: true }));
+    // A tool-free Ask response is read-only, including an empty response that
+    // must reach the provider's bounded delivery recovery. This does not mint
+    // completion evidence or retain any mutation, structured terminal or tool.
+    const readonlyAskResponse = responseWithoutTools === true && state.runMode === 'ask'
+      && Array.isArray(responseToolCalls) && responseToolCalls.length === 0;
+    const canRetain = (feedback, options) => readonlyAskResponse
+      ? isPassivePageFeedback(feedback)
+      : canRetainPageFeedbackCalls(responseToolCalls, state, page, feedback, options);
+    let retained = sameDocument && canRetain(events)
+      && (!pending.length || canRetain(pending, { pending: true }));
     if (retained) for (const call of responseToolCalls) {
       const args = JSON.parse(call.function.arguments);
       if (pageFeedbackCallPolicy(call.function.name, args, state, page, events).kind === 'bound_target'
@@ -767,7 +778,7 @@ export const pageFeedbackMethods = {
     }
     // Capture/description can itself receive a hard intervention.
     const finalPending = [...run.events.values()];
-    const accepted = retained && (!finalPending.length || canRetainPageFeedbackCalls(responseToolCalls, state, page, finalPending, { pending: true }));
+    const accepted = retained && (!finalPending.length || canRetain(finalPending, { pending: true }));
     if (Array.isArray(responseToolCalls) && !accepted) {
       const recovery = accountFeedbackSupersession(run, { passive: sameDocument && isPassivePageFeedback(events)
         && (!finalPending.length || isPassivePageFeedback(finalPending)), stage,

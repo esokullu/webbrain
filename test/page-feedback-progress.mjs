@@ -85,6 +85,100 @@ for (const build of ['chrome', 'firefox']) {
   const { Agent } = await import(`../src/${build}/src/agent/agent.js`);
 
   for (const streaming of [false, true]) {
+    // webbrain-traces-1791395643317.json: completed detached research followed
+    // by repeated valid Ask completions discarded because X counters changed.
+    for (const response of ['done', 'prose', 'empty']) for (const refreshFails of [false, true]) {
+      test(`${build}: ${streaming ? 'stream' : 'chat'} Ask ${response} reaches delivery under passive churn${refreshFails ? ' with failed AX refresh' : ''}`, async () => {
+        const tab = nextTab++, updates = [], dispatched = [];
+        const answer = 'Robot Ventures is an investment firm founded by Robert Leshner and Tarun Chitra.';
+        let agent, send, requests = 0, reads = 0;
+        const next = async () => {
+          assert.ok(++requests <= (response === 'empty' ? 3 : 2), 'Passive counters cannot consume the answer or provider recovery budget');
+          send({});
+          if (requests === 1) return call('research-founders', 'research_url', { url: 'https://example.com/robot-ventures' });
+          if (response === 'done') return call('researched-answer', 'done', { summary: answer });
+          return { content: response === 'prose' ? answer : '' };
+        };
+        agent = makeAgent(Agent, next);
+        agent.maxSteps = Infinity;
+        agent._enrichUserMessageWithCurrentPage = async (_tab, _messages, content) => {
+          send = bind(agent, tab);
+          return { role: 'user', content };
+        };
+        agent.executeTool = async (_tab, name, args) => {
+          if (name === 'get_accessibility_tree') {
+            reads++; send({});
+            return refreshFails ? { success: false, error: 'AX refresh unavailable' }
+              : { success: true, pageContent: `article "Unrelated timeline" [ref_1]\n text "${reads} views"` };
+          }
+          dispatched.push(name);
+          if (name === 'done') return { success: true, done: true, summary: args.summary };
+          assert.equal(name, 'research_url');
+          return { success: true, content: answer };
+        };
+        const options = { detachedRequestId: 'ask-feedback-run', askStreamingEnabled: true };
+        const update = (type, data) => updates.push({ type, data });
+        const result = streaming
+          ? await agent.processMessageStream(tab, 'Who founded Robot Ventures?', update, 'ask', options)
+          : await agent.processMessage(tab, 'Who founded Robot Ventures?', update, 'ask', [], options);
+        if (response === 'empty') {
+          assert.match(result, /empty|visible answer|visible text/i);
+          assert.equal(requests, 3, 'The provider receives exactly one recovery turn after its first empty response');
+        } else {
+          assert.equal(result, answer);
+          assert.equal(requests, 2);
+        }
+        assert.deepEqual(dispatched, response === 'done' ? ['research_url', 'done'] : ['research_url']);
+        assert.ok(reads >= requests, 'Every pending passive batch is still observed');
+        assert.equal(updates.some(update => update.type === 'warning' && /page kept changing/.test(update.data.message)), false);
+        assert.equal(agent._pageFeedbackRuns.size, 0);
+      });
+    }
+    for (const response of ['done', 'prose']) for (const change of ['human_input', 'unknown', 'navigation', 'style', 'frame', 'task_steering', 'document', 'mode_change']) {
+      test(`${build}: ${streaming ? 'stream' : 'chat'} Ask ${response} is reconsidered after ${change}`, async () => {
+        const tab = nextTab++, updates = [], delivered = [];
+        let agent, send, requests = 0;
+        const next = async () => {
+          if (++requests === 1) {
+            if (change === 'task_steering') {
+              assert.equal(agent.steerMessage(tab, 'Use the corrected question', { requestId: 'ask-guard-run', messageId: 'ask-correction' }).accepted, true);
+            } else if (change === 'navigation') {
+              agent._queuePageFeedback(tab, { kind: 'navigation', source: 'user', frameId: 0, before: PAGE_URL, after: PAGE_URL });
+            } else if (change === 'frame') {
+              agent._queuePageFeedback(tab, { kind: 'dom', source: 'page', frameId: 1, target: 'span#views' });
+            } else if (change === 'document') {
+              documents.set(tab, 'new-document'); send({});
+            } else if (change === 'mode_change') {
+              agent._runModeOverrides.set(tab, 'act'); send({});
+            } else send({ kind: change === 'human_input' ? 'input' : 'dom',
+              source: change === 'human_input' ? 'user' : change === 'unknown' ? 'unknown' : 'page',
+              ...(change === 'style' ? { target: 'style' } : {}) });
+            return response === 'done' ? call('stale-answer', 'done', { summary: 'Old answer' }) : { content: 'Old answer' };
+          }
+          assert.equal(requests, 2);
+          return { content: 'Fresh answer' };
+        };
+        agent = makeAgent(Agent, next);
+        agent._enrichUserMessageWithCurrentPage = async (_tab, _messages, content) => {
+          send = bind(agent, tab); return { role: 'user', content };
+        };
+        agent.executeTool = async (_tab, name, args) => {
+          if (name === 'get_accessibility_tree') return { success: true, pageContent: 'article "Fresh context" [ref_1]' };
+          delivered.push(args.summary); assert.fail(`Stale ${name} must not dispatch`);
+        };
+        const update = (type, data) => updates.push({ type, data });
+        const options = { detachedRequestId: 'ask-guard-run', askStreamingEnabled: true };
+        try {
+          const result = streaming
+            ? await agent.processMessageStream(tab, 'Read the current question', update, 'ask', options)
+            : await agent.processMessage(tab, 'Read the current question', update, 'ask', [], options);
+          assert.equal(result, 'Fresh answer');
+          assert.equal(requests, 2);
+          assert.deepEqual(delivered, []);
+          assert.equal(agent._pageFeedbackRuns.size, 0);
+        } finally { documents.delete(tab); }
+      });
+    }
     test(`${build}: ${streaming ? 'stream' : 'chat'} same-URL document replacement supersedes a read before the monitor registers`, async () => {
       const tab = nextTab++, updates = [], dispatched = [];
       let agent, requests = 0;

@@ -140,7 +140,7 @@ for (const build of ['chrome', 'firefox']) {
       }
     });
   }
-  for (const outcome of ['partial', 'failure']) {
+  for (const outcome of ['partial', 'failed']) {
     test(`${build}: explicit ${outcome} completion survives counters without becoming success`, () => {
       const candidate = call('done', { summary: 'The task remains incomplete.', outcome });
       assert.equal(canRetainPageFeedbackCalls([candidate], state, { success: false }, passive, { pending: true }), true);
@@ -148,6 +148,32 @@ for (const build of ['chrome', 'firefox']) {
       assert.equal(canRetainPageFeedbackCalls([candidate], state, page, [{ kind: 'pointer', source: 'user', frameId: 0 }]), false);
     });
   }
+  test(`${build}: summary-only Ask completion survives counters and unavailable AX reads`, () => {
+    const candidate = call('done', { summary: 'Answer from completed detached research.' });
+    const ask = { ...state, runMode: 'ask' };
+    for (const currentPage of [page, { success: false }, null]) {
+      assert.equal(canRetainPageFeedbackCalls([candidate], ask, currentPage, passive, { pending: true }), true);
+    }
+    assert.equal(canRetainPageFeedbackCalls([candidate, call('research_url', { url: 'https://example.com' })], ask, page, passive), false);
+    for (const feedback of [
+      { kind: 'input', source: 'user', frameId: 0 },
+      { kind: 'navigation', source: 'page', frameId: 0 },
+      { kind: 'dom', source: 'unknown', frameId: 0 },
+      { kind: 'dom', source: 'page', frameId: 1 },
+      { kind: 'dom', source: 'page', frameId: 0, target: 'style' },
+    ]) assert.equal(canRetainPageFeedbackCalls([candidate], ask, page, [feedback]), false);
+  });
+  test(`${build}: action and unknown modes cannot borrow Ask's summary-only completion`, () => {
+    const args = { summary: 'Claimed answer', runMode: 'ask', mode: 'ask' };
+    for (const runMode of ['act', 'dev', null, undefined]) {
+      assert.equal(pageFeedbackCallPolicy('done', args, { ...state, runMode }, page).kind, 'unsafe');
+    }
+    for (const outcome of ['failure', '', null, 'invented']) {
+      assert.equal(pageFeedbackCallPolicy('done', { summary: 'Incomplete', outcome }, { ...state, runMode: 'ask' }, page).kind, 'unsafe');
+    }
+    assert.equal(pageFeedbackCallPolicy('done_json', { data: { answer: 'Structured' } }, { ...state, runMode: 'ask' }, page).kind, 'unsafe');
+    assert.equal(pageFeedbackCallPolicy('done', { summary: 'Claimed success', outcome: 'success' }, { ...state, runMode: 'ask' }, { success: false }).kind, 'unsafe');
+  });
   test(`${build}: selectorless input needs a captured focus before becoming a binding candidate`, () => {
     for (const name of ['type_text', 'press_keys']) {
       assert.equal(pageFeedbackCallPolicy(name, {}, state, page).kind, 'unsafe');

@@ -96,7 +96,13 @@ export function pageFeedbackCallPolicy(name, args = {}, state = {}, currentPage 
   }
   if (name === 'download_public_media' && (httpUrl(args.url) || httpUrl(state.url))) return { kind: 'independent' };
   if (name === 'navigate' && httpUrl(args.url)) return { kind: 'navigate' };
-  if (name === 'done' && (['partial', 'failure'].includes(args.outcome)
+  // Ask exposes a summary-only done schema. Its answer can come from completed
+  // detached research, so unrelated counters (or a failed AX refresh) do not
+  // require a new inference. The run mode is private pre-inference state.
+  const askSummary = state.runMode === 'ask'
+    && !Object.prototype.hasOwnProperty.call(args, 'outcome')
+    && typeof args.summary === 'string' && !!args.summary.trim();
+  if (name === 'done' && (askSummary || ['partial', 'failed'].includes(args.outcome)
       || (args.outcome === 'success' && currentPage?.success !== false))) return { kind: 'observe', terminal: true };
   if (name === 'download_social_media' && !args.scroll && !args.all
       && [undefined, 'main', 'auto'].includes(args.mode)

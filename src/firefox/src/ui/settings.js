@@ -82,7 +82,7 @@ const SUBSCRIPTION_GUIDE_PRODUCTS = Object.freeze({
 
 // Version shown in the subtitle. Kept here so it only needs one update per
 // release; the subtitle string itself is translated.
-const EXT_VERSION = '40.0.6';
+const EXT_VERSION = '40.0.7';
 
 const providersContainer = document.getElementById('providers');
 const displaySettings = document.getElementById('display-settings');
