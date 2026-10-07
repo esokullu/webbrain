@@ -20,6 +20,22 @@ This changelog was generated from the repository Git history and release tags. V
 - Fixed page feedback attribution and monitoring for keyboard actions, shadow DOM, forms, redirects, stylesheets, frames, and animated page changes.
 - Fixed completion evidence freshness and scope so unrelated or stale page changes cannot satisfy a run.
 
+## [39.2.0] - 2026-10-07
+
+### Added
+- Added generative media creation with fal.ai, OpenRouter, and Comfy providers, including video support and safer provider handling.
+- Added optional MemCode OAuth recall and controls for steering active runs, including queued follow-ups and localized Bridge settings.
+- Added GPT-6.1 Sol and Claude Opus 5.5 provider support, plus Ling and Nex planner comparison tools.
+
+### Changed
+- Improved completion verification with fresh page evidence, run-scoped results, and clearer handling of cost limits in scheduled jobs.
+- Improved steering recovery and authorization, including final-step corrections and LinkedIn message inspection.
+- Updated Turkish documentation and refreshed media and planner benchmark materials.
+
+### Fixed
+- Fixed media generation tool visibility when providers are not configured and corrected service-worker imports for media providers.
+- Improved recovery from superseded planner recommendations and recognition of localized LinkedIn previews.
+
 ## [39.0.0] - 2026-10-06
 
 ### Added
