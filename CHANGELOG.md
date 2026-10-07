@@ -4,6 +4,22 @@ All notable changes to WebBrain are documented in this file.
 
 This changelog was generated from the repository Git history and release tags. Versions without a Git tag are inferred from version-bump commits and the current `package.json` / browser manifest versions.
 
+## [40.0.0] - 2026-10-07
+
+### Added
+- Added page feedback monitoring across forms, navigation, frames, accessibility state, and browser automation, with consent based trace snapshots for GitHub feedback drafts.
+- Added decision model verification for task completion using fresh, run scoped page evidence and safer handling of cost limits in scheduled jobs.
+- Added Ling 3.1 Flash planner benchmarks and a historical planner comparison panel for Ling and Nex.
+
+### Changed
+- Improved recovery from rate limited browser inference without replaying completed tool actions.
+- Improved Firefox BiDi and CDP action attribution, stale page feedback fencing, and WebMCP registration recovery.
+- Added a Turkish README translation and refreshed planner benchmark materials.
+
+### Fixed
+- Fixed page feedback attribution and monitoring for keyboard actions, shadow DOM, forms, redirects, stylesheets, frames, and animated page changes.
+- Fixed completion evidence freshness and scope so unrelated or stale page changes cannot satisfy a run.
+
 ## [39.0.0] - 2026-10-06
 
 ### Added
