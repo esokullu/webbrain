@@ -30950,7 +30950,10 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     if (args.left != null && Number.isFinite(Number(args.left))) update.left = Math.round(Number(args.left));
     if (args.top != null && Number.isFinite(Number(args.top))) update.top = Math.round(Number(args.top));
 
+    let resizeMarker = null;
+    let expectedViewport = null;
     try {
+      resizeMarker = await this._beginPageAgentResize(tabId);
       const win = await browser.windows.get(tab.windowId);
       if (win?.state && win.state !== 'normal') {
         await browser.windows.update(tab.windowId, { state: 'normal' });
@@ -30959,6 +30962,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       await browser.windows.update(tab.windowId, update);
       await new Promise(r => setTimeout(r, 250));
       const info = await this._getWindowInfo(tabId);
+      expectedViewport = info?.viewport || null;
       return {
         ...info,
         resized: true,
@@ -30967,6 +30971,8 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       };
     } catch (e) {
       return { success: false, error: `resize_window failed: ${e.message}` };
+    } finally {
+      await this._finishPageAgentResize(tabId, resizeMarker, expectedViewport);
     }
   }
 

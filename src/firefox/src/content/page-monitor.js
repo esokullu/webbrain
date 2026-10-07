@@ -30,6 +30,7 @@
   let preparedOperationCursor = 0;
   let requestGeneration = 0, unreported = 0, pendingDOM = null;
   let lastViewport = '';
+  let agentResize = null;
   let lastFeedbackDelivery = Promise.resolve();
   let agentTurn = null, userTurn = null, lastUserTarget = null;
   let matchedEvents = new WeakMap();
@@ -123,6 +124,35 @@
       return delivery;
     } catch { stop(); }
   };
+  const currentViewport = () => ({ width: window.innerWidth, height: window.innerHeight,
+    visualWidth: window.visualViewport?.width ?? window.innerWidth, visualHeight: window.visualViewport?.height ?? window.innerHeight,
+    scale: window.visualViewport?.scale ?? 1, offsetX: window.visualViewport?.offsetLeft ?? 0, offsetY: window.visualViewport?.offsetTop ?? 0 });
+  function flushAgentResize(source, expected = agentResize) {
+    if (!expected || agentResize !== expected) return Promise.resolve();
+    clearTimeout(expected.timer); agentResize = null;
+    return Promise.allSettled(expected.events.map(viewport => send({ kind: 'resize', source, target: 'viewport', viewport })));
+  }
+  function beginAgentResize(params) {
+    if (!active || params.runToken !== runToken || typeof params.operationId !== 'string' || !params.operationId) return false;
+    if (agentResize) void flushAgentResize('unknown');
+    const marker = { runToken, operationId: params.operationId, userAt: lastUserAt, events: [], timer: null };
+    marker.timer = setTimeout(() => { void flushAgentResize('unknown', marker); }, 5000);
+    agentResize = marker;
+    return true;
+  }
+  async function finishAgentResize(params) {
+    const marker = agentResize;
+    if (!marker || marker.runToken !== runToken || params.runToken !== runToken || marker.operationId !== params.operationId) {
+      return { ready: false };
+    }
+    const finalViewport = marker.events.at(-1);
+    const expected = params.expectedViewport;
+    const attributed = marker.userAt === lastUserAt && finalViewport
+      && Number.isFinite(expected?.width) && Number.isFinite(expected?.height)
+      && finalViewport.width === expected.width && finalViewport.height === expected.height;
+    await flushAgentResize(attributed ? 'agent' : 'unknown', marker);
+    return { ready: true, attributed: !!attributed };
+  }
   const interact = (kind, el, { completeGesture = false, ...extra } = {}) => {
     const isIgnored = ignored(el);
     if (!active || (isIgnored && !completeGesture)) return;
@@ -1001,14 +1031,16 @@
       const el = elementFor(event);
       if (event.isTrusted && !expected('scroll', el, event)) interact('activity', el);
     });
-    const viewport = () => ({ width: innerWidth, height: innerHeight,
-      visualWidth: window.visualViewport?.width ?? innerWidth, visualHeight: window.visualViewport?.height ?? innerHeight,
-      scale: window.visualViewport?.scale ?? 1, offsetX: window.visualViewport?.offsetLeft ?? 0, offsetY: window.visualViewport?.offsetTop ?? 0 });
-    lastViewport = JSON.stringify(viewport());
+    lastViewport = JSON.stringify(currentViewport());
     const onResize = () => {
-      const current = viewport(), key = JSON.stringify(current);
+      const current = currentViewport(), key = JSON.stringify(current);
       if (!active || key === lastViewport) return;
-      lastViewport = key; revision++;
+      lastViewport = key; revision++; publishRevision();
+      if (agentResize?.runToken === runToken && agentResize.events.length < 16) {
+        agentResize.events.push(current);
+        return;
+      }
+      if (agentResize) void flushAgentResize('unknown');
       send({ kind: 'resize', source: window === window.top ? 'unknown' : 'page', target: 'viewport', viewport: current });
     };
     listen(window, 'resize', onResize);
@@ -1052,6 +1084,7 @@
   }
   function stop() {
     active = false; runToken = ''; activePointers.clear(); pointerHeld = false; composing = false;
+    clearTimeout(agentResize?.timer); agentResize = null;
     lastUserAt = 0; lastViewport = ''; userTurn = null; lastUserTarget = null; matchedEvents = new WeakMap(); controlIterator = null; preparedOperationCursor = 0;
     document.documentElement?.removeAttribute(fenceAttribute);
     for (const el of nativeTargets) {
@@ -1232,6 +1265,10 @@
       if (msg.active) { void requestState().then(() => respond({ ready: true })); return true; }
       else if (!msg.runToken || msg.runToken === runToken) { requestGeneration++; stop(); respond({ ready: true }); }
     } else if (msg.action === 'page_monitor_prepare') { prepare(msg.params || {}); respond({ ready: true }); }
+    else if (msg.action === 'page_monitor_resize_begin') { respond({ ready: beginAgentResize(msg.params || {}) }); }
+    else if (msg.action === 'page_monitor_resize_finish') {
+      void finishAgentResize(msg.params || {}).then(respond, () => respond({ ready: false })); return true;
+    }
     else if (msg.action === 'page_monitor_validate') { respond({ ready: validateNativeDispatch(msg.params || {}) }); }
     else if (msg.action === 'page_monitor_dispatch') {
       const params = msg.params || {};

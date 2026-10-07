@@ -145,6 +145,25 @@ export const pageFeedbackMethods = {
     });
   },
 
+  async _beginPageAgentResize(tabId) {
+    const run = this._pageFeedbackRuns?.get(tabId);
+    if (!run) return null;
+    const marker = { runToken: run.token, operationId: token() };
+    try {
+      const response = await apiFor().tabs.sendMessage(tabId, { target: 'content', action: 'page_monitor_resize_begin',
+        params: marker }, { frameId: 0 });
+      return response?.ready === true && this._pageFeedbackRuns?.get(tabId) === run ? marker : null;
+    } catch { return null; }
+  },
+
+  async _finishPageAgentResize(tabId, marker, expectedViewport) {
+    if (!marker) return;
+    try {
+      await apiFor().tabs.sendMessage(tabId, { target: 'content', action: 'page_monitor_resize_finish',
+        params: { ...marker, expectedViewport: expectedViewport || null } }, { frameId: 0 });
+    } catch { /* A protected or navigated document cannot report resize attribution. */ }
+  },
+
   _finishPageFeedbackRun(tabId) {
     const run = this._pageFeedbackRuns?.get(tabId);
     if (!run) return;
@@ -192,6 +211,12 @@ export const pageFeedbackMethods = {
         || !['user', 'agent', 'page', 'unknown'].includes(feedback.source)) return { accepted: false, reason: 'invalid-observation' };
     frame.seq = seq;
     if (feedback.source === 'agent') {
+      if (feedback.kind === 'resize') {
+        const session = this._jevSessions?.get(tabId);
+        if (session) { session.disabled = true; session.queue = []; session.snapshot = null; }
+        this.screenshotCaptures?.delete(tabId);
+        this.clearLastTypeFieldIdent?.(tabId);
+      }
       if (['click', 'submit'].includes(feedback.operation)) {
         let url = '';
         try {

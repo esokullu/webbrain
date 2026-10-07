@@ -1804,6 +1804,47 @@ for (const [build, engine] of [['chrome', chromium], ['firefox', firefox]]) {
     } finally { await browser.close(); }
   });
 
+  test(`${build}: agent resize attribution waits for a matching viewport and preserves concurrent input`, async () => {
+    const { browser, page } = await fixture(engine, build);
+    try {
+      const agentResize = { operationId: 'agent-resize', runToken: 'test-run' };
+      await page.evaluate(marker => {
+        feedback = [];
+        deliver('page_monitor_resize_begin', marker);
+        deliver('page_monitor_prepare', { operationId: 'resize-click', tool: 'click', selector: '#agent' });
+      }, agentResize);
+      assert.equal(await page.evaluate(() => lastMonitorResponse.ready), true);
+      await page.setViewportSize({ width: 1000, height: 700 });
+      await page.waitForTimeout(50);
+      assert.deepEqual(await page.evaluate(() => feedback), [], 'Resize feedback stays buffered until its result is verified');
+      await page.evaluate(marker => deliver('page_monitor_resize_finish', {
+        ...marker, expectedViewport: { width: 1000, height: 700 },
+      }), agentResize);
+      await page.waitForFunction(() => feedback.some(event => event.kind === 'resize'), null, { timeout: 1000 });
+      const attributed = await page.evaluate(() => feedback.find(event => event.kind === 'resize'));
+      assert.equal(attributed.source, 'agent');
+      assert.equal(attributed.viewport.width, 1000);
+      const rejected = await page.evaluate(async () => {
+        deliver('page_monitor_dispatch', { operationId: 'resize-click', kind: 'click', selector: '#agent' });
+        await new Promise(resolve => setTimeout(resolve, 0)); return lastMonitorResponse;
+      });
+      assert.equal(rejected.pageFeedbackPending, true, 'The agent resize still invalidates prepared coordinates');
+
+      const overlap = { operationId: 'agent-resize-overlap', runToken: 'test-run' };
+      await page.evaluate(marker => { feedback = []; deliver('page_monitor_resize_begin', marker); }, overlap);
+      await page.setViewportSize({ width: 1100, height: 750 });
+      await page.waitForTimeout(50);
+      await page.locator('#human').click();
+      await page.evaluate(marker => deliver('page_monitor_resize_finish', {
+        ...marker, expectedViewport: { width: 1100, height: 750 },
+      }), overlap);
+      await page.waitForFunction(() => feedback.some(event => event.kind === 'resize')
+        && feedback.some(event => event.kind === 'click' && event.source === 'user'), null, { timeout: 1000 });
+      const overlappingResize = await page.evaluate(() => feedback.find(event => event.kind === 'resize'));
+      assert.equal(overlappingResize.source, 'unknown', 'Concurrent trusted input prevents agent attribution');
+    } finally { await browser.close(); }
+  });
+
   test(`${build}: contenteditable fallback attributes its cancellable gate and native edits`, async () => {
     const { browser, page } = await fixture(engine, build);
     try {

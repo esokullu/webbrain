@@ -365,6 +365,54 @@ for (const build of ['chrome', 'firefox']) {
     } finally { agent._releaseRunEntry(tab); }
   });
 
+  test(`${build}: agent resize feedback invalidates caches without queueing or idle delay`, async () => {
+    const agent = setup(Agent), tab = nextTab++;
+    await agent._claimRunEntry(tab, 'interactive');
+    try {
+      const binding = bind(agent, tab);
+      agent._jevSessions = new Map([[tab, { disabled: false, queue: ['prepared'], snapshot: {} }]]);
+      agent.screenshotCaptures.set(tab, { captureId: 'stale-resize' });
+      let clearedTypeField = false;
+      agent.clearLastTypeFieldIdent = id => { if (id === tab) clearedTypeField = true; };
+      assert.equal(binding.send({ kind: 'resize', source: 'agent', target: 'viewport',
+        viewport: { width: 900, height: 600, scale: 1 } }).accepted, true);
+      const run = agent._pageFeedbackRuns.get(tab);
+      assert.equal(run.events.size, 0, 'Agent geometry changes do not become page feedback');
+      assert.equal(run.lastActivityAt, 0, 'Agent geometry changes do not add an idle delay');
+      assert.equal(agent.screenshotCaptures.has(tab), false);
+      assert.equal(agent._jevSessions.get(tab).disabled, true);
+      assert.deepEqual(agent._jevSessions.get(tab).queue, []);
+      assert.equal(clearedTypeField, true);
+    } finally { agent._releaseRunEntry(tab); }
+  });
+
+  test(`${build}: resize_window brackets browser updates with the active monitor marker`, async () => {
+    const agent = setup(Agent), tab = nextTab++;
+    const previousGet = api.tabs.get, previousSend = api.tabs.sendMessage, previousWindows = api.windows;
+    const messages = [];
+    api.tabs.get = async id => ({ id, url: 'https://example.com/new', windowId: 23 });
+    api.tabs.sendMessage = async (_id, message) => { messages.push(message); return { ready: true }; };
+    api.windows = { get: async () => ({ state: 'normal' }), update: async () => ({}) };
+    agent._getWindowInfo = async () => ({ success: true, viewport: { width: 900, height: 600 }, note: 'test' });
+    await agent._claimRunEntry(tab, 'interactive');
+    try {
+      await agent._beginPageFeedbackRun(tab, 'interactive');
+      const result = await agent._resizeWindow(tab, { width: 900, height: 600 });
+      assert.equal(result.resized, true);
+      const markers = messages.filter(message => ['page_monitor_resize_begin', 'page_monitor_resize_finish'].includes(message.action));
+      assert.deepEqual(markers.map(message => message.action), ['page_monitor_resize_begin', 'page_monitor_resize_finish']);
+      assert.equal(markers[0].params.runToken, markers[1].params.runToken);
+      assert.equal(markers[0].params.operationId, markers[1].params.operationId);
+      assert.deepEqual(markers[1].params.expectedViewport, { width: 900, height: 600 });
+    } finally {
+      if (agent._pageFeedbackRuns.has(tab)) agent._finishPageFeedbackRun(tab);
+      agent._releaseRunEntry(tab);
+      api.tabs.get = previousGet;
+      api.tabs.sendMessage = previousSend;
+      if (previousWindows === undefined) delete api.windows; else api.windows = previousWindows;
+    }
+  });
+
   test(`${build}: navigation arriving during a page read gets its own feedback ID`, async () => {
     const agent = setup(Agent), tab = nextTab++, entered = deferred(), release = deferred();
     const updates = [], messages = [];
