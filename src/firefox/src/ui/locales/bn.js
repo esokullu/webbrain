@@ -1180,4 +1180,5 @@ export default {
   "st.sync.consent.legacy": "এনক্রিপ্ট করা সিঙ্ক চালু করবেন? WebBrain আপনার স্মৃতি, প্রোফাইল অটোফিল এবং API-কী প্রদানকারী সেটিংসের একটি এন্ড-টু-এন্ড এনক্রিপ্টেড কপি WebBrain Compass-এ প্রেরণ করবে। চ্যাট ইতিহাস এবং OAuth সাইন-ইন সিঙ্ক করা হয় না।",
   "st.sync.consent.denied": "এনক্রিপ্ট করা সিঙ্ক অনুমতি দেওয়া হয়নি।",
   'st.providers.webgpu_note.body': '{modelLink} কোনো API এন্ডপয়েন্ট ছাড়াই সম্পূর্ণভাবে Chrome-এ চলে। এটি Settings > Providers > WebGPU বা Apocalypse Mode থেকে ডাউনলোড করুন, তারপর standalone chat-এ nuclear control ব্যবহার করুন।',
+  'sp.monitor.navigation': "কাজ চলার সময় পৃষ্ঠা বদলেছে ({before} → {after})। কাজ চলতে থাকবে।",
 };

@@ -2,6 +2,47 @@ import { mkdtemp, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, basename } from 'node:path';
 
+const sipMask = (1n << 64n) - 1n;
+const sipRotate = (value, bits) => ((value << BigInt(bits)) | (value >> BigInt(64 - bits))) & sipMask;
+function pageActionSignature(secret, data) {
+  if (!/^[a-f\d]{32}$/i.test(secret || '')) return '';
+  const key = Buffer.from(secret, 'hex');
+  const read64 = offset => {
+    let value = 0n;
+    for (let index = 0; index < 8; index++) value |= BigInt(key[offset + index]) << BigInt(index * 8);
+    return value;
+  };
+  const k0 = read64(0), k1 = read64(8);
+  let v0 = 0x736f6d6570736575n ^ k0, v1 = 0x646f72616e646f6dn ^ k1;
+  let v2 = 0x6c7967656e657261n ^ k0, v3 = 0x7465646279746573n ^ k1;
+  const round = () => {
+    v0 = (v0 + v1) & sipMask; v1 = sipRotate(v1, 13); v1 ^= v0; v0 = sipRotate(v0, 32);
+    v2 = (v2 + v3) & sipMask; v3 = sipRotate(v3, 16); v3 ^= v2;
+    v0 = (v0 + v3) & sipMask; v3 = sipRotate(v3, 21); v3 ^= v0;
+    v2 = (v2 + v1) & sipMask; v1 = sipRotate(v1, 17); v1 ^= v2; v2 = sipRotate(v2, 32);
+  };
+  const bytes = Buffer.from(JSON.stringify([data.documentToken, data.runToken, data.operationId, data.revision,
+    data.kind, data.sequence, data.navigationCandidate === true]));
+  let offset = 0;
+  while (offset + 8 <= bytes.length) {
+    let block = 0n;
+    for (let index = 0; index < 8; index++) block |= BigInt(bytes[offset + index]) << BigInt(index * 8);
+    v3 ^= block; round(); round(); v0 ^= block; offset += 8;
+  }
+  let tail = BigInt(bytes.length) << 56n;
+  for (let index = 0; offset + index < bytes.length; index++) tail |= BigInt(bytes[offset + index]) << BigInt(index * 8);
+  v3 ^= tail; round(); round(); v0 ^= tail; v2 ^= 0xffn;
+  round(); round(); round(); round();
+  return (v0 ^ v1 ^ v2 ^ v3).toString(16).padStart(16, '0');
+}
+
+export function createNativeActionMarker(guard, kind, sequence) {
+  const { nativeSecret, ...data } = guard || {};
+  const marker = { ...data, kind, sequence };
+  marker.signature = pageActionSignature(nativeSecret, marker);
+  return JSON.stringify(marker);
+}
+
 function unpackRemoteObjectValue(value) {
   if (value?.type !== 'object' || !Array.isArray(value.value)) return value;
   return Object.fromEntries(value.value.flatMap(entry => {
@@ -204,16 +245,17 @@ export class BidiSession {
     if (run) await this.send('input.releaseActions', { context: run.context }).catch(() => {});
     return {};
   }
-  async perform(id, action, payload) {
+  async perform(id, action, payload, validatePageDispatch = null) {
     const dispatch = { started: false };
-    try { return await this.performAction(id, action, payload, dispatch); }
+    try { return await this.performAction(id, action, payload, dispatch, validatePageDispatch); }
     catch (error) {
       error.dispatchState = { dispatched: dispatch.started, noDispatch: !dispatch.started,
-        outcomeUnknown: dispatch.started, retryable: !dispatch.started };
+        outcomeUnknown: dispatch.started, retryable: !dispatch.started,
+        ...(error.code === 'page_feedback_pending' ? { pageFeedbackPending: true } : {}) };
       throw error;
     }
   }
-  async performAction(id, action, payload, dispatch) {
+  async performAction(id, action, payload, dispatch, validatePageDispatch = null) {
     if (!['navigate', 'click', 'hover', 'type', 'field', 'key', 'upload'].includes(action)) throw new Error('Unsupported BiDi action');
     if (payload.modifiers) throw new Error('Key modifiers are not supported by this tool');
     const run = this.runs.get(id); if (!run) throw new Error('Run stopped or disconnected');
@@ -224,6 +266,13 @@ export class BidiSession {
     assertLive();
     if (action === 'navigate') {
       if (!/^https?:\/\//.test(payload.url)) throw new Error('Invalid navigation URL');
+      const guard = payload.pageFeedbackGuard;
+      if (guard && (typeof validatePageDispatch !== 'function'
+          || !await validatePageDispatch(id, guard, 'navigate', false))) {
+        const error = new Error('Page changed during native preparation; navigation was not sent');
+        error.code = 'page_feedback_pending'; throw error;
+      }
+      assertLive();
       run.navigation = true;
       try { dispatch.started = true; await this.send('browsingContext.navigate', { context: run.context, url: payload.url, wait: 'interactive' }); }
       finally { run.navigation = false; }
@@ -231,8 +280,72 @@ export class BidiSession {
     }
     const match = await this.locate(payload.token, payload.url, run.context);
     assertLive();
+    let nativeSequence = 0;
+    const markNativeDispatch = async (kind, { rebindFocus = false } = {}) => {
+      assertLive();
+      const guard = payload.pageFeedbackGuard;
+      if (!guard) return; // Compatibility with clients without page monitoring.
+      if (typeof validatePageDispatch !== 'function'
+          || !await validatePageDispatch(id, guard, kind, rebindFocus === true)) {
+        const error = new Error('Page changed during native preparation; no further input sent');
+        error.code = 'page_feedback_pending'; throw error;
+      }
+      const marker = createNativeActionMarker(guard, kind, ++nativeSequence);
+      const checked = await this.call(match, `(el, marker, kind, action) => {
+        if (!el.isConnected) return false;
+        const deepActiveElement = () => {
+          let active = document.activeElement;
+          while (active?.shadowRoot?.activeElement) active = active.shadowRoot.activeElement;
+          return active;
+        };
+        const target = kind === 'input' && action !== 'upload' ? deepActiveElement() || el : el;
+        if (!target?.isConnected) return false;
+        target.setAttribute('data-webbrain-native-action', marker);
+        return true;
+      }`, [{ type: 'string', value: marker }, { type: 'string', value: kind }, { type: 'string', value: action }]);
+      if (checked.result?.value !== true) {
+        const error = new Error('Page changed during native preparation; no further input sent');
+        error.code = 'page_feedback_pending'; throw error;
+      }
+      try {
+        assertLive();
+        if (!await validatePageDispatch(id, guard, kind, rebindFocus === true)) {
+          const error = new Error('Page changed during native preparation; no further input sent');
+          error.code = 'page_feedback_pending'; throw error;
+        }
+        assertLive();
+      } catch (error) {
+        await clearNativeDispatch(marker);
+        throw error;
+      }
+      return marker;
+    };
+    const clearNativeDispatch = async marker => {
+      if (!marker || !payload.pageFeedbackGuard) return;
+      try {
+        await this.call(match, `(el, marker, action) => {
+          const kind = JSON.parse(marker).kind;
+          const deepActiveElement = () => {
+            let active = document.activeElement;
+            while (active?.shadowRoot?.activeElement) active = active.shadowRoot.activeElement;
+            return active;
+          };
+          const targets = kind === 'input' && action !== 'upload' ? [el, deepActiveElement()] : [el];
+          for (const target of new Set(targets))
+            if (target?.getAttribute('data-webbrain-native-action') === marker) target.removeAttribute('data-webbrain-native-action');
+        }`, [{ type: 'string', value: marker }, { type: 'string', value: action }]);
+      } catch { /* The document may have navigated or the monitor already consumed the marker. */ }
+    };
     const point = action === 'click' && payload.point != null ? payload.point : null;
     if (point && (!Number.isInteger(point.x) || !Number.isInteger(point.y))) throw new Error('Invalid click coordinates');
+    const focusGuard = payload.pageFeedbackGuard;
+    if (['type', 'field', 'key'].includes(action) && focusGuard
+        && (typeof validatePageDispatch !== 'function'
+          || !await validatePageDispatch(id, focusGuard, 'input', false))) {
+      const error = new Error('Page changed during native preparation; no focus or input sent');
+      error.code = 'page_feedback_pending'; throw error;
+    }
+    assertLive();
     const check = await this.call(match, `(el, token, action, x, y) => {
       if (!el.isConnected || el.getAttribute('data-webbrain-bidi') !== token || el.disabled) return false;
       el.removeAttribute('data-webbrain-bidi');
@@ -276,8 +389,11 @@ export class BidiSession {
       const path = join(dir, name === '.' || name === '..' ? 'attachment' : name);
       await writeFile(path, bytes, { mode: 0o600 });
       assertLive();
-      dispatch.started = true;
-      await this.send('input.setFiles', { context: match.context, element: { sharedId: match.node.sharedId }, files: [path] });
+      const marker = await markNativeDispatch('input');
+      try {
+        dispatch.started = true;
+        await this.send('input.setFiles', { context: match.context, element: { sharedId: match.node.sharedId }, files: [path] });
+      } finally { await clearNativeDispatch(marker); }
       const attached = await this.call(match, '(el, name, size) => el.isConnected && el.files?.length === 1 && el.files[0].name === name && el.files[0].size === size', [{ type: 'string', value: name }, { type: 'number', value: bytes.length }]);
       if (attached.result?.value !== true) return { success: false, dispatched: true, outcomeUnknown: true, retryable: false, error: 'File input changed after attachment; inspect the page before retrying.' };
       return { success: true, dispatched: true, attachmentState: 'input_attached', file: name, size: bytes.length };
@@ -299,11 +415,27 @@ export class BidiSession {
       if (followTabFocus) assertLive();
       else await assertFocus();
       const actions = [
-        ...(modifier ? [{ type: 'keyDown', value: modifier }] : []),
         { type: 'keyDown', value }, { type: 'keyUp', value },
         ...(modifier ? [{ type: 'keyUp', value: modifier }] : []),
       ];
-      try { dispatch.started = true; await this.send('input.performActions', { context: match.context, actions: [{ type: 'key', id: 'webbrain-keyboard', actions }] }); }
+      try {
+        // Each keydown needs its own expectation. Keep the modifier held while
+        // renewing the fence, so Ctrl/Meta+A cannot look like a human edit.
+        if (modifier) {
+          const marker = await markNativeDispatch('input');
+          try {
+            dispatch.started = true;
+            await this.send('input.performActions', { context: match.context, actions: [{ type: 'key', id: 'webbrain-keyboard',
+              actions: [{ type: 'keyDown', value: modifier }] }] });
+          } finally { await clearNativeDispatch(marker); }
+          await assertFocus();
+        }
+        const marker = await markNativeDispatch('input', { rebindFocus: followTabFocus });
+        try {
+          dispatch.started = true;
+          await this.send('input.performActions', { context: match.context, actions: [{ type: 'key', id: 'webbrain-keyboard', actions }] });
+        } finally { await clearNativeDispatch(marker); }
+      }
       finally { await this.send('input.releaseActions', { context: match.context }).catch(() => {}); }
       assertLive();
     };
@@ -314,8 +446,12 @@ export class BidiSession {
         ...(action === 'click' ? [{ type: 'pointerDown', button: 0 }, { type: 'pointerUp', button: 0 }] : []),
       ] };
       assertLive();
+      const marker = await markNativeDispatch('click');
       try { dispatch.started = true; await this.send('input.performActions', { context: match.context, actions: [source] }); }
-      finally { await this.send('input.releaseActions', { context: match.context }).catch(() => {}); }
+      finally {
+        await clearNativeDispatch(marker);
+        await this.send('input.releaseActions', { context: match.context }).catch(() => {});
+      }
       assertLive();
       if (checkable) {
         const observation = await this._waitForCheckableState(match, checkable.desiredChecked, 80);
@@ -377,11 +513,15 @@ export class BidiSession {
           await assertFocus();
           // Enter is a submit shortcut on many editors, even with Shift. Insert a literal
           // newline through the editing command instead; never synthesize a submit key.
-          dispatch.started = true;
-          const inserted = await this.call(match, `(el, text) => {
-            if (!el.isConnected || el.getRootNode().activeElement !== el) return false;
-            return document.execCommand('insertText', false, text);
-          }`, [{ type: 'string', value: char }]);
+          const marker = await markNativeDispatch('input');
+          let inserted;
+          try {
+            dispatch.started = true;
+            inserted = await this.call(match, `(el, text) => {
+              if (!el.isConnected || el.getRootNode().activeElement !== el) return false;
+              return document.execCommand('insertText', false, text);
+            }`, [{ type: 'string', value: char }]);
+          } finally { await clearNativeDispatch(marker); }
           if (inserted.result?.value !== true) throw new Error('Editor rejected literal newline insertion');
           assertLive();
         } else await press(char);

@@ -2,6 +2,7 @@ import { verifyBrowserCompletion } from './completion-runtime.js';
 import { DECISION_SETTINGS_KEYS, resolveDecisionConfig } from './decision-config.js';
 import { completionStopError } from './completion-verifier.js';
 import { COMPLETION_DOCUMENT_STAMP_SCRIPT, COMPLETION_DOCUMENT_IDENTITY_SCRIPT } from './completion-document.js';
+import { installPageFeedback, beforePageAgentDispatch, hasPageAgentDispatchOwner } from './page-feedback.js';
 import { JEV_FAST_KEYS, JEV_CLASSIFIER_THRESHOLD, JEV_BROWSER_THRESHOLD, confidentChoice, buildJevBrowserRequest, decideJevBrowser, jevVisualInputRequiresMainModel, JevFastSession } from './systemone-fast.js';
 import { redactSystemOneText, wrapSystemOneData, boundedSystemOneText } from './systemone-evidence.js';
 import { createSystemOneJudge, isSystemOneResponseContractError, systemOneFailureReason, SYSTEM_ONE_COST_PROVIDER } from './systemone-judge.js';
@@ -5756,6 +5757,9 @@ export class Agent extends LoopDetector {
     else externalSignal?.addEventListener?.('abort', onAbort, { once: true });
     try {
       await this.assertRunStartAllowed(tabId, defaultKind, runOptions);
+      if (!this._isStandaloneChatRun(runOptions)) {
+        await this._beginPageFeedbackRun(tabId, this._runEntryKind(defaultKind, runOptions));
+      }
     } catch (error) {
       this._releaseRunEntry(tabId);
       throw error;
@@ -5763,6 +5767,7 @@ export class Agent extends LoopDetector {
   }
 
   _releaseRunEntry(tabId) {
+    this._finishPageFeedbackRun(tabId);
     firefoxBidi.stopRun(tabId);
     this._runAbortStates.get(tabId)?.dispose();
     this._runAbortStates.delete(tabId);
@@ -5779,6 +5784,8 @@ export class Agent extends LoopDetector {
   }
 
   _beginSteeringRun(tabId, onUpdate, runOptions = {}) {
+    const feedbackRun = this._pageFeedbackRuns?.get(tabId);
+    if (feedbackRun) feedbackRun.onUpdate = onUpdate;
     if (runOptions.cloudRun || runOptions.scheduledRun) return;
     this._steeringRuns.set(tabId, {
       requestId: String(runOptions.detachedRequestId || ''),
@@ -7145,7 +7152,7 @@ export class Agent extends LoopDetector {
   }
 
   async _maybeJevFastTurn(tabId, task, messages, mode, allowed, provider, costState, runOptions = {}, recovery = null) {
-    if (this._steeringRuns.get(tabId)?.acceptedIds.size) return null;
+    if (this._steeringRuns.get(tabId)?.acceptedIds.size || this._pageFeedbackRuns?.get(tabId)?.revision) return null;
     const context = this.systemOneContext(tabId);
     if (!['act', 'dev'].includes(mode) || this._checkAbort(tabId)) return null;
     let session;
@@ -9324,7 +9331,8 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
    * triggered the bulk pattern and navigated the page never silently drops the
    * "previous page is GONE" warning.
    */
-  _injectNavNotices(messages, navNotices, onUpdate) {
+  _injectNavNotices(messages, navNotices, onUpdate, tabId) {
+    if ([...(this._pageFeedbackRuns?.get(tabId)?.events.values() || [])].some(event => event.kind === 'navigation' && event.frameId === 0)) return;
     if (!navNotices || navNotices.length === 0) return;
     const last = navNotices[navNotices.length - 1];
     const noticeText =
@@ -10962,7 +10970,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
         error: `Skipped ${skippedName}: ${triggeringTool} requires a fresh model turn before any dependent browser action.`,
       }),
     );
-    this._injectNavNotices(messages, options.navNotices || [], onUpdate);
+    this._injectNavNotices(messages, options.navNotices || [], onUpdate, tabId);
     onUpdate('warning', {
       message: `Paused ${skippedCount} stale tool call(s) after ${triggeringTool}; continuing from the observed result.`,
     });
@@ -11158,10 +11166,11 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
         onUpdate('warning', { message: 'Stopped by user.' });
         return { action: 'abort', value };
       }
-      if (this._hasPendingSteering(tabId)) {
+      if (this._hasPendingSteering(tabId) || this._hasPendingPageFeedback(tabId)) {
         this._appendSyntheticToolResults(tabId, toolCalls, toolIndex, messages, onUpdate, step, () => ({
           success: false, skipped: true, dispatched: false, noDispatch: true,
-          error: 'Skipped because the user steered the current task. Reconsider the remaining actions using the latest user message.',
+          pageFeedbackPending: this._hasPendingPageFeedback(tabId),
+          error: 'Skipped because the user steered the current task or the browser changed. Reconsider remaining actions using the latest feedback.',
         }));
         return { action: 'continue' };
       }
@@ -11546,7 +11555,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
         if (workflowPreSubmitBlock.workflowRearmed || workflowPreSubmitBlock.conditionalMutationBlocked) {
           this._appendSyntheticToolResults(tabId, toolCalls, toolIndex + 1, messages, onUpdate, step,
             () => ({ success: false, skipped: true, error: 'skipped: conditional workflow transition requires a fresh tool batch' }));
-          this._injectNavNotices(messages, navNotices, onUpdate);
+          this._injectNavNotices(messages, navNotices, onUpdate, tabId);
           this._persist(tabId);
           return { action: 'continue' };
         }
@@ -12134,7 +12143,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
           this._throwIfAborted(abortSignal);
           // Permission, checkpoint and preflight waits can receive a correction.
           // Recheck after all preparation, before marking or invoking dispatch.
-          if (this._hasPendingSteering(tabId)) return { steered: true };
+            if (this._hasPendingSteering(tabId) || this._hasPendingPageFeedback(tabId)) return { steered: true };
           if (!pipelineToolbarPreflight.block && !socialDispatchBlock) callState.invoked = true;
           const pipelineRawToolResult = pipelineToolbarPreflight.block || socialDispatchBlock || await this.executeTool(
             tabId,
@@ -12260,7 +12269,8 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       if (steeringBeforeDispatch) {
         this._appendSyntheticToolResults(tabId, toolCalls, toolIndex, messages, onUpdate, step, () => ({
           success: false, skipped: true, dispatched: false, noDispatch: true,
-          error: 'Skipped because the user steered the current task. Reconsider the remaining actions using the latest user message.',
+          pageFeedbackPending: this._hasPendingPageFeedback(tabId),
+          error: 'Skipped because the user steered the current task or the browser changed. Reconsider remaining actions using the latest feedback.',
         }));
         return { action: 'continue' };
       }
@@ -12800,7 +12810,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
             error: 'skipped: an earlier tool returned no response; verify the current state before retrying',
           }),
         );
-        this._injectNavNotices(messages, navNotices, onUpdate);
+        this._injectNavNotices(messages, navNotices, onUpdate, tabId);
         onUpdate('warning', {
           message: `Tool response was lost; paused ${skippedCount} remaining tool call(s) for state verification.`,
         });
@@ -12926,7 +12936,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
         // A click can both trigger the bulk pattern AND navigate the page; this
         // early return skips the post-loop flush, so emit any nav notices here
         // or the model would replay against stale URLs from the prior page.
-        this._injectNavNotices(messages, navNotices, onUpdate);
+        this._injectNavNotices(messages, navNotices, onUpdate, tabId);
         this._persist(tabId);
         return { action: 'continue' };
       }
@@ -12936,7 +12946,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       }
     }
 
-    this._injectNavNotices(messages, navNotices, onUpdate);
+    this._injectNavNotices(messages, navNotices, onUpdate, tabId);
 
     // Auto-screenshot after state change. Capture if either the main
     // provider supports images, or a dedicated vision model is configured
@@ -30941,7 +30951,10 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     if (args.left != null && Number.isFinite(Number(args.left))) update.left = Math.round(Number(args.left));
     if (args.top != null && Number.isFinite(Number(args.top))) update.top = Math.round(Number(args.top));
 
+    let resizeMarker = null;
+    let expectedViewport = null;
     try {
+      resizeMarker = await this._beginPageAgentResize(tabId);
       const win = await browser.windows.get(tab.windowId);
       if (win?.state && win.state !== 'normal') {
         await browser.windows.update(tab.windowId, { state: 'normal' });
@@ -30950,6 +30963,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       await browser.windows.update(tab.windowId, update);
       await new Promise(r => setTimeout(r, 250));
       const info = await this._getWindowInfo(tabId);
+      expectedViewport = info?.viewport || null;
       return {
         ...info,
         resized: true,
@@ -30958,6 +30972,8 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       };
     } catch (e) {
       return { success: false, error: `resize_window failed: ${e.message}` };
+    } finally {
+      await this._finishPageAgentResize(tabId, resizeMarker, expectedViewport);
     }
   }
 
@@ -31079,6 +31095,8 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       ? runOptions?.parentSessionId || null
       : null;
     await this._claimRunEntry(tabId, 'workflow', runOptions);
+    const feedbackRun = this._pageFeedbackRuns?.get(tabId);
+    if (feedbackRun) feedbackRun.onUpdate = onUpdate;
     let completionRunToken = '';
     let startUrl = '';
     let traceRunId = null;
@@ -31136,6 +31154,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     let finalContent = '';
     let matchedSteps = 0;
     const verifiedHealings = [];
+    const pageFeedbackRetries = new Map();
 
     const finishStopped = (reason, stepIndex = 0) => {
       const summary = `Saved workflow "${workflow.name}" stopped safely at step ${stepIndex + 1}: ${reason}.`;
@@ -31163,7 +31182,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
           stepIndex: 0,
           matchedSteps,
           healings: verifiedHealings,
-          prompt: workflowFallbackPrompt(workflow, 0, reason),
+          prompt: await this._workflowFeedbackFallbackPrompt(tabId, workflowFallbackPrompt(workflow, 0, reason), onUpdate),
         };
       }
       const protectedMessagingStep = savedWorkflowProtectedMessagingStepIndex(workflow, startUrl);
@@ -31180,6 +31199,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       }
 
       for (let index = 0; index < workflow.steps.length; index++) {
+        await this._applyPendingPageFeedback(tabId, [], onUpdate, { workflow: true });
         if (this._checkAbort(tabId)) return finishStopped('stopped by the user', index);
         const step = workflow.steps[index];
         const stepUrl = await this._currentUrl(tabId);
@@ -31210,7 +31230,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
             stepIndex: index,
             matchedSteps,
             healings: verifiedHealings,
-            prompt: workflowFallbackPrompt(workflow, index, reason),
+            prompt: await this._workflowFeedbackFallbackPrompt(tabId, workflowFallbackPrompt(workflow, index, reason), onUpdate),
           };
         }
         let executionArgs;
@@ -31287,7 +31307,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
               stepIndex: index,
               matchedSteps,
               healings: verifiedHealings,
-              prompt: workflowFallbackPrompt(workflow, index, reason),
+              prompt: await this._workflowFeedbackFallbackPrompt(tabId, workflowFallbackPrompt(workflow, index, reason), onUpdate),
             };
           }
           if (['click_ax', 'set_checked', 'type_ax', 'set_field', 'scroll'].includes(step.tool)) {
@@ -31331,6 +31351,20 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
           runOptions,
         );
         const afterUrl = await this._currentUrl(tabId);
+        if (rawResult?.pageFeedbackPending && rawResult?.noDispatch === true) {
+          const retries = (pageFeedbackRetries.get(index) || 0) + 1;
+          pageFeedbackRetries.set(index, retries);
+          if (retries > 3) {
+            const reason = 'page kept changing before workflow dispatch';
+            traceStatus = 'workflow_fallback';
+            finalContent = 'Continuing with the agent after repeated page changes.';
+            return { status: 'fallback', reason, stepIndex: index, matchedSteps, healings: verifiedHealings,
+              prompt: await this._workflowFeedbackFallbackPrompt(tabId, workflowFallbackPrompt(workflow, index, reason), onUpdate) };
+          }
+          await this._applyPendingPageFeedback(tabId, [], onUpdate, { workflow: true });
+          index--; // Re-resolve this unexecuted step against the new page.
+          continue;
+        }
         const validation = validateWorkflowStepResult(step.expected, rawResult, { beforeUrl, afterUrl, tool: step.tool });
         trace.recordNote(traceRunId, index + 1, 'workflow_replay_step', {
           workflowId: workflow.id,
@@ -31354,7 +31388,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
             stepIndex: index,
             matchedSteps,
             healings: verifiedHealings,
-            prompt: workflowFallbackPrompt(workflow, index, validation.reason),
+            prompt: await this._workflowFeedbackFallbackPrompt(tabId, workflowFallbackPrompt(workflow, index, validation.reason), onUpdate),
           };
         }
         if (pendingHealing) {
@@ -31528,6 +31562,9 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
   }
 
   async _executeToolImpl(tabId, name, args, onUpdate = null, executionContext = null) {
+    if (['execute_js', 'inject_css', 'remove_injected_css'].includes(name)) {
+      await beforePageAgentDispatch(browser, tabId, { kind: 'dom' });
+    }
     const dispatchContext = executionContext && typeof executionContext === 'object'
       ? executionContext
       : {};
@@ -32268,14 +32305,19 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
 
       try {
         if (firefoxBidi.runs.has(tabId)) await firefoxBidi.perform(tabId, 'navigate', { url: rawUrl });
-        else await browser.tabs.update(tabId, { url: rawUrl });
+        else {
+          await beforePageAgentDispatch(browser, tabId, { kind: 'navigate', url: rawUrl });
+          await browser.tabs.update(tabId, { url: rawUrl });
+        }
       } catch (e) {
         removeNavigationListener();
+        if (e?.code === 'page_feedback_pending') throw e;
         return {
           success: false,
           dispatched: false,
           noDispatch: true,
           ...(firefoxBidi.runs.has(tabId) ? { dispatched: true, noDispatch: false, outcomeUnknown: true, retryable: false } : {}),
+          ...(e?.code === 'page_feedback_pending' ? { pageFeedbackPending: true, skipped: true } : {}),
           error: `navigate: browser rejected the navigation: ${e?.message || String(e)}`,
         };
       }
@@ -32475,11 +32517,13 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
               return { before };
             })()
           `;
+          await beforePageAgentDispatch(globalThis.browser || globalThis.chrome, tabId, { kind: 'navigate', history: true });
           historyDispatchArmed = true;
           dispatched = true;
           const results = await browser.tabs.executeScript(tabId, { code });
           probe = (results && results[0]) || null;
         } catch (e) {
+          if (e?.code === 'page_feedback_pending') throw e;
           return { success: false, dispatched, error: `${name}: cannot navigate history on this page (${e.message}).` };
         }
         if (!probe) {
@@ -33501,7 +33545,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
             return { success: true, dispatched: false };
           })();
         `;
-        const buildInjectCode = actionDeadlineAt => `
+        const buildInjectCode = (actionDeadlineAt, pageFeedbackGuard) => `
           (function() {
             const actionDeadlineAt = ${Number(actionDeadlineAt) || 0};
             const deadlineExpired = () => actionDeadlineAt > 0 && Date.now() >= actionDeadlineAt;
@@ -33541,6 +33585,24 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
             if (!(el instanceof HTMLInputElement) || el.type !== 'file') {
               return { success: false, dispatched: false, error: 'Selector does not match an <input type="file"> element: ' + selector };
             }
+            const pageFeedbackGuard = ${JSON.stringify(pageFeedbackGuard || null)};
+            const pageMonitor = window.__wbPageMonitor;
+            if (pageFeedbackGuard?.operationId) {
+              if (typeof pageMonitor?.activatePreparedDispatch !== 'function'
+                  || typeof pageMonitor?.withPreparedDispatch !== 'function') {
+                return { success: false, dispatched: false, noDispatch: true, pageFeedbackPending: true,
+                  error: 'The page monitor is unavailable at the upload dispatch boundary. Re-observe the page before acting.' };
+              }
+              try {
+                pageMonitor.activatePreparedDispatch({ operationId: pageFeedbackGuard.operationId, kind: 'input', element: el });
+              } catch (e) {
+                if (e?.code === 'page_feedback_pending') {
+                  return { success: false, dispatched: false, noDispatch: true, pageFeedbackPending: true,
+                    error: e.message || 'The browser changed during upload preparation. Re-observe the page before acting.' };
+                }
+                throw e;
+              }
+            }
             const compactIdentity = value => String(value || '').replace(/\\s+/g, ' ').trim().slice(0, 160);
             let targetLabel = '';
             try {
@@ -33573,10 +33635,14 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
               if (deadlineExpired()) {
                 return { success: false, dispatched: false, deadlineExpired: true, error: 'Upload action deadline expired before dispatch' };
               }
-              el.files = dt.files;
-              dispatched = true;
-              el.dispatchEvent(new Event('input', { bubbles: true }));
-              el.dispatchEvent(new Event('change', { bubbles: true }));
+              const attach = () => {
+                dispatched = true;
+                el.files = dt.files;
+                el.dispatchEvent(new Event('input', { bubbles: true }));
+                el.dispatchEvent(new Event('change', { bubbles: true }));
+              };
+              if (pageFeedbackGuard?.operationId) pageMonitor.withPreparedDispatch(pageFeedbackGuard.operationId, attach);
+              else attach();
               const attachmentState = el.files && el.files.length
                 ? 'input_attached'
                 : 'page_consumed';
@@ -33635,10 +33701,23 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
           // change events, so a lost response must be treated as an unknown
           // upload outcome rather than retried blindly.
           this._throwIfAborted(abortSignal);
+          const pageFeedbackGuard = await beforePageAgentDispatch(globalThis.browser || globalThis.chrome, tabId, {
+            kind: 'input', selector: args.selector, fenceOnly: true,
+          });
+          this._throwIfAborted(abortSignal);
+          if (hasPageAgentDispatchOwner(tabId) && !pageFeedbackGuard?.operationId) {
+            return {
+              success: false,
+              dispatched: false,
+              noDispatch: true,
+              pageFeedbackPending: true,
+              error: 'The page monitor could not validate the upload target at dispatch. Re-observe the page before acting.',
+            };
+          }
           markContentPipelineDispatched();
           let results;
           try {
-            results = await browser.tabs.executeScript(tabId, { code: buildInjectCode(actionDeadlineAt) });
+            results = await browser.tabs.executeScript(tabId, { code: buildInjectCode(actionDeadlineAt, pageFeedbackGuard) });
           } catch (e) {
             this._throwIfAborted(abortSignal);
             return {
@@ -33663,6 +33742,17 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
               retryable: true,
               deadlineExpired: true,
               error: res.error || 'Upload action deadline expired before dispatch',
+            };
+          }
+          if (res?.pageFeedbackPending && res?.noDispatch === true) {
+            contentPipelineDispatchState.started = false;
+            return {
+              ...res,
+              success: false,
+              dispatched: false,
+              noDispatch: true,
+              outcomeUnknown: false,
+              retryable: true,
             };
           }
           this._throwIfAborted(abortSignal);
@@ -35166,6 +35256,10 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
           };
         }
         const selected = candidates[0];
+        const dispatchGuard = await beforePageAgentDispatch(globalThis.browser || globalThis.chrome, tabId, {
+          kind: 'click', selector, frameId: selected.frameId, fenceOnly: true, prepareMonitor: true,
+        });
+        throwIfContentPipelineAborted();
         const clickCode = `
           (() => {
             let targetDispatched = false;
@@ -35175,12 +35269,26 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
               el.scrollIntoView({ block: 'center', inline: 'center' });
               const rect = el.getBoundingClientRect();
               const opts = { bubbles: true, cancelable: true, view: window, clientX: rect.left + rect.width/2, clientY: rect.top + rect.height/2, button: 0 };
-              targetDispatched = true;
-              try { el.dispatchEvent(new PointerEvent('pointerdown', opts)); } catch (e) {}
-              el.dispatchEvent(new MouseEvent('mousedown', opts));
-              try { el.dispatchEvent(new PointerEvent('pointerup', opts)); } catch (e) {}
-              el.dispatchEvent(new MouseEvent('mouseup', opts));
-              el.click();
+              const monitorGuard = ${JSON.stringify(dispatchGuard || null)};
+              if (monitorGuard?.operationId) {
+                if (typeof window.__wbPageMonitor?.activatePreparedDispatch !== 'function') {
+                  return { ok: false, url: location.href, reason: 'page-monitor-unavailable' };
+                }
+                window.__wbPageMonitor.activatePreparedDispatch({
+                  operationId: monitorGuard.operationId, kind: 'click', element: el, navigationCandidate: true,
+                });
+              }
+              const dispatch = () => {
+                targetDispatched = true;
+                try { el.dispatchEvent(new PointerEvent('pointerdown', opts)); } catch (e) {}
+                el.dispatchEvent(new MouseEvent('mousedown', opts));
+                try { el.dispatchEvent(new PointerEvent('pointerup', opts)); } catch (e) {}
+                el.dispatchEvent(new MouseEvent('mouseup', opts));
+                el.click();
+              };
+              if (monitorGuard?.operationId && window.__wbPageMonitor?.withPreparedDispatch)
+                window.__wbPageMonitor.withPreparedDispatch(monitorGuard.operationId, dispatch);
+              else dispatch();
               return { ok: true, url: location.href, tag: el.tagName, text: (el.innerText || el.value || '').slice(0, 80), dispatched: true };
             } catch (e) { return { ok: false, url: location.href, dispatched: targetDispatched, error: e.message }; }
           })()
@@ -35266,7 +35374,10 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
             abortSignal: contentPipelineAbortSignal,
             deadlineAt: Number(CONTENT_ACTION_SIGNAL_DEADLINES.get(contentPipelineAbortSignal)?.deadlineAt) || 0,
             deadlineError: CONTENT_ACTION_SIGNAL_DEADLINES.get(contentPipelineAbortSignal)?.error || null,
-            beforeDispatch: () => {
+            beforeDispatch: async frameId => {
+              await beforePageAgentDispatch(globalThis.browser || globalThis.chrome, tabId, {
+                kind: 'input', selector, frameId, fenceOnly: true,
+              });
               dispatched = true;
               markContentPipelineDispatched();
             },
@@ -35278,6 +35389,9 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
           return legacyResult;
         }
         throwIfContentPipelineAborted();
+        await beforePageAgentDispatch(globalThis.browser || globalThis.chrome, tabId, {
+          kind: 'input', selector, frameId: targetFrameId, fenceOnly: true,
+        });
         dispatched = true;
         markContentPipelineDispatched();
         try {
@@ -35520,7 +35634,15 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       }
     }
     if (dispatchContext.jevBinding) contentArgs = { ...contentArgs, _jevBinding: dispatchContext.jevBinding };
-    const sendContentAction = stageAbortSignal => {
+    const sendContentAction = async stageAbortSignal => {
+      if (Agent.STATE_CHANGE_TOOLS.has(name)) {
+        await beforePageAgentDispatch(globalThis.browser || globalThis.chrome, tabId, {
+          kind: /type|field|key/.test(name) ? 'input' : name === 'scroll' ? 'scroll' : /click|checked|hover|drag/.test(name) ? 'click' : 'dom',
+          frameId: messageOptions?.frameId || 0, selector: contentArgs?.selector, ref_id: contentArgs?.ref_id,
+          navigationCandidate: ['click', 'click_ax', 'set_checked'].includes(name),
+          fenceOnly: true,
+        });
+      }
       throwIfContentPipelineAborted();
       this._throwIfAborted(stageAbortSignal);
       if (Agent.STATE_CHANGE_TOOLS.has(name)) markContentPipelineDispatched();
@@ -35702,6 +35824,8 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
   }
 
   async _injectCoreContentScripts(tabId) {
+    await browser.tabs.executeScript(tabId, { file: 'src/content/page-monitor-shadow-loader.js' });
+    await browser.tabs.executeScript(tabId, { file: 'src/content/page-monitor.js' });
     await browser.tabs.executeScript(tabId, {
       file: 'src/content/file-picker-guard-loader.js',
     });
@@ -36694,6 +36818,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
 
       steps++;
       lastTraceStep = steps;
+      await this._applyPendingPageFeedback(tabId, messages, onUpdate);
       if (this._hasPendingSteering(tabId)) { steps--; continue; }
       onUpdate('thinking', { step: steps });
       if (runId) trace.recordStepStart(runId, steps, {});
@@ -36874,7 +36999,8 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
         break;
       }
 
-      if (this._applyPendingSteering(tabId, messages, onUpdate)) {
+      if ((await this._applyPendingPageFeedback(tabId, messages, onUpdate))
+          || this._applyPendingSteering(tabId, messages, onUpdate)) {
         onUpdate('text', { content: '', replace: true });
         continue;
       }
@@ -36931,7 +37057,8 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
           tabId, result.toolCalls, messages, onUpdate, provider, assistantToolContent, allowedToolNames, steps, runOptions, toolSchemas
         );
         if (['continue', 'return'].includes(batchResult.action) && !batchResult.status
-            && this._applyPendingSteering(tabId, messages, onUpdate)) {
+            && ((await this._applyPendingPageFeedback(tabId, messages, onUpdate))
+              || this._applyPendingSteering(tabId, messages, onUpdate))) {
           onUpdate('text', { content: '', replace: true });
           continue;
         }
@@ -37744,6 +37871,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
 
       steps++;
       lastTraceStep = steps;
+      await this._applyPendingPageFeedback(tabId, messages, onUpdate);
       if (this._hasPendingSteering(tabId)) { steps--; continue; }
       onUpdate('thinking', { step: steps });
       if (runId) trace.recordStepStart(runId, steps, {});
@@ -37889,7 +38017,8 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
           toolCalls: streamedToolCalls,
         }));
 
-        if (this._applyPendingSteering(tabId, messages, onUpdate)) {
+        if ((await this._applyPendingPageFeedback(tabId, messages, onUpdate))
+            || this._applyPendingSteering(tabId, messages, onUpdate)) {
           onUpdate('text', { content: '', replace: true });
           continue;
         }
@@ -37932,8 +38061,9 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
           const batchResult = await this._executeToolBatch(
             tabId, toolCalls, messages, onUpdate, provider, fullText, allowedToolNames, steps, runOptions, toolSchemas
           );
-          if (['continue', 'return'].includes(batchResult.action) && !batchResult.status
-              && this._applyPendingSteering(tabId, messages, onUpdate)) {
+        if (['continue', 'return'].includes(batchResult.action) && !batchResult.status
+            && ((await this._applyPendingPageFeedback(tabId, messages, onUpdate))
+              || this._applyPendingSteering(tabId, messages, onUpdate))) {
             onUpdate('text', { content: '', replace: true });
             continue;
           }
@@ -38305,3 +38435,5 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     }
   }
 }
+
+installPageFeedback(Agent);

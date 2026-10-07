@@ -1,3 +1,4 @@
+import { renderPageFeedbackNote } from './page-feedback-ui.js';
 import { appendGeneratedMedia, restoreGeneratedMedia } from './generated-media-view.js';
 import { saveScreenshot } from './screenshot-download.js';
 /**
@@ -3221,6 +3222,7 @@ const SCHEDULED_VISIBLE_STATUSES = new Set(['pending', 'queued', 'paused', 'runn
 const COMPLETED_SCHEDULED_JOB_AUTO_HIDE_MS = 15 * 1000;
 const pinnedCompletedScheduledJobIds = new Set();
 const pendingScheduledPlannerFallbackMessages = new Map();
+const pendingScheduledPageFeedback = new Map();
 const scheduledAssistantPreparationJobIds = new Set();
 let scheduledJobAutoHideTimer = null;
 
@@ -3325,6 +3327,15 @@ function flushScheduledPlannerFallbackMessage(jobId, assistantEl = null) {
   return true;
 }
 
+function flushScheduledPageFeedback(jobId, assistantEl) {
+  const id = String(jobId || '');
+  if (!assistantEl || !pendingScheduledPageFeedback.has(id)) return;
+  const events = pendingScheduledPageFeedback.get(id);
+  pendingScheduledPageFeedback.delete(id);
+  for (const data of events.values()) renderPageFeedbackNote(assistantEl, data, t);
+  schedulePersist();
+}
+
 function ensureScheduledTerminalMessage(job) {
   const jobId = job?.id ? String(job.id) : '';
   if (!jobId || !isUrlTargetScheduledJob(job)) return null;
@@ -3332,12 +3343,14 @@ function ensureScheduledTerminalMessage(job) {
   if (existing && scheduledAssistantPreparationJobIds.has(jobId)) return existing;
   if (existing) {
     flushScheduledPlannerFallbackMessage(jobId, existing);
+    flushScheduledPageFeedback(jobId, existing);
     return existing;
   }
   resetChatNavigation();
   const msgEl = addMessage('assistant', '');
   msgEl.dataset.scheduledJobId = jobId;
   flushScheduledPlannerFallbackMessage(jobId, msgEl);
+  flushScheduledPageFeedback(jobId, msgEl);
   return msgEl;
 }
 
@@ -3633,6 +3646,7 @@ async function handleScheduledJobEvent(data, tabId) {
       }
       if (jobId) currentAssistantEl.dataset.scheduledJobId = jobId;
       flushScheduledPlannerFallbackMessage(jobId, currentAssistantEl);
+      flushScheduledPageFeedback(jobId, currentAssistantEl);
       showActivity(t('sp.scheduled.running', { title }));
     } finally {
       if (preparingScheduledAssistant) scheduledAssistantPreparationJobIds.delete(jobId);
@@ -9641,6 +9655,21 @@ function handleAgentUpdateMessage(msg) {
   const { type, data } = msg;
 
   switch (type) {
+    case 'page_feedback': {
+      const jobId = String(data?.scheduledJobId || '');
+      const target = jobId ? findScheduledAssistantMessageForJob(jobId) : eventAssistantEl;
+      if (jobId && (!target || scheduledAssistantPreparationJobIds.has(jobId))) {
+        if (data.navigation && data.id) {
+          const events = pendingScheduledPageFeedback.get(jobId) || new Map();
+          events.set(data.id, data);
+          while (events.size > 32) events.delete(events.keys().next().value);
+          pendingScheduledPageFeedback.set(jobId, events);
+          while (pendingScheduledPageFeedback.size > 50) pendingScheduledPageFeedback.delete(pendingScheduledPageFeedback.keys().next().value);
+        }
+      } else if (renderPageFeedbackNote(target || currentAssistantEl, data, t)) schedulePersist();
+      break;
+    }
+
     case 'steering_applied': {
       const id = String(data?.id || '');
       if (id && !messagesEl.querySelector(`[data-steering-message-id="${CSS.escape(id)}"]`)) {

@@ -1162,4 +1162,5 @@ export default {
   "st.sync.consent.legacy": "暗号化された同期をオンにしますか? WebBrain は、エンドツーエンドで暗号化された思い出、プロファイルの自動入力、API キー プロバイダー設定のコピーを WebBrain Compass に送信します。チャット履歴と OAuth サインインは同期されません。",
   "st.sync.consent.denied": "暗号化された同期権限が付与されませんでした。",
   'st.providers.webgpu_note.body': '{modelLink} runs entirely in Chrome with no API endpoint. Download it in Settings > Providers > WebGPU or Apocalypse Mode, then use the nuclear control in standalone chat.',
+  'sp.monitor.navigation': "タスク実行中にページが変わりました（{before} → {after}）。タスクを続行します。",
 };

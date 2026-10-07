@@ -2,6 +2,7 @@ import { verifyBrowserCompletion } from './completion-runtime.js';
 import { DECISION_SETTINGS_KEYS, resolveDecisionConfig } from './decision-config.js';
 import { completionStopError } from './completion-verifier.js';
 import { COMPLETION_DOCUMENT_STAMP_SCRIPT, COMPLETION_DOCUMENT_IDENTITY_SCRIPT } from './completion-document.js';
+import { installPageFeedback, beforePageAgentDispatch } from './page-feedback.js';
 import { JEV_FAST_KEYS, JEV_CLASSIFIER_THRESHOLD, JEV_BROWSER_THRESHOLD, confidentChoice, buildJevBrowserRequest, decideJevBrowser, jevVisualInputRequiresMainModel, JevFastSession } from './systemone-fast.js';
 import { redactSystemOneText, wrapSystemOneData, boundedSystemOneText } from './systemone-evidence.js';
 import { createSystemOneJudge, isSystemOneResponseContractError, systemOneFailureReason, SYSTEM_ONE_COST_PROVIDER } from './systemone-judge.js';
@@ -6042,6 +6043,9 @@ export class Agent extends LoopDetector {
     else externalSignal?.addEventListener?.('abort', onAbort, { once: true });
     try {
       await this.assertRunStartAllowed(tabId, defaultKind, runOptions);
+      if (!this._isStandaloneChatRun(runOptions)) {
+        await this._beginPageFeedbackRun(tabId, this._runEntryKind(defaultKind, runOptions));
+      }
     } catch (error) {
       this._releaseRunEntry(tabId);
       throw error;
@@ -6049,6 +6053,7 @@ export class Agent extends LoopDetector {
   }
 
   _releaseRunEntry(tabId) {
+    this._finishPageFeedbackRun(tabId);
     cdpClient.stopDialogHandling(tabId);
     this._runAbortStates.get(tabId)?.dispose();
     this._runAbortStates.delete(tabId);
@@ -6065,6 +6070,8 @@ export class Agent extends LoopDetector {
   }
 
   _beginSteeringRun(tabId, onUpdate, runOptions = {}) {
+    const feedbackRun = this._pageFeedbackRuns?.get(tabId);
+    if (feedbackRun) feedbackRun.onUpdate = onUpdate;
     if (runOptions.cloudRun || runOptions.scheduledRun) return;
     this._steeringRuns.set(tabId, {
       requestId: String(runOptions.detachedRequestId || ''),
@@ -7296,7 +7303,7 @@ export class Agent extends LoopDetector {
   }
 
   async _maybeJevFastTurn(tabId, task, messages, mode, allowed, provider, costState, runOptions = {}, recovery = null) {
-    if (this._steeringRuns.get(tabId)?.acceptedIds.size) return null;
+    if (this._steeringRuns.get(tabId)?.acceptedIds.size || this._pageFeedbackRuns?.get(tabId)?.revision) return null;
     const context = this.systemOneContext(tabId);
     if (!['act', 'dev'].includes(mode) || this._checkAbort(tabId)) return null;
     let session;
@@ -10392,7 +10399,8 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
    * triggered the bulk pattern and navigated the page never silently drops the
    * "previous page is GONE" warning.
    */
-  _injectNavNotices(messages, navNotices, onUpdate) {
+  _injectNavNotices(messages, navNotices, onUpdate, tabId) {
+    if ([...(this._pageFeedbackRuns?.get(tabId)?.events.values() || [])].some(event => event.kind === 'navigation' && event.frameId === 0)) return;
     if (!navNotices || navNotices.length === 0) return;
     const last = navNotices[navNotices.length - 1];
     const noticeText =
@@ -12275,7 +12283,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
         error: `Skipped ${skippedName}: ${triggeringTool} requires a fresh model turn before any dependent browser action.`,
       }),
     );
-    this._injectNavNotices(messages, options.navNotices || [], onUpdate);
+    this._injectNavNotices(messages, options.navNotices || [], onUpdate, tabId);
     onUpdate('warning', {
       message: `Paused ${skippedCount} stale tool call(s) after ${triggeringTool}; continuing from the observed result.`,
     });
@@ -12472,10 +12480,11 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
         return { action: 'abort', value };
       }
 
-      if (this._hasPendingSteering(tabId)) {
+      if (this._hasPendingSteering(tabId) || this._hasPendingPageFeedback(tabId)) {
         this._appendSyntheticToolResults(tabId, toolCalls, toolIndex, messages, onUpdate, step, () => ({
           success: false, skipped: true, dispatched: false, noDispatch: true,
-          error: 'Skipped because the user steered the current task. Reconsider the remaining actions using the latest user message.',
+          pageFeedbackPending: this._hasPendingPageFeedback(tabId),
+          error: 'Skipped because the user steered the current task or the browser changed. Reconsider remaining actions using the latest feedback.',
         }));
         return { action: 'continue' };
       }
@@ -12920,7 +12929,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
         if (workflowPreSubmitBlock.workflowRearmed || workflowPreSubmitBlock.conditionalMutationBlocked) {
           this._appendSyntheticToolResults(tabId, toolCalls, toolIndex + 1, messages, onUpdate, step,
             () => ({ success: false, skipped: true, error: 'skipped: conditional workflow transition requires a fresh tool batch' }));
-          this._injectNavNotices(messages, navNotices, onUpdate);
+          this._injectNavNotices(messages, navNotices, onUpdate, tabId);
           this._persist(tabId);
           return { action: 'continue' };
         }
@@ -13527,7 +13536,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
             this._throwIfAborted(abortSignal);
             // Permission, checkpoint and preflight waits can receive a correction.
             // Recheck after all preparation, before marking or invoking dispatch.
-            if (this._hasPendingSteering(tabId)) return { steered: true };
+            if (this._hasPendingSteering(tabId) || this._hasPendingPageFeedback(tabId)) return { steered: true };
             if (!pipelineToolbarPreflight.block && !socialDispatchBlock) callState.invoked = true;
             const pipelineRawToolResult = pipelineToolbarPreflight.block || socialDispatchBlock || await this.executeTool(
               tabId,
@@ -13661,7 +13670,8 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       if (steeringBeforeDispatch) {
         this._appendSyntheticToolResults(tabId, toolCalls, toolIndex, messages, onUpdate, step, () => ({
           success: false, skipped: true, dispatched: false, noDispatch: true,
-          error: 'Skipped because the user steered the current task. Reconsider the remaining actions using the latest user message.',
+          pageFeedbackPending: this._hasPendingPageFeedback(tabId),
+          error: 'Skipped because the user steered the current task or the browser changed. Reconsider remaining actions using the latest feedback.',
         }));
         return { action: 'continue' };
       }
@@ -14228,7 +14238,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
             error: 'skipped: an earlier tool returned no response; verify the current state before retrying',
           }),
         );
-        this._injectNavNotices(messages, navNotices, onUpdate);
+        this._injectNavNotices(messages, navNotices, onUpdate, tabId);
         onUpdate('warning', {
           message: `Tool response was lost; paused ${skippedCount} remaining tool call(s) for state verification.`,
         });
@@ -14407,7 +14417,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
         // A click can both trigger the bulk pattern AND navigate the page; this
         // early return skips the post-loop flush, so emit any nav notices here
         // or the model would replay against stale URLs from the prior page.
-        this._injectNavNotices(messages, navNotices, onUpdate);
+        this._injectNavNotices(messages, navNotices, onUpdate, tabId);
         this._persist(tabId);
         return { action: 'continue' };
       }
@@ -14420,7 +14430,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
 
     // Inject any navigation notices BEFORE the auto-screenshot, so the
     // model sees the warning and the new viewport in the same turn.
-    this._injectNavNotices(messages, navNotices, onUpdate);
+    this._injectNavNotices(messages, navNotices, onUpdate, tabId);
 
     // Auto-screenshot once per batch, debounced 500ms. Capture if either
     // the main provider supports images, or a dedicated vision model is
@@ -33361,7 +33371,10 @@ If the user has already named or confirmed this exact recipient, do NOT ask agai
     if (args.left != null && Number.isFinite(Number(args.left))) update.left = Math.round(Number(args.left));
     if (args.top != null && Number.isFinite(Number(args.top))) update.top = Math.round(Number(args.top));
 
+    let resizeMarker = null;
+    let expectedViewport = null;
     try {
+      resizeMarker = await this._beginPageAgentResize(tabId);
       const win = await chrome.windows.get(tab.windowId);
       if (win?.state && win.state !== 'normal') {
         await chrome.windows.update(tab.windowId, { state: 'normal' });
@@ -33370,6 +33383,7 @@ If the user has already named or confirmed this exact recipient, do NOT ask agai
       await chrome.windows.update(tab.windowId, update);
       await new Promise(r => setTimeout(r, 250));
       const info = await this._getWindowInfo(tabId);
+      expectedViewport = info?.viewport || null;
       return {
         ...info,
         resized: true,
@@ -33378,6 +33392,8 @@ If the user has already named or confirmed this exact recipient, do NOT ask agai
       };
     } catch (e) {
       return { success: false, error: `resize_window failed: ${e.message}` };
+    } finally {
+      await this._finishPageAgentResize(tabId, resizeMarker, expectedViewport);
     }
   }
 
@@ -33398,11 +33414,12 @@ If the user has already named or confirmed this exact recipient, do NOT ask agai
     await chrome.scripting.executeScript({
       target: { tabId },
       world: 'MAIN',
-      files: ['src/content/file-picker-guard-page.js'],
+      files: ['src/content/page-monitor-shadow.js', 'src/content/file-picker-guard-page.js'],
     });
     await chrome.scripting.executeScript({
       target: { tabId },
       files: [
+        'src/content/page-monitor.js',
         'src/content/rich-text-toolbar-heuristic.js',
         'src/content/accessibility-tree.js',
         'src/content/chat-observation.js',
@@ -33472,6 +33489,7 @@ If the user has already named or confirmed this exact recipient, do NOT ask agai
       if (!before?.documentId) {
         return { success: false, error: 'inject_css: could not identify the current document.' };
       }
+      await beforePageAgentDispatch(globalThis.chrome, tabId, { kind: 'dom' });
       await chrome.scripting.insertCSS({ target: { tabId }, css: injectedCss, origin: 'AUTHOR' });
       const after = await this._getDevDocumentIdentity(tabId);
       if (after?.documentId !== before.documentId) {
@@ -33532,6 +33550,7 @@ If the user has already named or confirmed this exact recipient, do NOT ask agai
         note: 'Temporary CSS is active on this page. Call remove_injected_css with this patchId to undo it.',
       };
     } catch (e) {
+      if (e?.code === 'page_feedback_pending') throw e;
       return { success: false, error: `inject_css failed: ${e.message || e}` };
     }
   }
@@ -33561,11 +33580,13 @@ If the user has already named or confirmed this exact recipient, do NOT ask agai
           error: `remove_injected_css: patchId "${patchId}" belongs to a document that is no longer loaded.`,
         };
       }
+      await beforePageAgentDispatch(globalThis.chrome, tabId, { kind: 'dom' });
       await chrome.scripting.removeCSS({ target: { tabId }, css: patch.injectedCss || patch.css, origin: 'AUTHOR' });
       this._devCssPatches?.delete(patchId);
       try { await chrome.storage.session.remove(storageKey); } catch {}
       return { success: true, patchId, removed: true };
     } catch (e) {
+      if (e?.code === 'page_feedback_pending') throw e;
       return { success: false, error: `remove_injected_css failed: ${e.message || e}` };
     }
   }
@@ -33599,9 +33620,16 @@ If the user has already named or confirmed this exact recipient, do NOT ask agai
       // Match Firefox's function-body contract while adding async/await:
       // callers use an explicit `return` for readback instead of having to
       // squeeze a multi-statement edit into one JavaScript expression.
-      const expression = `(async () => {\n${code}\n})()\n//# sourceURL=webbrain-dev-execute.js`;
+      const pageGuard = await beforePageAgentDispatch(globalThis.chrome, tabId, { kind: 'dom' });
+      const abortedDispatchToken = pageGuard ? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}` : null;
       dispatched = true;
-      const response = await cdpClient.evaluate(tabId, expression, true, { timeoutMs: 15000 });
+      const response = pageGuard
+        ? await cdpClient.evaluateFunction(tabId, `function (guard, abortedToken) {
+          const gate = new CustomEvent('webbrain-agent-dom-dispatch', { detail: JSON.stringify(guard), cancelable: true });
+          if (!window.dispatchEvent(gate)) return { __webbrainPageFeedbackAborted: abortedToken };
+          return (async () => {\n${code}\n})();
+        }\n//# sourceURL=webbrain-dev-execute.js`, [pageGuard, abortedDispatchToken], { timeoutMs: 15000 })
+        : await cdpClient.evaluate(tabId, `(async () => {\n${code}\n})()\n//# sourceURL=webbrain-dev-execute.js`, true, { timeoutMs: 15000 });
       if (response?.exceptionDetails) {
         const details = response.exceptionDetails;
         const exception = details.exception || {};
@@ -33625,6 +33653,11 @@ If the user has already named or confirmed this exact recipient, do NOT ask agai
         };
       }
       const remote = response?.result || {};
+      if (pageGuard && remote.value?.__webbrainPageFeedbackAborted === abortedDispatchToken) {
+        dispatched = false;
+        return { success: false, dispatched: false, noDispatch: true, retryable: true,
+          error: 'The page changed during JavaScript preparation. Re-read the page and retry.' };
+      }
       let result = null;
       let truncated = false;
       let resultFormat = 'undefined';
@@ -33651,6 +33684,7 @@ If the user has already named or confirmed this exact recipient, do NOT ask agai
         description: remote.description ? String(remote.description).slice(0, 1000) : undefined,
       };
     } catch (e) {
+      if (e?.code === 'page_feedback_pending') throw e;
       if (/timed?\s*out|timeout/i.test(String(e?.message || e))) {
         return { success: false, dispatched, timedOut: true, error: 'execute_js timed out after 15,000 ms.' };
       }
@@ -34093,6 +34127,8 @@ If the user has already named or confirmed this exact recipient, do NOT ask agai
       ? runOptions?.parentSessionId || null
       : null;
     await this._claimRunEntry(tabId, 'workflow', runOptions);
+    const feedbackRun = this._pageFeedbackRuns?.get(tabId);
+    if (feedbackRun) feedbackRun.onUpdate = onUpdate;
     let completionRunToken = '';
     let previousForegroundCapture = false;
     let capturePolicyConfigured = false;
@@ -34166,6 +34202,7 @@ If the user has already named or confirmed this exact recipient, do NOT ask agai
     let finalContent = '';
     let matchedSteps = 0;
     const verifiedHealings = [];
+    const pageFeedbackRetries = new Map();
 
     const finishStopped = (reason, stepIndex = 0) => {
       const summary = `Saved workflow "${workflow.name}" stopped safely at step ${stepIndex + 1}: ${reason}.`;
@@ -34193,7 +34230,7 @@ If the user has already named or confirmed this exact recipient, do NOT ask agai
           stepIndex: 0,
           matchedSteps,
           healings: verifiedHealings,
-          prompt: workflowFallbackPrompt(workflow, 0, reason),
+          prompt: await this._workflowFeedbackFallbackPrompt(tabId, workflowFallbackPrompt(workflow, 0, reason), onUpdate),
         };
       }
       const protectedMessagingStep = savedWorkflowProtectedMessagingStepIndex(workflow, startUrl);
@@ -34210,6 +34247,7 @@ If the user has already named or confirmed this exact recipient, do NOT ask agai
       }
 
       for (let index = 0; index < workflow.steps.length; index++) {
+        await this._applyPendingPageFeedback(tabId, [], onUpdate, { workflow: true });
         if (this._checkAbort(tabId)) return finishStopped('stopped by the user', index);
         const step = workflow.steps[index];
         const stepUrl = await this._currentUrl(tabId);
@@ -34240,7 +34278,7 @@ If the user has already named or confirmed this exact recipient, do NOT ask agai
             stepIndex: index,
             matchedSteps,
             healings: verifiedHealings,
-            prompt: workflowFallbackPrompt(workflow, index, reason),
+            prompt: await this._workflowFeedbackFallbackPrompt(tabId, workflowFallbackPrompt(workflow, index, reason), onUpdate),
           };
         }
         let executionArgs;
@@ -34317,7 +34355,7 @@ If the user has already named or confirmed this exact recipient, do NOT ask agai
               stepIndex: index,
               matchedSteps,
               healings: verifiedHealings,
-              prompt: workflowFallbackPrompt(workflow, index, reason),
+              prompt: await this._workflowFeedbackFallbackPrompt(tabId, workflowFallbackPrompt(workflow, index, reason), onUpdate),
             };
           }
           if (['click_ax', 'set_checked', 'type_ax', 'set_field', 'scroll'].includes(step.tool)) {
@@ -34361,6 +34399,20 @@ If the user has already named or confirmed this exact recipient, do NOT ask agai
           runOptions,
         );
         const afterUrl = await this._currentUrl(tabId);
+        if (rawResult?.pageFeedbackPending && rawResult?.noDispatch === true) {
+          const retries = (pageFeedbackRetries.get(index) || 0) + 1;
+          pageFeedbackRetries.set(index, retries);
+          if (retries > 3) {
+            const reason = 'page kept changing before workflow dispatch';
+            traceStatus = 'workflow_fallback';
+            finalContent = 'Continuing with the agent after repeated page changes.';
+            return { status: 'fallback', reason, stepIndex: index, matchedSteps, healings: verifiedHealings,
+              prompt: await this._workflowFeedbackFallbackPrompt(tabId, workflowFallbackPrompt(workflow, index, reason), onUpdate) };
+          }
+          await this._applyPendingPageFeedback(tabId, [], onUpdate, { workflow: true });
+          index--; // Re-resolve this unexecuted step against the new page.
+          continue;
+        }
         const validation = validateWorkflowStepResult(step.expected, rawResult, { beforeUrl, afterUrl, tool: step.tool });
         trace.recordNote(traceRunId, index + 1, 'workflow_replay_step', {
           workflowId: workflow.id,
@@ -34384,7 +34436,7 @@ If the user has already named or confirmed this exact recipient, do NOT ask agai
             stepIndex: index,
             matchedSteps,
             healings: verifiedHealings,
-            prompt: workflowFallbackPrompt(workflow, index, validation.reason),
+            prompt: await this._workflowFeedbackFallbackPrompt(tabId, workflowFallbackPrompt(workflow, index, validation.reason), onUpdate),
           };
         }
         if (pendingHealing) {
@@ -34834,6 +34886,11 @@ If the user has already named or confirmed this exact recipient, do NOT ask agai
         }
         return await cdpClient.invokeWebMCPTool(tabId, args?.tool_id, args?.input || {}, {
           abortCheck: () => this._checkAbort(tabId),
+          beforeDispatch: async () => {
+            throwIfEarlyCdpAborted();
+            await beforePageAgentDispatch(globalThis.chrome, tabId, { kind: 'dom' });
+            markEarlyCdpDispatched();
+          },
           expectedFrameId,
           expectedTargetUrl,
         });
@@ -35522,6 +35579,7 @@ If the user has already named or confirmed this exact recipient, do NOT ask agai
 
       try {
         releaseDialogNavigation = cdpClient.authorizeNavigationDialog(tabId, beforeUrl, earlyCdpAbortSignal);
+        await beforePageAgentDispatch(globalThis.chrome, tabId, { kind: 'navigate', url: rawUrl });
         await chrome.tabs.update(tabId, { url: rawUrl });
       } catch (e) {
         removeNavigationListener();
@@ -35529,6 +35587,7 @@ If the user has already named or confirmed this exact recipient, do NOT ask agai
           success: false,
           dispatched: false,
           noDispatch: true,
+          ...(e?.code === 'page_feedback_pending' ? { pageFeedbackPending: true, skipped: true } : {}),
           error: `navigate: browser rejected the navigation: ${e?.message || String(e)}`,
         };
       }
@@ -35725,6 +35784,7 @@ If the user has already named or confirmed this exact recipient, do NOT ask agai
       try {
         try {
           const delta = direction === 'back' ? -steps : steps;
+          await beforePageAgentDispatch(globalThis.chrome, tabId, { kind: 'navigate', history: true });
           historyDispatchArmed = true;
           dispatched = true;
           releaseDialogNavigation = cdpClient.authorizeNavigationDialog(tabId, beforeUrl, earlyCdpAbortSignal);
@@ -35739,6 +35799,7 @@ If the user has already named or confirmed this exact recipient, do NOT ask agai
           });
           probe = results?.[0]?.result || null;
         } catch (e) {
+          if (e?.code === 'page_feedback_pending') throw e;
           removeNavigationListeners();
           return { success: false, dispatched, error: `${name}: cannot navigate history on this page (${e.message}).` };
         }
@@ -38060,6 +38121,7 @@ If the user has already named or confirmed this exact recipient, do NOT ask agai
         }
         if (binding?.token && Number.isInteger(binding.frameId)) {
           throwIfEarlyCdpAborted();
+          await beforePageAgentDispatch(globalThis.chrome, tabId, { kind: 'click', selector, frameId: binding.frameId, fenceOnly: true });
           dispatched = true;
           markEarlyCdpDispatched();
           const response = await chrome.tabs.sendMessage(tabId, {
@@ -38124,32 +38186,55 @@ If the user has already named or confirmed this exact recipient, do NOT ask agai
         }
         const selected = candidates[0];
         throwIfEarlyCdpAborted();
+        const dispatchGuard = await beforePageAgentDispatch(globalThis.chrome, tabId, {
+          kind: 'click', selector, frameId: selected.frameId, fenceOnly: true, prepareMonitor: true,
+        });
         dispatched = true;
         markEarlyCdpDispatched();
         const clicked = await chrome.scripting.executeScript({
           target: { tabId, frameIds: [selected.frameId] },
-          func: (sel, matchIndex) => {
+          func: (sel, matchIndex, monitorGuard) => {
             let targetDispatched = false;
             try {
               const el = document.querySelectorAll(sel)[matchIndex];
               if (!el) return { ok: false, url: location.href, reason: 'not-found-after-census' };
-              if (el.tagName !== 'SELECT') el.scrollIntoView({ block: 'center', inline: 'center' });
+              if (monitorGuard?.operationId) {
+                if (typeof window.__wbPageMonitor?.activatePreparedDispatch !== 'function') {
+                  return { ok: false, url: location.href, reason: 'page-monitor-unavailable' };
+                }
+                window.__wbPageMonitor.activatePreparedDispatch({
+                  operationId: monitorGuard.operationId, kind: 'click', element: el, navigationCandidate: true,
+                });
+              }
+              if (el.tagName !== 'SELECT') {
+                const scroll = () => el.scrollIntoView({ block: 'center', inline: 'center' });
+                if (monitorGuard?.operationId && window.__wbPageMonitor?.withPreparedDispatch)
+                  window.__wbPageMonitor.withPreparedDispatch(monitorGuard.operationId, scroll);
+                else scroll();
+              }
+              if (!el.isConnected || document.querySelectorAll(sel)[matchIndex] !== el)
+                return { ok: false, url: location.href, reason: 'target-changed-after-scroll' };
               const rect = el.getBoundingClientRect();
               const cx = rect.left + rect.width / 2;
               const cy = rect.top + rect.height / 2;
               const opts = { bubbles: true, cancelable: true, view: window, clientX: cx, clientY: cy, button: 0 };
-              targetDispatched = true;
-              try { el.dispatchEvent(new PointerEvent('pointerdown', opts)); } catch (e) {}
-              el.dispatchEvent(new MouseEvent('mousedown', opts));
-              try { el.dispatchEvent(new PointerEvent('pointerup', opts)); } catch (e) {}
-              el.dispatchEvent(new MouseEvent('mouseup', opts));
-              el.click();
+              const dispatch = () => {
+                targetDispatched = true;
+                try { el.dispatchEvent(new PointerEvent('pointerdown', opts)); } catch (e) {}
+                el.dispatchEvent(new MouseEvent('mousedown', opts));
+                try { el.dispatchEvent(new PointerEvent('pointerup', opts)); } catch (e) {}
+                el.dispatchEvent(new MouseEvent('mouseup', opts));
+                el.click();
+              };
+              if (monitorGuard?.operationId && window.__wbPageMonitor?.withPreparedDispatch)
+                window.__wbPageMonitor.withPreparedDispatch(monitorGuard.operationId, dispatch);
+              else dispatch();
               return { ok: true, url: location.href, tag: el.tagName, text: (el.innerText || el.value || '').slice(0, 80), dispatched: true };
             } catch (e) {
               return { ok: false, url: location.href, dispatched: targetDispatched, error: e.message };
             }
           },
-          args: [selector, requestedMatchIndex],
+          args: [selector, requestedMatchIndex, dispatchGuard],
         });
         const result = clicked?.[0]?.result;
         return result?.ok
@@ -38228,7 +38313,10 @@ If the user has already named or confirmed this exact recipient, do NOT ask agai
             abortSignal: earlyCdpAbortSignal,
             deadlineAt: Number(CONTENT_ACTION_SIGNAL_DEADLINES.get(earlyCdpAbortSignal)?.deadlineAt) || 0,
             deadlineError: CONTENT_ACTION_SIGNAL_DEADLINES.get(earlyCdpAbortSignal)?.error || null,
-            beforeDispatch: () => {
+            beforeDispatch: async frameId => {
+              await beforePageAgentDispatch(globalThis.chrome, tabId, {
+                kind: 'input', selector, frameId, fenceOnly: true,
+              });
               dispatched = true;
               markEarlyCdpDispatched();
             },
@@ -38240,6 +38328,9 @@ If the user has already named or confirmed this exact recipient, do NOT ask agai
           return legacyResult;
         }
         throwIfEarlyCdpAborted();
+        await beforePageAgentDispatch(globalThis.chrome, tabId, {
+          kind: 'input', selector, frameId: targetFrameId, fenceOnly: true,
+        });
         dispatched = true;
         markEarlyCdpDispatched();
         try {
@@ -38718,6 +38809,10 @@ If the user has already named or confirmed this exact recipient, do NOT ask agai
               },
             },
           );
+          if ((injected?.noDispatch === true || injected?.dispatched === false) && injected?.outcomeUnknown !== true) {
+            uploadDispatched = false;
+            earlyCdpDispatchState.started = false;
+          }
           if (injected?.deadlineExpired && injected?.dispatched !== true) {
             uploadDispatched = false;
             earlyCdpDispatchState.started = false;
@@ -38736,6 +38831,8 @@ If the user has already named or confirmed this exact recipient, do NOT ask agai
             return {
               success: false,
               dispatched: injected?.dispatched === true,
+              ...(injected?.noDispatch === true || injected?.dispatched === false ? { noDispatch: true } : {}),
+              ...(injected?.pageFeedbackPending === true ? { pageFeedbackPending: true } : {}),
               error: `Upload failed: ${injected?.error || 'the page rejected the attached file data'}`,
             };
           }
@@ -38799,9 +38896,11 @@ If the user has already named or confirmed this exact recipient, do NOT ask agai
         const pathConfirmed = !!(probe && probe.exists && probe.readable === true);
 
         throwIfEarlyCdpAborted();
-        uploadDispatched = true;
-        markEarlyCdpDispatched();
-        await cdpClient.setFileInputFiles(tabId, objectIds[0], [args.filePath]);
+        await cdpClient.setFileInputFiles(tabId, objectIds[0], [args.filePath], { beforeDispatch: () => {
+          throwIfEarlyCdpAborted();
+          uploadDispatched = true;
+          markEarlyCdpDispatched();
+        } });
         throwIfEarlyCdpAborted();
 
         // Verify the file actually attached. CDP's DOM.setFileInputFiles does
@@ -38894,7 +38993,7 @@ If the user has already named or confirmed this exact recipient, do NOT ask agai
           note: 'The local file was readable and the page handled the attachment event, but upload_file could not read the resulting FileList. This does not prove a remote upload or form submission; verify the page state and submit/commit when required.',
         };
       } catch (e) {
-        if (e?.code === 'content_action_timeout') throw e;
+        if (e?.code === 'content_action_timeout' || e?.code === 'page_feedback_pending') throw e;
         return { success: false, dispatched: uploadDispatched, error: `Upload failed: ${e.message}` };
       } finally {
         await cdpClient.releaseObjectGroup(tabId, uploadQuery?.objectGroup);
@@ -39888,8 +39987,10 @@ If the user has already named or confirmed this exact recipient, do NOT ask agai
               return { success: true };
             },
           });
-          if (selResult?.deadlineExpired === true && selResult?.dispatched !== true) {
+          if ((selResult?.noDispatch === true || selResult?.dispatched === false) && selResult?.outcomeUnknown !== true) {
             earlyCdpDispatchState.started = false;
+          }
+          if (selResult?.deadlineExpired === true && selResult?.dispatched !== true) {
             return {
               ...selResult,
               success: false,
@@ -41059,7 +41160,15 @@ If the user has already named or confirmed this exact recipient, do NOT ask agai
       ? { frameId: dispatchBinding.frameId }
       : undefined;
     if (dispatchContext.jevBinding) contentArgs = { ...contentArgs, _jevBinding: dispatchContext.jevBinding };
-    const sendContentAction = stageAbortSignal => {
+    const sendContentAction = async stageAbortSignal => {
+      if (Agent.STATE_CHANGE_TOOLS.has(name)) {
+        await beforePageAgentDispatch(globalThis.browser || globalThis.chrome, tabId, {
+          kind: /type|field|key/.test(name) ? 'input' : name === 'scroll' ? 'scroll' : /click|checked|hover|drag/.test(name) ? 'click' : 'dom',
+          frameId: messageOptions?.frameId || 0, selector: contentArgs?.selector, ref_id: contentArgs?.ref_id,
+          navigationCandidate: ['click', 'click_ax', 'set_checked'].includes(name),
+          fenceOnly: true,
+        });
+      }
       if (earlyCdpAbortSignal) {
         throwIfEarlyCdpAborted();
         if (Agent.STATE_CHANGE_TOOLS.has(name) && name !== 'set_checked') {
@@ -41110,6 +41219,7 @@ If the user has already named or confirmed this exact recipient, do NOT ask agai
               await chrome.scripting.executeScript({
                 target: { tabId },
                 files: [
+                  'src/content/page-monitor.js',
                   'src/content/rich-text-toolbar-heuristic.js',
                   'src/content/accessibility-tree.js',
                   'src/content/teacher-capture.js',
@@ -43762,6 +43872,7 @@ If the user has already named or confirmed this exact recipient, do NOT ask agai
 
       steps++;
       lastTraceStep = steps;
+      await this._applyPendingPageFeedback(tabId, messages, onUpdate);
       if (this._hasPendingSteering(tabId)) { steps--; continue; }
       onUpdate('thinking', { step: steps });
       if (runId) trace.recordStepStart(runId, steps, {});
@@ -43963,7 +44074,8 @@ If the user has already named or confirmed this exact recipient, do NOT ask agai
         break;
       }
 
-      if (this._applyPendingSteering(tabId, messages, onUpdate)) {
+      if ((await this._applyPendingPageFeedback(tabId, messages, onUpdate))
+          || this._applyPendingSteering(tabId, messages, onUpdate)) {
         onUpdate('text', { content: '', replace: true });
         continue;
       }
@@ -44068,7 +44180,8 @@ If the user has already named or confirmed this exact recipient, do NOT ask agai
           tabId, result.toolCalls, messages, onUpdate, provider, assistantToolContent, allowedToolNames, steps, runOptions, toolSchemas
         );
         if (['continue', 'return'].includes(batchResult.action) && !batchResult.status
-            && this._applyPendingSteering(tabId, messages, onUpdate)) {
+            && ((await this._applyPendingPageFeedback(tabId, messages, onUpdate))
+              || this._applyPendingSteering(tabId, messages, onUpdate))) {
           onUpdate('text', { content: '', replace: true });
           continue;
         }
@@ -44979,6 +45092,7 @@ If the user has already named or confirmed this exact recipient, do NOT ask agai
 
       steps++;
       lastTraceStep = steps;
+      if (await this._applyPendingPageFeedback(tabId, messages, onUpdate)) pendingVisionFallbackMessages = null;
       if (this._hasPendingSteering(tabId)) { steps--; continue; }
       onUpdate('thinking', { step: steps });
       if (runId) trace.recordStepStart(runId, steps, {});
@@ -45127,7 +45241,8 @@ If the user has already named or confirmed this exact recipient, do NOT ask agai
           toolCalls: streamedToolCalls,
         }));
 
-        if (this._applyPendingSteering(tabId, messages, onUpdate)) {
+        if ((await this._applyPendingPageFeedback(tabId, messages, onUpdate))
+            || this._applyPendingSteering(tabId, messages, onUpdate)) {
           onUpdate('text', { content: '', replace: true });
           continue;
         }
@@ -45218,7 +45333,8 @@ If the user has already named or confirmed this exact recipient, do NOT ask agai
             tabId, toolCalls, messages, onUpdate, provider, fullText, allowedToolNames, steps, runOptions, toolSchemas
           );
           if (['continue', 'return'].includes(batchResult.action) && !batchResult.status
-              && this._applyPendingSteering(tabId, messages, onUpdate)) {
+              && ((await this._applyPendingPageFeedback(tabId, messages, onUpdate))
+                || this._applyPendingSteering(tabId, messages, onUpdate))) {
             onUpdate('text', { content: '', replace: true });
             continue;
           }
@@ -45636,3 +45752,5 @@ If the user has already named or confirmed this exact recipient, do NOT ask agai
     }
   }
 }
+
+installPageFeedback(Agent);

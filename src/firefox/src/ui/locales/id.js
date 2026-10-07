@@ -1162,4 +1162,5 @@ export default {
   "st.sync.consent.legacy": "Aktifkan sinkronisasi terenkripsi? WebBrain akan mengirimkan salinan memori Anda yang terenkripsi ujung ke ujung, pengisian otomatis profil, dan pengaturan penyedia kunci API ke WebBrain Compass. Riwayat obrolan dan proses masuk OAuth tidak disinkronkan.",
   "st.sync.consent.denied": "Izin sinkronisasi terenkripsi tidak diberikan.",
   'st.providers.webgpu_note.body': '{modelLink} runs entirely in Chrome with no API endpoint. Download it in Settings > Providers > WebGPU or Apocalypse Mode, then use the nuclear control in standalone chat.',
+  'sp.monitor.navigation': "Halaman berubah saat tugas berjalan ({before} → {after}). Tugas dilanjutkan.",
 };

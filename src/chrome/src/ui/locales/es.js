@@ -1214,4 +1214,5 @@ export default {
   'st.providers.webgpu_download.resume': 'Resume',
   'st.providers.webgpu_download.stop': 'Stop & remove',
   'st.providers.webgpu_download.activate_blocked': 'Download the selected model before choosing WebGPU for chat.',
+  'sp.monitor.navigation': "La página cambió mientras se ejecutaba la tarea ({before} → {after}). La tarea continúa.",
 };

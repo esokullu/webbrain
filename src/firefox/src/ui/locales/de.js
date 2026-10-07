@@ -1153,4 +1153,5 @@ export default {
   "st.sync.consent.legacy": "Verschlüsselte Synchronisierung aktivieren? WebBrain überträgt eine Ende-zu-Ende-verschlüsselte Kopie Ihrer Erinnerungen, des automatischen Ausfüllens Ihres Profils und der Einstellungen des API-Schlüsselanbieters an die WebBrain Compass. Chatverlauf und OAuth-Anmeldungen werden nicht synchronisiert.",
   "st.sync.consent.denied": "Die Berechtigung zur verschlüsselten Synchronisierung wurde nicht erteilt.",
   'st.providers.webgpu_note.body': '{modelLink} runs entirely in Chrome with no API endpoint. Download it in Settings > Providers > WebGPU or Apocalypse Mode, then use the nuclear control in standalone chat.',
+  'sp.monitor.navigation': "Die Seite hat sich während der Aufgabe geändert ({before} → {after}). Die Aufgabe wird fortgesetzt.",
 };
