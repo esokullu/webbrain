@@ -46,6 +46,12 @@ function canKeepPageResponse(previous, current, events, toolCalls) {
     const name = call.function?.name;
     // These tools will observe the refreshed page when actually dispatched.
     if (['get_accessibility_tree', 'get_interactive_elements', 'read_page', 'inspect_viewport'].includes(name)) return true;
+    // Success is only a candidate: done captures and verifies fresh evidence.
+    // Let that verifier assess passive page churn instead of retrying the model.
+    // Other outcomes skip verification, and mixed batches may still act on stale targets.
+    if (name === 'done' && toolCalls.length === 1 && current.success !== false) {
+      try { return JSON.parse(call.function.arguments)?.outcome === 'success'; } catch { return false; }
+    }
     if (name !== 'click_ax') return false;
     let args;
     try { args = JSON.parse(call.function.arguments); } catch { return false; }
@@ -508,9 +514,9 @@ export const pageFeedbackMethods = {
       }
     }
     this._persist(tabId);
-    // Refresh observations without paying for the same navigation decision
-    // again on a live feed. The ordinary preparation/dispatch fences still
-    // run, and any user activity or target change supersedes the response.
+    // Refresh observations without repeating reads, unchanged navigation or
+    // a success candidate on a live feed. Completion still needs fresh proof;
+    // ordinary preparation/dispatch fences and user feedback remain authoritative.
     if (run.latestPage && this._pageFeedbackRuns.get(tabId) === run && !this._hasPendingPageFeedback(tabId)
         && canKeepPageResponse(previousPage, run.latestPage, events, responseToolCalls)) return false;
     return true;

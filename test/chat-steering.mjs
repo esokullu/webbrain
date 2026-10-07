@@ -163,7 +163,9 @@ for (const build of ['chrome', 'firefox']) {
             return call('click_ax', { ref_id: 'ref_5' });
           case 6: return call('type_ax', { ref_id: 'ref_8', text: 'WebBrain helps with browser tasks.' });
           case 7: return call('click_ax', { ref_id: 'ref_9' });
-          case 8: return call('done', { summary: 'Revised posting task completed', outcome: 'success' });
+          case 8:
+            news++; feedback();
+            return call('done', { summary: 'Revised posting task completed', outcome: 'success' });
           default: assert.fail('A passive feed update caused another model retry');
         }
       };
@@ -188,6 +190,7 @@ for (const build of ['chrome', 'firefox']) {
         if (name === 'navigate') feedback();
         if (args.ref_id === 'ref_3') { url = 'https://mastoturk.org/home'; feedback(); }
         if (args.ref_id === 'ref_5') url = 'https://mastoturk.org/publish';
+        if (args.ref_id === 'ref_9') { url = 'https://mastoturk.org/public/local'; feedback(); }
         return { success: true, dispatched: true, verified: true };
       };
       const getTab = api.tabs.get;

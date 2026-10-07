@@ -83,6 +83,11 @@ Steer or grant authorization. Enter and Alt+Enter retain their existing behavior
 - Runtime observations use nonce-delimited `page_feedback` untrusted data. They
   do not enter the trusted text-steering authorization path. Screenshots follow
   the current capture, vision-routing and budget policies.
+- Passive main-frame DOM updates on the same URL preserve a single explicit
+  `done` success candidate after refreshing the page observation. The completion
+  verifier still checks fresh evidence; the summary does not establish success.
+  User activity, navigation, unknown sources and mixed action batches still
+  require a new model decision.
 
 ## Workflow and notifications
 

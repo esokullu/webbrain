@@ -89,6 +89,78 @@ function allowBatchPreparation(agent) {
 for (const build of ['chrome', 'firefox']) {
   const { Agent } = await import(`../src/${build}/src/agent/agent.js`);
   const { beforePageAgentDispatch } = await import(`../src/${build}/src/agent/page-feedback.js`);
+  const { verifyBrowserCompletion } = await import(`../src/${build}/src/agent/completion-runtime.js`);
+
+  for (const outcome of ['succeeded', 'failed']) {
+    test(`${build}: retained success candidate verifies fresh ${outcome} evidence`, async () => {
+      const agent = setup(Agent, { chat: async () => assert.fail('Completion should use the bounded judge request') });
+      const tab = nextTab++;
+      let page = { success: true, pageContent: 'article "Old timeline" [ref_1]' }, requests = 0;
+      agent.executeTool = async (_tab, name) => {
+        assert.equal(name, 'get_accessibility_tree');
+        return page;
+      };
+      agent._completionDocumentStamp = async () => 'same-document';
+      agent._progressTaskKeyHash = () => 'publish-task';
+      agent._progressTaskAnchorText = () => 'Publish a WebBrain post';
+      agent._chatWithCostAllowance = async (_provider, messages, options) => {
+        requests++;
+        assert.equal(options.tools, undefined);
+        assert.match(JSON.stringify(messages), /Fresh result/);
+        assert.doesNotMatch(JSON.stringify(messages), /Old timeline/);
+        return { content: JSON.stringify({ outcome, reason: 'Fresh result establishes the outcome.' }) };
+      };
+      await agent._claimRunEntry(tab, 'interactive');
+      try {
+        const binding = bind(agent, tab), messages = [{ role: 'system', content: '' }, { role: 'user', content: 'Publish a WebBrain post' }];
+        agent.conversations.set(tab, messages);
+        binding.send({ kind: 'dom', source: 'page', target: 'time' });
+        await agent._applyPendingPageFeedback(tab, messages);
+        page = { success: true, pageContent: `article "Fresh result: ${outcome}" [ref_1]` };
+        binding.send({ kind: 'dom', source: 'page', target: 'time' });
+        const args = { summary: 'Published successfully', outcome: 'success' };
+        assert.equal(await agent._applyPendingPageFeedback(tab, messages, () => {}, {
+          responseToolCalls: [{ function: { name: 'done', arguments: JSON.stringify(args) } }],
+        }), false);
+        const verdict = await verifyBrowserCompletion(agent, tab, { pageUrl: 'https://example.com/new', summary: args.summary });
+        assert.equal(verdict.outcome, outcome, 'Retaining a success candidate must not override fresh negative evidence');
+        assert.equal(verdict.engine, 'llm');
+        assert.equal(requests, 1);
+      } finally { agent._releaseRunEntry(tab); }
+    });
+  }
+
+  for (const change of ['feed', 'user', 'unknown', 'iframe', 'navigation', 'viewport', 'style', 'failed_read',
+    'partial', 'missing_outcome', 'malformed', 'mixed', 'duplicate', 'pending']) {
+    test(`${build}: success completion ${change === 'feed' ? 'survives' : 'rejects'} ${change} feedback`, async () => {
+      const agent = setup(Agent), tab = nextTab++;
+      let page = { success: true, pageContent: 'article "Published WebBrain post" [ref_1]' };
+      agent.executeTool = async () => page;
+      await agent._claimRunEntry(tab, 'interactive');
+      try {
+        const binding = bind(agent, tab), messages = [{ role: 'system', content: '' }, { role: 'user', content: 'Publish a WebBrain post' }];
+        binding.send({ kind: 'dom', source: 'page', target: 'time' });
+        await agent._applyPendingPageFeedback(tab, messages);
+        page = { success: change !== 'failed_read', pageContent: 'article "Updated timeline" [ref_1]' };
+        binding.send({ kind: change === 'viewport' ? 'resize' : 'dom',
+          source: change === 'user' ? 'user' : change === 'unknown' ? 'unknown' : 'page',
+          target: change === 'style' ? 'style' : 'time' });
+        if (change === 'iframe') agent._queuePageFeedback(tab, { kind: 'dom', source: 'page', frameId: 1, target: 'time' });
+        if (change === 'navigation') agent._queuePageFeedback(tab, { kind: 'navigation', source: 'page', frameId: 0 });
+        if (change === 'pending') agent.executeTool = async () => {
+          binding.send({ kind: 'input', source: 'user' });
+          return page;
+        };
+        const args = { summary: 'Published', outcome: change === 'partial' ? 'partial' : 'success' };
+        if (change === 'missing_outcome') delete args.outcome;
+        const call = { function: { name: 'done', arguments: change === 'malformed' ? '{' : JSON.stringify(args) } };
+        const calls = change === 'duplicate' ? [call, call] : change === 'mixed'
+          ? [call, { function: { name: 'click_ax', arguments: '{"ref_id":"ref_1"}' } }] : [call];
+        assert.equal(await agent._applyPendingPageFeedback(tab, messages, () => {}, { responseToolCalls: calls }), change !== 'feed');
+        assert.equal(agent._activeTaskBinding(messages).text, 'Publish a WebBrain post');
+      } finally { agent._releaseRunEntry(tab); }
+    });
+  }
 
   for (const change of ['feed', 'label', 'href', 'ancestor', 'user', 'unknown', 'iframe', 'base', 'truncated', 'missing', 'submit', 'coordinates']) {
     test(`${build}: response navigation ${change === 'feed' ? 'survives' : 'rejects'} ${change} feedback`, async () => {
