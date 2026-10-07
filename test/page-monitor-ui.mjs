@@ -233,6 +233,9 @@ test('Chrome controlled-field trusted typing survives its focus-created formatti
       window._fieldMeta = el => ({ tag: 'div', contentEditable: true, ariaLabel: el.getAttribute('aria-label') });
       window._editableTextValue = el => el.innerText.replace(/\n$/, '');
       window.readProseMirrorText = () => null;
+      window.isDraftJsEditor = () => false;
+      window.readDraftJsText = () => null;
+      window.readEmptyCaretText = () => null;
       window._stableFieldSelector = el => '#' + el.id;
       window._setFieldValueMatches = (actual, prefix, text, clear) => actual === (clear ? '' : prefix) + text;
     });

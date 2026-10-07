@@ -4665,8 +4665,84 @@
     return children.map(read).join('\n');
   }
 
+  function readEmptyCaretText(el) {
+    if (!el?.isContentEditable || el.innerText !== '\n' || el.textContent !== '') return null;
+    let node = el;
+    for (let depth = 0; depth < 16; depth++) {
+      if (node.nodeType !== 1 || node.shadowRoot || node.hidden
+          || String(node.getAttribute('aria-hidden') || '').trim().toLowerCase() === 'true'
+          || String(node.getAttribute('contenteditable') || '').trim().toLowerCase() === 'false') return null;
+      const style = node.ownerDocument?.defaultView?.getComputedStyle?.(node);
+      if (!style || style.display === 'none' || ['hidden', 'collapse'].includes(style.visibility)
+          || style.opacity === '0' || style.contentVisibility === 'hidden') return null;
+      if (node.tagName === 'BR') return node.childNodes.length === 0 ? '' : null;
+      // Only one caret placeholder through ordinary block/inline wrappers.
+      // Extra text, empty blocks, breaks, embeds or sibling nodes stay literal.
+      if ((node !== el && !['DIV', 'P', 'SPAN'].includes(node.tagName)) || node.childNodes.length !== 1) return null;
+      node = node.childNodes[0];
+    }
+    return null;
+  }
+
+  function isDraftJsEditor(el) {
+    return !!el?.isContentEditable && (el.classList?.contains('public-DraftEditor-content')
+      || Array.from(el.children || []).some(child => child.getAttribute('data-contents') === 'true'));
+  }
+
+  function readDraftJsText(el) {
+    if (!el?.isContentEditable || !el.childNodes) return null;
+    const roots = Array.from(el.childNodes);
+    if (roots.length !== 1 || roots[0].nodeType !== 1 || roots[0].tagName !== 'DIV'
+        || roots[0].getAttribute('data-contents') !== 'true') return null;
+    let visited = 0;
+    const supported = node => {
+      if (++visited > 4096 || node.shadowRoot || node.hidden || String(node.getAttribute('aria-hidden') || '').trim().toLowerCase() === 'true'
+          || String(node.getAttribute('contenteditable') || '').trim().toLowerCase() === 'false') return false;
+      const style = node.ownerDocument?.defaultView?.getComputedStyle?.(node);
+      return !!style && (style.display !== 'none' && !['hidden', 'collapse'].includes(style.visibility)
+        && style.opacity !== '0' && style.contentVisibility !== 'hidden');
+    };
+    if (!supported(el) || !supported(roots[0])) return null;
+    const blocks = Array.from(roots[0].childNodes);
+    if (!blocks.length) return null;
+    const texts = [];
+    for (const block of blocks) {
+      if (block.nodeType !== 1 || block.tagName !== 'DIV' || block.getAttribute('data-block') !== 'true'
+          || !block.getAttribute('data-offset-key') || !supported(block)) return null;
+      const children = Array.from(block.childNodes);
+      const body = children[0];
+      if (children.length !== 1 || body?.nodeType !== 1 || body.tagName !== 'DIV'
+          || !body.classList.contains('public-DraftStyleDefault-block')
+          || !body.getAttribute('data-offset-key') || !supported(body)) return null;
+      const leaves = [];
+      const read = (node, depth = 0) => {
+        if (depth > 32 || node.nodeType !== 1 || !supported(node)) return false;
+        if (node.tagName === 'BR') {
+          if (node.getAttribute('data-text') !== 'true' || node.childNodes.length) return false;
+          leaves.push(null); return true;
+        }
+        if (node.tagName !== 'SPAN') return false;
+        const descendants = Array.from(node.childNodes);
+        if (node.getAttribute('data-text') === 'true') {
+          if (!descendants.every(child => child.nodeType === 3)) return false;
+          leaves.push(descendants.map(child => child.nodeValue || '').join('')); return true;
+        }
+        return descendants.length > 0 && descendants.every(child => read(child, depth + 1));
+      };
+      if (!body.childNodes.length || !Array.from(body.childNodes).every(node => read(node))) return null;
+      // DraftJS's sole data-text BR in an empty block is a caret placeholder.
+      // Real document breaks are separators between blocks (or text in leaves).
+      // Mixed BR/text and embeds are unsupported; keep their rendered fallback.
+      const placeholders = leaves.filter(value => value === null).length;
+      if (placeholders && (placeholders !== 1 || leaves.some(value => value !== null && value !== ''))) return null;
+      texts.push(leaves.filter(value => value !== null).join(''));
+    }
+    return texts.join('\n');
+  }
+
   function _editableTextValue(el) {
-    const semantic = readProseMirrorText(el);
+    const semantic = isDraftJsEditor(el) ? readDraftJsText(el)
+      : (readProseMirrorText(el) ?? readEmptyCaretText(el));
     return semantic !== null ? semantic : (typeof el.innerText === 'string' ? el.innerText : (el.textContent || ''));
   }
 
@@ -8088,6 +8164,10 @@
             } catch { return null; }
           })();
           const fieldMeta = _fieldMeta(el);
+          if (isDraftJsEditor(el) && readDraftJsText(el) === null) return failure(
+            'The DraftJS editor structure cannot establish its exact document text. Re-observe this editor before typing.',
+            { ref_id, verified: false, fieldMeta, recoveryRequired: 'fresh_tree', retryable: false },
+          );
           let previous = '';
           let method = '';
           let selectExpected = null;
@@ -8180,10 +8260,14 @@
               { ref_id, verified: false, recoveryRequired: 'verify_or_restore_field', failureScope: `field-value:${ref_id}`, retryable: false, fieldMeta },
             );
           }
+          if (isDraftJsEditor(el) && readDraftJsText(el) === null) return failure(
+            'The DraftJS editor structure changed during typing and cannot establish its exact document text.',
+            { ref_id, verified: false, fieldMeta, recoveryRequired: 'verify_or_restore_field', failureScope: `field-value:${ref_id}`, retryable: false },
+          );
           const actual = el.isContentEditable ? _editableTextValue(el) : (el.value || '');
           const verified = selectExpected !== null
             ? actual === selectExpected
-            : _setFieldValueMatches(actual, previous, text, !!clear, el.isContentEditable, readProseMirrorText(el) !== null);
+            : _setFieldValueMatches(actual, previous, text, !!clear, el.isContentEditable, (readProseMirrorText(el) !== null || readDraftJsText(el) !== null || readEmptyCaretText(el) !== null));
           const fallbackAttempted = false;
           if (!verified) {
             return failure(
@@ -8295,6 +8379,10 @@
             return failure(`ref_id ${ref_id} is not a text field (tag=${el.tagName}). set_field works on input/textarea/contenteditable only.`);
           }
           const fieldMeta = _fieldMeta(el);
+          if (isDraftJsEditor(el) && readDraftJsText(el) === null) return failure(
+            'The DraftJS editor structure cannot establish its exact document text. Re-observe this editor before typing.',
+            { ref_id, verified: false, fieldMeta, recoveryRequired: 'fresh_tree', retryable: false },
+          );
           let prevValue = '';
           if (el.isContentEditable) {
             prevValue = _editableTextValue(el);
@@ -8340,8 +8428,12 @@
               { ref_id, verified: false, recoveryRequired: 'verify_or_restore_field', failureScope: `field-value:${ref_id}`, retryable: false },
             );
           }
+          if (isDraftJsEditor(el) && readDraftJsText(el) === null) return failure(
+            'The DraftJS editor structure changed during typing and cannot establish its exact document text.',
+            { ref_id, verified: false, fieldMeta, recoveryRequired: 'verify_or_restore_field', failureScope: `field-value:${ref_id}`, retryable: false },
+          );
           const actual = el.isContentEditable ? _editableTextValue(el) : (el.value || '');
-          const verified = _setFieldValueMatches(actual, prevValue, text, clear, el.isContentEditable, readProseMirrorText(el) !== null);
+          const verified = _setFieldValueMatches(actual, prevValue, text, clear, el.isContentEditable, (readProseMirrorText(el) !== null || readDraftJsText(el) !== null || readEmptyCaretText(el) !== null));
           const fallbackAttempted = false;
           let nativeSubmitAttempted = false;
           let submissionOutcomeUnknown = false;
@@ -8566,6 +8658,8 @@
           if (typeof window.__wb_ax_lookup !== 'function') return { success: false, verified: false, error: 'accessibility-tree.js not injected' };
           const el = window.__wb_ax_lookup(ref_id);
           if (!el || !el.isConnected) return { success: false, verified: false, error: `ref_id ${ref_id} is stale` };
+          if (isDraftJsEditor(el) && readDraftJsText(el) === null)
+            return { success: false, verified: false, error: 'The DraftJS editor structure cannot establish its exact document text.' };
           const actual = el.isContentEditable ? _editableTextValue(el) : (el.value || '');
           const verifiesAppend = el.isContentEditable && typeof appendText === 'string';
           const expectedPrefix = verifiesAppend
@@ -8580,7 +8674,7 @@
                   expectedPrefix,
                   verifiesAppend ? appendText : expected,
                   !verifiesAppend,
-                  el.isContentEditable, readProseMirrorText(el) !== null,
+                  el.isContentEditable, (readProseMirrorText(el) !== null || readDraftJsText(el) !== null || readEmptyCaretText(el) !== null),
                 ),
             actual: actual.slice(0, 200),
             fieldMeta: _fieldMeta(el),
@@ -8635,6 +8729,8 @@
           if (!(el.isContentEditable || tag === 'INPUT' || tag === 'TEXTAREA')) {
             return { success: false, error: 'target is not a text field' };
           }
+          if (isDraftJsEditor(el) && readDraftJsText(el) === null)
+            return { success: false, verified: false, error: 'The DraftJS editor structure cannot establish its exact document text.' };
           const value = String(el.isContentEditable ? _editableTextValue(el) : (el.value || ''));
           if (!globalThis.crypto?.subtle) return { success: false, error: 'SHA-256 is unavailable' };
           const digest = await globalThis.crypto.subtle.digest('SHA-256', new TextEncoder().encode(value));
@@ -8644,7 +8740,7 @@
           return {
             success: true,
             ...(typeof expected === 'string' ? {
-              verified: _setFieldValueMatches(value, '', expected, true, el.isContentEditable, readProseMirrorText(el) !== null),
+              verified: _setFieldValueMatches(value, '', expected, true, el.isContentEditable, (readProseMirrorText(el) !== null || readDraftJsText(el) !== null || readEmptyCaretText(el) !== null)),
             } : {}),
             valueLength: value.length,
             valueSha256,

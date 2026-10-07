@@ -606,7 +606,11 @@
       for (const id of (el.getAttribute(attribute) || '').split(/\s+/).filter(Boolean)) {
         const root = el.getRootNode();
         const matches = root.querySelectorAll?.(`[id="${CSS.escape(id)}"]`);
-        if (matches?.length !== 1) return null;
+        // Dangling ARIA references name no current label. Their attributes
+        // remain bound, and a label appearing later changes the footprint.
+        // Ambiguous references cannot establish an exact action context.
+        if (!matches?.length) continue;
+        if (matches.length !== 1) return null;
         labels.add(matches[0]);
       }
     }
@@ -632,16 +636,46 @@
       return context;
     } catch { return null; }
   }
-  function dialogTextIsCovered(owner, boundTextNodes, addNode) {
+  function dialogTextIsCovered(owner, boundTextNodes, addNode, identities, form) {
+    const authoredLabel = node => ['aria-label', 'aria-labelledby', 'aria-describedby', 'title', 'alt']
+      .some(attribute => node.getAttribute(attribute)?.trim());
+    const collectedIdentities = new Set();
+    const addIdentity = node => {
+      const pending = [node];
+      while (pending.length) {
+        const current = pending.pop();
+        if (collectedIdentities.has(current)) continue;
+        if (collectedIdentities.size >= 256 || current.shadowRoot || current.closest('aside,[role="complementary"]')
+            || (current.closest('form,[role="form"]') && current.closest('form,[role="form"]') !== form)
+            || current.matches('input,textarea,select,[contenteditable]:not([contenteditable="false"])')
+            || current.querySelector('input,textarea,select,[contenteditable]:not([contenteditable="false"])')
+            || [...current.querySelectorAll(modelControlSelector)].some(control => !boundTextNodes.has(control))
+            || !addNode(current, { text: true, fullTextRequired: true })) return false;
+        identities.add(current); collectedIdentities.add(current);
+        const labels = modelLabels(current);
+        if (!labels || labels.length + pending.length + collectedIdentities.size > 256) return false;
+        pending.push(...labels.map(label => label.node));
+      }
+      return true;
+    };
     const stack = [...owner.childNodes];
     let visited = 0;
     while (stack.length) {
       if (++visited > 256) return false;
       const node = stack.pop();
       if (node.nodeType === 3) {
-        // Direct owner text is already bound; generic nested text may name a
-        // destination that the control/heading footprint cannot establish.
-        if (node.data.trim() && node.parentElement !== owner) return false;
+        if (node.data.trim()) {
+          const parent = node.parentElement;
+          // Plain recipient/account text needs the same complete observation
+          // as authored labels. Do not borrow text from an excluded control,
+          // another form/sidebar, or a wrapper containing editable values.
+          if (parent !== owner && (parent.closest(modelControlSelector)
+              || parent.closest('aside,[role="complementary"]')
+              || (parent.closest('form,[role="form"]') && parent.closest('form,[role="form"]') !== form)
+              || parent.querySelector('input,textarea,select,[contenteditable]:not([contenteditable="false"])')
+              || !addNode(parent, { directText: true }))) return false;
+          identities.add(parent);
+        }
         continue;
       }
       if (!(node instanceof Element) || ignored(node)) continue;
@@ -651,8 +685,15 @@
       // text. Shadow subtrees have no complete text binding here.
       if (node.shadowRoot) return false;
       if (boundTextNodes.has(node)) continue;
-      if (node.matches(modelEntityIdentitySelector) || ['aria-label', 'aria-labelledby', 'aria-describedby', 'title', 'alt']
-        .some(attribute => node.getAttribute(attribute)?.trim())) return false;
+      if (node.matches(modelEntityIdentitySelector) || node.matches(entityOwnerSelector)
+          || node.matches(modelControlSelector)) return false;
+      if (authoredLabel(node)) {
+        // Account avatars and other authored labels are meaningful context.
+        // Bind their complete subtree and expose the current rendered identity
+        // in the same model observation rather than silently omitting it.
+        if (!addIdentity(node)) return false;
+        continue;
+      }
       if (visited + stack.length + node.childNodes.length > 256) return false;
       stack.push(...node.childNodes);
     }
@@ -661,14 +702,22 @@
     // including label roots outside the dialog. Editable descendants keep
     // their existing value continuation instead of acquiring extra bindings.
     for (const root of boundTextNodes) {
+      // Authored wrappers can conceal nested account labels. Their reference
+      // chains are collected when admitted, even for roots already visited.
       const descendants = root.querySelectorAll('*');
       if (root.shadowRoot || descendants.length > 256) return false;
       for (const child of descendants) {
         if (ignored(child)) continue;
-        if (child.shadowRoot || (child.matches(modelEntityIdentitySelector) && !boundTextNodes.has(child))) return false;
+        if (child.shadowRoot || ((child.matches(modelEntityIdentitySelector) || child.matches(entityOwnerSelector)
+            || child.matches(modelControlSelector)) && !boundTextNodes.has(child))) return false;
         // An ARIA textbox can be a read-only destination display. Only real
         // editable DOM hosts need the native value-continuation exemption.
-        if (!child.isContentEditable && !child.closest('input,textarea,select') && !addNode(child)) return false;
+        if (!child.isContentEditable && !child.closest('input,textarea,select')) {
+          const style = getComputedStyle(child);
+          if (authoredLabel(child) && style.display !== 'none' && style.opacity !== '0' && style.contentVisibility !== 'hidden') {
+            if (!addIdentity(child)) return false;
+          } else if (!addNode(child)) return false;
+        }
       }
     }
     return true;
@@ -711,10 +760,17 @@
       }
       if (!owner) { owner = fallback; unstructuredOwner = true; }
     }
-    const nodes = [], ancestors = [], boundTextNodes = new Set();
+    const nodes = [], ancestors = [], boundTextNodes = new Set(), dialogIdentities = new Set();
     let uncoveredLabel = false;
     const addNode = (node, options = {}) => {
-      if (nodes.some(item => item.node === node)) return true;
+      const previous = nodes.find(item => item.node === node);
+      if (previous) {
+        // A form/owner may already have an attribute-only binding. Plain
+        // destination text must strengthen it without aggregating editor data
+        // or downgrading an existing complete label/control binding.
+        if (options.directText && !boundTextNodes.has(node)) previous.value = modelSemantic(node, { directText: true });
+        return !options.fullTextRequired || boundTextNodes.has(node);
+      }
       if (nodes.length >= 256 || (node.tagName === 'INPUT' && node.type === 'file' && node.files?.length > 32)) return false;
       const labels = modelLabels(node);
       if (!labels) return false;
@@ -732,7 +788,7 @@
     if (!addNode(target, { text: true, control: true, observedName: !structuralFile, structuralFile })
         || !addNode(action, { text: true, control: true, observedName: !structuralFile, structuralFile })) return null;
     for (let ancestor = bindingParent(target); ancestor; ancestor = bindingParent(ancestor)) {
-      if (ancestors.length >= 24) return null;
+      if (ancestors.length >= 64) return null;
       const labels = modelLabels(ancestor);
       if (!labels) return null;
       const style = getComputedStyle(ancestor);
@@ -783,9 +839,9 @@
       for (const control of owner.querySelectorAll(modelControlSelector)) {
         if (belongs(control, headingFreeDialog) && !addNode(control, { text: true, control: true })) return null;
       }
-      // A heading-free dialog can supply a boundary for a controls-only
-      // composer. Uncovered generic destination text keeps the strict fence.
-      meaningfulOwner ||= headingFreeDialog && dialogTextIsCovered(owner, boundTextNodes, addNode) && !uncoveredLabel;
+      // A heading-free dialog can supply a boundary when all local labels,
+      // text and controls are bound and identities are completely observed.
+      meaningfulOwner ||= headingFreeDialog && dialogTextIsCovered(owner, boundTextNodes, addNode, dialogIdentities, form) && !uncoveredLabel;
     }
     // An arbitrary container/toolbar with no entity anchor cannot establish
     // the recipient or item. Such targets retain strict legacy dispatch only.
@@ -802,6 +858,7 @@
     const hit = structuralFile ? null : deepElementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
     if (!structuralFile && (!hit || !(target === hit || target.contains(hit) || (action.contains(target) && action.contains(hit))))) return null;
     return { model: true, structuralFile, target, scope: owner || form || action, ancestors, nodes, hit,
+      dialogIdentities,
       ...(conversation ? { conversationCarrier: conversation.carrier, conversationComposer: conversation.composer } : {}),
       context: JSON.stringify([location.href, document.baseURI, currentViewport(), window.scrollX, window.scrollY,
         rect ? [rect.left, rect.top, rect.width, rect.height] : null,
@@ -943,8 +1000,10 @@
     }
     let evidenceLength = 0;
     const exposedEditableNames = new WeakMap();
-    const exposeIdentity = (node, { authoredEditableName = false } = {}) => {
-      if (publicNodes.has(node) && !authoredEditableName) return true;
+    const exposedCompleteLabels = new WeakSet();
+    const exposeIdentity = (node, { authoredEditableName = false, completeLabel = false } = {}) => {
+      if (publicNodes.has(node) && !authoredEditableName && !completeLabel) return true;
+      if (completeLabel && exposedCompleteLabels.has(node)) return true;
       // Emit only current rendered page labels. Editable contents, input
       // values, data identities and private control/file state stay private.
       if (!visible(node) || (!authoredEditableName && node.matches('input,textarea,select,[contenteditable]:not([contenteditable="false"])'))
@@ -966,7 +1025,11 @@
       const authored = String(node.getAttribute('aria-label') || node.getAttribute('title')
         || (authoredEditableName ? node.getAttribute('placeholder') : node.getAttribute('alt')) || '')
         .replace(/\s+/g, ' ').trim();
-      const name = authored || rendered;
+      // A reference-only carrier may have no own text. Its full referenced
+      // labels are exposed separately before the footprint is certified.
+      const referencedName = completeLabel && node.getAttribute('aria-labelledby')
+        ? String(window.__wb_ax_name?.(node) || '').replace(/\s+/g, ' ').trim() : '';
+      const name = authored || rendered || referencedName;
       if (!name || authored.length > 512) return false;
       if (authoredEditableName && exposedEditableNames.get(node) === authored) return true;
       const ref = window.__wb_ax_ref?.(node);
@@ -980,6 +1043,7 @@
       evidenceLength += line.length;
       refs.set(ref, node); publicNodes.add(node);
       if (authoredEditableName) exposedEditableNames.set(node, authored);
+      if (completeLabel) exposedCompleteLabels.add(node);
       return true;
     };
     const observedFootprint = footprint => {
@@ -998,9 +1062,10 @@
       }
       const evidence = footprint.nodes.filter(item => item.node !== footprint.target
         && (item.node === footprint.conversationCarrier
+          || footprint.dialogIdentities?.has(item.node)
           || item.node.matches('h1,h2,h3,h4,h5,h6,[role="heading"],[aria-current],'+modelEntityIdentitySelector))
-        && visible(item.node));
-      return evidence.every(item => exposeIdentity(item.node))
+        && (footprint.dialogIdentities?.has(item.node) || visible(item.node)));
+      return evidence.every(item => exposeIdentity(item.node, { completeLabel: footprint.dialogIdentities?.has(item.node) }))
         && (publicNodes.has(footprint.scope) || evidence.some(item => publicNodes.has(item.node)));
     };
     const captureTarget = node => {

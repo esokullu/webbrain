@@ -49,6 +49,81 @@ function readProseMirrorText(el) {
   return children.map(read).join('\n');
 }
 
+function readEmptyCaretText(el) {
+  if (!el?.isContentEditable || el.innerText !== '\n' || el.textContent !== '') return null;
+  let node = el;
+  for (let depth = 0; depth < 16; depth++) {
+    if (node.nodeType !== 1 || node.shadowRoot || node.hidden
+        || String(node.getAttribute('aria-hidden') || '').trim().toLowerCase() === 'true'
+        || String(node.getAttribute('contenteditable') || '').trim().toLowerCase() === 'false') return null;
+    const style = node.ownerDocument?.defaultView?.getComputedStyle?.(node);
+    if (!style || style.display === 'none' || ['hidden', 'collapse'].includes(style.visibility)
+        || style.opacity === '0' || style.contentVisibility === 'hidden') return null;
+    if (node.tagName === 'BR') return node.childNodes.length === 0 ? '' : null;
+    // Only one caret placeholder through ordinary block/inline wrappers.
+    // Extra text, empty blocks, breaks, embeds or sibling nodes stay literal.
+    if ((node !== el && !['DIV', 'P', 'SPAN'].includes(node.tagName)) || node.childNodes.length !== 1) return null;
+    node = node.childNodes[0];
+  }
+  return null;
+}
+
+function isDraftJsEditor(el) {
+  return !!el?.isContentEditable && (el.classList?.contains('public-DraftEditor-content')
+    || Array.from(el.children || []).some(child => child.getAttribute('data-contents') === 'true'));
+}
+
+function readDraftJsText(el) {
+  if (!el?.isContentEditable || !el.childNodes) return null;
+  const roots = Array.from(el.childNodes);
+  if (roots.length !== 1 || roots[0].nodeType !== 1 || roots[0].tagName !== 'DIV'
+      || roots[0].getAttribute('data-contents') !== 'true') return null;
+  let visited = 0;
+  const supported = node => {
+    if (++visited > 4096 || node.shadowRoot || node.hidden || String(node.getAttribute('aria-hidden') || '').trim().toLowerCase() === 'true'
+        || String(node.getAttribute('contenteditable') || '').trim().toLowerCase() === 'false') return false;
+    const style = node.ownerDocument?.defaultView?.getComputedStyle?.(node);
+    return !!style && (style.display !== 'none' && !['hidden', 'collapse'].includes(style.visibility)
+      && style.opacity !== '0' && style.contentVisibility !== 'hidden');
+  };
+  if (!supported(el) || !supported(roots[0])) return null;
+  const blocks = Array.from(roots[0].childNodes);
+  if (!blocks.length) return null;
+  const texts = [];
+  for (const block of blocks) {
+    if (block.nodeType !== 1 || block.tagName !== 'DIV' || block.getAttribute('data-block') !== 'true'
+        || !block.getAttribute('data-offset-key') || !supported(block)) return null;
+    const children = Array.from(block.childNodes);
+    const body = children[0];
+    if (children.length !== 1 || body?.nodeType !== 1 || body.tagName !== 'DIV'
+        || !body.classList.contains('public-DraftStyleDefault-block')
+        || !body.getAttribute('data-offset-key') || !supported(body)) return null;
+    const leaves = [];
+    const read = (node, depth = 0) => {
+      if (depth > 32 || node.nodeType !== 1 || !supported(node)) return false;
+      if (node.tagName === 'BR') {
+        if (node.getAttribute('data-text') !== 'true' || node.childNodes.length) return false;
+        leaves.push(null); return true;
+      }
+      if (node.tagName !== 'SPAN') return false;
+      const descendants = Array.from(node.childNodes);
+      if (node.getAttribute('data-text') === 'true') {
+        if (!descendants.every(child => child.nodeType === 3)) return false;
+        leaves.push(descendants.map(child => child.nodeValue || '').join('')); return true;
+      }
+      return descendants.length > 0 && descendants.every(child => read(child, depth + 1));
+    };
+    if (!body.childNodes.length || !Array.from(body.childNodes).every(node => read(node))) return null;
+    // DraftJS's sole data-text BR in an empty block is a caret placeholder.
+    // Real document breaks are separators between blocks (or text in leaves).
+    // Mixed BR/text and embeds are unsupported; keep their rendered fallback.
+    const placeholders = leaves.filter(value => value === null).length;
+    if (placeholders && (placeholders !== 1 || leaves.some(value => value !== null && value !== ''))) return null;
+    texts.push(leaves.filter(value => value !== null).join(''));
+  }
+  return texts.join('\n');
+}
+
 const FULL_PAGE_SCROLL_SETTLE_MS = 100;
 const FULL_PAGE_STABLE_PASSES = 2;
 const FULL_PAGE_MAX_DISCOVERY_STEPS = 100;
@@ -4760,7 +4835,10 @@ export class CDPClient {
       if (!el || el.nodeType !== 1 || !el.isConnected) return null;
       const tag = String(el.tagName || '').toUpperCase();
       if (!(el.isContentEditable || ['INPUT', 'TEXTAREA'].includes(tag))) return null;
-      const semantic = (${readProseMirrorText.toString()})(el);
+      const draftJs = (${isDraftJsEditor.toString()})(el);
+      const semantic = draftJs ? (${readDraftJsText.toString()})(el)
+        : ((${readProseMirrorText.toString()})(el) ?? (${readEmptyCaretText.toString()})(el));
+      if (draftJs && semantic === null) return null;
       const value = semantic !== null ? semantic : String(el.isContentEditable ? (el.textContent || '') : (el.value || ''));
       return (${TEXT_ENTRY_SIGNATURE_SOURCE})(value);
     }`;
@@ -4811,7 +4889,10 @@ export class CDPClient {
         if (!el || !el.isConnected) return null;
         const tag = String(el.tagName || '').toUpperCase();
         if (!(el.isContentEditable || ['INPUT', 'TEXTAREA'].includes(tag))) return null;
-        const semantic = (${readProseMirrorText.toString()})(el);
+        const draftJs = (${isDraftJsEditor.toString()})(el);
+        const semantic = draftJs ? (${readDraftJsText.toString()})(el)
+        : ((${readProseMirrorText.toString()})(el) ?? (${readEmptyCaretText.toString()})(el));
+        if (draftJs && semantic === null) return null;
         const value = semantic !== null ? semantic : String(el.isContentEditable ? (el.textContent || '') : (el.value || ''));
         return (${TEXT_ENTRY_SIGNATURE_SOURCE})(value);
       })()
@@ -4855,7 +4936,10 @@ export class CDPClient {
       const tag = String(el.tagName || '').toUpperCase();
       const typeable = el.isContentEditable || ['INPUT', 'TEXTAREA'].includes(tag);
       if (!typeable) return { found: true, verified: false };
-      const semantic = (${readProseMirrorText.toString()})(el);
+      const draftJs = (${isDraftJsEditor.toString()})(el);
+      const semantic = draftJs ? (${readDraftJsText.toString()})(el)
+        : ((${readProseMirrorText.toString()})(el) ?? (${readEmptyCaretText.toString()})(el));
+      if (draftJs && semantic === null) return { found: true, verified: false };
       if (semantic !== null) expected = expected.replace(/\\r\\n?/g, '\\n');
       const value = semantic !== null ? semantic : String(el.isContentEditable ? (el.textContent || '') : (el.value || ''));
       const signatureOf = ${TEXT_ENTRY_SIGNATURE_SOURCE};
@@ -4937,7 +5021,10 @@ export class CDPClient {
         const tag = String(el.tagName || '').toUpperCase();
         const typeable = el.isContentEditable || ['INPUT', 'TEXTAREA'].includes(tag);
         if (!typeable) return { found: true, verified: false };
-        const semantic = (${readProseMirrorText.toString()})(el);
+        const draftJs = (${isDraftJsEditor.toString()})(el);
+        const semantic = draftJs ? (${readDraftJsText.toString()})(el)
+        : ((${readProseMirrorText.toString()})(el) ?? (${readEmptyCaretText.toString()})(el));
+        if (draftJs && semantic === null) return { found: true, verified: false };
         if (semantic !== null) expected = expected.replace(/\\r\\n?/g, '\\n');
         const value = semantic !== null ? semantic : String(el.isContentEditable ? (el.textContent || '') : (el.value || ''));
         const signatureOf = ${TEXT_ENTRY_SIGNATURE_SOURCE};

@@ -111,6 +111,218 @@ for (const build of ['chrome', 'firefox']) {
         } finally { await context.close(); }
       });
 
+      await t.test('real X structure: deep editor, dangling dialog label and account avatar are certified together', async () => {
+        const { context, page } = await fixture(browser, build);
+        try {
+          await page.evaluate(() => {
+            const composer = document.getElementById('composer');
+            composer.setAttribute('aria-labelledby', 'modal-header');
+            const avatar = document.createElement('div');
+            avatar.id = 'account-avatar'; avatar.setAttribute('aria-label', 'Emre Sokullu');
+            avatar.style.cssText = 'width:40px;height:40px';
+            avatar.innerHTML = '<div><img alt="Emre Sokullu" style="width:40px;height:40px"></div>';
+            composer.prepend(avatar);
+            let child = document.getElementById('editor');
+            for (let depth = 0; depth < 40; depth++) {
+              const wrapper = document.createElement('div');
+              child.before(wrapper); wrapper.append(child); child = wrapper;
+            }
+            const placeholder = document.createElement('div');
+            placeholder.id = 'draft-placeholder'; placeholder.textContent = 'What’s happening?';
+            composer.append(placeholder);
+            document.getElementById('editor').setAttribute('aria-describedby', placeholder.id);
+          });
+          await page.locator('#editor').focus();
+          const snapshot = await capture(page);
+          assert.equal(snapshot.focusedTargetAvailable, true);
+          assert.match(snapshot.page.pageContent, /visible identity "Emre Sokullu"/);
+          assert.equal((await validate(page, snapshot)).ready, true);
+          assert.equal((await validate(page, snapshot, { tool: 'click_ax', ref_id: snapshot.postRef })).ready, true);
+          await page.evaluate(() => document.getElementById('counter').textContent = '16');
+          await page.waitForTimeout(180);
+          assert.equal((await validate(page, snapshot)).ready, true);
+          await page.evaluate(() => document.getElementById('account-avatar').setAttribute('aria-label', 'Another account'));
+          await page.waitForTimeout(180);
+          assert.equal((await validate(page, snapshot)).ready, false);
+          assert.equal((await validate(page, snapshot, { tool: 'click_ax', ref_id: snapshot.postRef })).ready, false);
+        } finally { await context.close(); }
+      });
+
+      for (const change of ['reference-appears', 'duplicate-reference', 'ancestor-limit']) await t.test(`${change}: deep dialog context remains bounded and exact`, async () => {
+        const { context, page } = await fixture(browser, build);
+        try {
+          await page.evaluate(() => document.getElementById('composer').setAttribute('aria-labelledby', 'missing-header'));
+          const snapshot = await capture(page);
+          assert.equal((await validate(page, snapshot)).ready, true);
+          await page.evaluate(change => {
+            if (change === 'ancestor-limit') {
+              let child = document.getElementById('editor');
+              for (let index = 0; index < 70; index++) {
+                const wrapper = document.createElement('div'); child.before(wrapper); wrapper.append(child); child = wrapper;
+              }
+            } else {
+              for (let index = 0; index < (change === 'duplicate-reference' ? 2 : 1); index++) {
+                const label = document.createElement('div'); label.id = 'missing-header'; label.textContent = 'Another destination';
+                document.getElementById('composer').append(label);
+              }
+            }
+          }, change);
+          await page.waitForTimeout(180);
+          assert.equal((await validate(page, snapshot)).ready, false);
+          if (change !== 'reference-appears') {
+            const current = await capture(page);
+            assert.equal((await validate(page, current)).ready, false);
+          }
+        } finally { await context.close(); }
+      });
+
+      for (const labelLength of [160, 2200]) await t.test(`generic account label of ${labelLength} characters is fully observed or stays uncertified`, async () => {
+        const { context, page } = await fixture(browser, build);
+        try {
+          const label = 'Account ' + 'A'.repeat(labelLength);
+          await page.evaluate(label => {
+            const avatar = document.createElement('div'); avatar.setAttribute('aria-label', label);
+            avatar.style.cssText = 'width:40px;height:40px'; document.getElementById('composer').prepend(avatar);
+          }, label);
+          const snapshot = await capture(page);
+          const result = await validate(page, snapshot);
+          if (labelLength === 160) {
+            assert.ok(snapshot.page.pageContent.includes(`visible identity ${JSON.stringify(label)}`));
+            assert.equal(result.ready, true);
+          } else assert.equal(result.ready, false);
+        } finally { await context.close(); }
+      });
+
+      for (const variant of ['image', 'aria-label', 'title', 'labelledby', 'describedby', 'reference-chain', 'reference-cycle', 'reference-order',
+        'oversized-label', 'evidence-budget', 'duplicate-reference', 'dangling-reference', 'separate-form', 'sidebar',
+        'editable', 'hidden-visible-child']) await t.test(`${variant}: nested account identities omitted by AX are fully exposed or stay uncertified`, async () => {
+        const { context, page } = await fixture(browser, build);
+        try {
+          const expected = await page.evaluate(variant => {
+            const wrapper = document.createElement('div'); wrapper.id = 'account-wrapper';
+            wrapper.setAttribute('aria-label', 'Account avatar'); wrapper.style.cssText = 'width:200px;height:44px';
+            const label = document.createElement(variant === 'image' ? 'img' : 'span'); label.id = 'nested-account';
+            label.style.cssText = 'display:inline-block;width:28px;height:28px';
+            const expected = variant === 'oversized-label' ? 'Alice ' + 'A'.repeat(600)
+              : variant === 'aria-label' ? 'Alice ' + 'A'.repeat(160) : 'Alice';
+            label.setAttribute(variant === 'image' ? 'alt' : variant === 'title' ? 'title' : 'aria-label', expected);
+            wrapper.append(label); document.getElementById('composer').prepend(wrapper);
+            const addReference = (id, text) => {
+              const reference = document.createElement('div'); reference.id = id; reference.textContent = text;
+              reference.style.cssText = 'position:absolute;left:600px;top:520px;width:180px;height:24px';
+              document.body.append(reference); return reference;
+            };
+            if (['labelledby', 'describedby', 'reference-chain', 'reference-cycle', 'reference-order', 'duplicate-reference', 'dangling-reference'].includes(variant)) {
+              const reference = addReference('account-label', 'Alice');
+              if (variant === 'labelledby') {
+                label.removeAttribute('aria-label'); label.setAttribute('aria-labelledby', reference.id);
+              } else label.setAttribute('aria-describedby', reference.id);
+              if (variant === 'reference-chain' || variant === 'reference-cycle' || variant === 'reference-order') {
+                const destination = addReference('account-destination', variant === 'reference-order' ? 'Alice' : 'Workspace one');
+                reference.setAttribute('aria-describedby', destination.id);
+                if (variant === 'reference-cycle') destination.setAttribute('aria-describedby', reference.id);
+                if (variant === 'reference-order') {
+                  reference.textContent = 'Profile'; label.setAttribute('aria-label', 'Avatar');
+                  document.getElementById('editor').setAttribute('aria-describedby', reference.id);
+                }
+              } else if (variant === 'duplicate-reference') {
+                addReference('account-label', 'Bob');
+              } else if (variant === 'dangling-reference') {
+                label.removeAttribute('aria-label'); label.setAttribute('aria-labelledby', 'missing-account');
+                label.removeAttribute('aria-describedby'); reference.remove();
+              }
+            } else if (variant === 'evidence-budget') {
+              label.setAttribute('aria-label', 'Alice ' + 'A'.repeat(400));
+              for (let index = 0; index < 9; index++) {
+                const extra = label.cloneNode(); extra.id = `additional-account-${index}`; wrapper.append(extra);
+              }
+            } else if (variant === 'separate-form' || variant === 'sidebar') {
+              const excluded = document.createElement(variant === 'separate-form' ? 'form' : 'aside');
+              wrapper.append(excluded); excluded.append(label);
+            } else if (variant === 'editable') {
+              label.setAttribute('contenteditable', 'true'); label.textContent = 'Private draft';
+            } else if (variant === 'hidden-visible-child') {
+              label.style.visibility = 'hidden';
+              label.innerHTML = '<span style="visibility:visible">Alice</span>';
+            }
+            // Exercise complete public evidence independently of whether the
+            // regular AX formatter happens to include an image/generic label.
+            const omitted = [...wrapper.querySelectorAll('*'), wrapper,
+              ...document.querySelectorAll('#account-label,#account-destination')];
+            const omittedRefs = new Set(omitted.map(node => __wb_ax_ref(node)));
+            const originalTree = window.__generateAccessibilityTree;
+            window.__generateAccessibilityTree = (...args) => {
+              const tree = originalTree(...args);
+              return { ...tree, pageContent: tree.pageContent.split('\n')
+                .filter(line => ![...omittedRefs].some(ref => line.includes(`[${ref}]`))).join('\n') };
+            };
+            return expected;
+          }, variant);
+          const snapshot = await capture(page);
+          const editor = await validate(page, snapshot);
+          const post = await validate(page, snapshot, { tool: 'click_ax', ref_id: snapshot.postRef });
+          if (['image', 'aria-label', 'title', 'labelledby', 'describedby', 'reference-chain', 'reference-cycle', 'reference-order'].includes(variant)) {
+            assert.equal(editor.ready, true, JSON.stringify(editor));
+            assert.equal(post.ready, true, JSON.stringify(post));
+            const evidence = snapshot.page.pageContent.split('[CURRENT VISIBLE ACTION IDENTITY]')[1];
+            assert.ok(evidence.includes(`visible identity ${JSON.stringify(expected)}`), evidence);
+            assert.ok(evidence.includes('visible identity "Account avatar"'), evidence);
+            if (variant === 'reference-chain' || variant === 'reference-cycle')
+              assert.ok(evidence.includes('visible identity "Workspace one"'), evidence);
+            await page.evaluate(variant => {
+              const node = document.getElementById(variant === 'reference-chain' || variant === 'reference-cycle' || variant === 'reference-order'
+                ? 'account-destination' : variant === 'labelledby' || variant === 'describedby' ? 'account-label' : 'nested-account');
+              if (node.id !== 'nested-account') node.textContent = 'Bob';
+              else node.setAttribute(variant === 'image' ? 'alt' : variant === 'title' ? 'title' : 'aria-label', 'Bob');
+            }, variant);
+            await page.waitForTimeout(180);
+            assert.equal((await validate(page, snapshot)).ready, false);
+            assert.equal((await validate(page, snapshot, { tool: 'click_ax', ref_id: snapshot.postRef })).ready, false);
+          } else {
+            assert.equal(editor.ready, false, JSON.stringify(editor));
+            assert.equal(post.ready, false, JSON.stringify(post));
+          }
+        } finally { await context.close(); }
+      });
+
+      for (const placement of ['direct-owner', 'owned-form', 'direct-form']) await t.test(`${placement}: plain destination text is fully observed without publishing editable values as identity`, async () => {
+        const { context, page } = await fixture(browser, build);
+        try {
+          await page.evaluate(placement => {
+            const owner = document.getElementById('composer');
+            const editor = document.getElementById('editor'); editor.textContent = 'Private draft';
+            if (placement === 'direct-owner') owner.prepend(document.createTextNode('Replying to Alice'));
+            else {
+              const form = document.createElement('form');
+              if (placement === 'direct-form') {
+                form.append(document.createTextNode('Replying to Alice'), document.getElementById('post'));
+                owner.append(form);
+              } else {
+                const label = document.createElement('span'); label.textContent = 'Replying to Alice';
+                editor.before(form); form.append(label, editor, document.getElementById('post'));
+              }
+            }
+          }, placement);
+          const snapshot = await capture(page);
+          // A separate form belongs to its own Post action, so an editor
+          // outside it remains conservative while the Post proof binds its text.
+          if (placement !== 'direct-form') assert.equal((await validate(page, snapshot)).ready, true);
+          assert.equal((await validate(page, snapshot, { tool: 'click_ax', ref_id: snapshot.postRef })).ready, true);
+          const identities = snapshot.page.pageContent.split('[CURRENT VISIBLE ACTION IDENTITY]')[1];
+          assert.match(identities, /Replying to Alice/);
+          assert.ok(!identities.includes('Private draft'), 'Additional identity evidence must exclude the editable payload');
+          await page.evaluate(placement => {
+            const owner = document.getElementById('composer');
+            if (placement === 'direct-owner') owner.firstChild.data = 'Replying to Bob';
+            else if (placement === 'direct-form') owner.querySelector('form').firstChild.data = 'Replying to Bob';
+            else owner.querySelector('form > span').textContent = 'Replying to Bob';
+          }, placement);
+          await page.waitForTimeout(180);
+          assert.equal((await validate(page, snapshot)).ready, false);
+          assert.equal((await validate(page, snapshot, { tool: 'click_ax', ref_id: snapshot.postRef })).ready, false);
+        } finally { await context.close(); }
+      });
+
       for (const variant of ['control-display', 'control-visibility', 'reference-display', 'reference-visibility',
         'readonly-inside-display', 'readonly-inside-visibility', 'readonly-reference-display', 'readonly-reference-visibility']) {
         await t.test(`${variant}: rendered audience changes invalidate an earlier Post certificate despite identical textContent`, async () => {
@@ -188,12 +400,31 @@ for (const build of ['chrome', 'firefox']) {
         } finally { await context.close(); }
       });
 
-      for (const kind of ['nested-text', 'generic-label', 'display-contents', 'open-shadow', 'separate-form', 'sidebar-identity', 'nav-control-identity', 'nav-control-shadow']) await t.test(`${kind}: uncovered destination identity stays uncertified`, async () => {
+      for (const kind of ['nested-text', 'generic-label', 'display-contents', 'display-contents-label', 'hidden-label-visible-child', 'label-with-editor', 'label-with-shadow', 'label-with-excluded-control', 'open-shadow', 'separate-form', 'labelled-separate-form', 'labelled-sidebar-control', 'separate-article', 'sidebar-identity', 'nav-control-identity', 'nav-control-shadow']) await t.test(`${kind}: destination identity is completely observed or stays uncertified`, async () => {
         const { context, page } = await fixture(browser, build);
         try {
           await page.evaluate(kind => {
             const destination = document.createElement('p'); destination.id = 'destination';
-            if (kind === 'nested-text' || kind === 'display-contents') {
+            if (kind === 'display-contents-label' || kind === 'hidden-label-visible-child') {
+              destination.setAttribute('aria-label', 'Replying to Alice');
+              destination.style.cssText = kind === 'display-contents-label' ? 'display:contents' : 'visibility:hidden';
+              destination.innerHTML = '<span style="visibility:visible">Replying to Alice</span>';
+            } else if (kind === 'label-with-editor') {
+              destination.setAttribute('aria-label', 'Replying to Alice');
+              destination.innerHTML = '<div contenteditable="true">Existing message</div>';
+            } else if (kind === 'label-with-shadow') {
+              destination.setAttribute('aria-label', 'Replying to Alice');
+              destination.attachShadow({ mode: 'open' }).innerHTML = '<span>Replying to Alice</span>';
+            } else if (kind === 'label-with-excluded-control') {
+              destination.setAttribute('aria-label', 'Replying to Alice');
+              destination.innerHTML = '<aside><input type="checkbox"></aside>';
+            } else if (kind === 'labelled-separate-form') {
+              destination.innerHTML = '<form><button aria-label="Replying to Alice" type="button"></button></form>';
+            } else if (kind === 'labelled-sidebar-control') {
+              destination.innerHTML = '<aside><button aria-label="Replying to Alice" type="button"></button></aside>';
+            } else if (kind === 'separate-article') {
+              destination.innerHTML = '<article><span>Replying to Alice</span></article>';
+            } else if (kind === 'nested-text' || kind === 'display-contents') {
               destination.innerHTML = '<span>Replying to Alice</span>';
               if (kind === 'display-contents') destination.style.display = 'contents';
             } else if (kind === 'open-shadow') {
@@ -219,8 +450,15 @@ for (const build of ['chrome', 'firefox']) {
           await page.waitForTimeout(180);
           const snapshot = await capture(page);
           const original = await validate(page, snapshot);
-          assert.equal(original.ready, false);
-          assert.equal(original.uncertified, true);
+          if (['generic-label', 'nested-text', 'display-contents'].includes(kind)) {
+            assert.equal(original.ready, true);
+            assert.match(snapshot.page.pageContent, /visible identity "Replying to Alice"/);
+          } else {
+            assert.equal(original.ready, false);
+            if (kind === 'display-contents-label' || kind === 'hidden-label-visible-child')
+              assert.equal(original.reason, 'target_uncovered', 'A private footprint without complete public identity evidence cannot certify the target');
+            else assert.equal(original.uncertified, true);
+          }
           await page.evaluate(kind => {
             const destination = document.getElementById('destination');
             if (kind === 'nested-text' || kind === 'display-contents') destination.firstChild.textContent = 'Replying to Bob';
