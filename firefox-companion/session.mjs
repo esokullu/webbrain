@@ -338,6 +338,14 @@ export class BidiSession {
     };
     const point = action === 'click' && payload.point != null ? payload.point : null;
     if (point && (!Number.isInteger(point.x) || !Number.isInteger(point.y))) throw new Error('Invalid click coordinates');
+    const focusGuard = payload.pageFeedbackGuard;
+    if (['type', 'field', 'key'].includes(action) && focusGuard
+        && (typeof validatePageDispatch !== 'function'
+          || !await validatePageDispatch(id, focusGuard, 'input', false))) {
+      const error = new Error('Page changed during native preparation; no focus or input sent');
+      error.code = 'page_feedback_pending'; throw error;
+    }
+    assertLive();
     const check = await this.call(match, `(el, token, action, x, y) => {
       if (!el.isConnected || el.getAttribute('data-webbrain-bidi') !== token || el.disabled) return false;
       el.removeAttribute('data-webbrain-bidi');

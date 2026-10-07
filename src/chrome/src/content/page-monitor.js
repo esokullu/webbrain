@@ -710,6 +710,7 @@
       }
       const editableTextMutation = editable(el) && (record.type === 'characterData'
         || (record.type === 'childList' && [...record.addedNodes, ...record.removedNodes].some(node => node.nodeType === 3)));
+      const accessibleNameContentMutation = ['characterData', 'childList'].includes(record.type);
       if (ignored(el)) continue;
       if (record.type === 'attributes' && record.attributeName === 'data-selected'
           && record.oldValue !== el.getAttribute('data-selected')) {
@@ -720,6 +721,10 @@
       // DOM writes are attributed to its dispatch. Keep those paths deduplicated
       // while observing independent page-script changes to editable text.
       if (editableTextMutation && (userTurn || (agentTurn && lastUserAt <= agentTurn.userAt))) continue;
+      if (accessibleNameContentMutation && el.tagName === 'OPTION' && el.selected) {
+        const select = el.closest('select');
+        if (select && !ignored(select)) noteChange(select, record.agentUserAt);
+      }
       if (record.type === 'attributes' && ['class', 'style'].includes(record.attributeName)
           && deferAnimationCheck(record, el)) continue;
       if (record.type === 'layout' && deferAnimationCheck(record, el)) continue;
@@ -739,7 +744,6 @@
         if (nextControl !== previousControl) noteChange(el, record.agentUserAt);
         continue;
       }
-      const accessibleNameContentMutation = ['characterData', 'childList'].includes(record.type);
       const nativeLabelAssociationMutation = record.type === 'attributes'
         && record.attributeName === 'for' && el.tagName === 'LABEL';
       const hiddenAriaLabelIdMutation = record.type === 'attributes' && record.attributeName === 'id';
@@ -987,9 +991,11 @@
     listen(document, 'keydown', event => {
       const el = elementFor(event);
       if (!event.isTrusted || expected('input', el, event)) return;
-      // Key names identify scrolling and focus movement locally, never transmitted.
-      if (editable(el)) interact('activity', el);
-      else if (['Tab', 'Escape', 'ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' '].includes(event.key)) interact('activity', el);
+      // Modifier-only presses do not activate page shortcuts. Other trusted
+      // keydowns can change page state even when no DOM mutation follows; key
+      // values are used only for this local filter and never enter feedback.
+      if (!['Shift', 'Control', 'Alt', 'Meta', 'AltGraph', 'CapsLock', 'NumLock', 'ScrollLock', 'Fn', 'FnLock', 'Hyper', 'Super']
+        .includes(event.key)) interact('activity', el);
     });
     for (const name of ['wheel', 'touchmove']) listen(document, name, event => {
       const el = elementFor(event);

@@ -779,6 +779,35 @@ for (const [build, engine] of [['chrome', chromium], ['firefox', firefox]]) {
     } finally { await browser.close(); }
   });
 
+  test(`${build}: selected native option label edits invalidate the owning select`, async () => {
+    const { browser, page } = await fixture(engine, build);
+    try {
+      await page.evaluate(() => {
+        const select = document.createElement('select'); select.id = 'native-option-label-select';
+        select.innerHTML = '<option value="stable-choice" selected>Initial choice</option><option value="other">Other choice</option>';
+        document.body.append(select);
+      });
+      await page.waitForTimeout(300);
+      const guard = await page.evaluate(() => {
+        feedback = [];
+        deliver('page_monitor_prepare', { operationId: 'native-option-label', tool: 'click', selector: '#native-option-label-select' });
+        deliver('page_monitor_dispatch', { operationId: 'native-option-label', kind: 'click', selector: '#native-option-label-select', fenceOnly: true });
+        document.querySelector('#native-option-label-select option:checked').textContent = 'Updated choice';
+        return lastMonitorResponse.guard;
+      });
+      await page.waitForFunction(() => feedback.some(event => event.kind === 'dom'
+        && event.target === 'select#native-option-label-select'), null, { timeout: 1000 });
+      assert.equal(await page.locator('#native-option-label-select').evaluate(select => select.value), 'stable-choice',
+        'The native value remains stable while the model-visible selected label changes');
+      assert.equal(JSON.stringify(await page.evaluate(() => feedback)).includes('Updated choice'), false,
+        'Selected option labels must not be copied into feedback');
+      const accepted = await page.evaluate(value => window.dispatchEvent(new CustomEvent('webbrain-agent-dom-dispatch', {
+        detail: JSON.stringify({ ...value, dispatchPhase: 'click' }), cancelable: true,
+      })), guard);
+      assert.equal(accepted, false, 'Editing the selected option label must stale the prepared select action');
+    } finally { await browser.close(); }
+  });
+
   test(`${build}: fenced iframe clicks reject transport-gap input and attribute the dispatched click`, async () => {
     const { browser, page } = await fixture(engine, build);
     try {
@@ -2096,6 +2125,39 @@ for (const [build, engine] of [['chrome', chromium], ['firefox', firefox]]) {
       await page.waitForFunction(() => feedback.some(event => event.kind === 'click' && event.source === 'user'), null, { timeout: 1000 });
       assert.equal((await page.evaluate(() => feedback)).some(event => event.kind === 'click' && event.source === 'user'), true,
         'A later pointer click must remain user activity after keyboard attribution');
+    } finally { await browser.close(); }
+  });
+
+  test(`${build}: non-editable site shortcut keys invalidate actions without exposing keys`, async () => {
+    const { browser, page } = await fixture(engine, build);
+    try {
+      await page.evaluate(() => {
+        const surface = document.createElement('div'); surface.id = 'shortcut-surface'; surface.tabIndex = 0;
+        document.body.prepend(surface);
+      });
+      await page.waitForTimeout(250);
+      await page.locator('#shortcut-surface').focus();
+      await page.waitForTimeout(150);
+      const dispatch = await page.evaluate(() => {
+        feedback = [];
+        deliver('page_monitor_prepare', { operationId: 'site-shortcut', tool: 'click', selector: '#agent' });
+        deliver('page_monitor_dispatch', { operationId: 'site-shortcut', kind: 'click', selector: '#agent', fenceOnly: true });
+        return lastMonitorResponse;
+      });
+      assert.equal(dispatch.ready, true, JSON.stringify(dispatch));
+      await page.locator('#shortcut-surface').press('Shift');
+      assert.deepEqual(await page.evaluate(() => feedback), [], 'Modifier-only presses do not produce shortcut activity');
+      await page.locator('#shortcut-surface').press('j');
+      await page.waitForFunction(() => feedback.some(event => event.kind === 'activity' && event.source === 'user'), null, { timeout: 1000 });
+      const events = await page.evaluate(() => feedback);
+      assert.equal(events.some(event => event.kind === 'activity' && event.source === 'user'), true, JSON.stringify(events));
+      assert.equal(events.some(event => Object.hasOwn(event, 'key') || Object.hasOwn(event, 'value')), false,
+        'Keyboard contents must never be included in page feedback');
+      const blocked = await page.evaluate(() => {
+        try { __wbPageMonitor.activatePreparedDispatch({ operationId: 'site-shortcut', kind: 'click' }); return null; }
+        catch (error) { return error.code; }
+      });
+      assert.equal(blocked, 'page_feedback_pending', 'A site shortcut must invalidate the prepared action');
     } finally { await browser.close(); }
   });
 

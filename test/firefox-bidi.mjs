@@ -206,7 +206,7 @@ test('BiDi navigation revalidates the page feedback guard before native dispatch
     async (_id, _guard, kind) => kind === 'navigate');
   assert.equal(sent.filter(call => call.method === 'browsingContext.navigate').length, 1);
 });
-for (const failAt of [1, 2, 3]) {
+for (const failAt of [1, 2, 3, 4]) {
   test(`page feedback change before native input ${failAt} preserves dispatch evidence`, async () => {
     const session = new BidiSession(), runId = id();
     session.runs.set(runId, { context: 'a' });
@@ -217,14 +217,33 @@ for (const failAt of [1, 2, 3]) {
     await assert.rejects(session.perform(runId, 'type', { text: 'ab', clear: false,
       pageFeedbackGuard: { documentToken: 'doc', revision: 7, operationId: 'op' } }, async () => ++checks < failAt), error => {
       assert.equal(error.code, 'page_feedback_pending');
-      assert.equal(error.dispatchState.noDispatch, failAt < 3);
-      assert.equal(error.dispatchState.dispatched, failAt === 3);
-      assert.equal(error.dispatchState.outcomeUnknown, failAt === 3);
+      assert.equal(error.dispatchState.noDispatch, failAt < 4);
+      assert.equal(error.dispatchState.dispatched, failAt === 4);
+      assert.equal(error.dispatchState.outcomeUnknown, failAt === 4);
       return true;
     });
-    assert.equal(inputs, Math.max(0, failAt - 2), 'No subsequent character may be sent after the intervention');
+    assert.equal(inputs, failAt === 4 ? 1 : 0, 'No subsequent character may be sent after the intervention');
   });
 }
+
+test('feedback during BiDi target lookup blocks focus before the focus-capable target check', async () => {
+  const session = new BidiSession(), runId = id();
+  session.runs.set(runId, { context: 'a' });
+  let intervened = false, targetChecks = 0;
+  session.locate = async () => {
+    intervened = true;
+    return { context: 'a', node: { sharedId: 'el' } };
+  };
+  session.call = async () => { targetChecks++; return { result: { value: true } }; };
+  await assert.rejects(session.perform(runId, 'type', { text: 'stale', clear: false,
+    pageFeedbackGuard: { documentToken: 'doc', revision: 7, operationId: 'op' } },
+  async () => !intervened), error => {
+    assert.equal(error.code, 'page_feedback_pending');
+    assert.equal(error.dispatchState.noDispatch, true);
+    return true;
+  });
+  assert.equal(targetChecks, 0, 'A stale page must be rejected before the target check calls focus()');
+});
 
 test('page feedback after native marker installation clears attribution and blocks input', async () => {
   const session = new BidiSession(), runId = id(), sent = [];
@@ -261,7 +280,7 @@ for (const platform of ['Win32', 'MacIntel']) {
           : declaration.includes('el.innerText : el.value') ? '' : true } });
     session.send = async (method, params) => { if (method === 'input.performActions') sent.push({ marks: checks, actions: params.actions[0].actions }); return {}; };
     await session.perform(runId, 'field', { text: 'x', pageFeedbackGuard: { documentToken: 'doc', revision: 0, operationId: 'op' } }, async () => { checks++; return true; });
-    assert.deepEqual(sent.map(item => item.marks), [2, 4, 6, 8]);
+    assert.deepEqual(sent.map(item => item.marks), [3, 5, 7, 9]);
     assert.deepEqual(sent[0].actions, [{ type: 'keyDown', value: platform === 'MacIntel' ? '\uE03D' : '\uE009' }]);
     assert.equal(sent[1].actions[0].value, 'a');
     assert.equal(sent[2].actions[0].value, '\uE003');
@@ -298,6 +317,7 @@ test('repeated native Tab validates and rebinds to the focused target before eac
   });
   assert.equal(result.success, true);
   assert.deepEqual(validations, [
+    { kind: 'input', rebindFocus: false },
     { kind: 'input', rebindFocus: false },
     { kind: 'input', rebindFocus: false },
     { kind: 'input', rebindFocus: true },
