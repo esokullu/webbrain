@@ -4,13 +4,28 @@ const FRESH_READS = new Set([
   'extract_data', 'get_selection', 'get_shadow_dom', 'shadow_dom_query', 'get_frames',
   'iframe_read', 'get_window_info', 'list_webmcp_tools', 'inspect_viewport', 'screenshot',
   'wait_for_element', 'wait_for_stable', 'read_console', 'inspect_network_requests',
-  'inspect_element_styles', 'verify_form', 'chat_observe',
+  'inspect_element_styles', 'verify_form', 'chat_observe', 'read_pdf', 'get_captcha_capabilities', 'find_text',
 ]);
 const DETACHED_TOOLS = new Set([
   'list_downloads', 'read_downloaded_file', 'scratchpad_write', 'progress_read',
-  'progress_update', 'recall_memcode', 'clarify',
+  'progress_update', 'recall_memcode', 'clarify', 'generate_image', 'schedule_task', 'schedule_resume', 'resize_window',
 ]);
 const AX_ACTIONS = new Set(['click_ax', 'type_ax', 'set_field', 'set_checked']);
+// A candidate only: the isolated monitor must validate the private snapshot
+// captured together with the page observation before the model made this call.
+const BOUND_ACTIONS = new Set(['click', 'click_ax', 'type_text', 'type_ax', 'set_field', 'set_checked',
+  'press_keys', 'hover', 'upload_file']);
+function hasBoundTarget(name, args, state) {
+  return BOUND_ACTIONS.has(name) && !!state.actionBinding?.snapshotToken
+    && !Number.isFinite(args.x) && !Number.isFinite(args.y)
+    && (args.frameId == null || Number(args.frameId) === 0)
+    && (args.targetFrame == null || Number(args.targetFrame) === 0)
+    && !args.allFrames && !args.all && !args.urlFilter
+    && (/^ref_[A-Za-z0-9_-]+$/.test(args.ref_id || '')
+      || (typeof args.selector === 'string' && !!args.selector.trim())
+      || (['type_text', 'press_keys'].includes(name) && !args.ref_id && !args.selector
+        && state.actionBinding.focusedTargetAvailable === true));
+}
 const httpUrl = value => {
   try {
     const url = new URL(value);
@@ -73,11 +88,16 @@ export function pageFeedbackCallPolicy(name, args = {}, state = {}, currentPage 
   if (['fetch_url', 'research_url'].includes(name) && httpUrl(args.url)
       && ['GET', 'HEAD'].includes(String(args.method || 'GET').toUpperCase())
       && !args.replayRequestId && !args.body) return { kind: 'independent' };
-  if (name === 'read_pdf' && (httpUrl(args.url) || args.download_id)) return { kind: 'independent' };
-  if (name === 'download_files' && Array.isArray(args.urls) && args.urls.length && args.urls.every(httpUrl)) return { kind: 'independent' };
+  if (['download_files', 'download_file'].includes(name)) {
+    // Match the handler's singular-URL alias and precedence exactly. Page churn
+    // does not alter a concrete resource URL already supplied to the download.
+    const urls = Array.isArray(args.urls) && args.urls.length ? args.urls : args.url ? [args.url] : [];
+    if (urls.length && urls.every(httpUrl)) return { kind: 'independent' };
+  }
   if (name === 'download_public_media' && (httpUrl(args.url) || httpUrl(state.url))) return { kind: 'independent' };
   if (name === 'navigate' && httpUrl(args.url)) return { kind: 'navigate' };
-  if (name === 'done' && args.outcome === 'success' && currentPage?.success !== false) return { kind: 'observe', terminal: true };
+  if (name === 'done' && (['partial', 'failure'].includes(args.outcome)
+      || (args.outcome === 'success' && currentPage?.success !== false))) return { kind: 'observe', terminal: true };
   if (name === 'download_social_media' && !args.scroll && !args.all
       && [undefined, 'main', 'auto'].includes(args.mode)
       && [undefined, 'dom', 'auto'].includes(args.strategy)
@@ -92,6 +112,7 @@ export function pageFeedbackCallPolicy(name, args = {}, state = {}, currentPage 
       return { kind: 'media_resolve', target, reason: binding ? 'focus_unverified' : 'media_binding_missing' };
     }
   }
+  if (hasBoundTarget(name, args, state)) return { kind: 'bound_target' };
   if (!AX_ACTIONS.has(name) || !currentPage || events.some(event => /^(?:form|input|textarea|select|option)(?:$|[\s#.])/.test(event.target || ''))) return { kind: 'unsafe' };
   const before = axTargetContext(state.page && { ...state.page, url: state.page.url || state.url }, args.ref_id);
   const after = axTargetContext({ ...currentPage, url: currentPage.url || state.url }, args.ref_id);

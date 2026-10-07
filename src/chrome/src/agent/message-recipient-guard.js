@@ -5,6 +5,22 @@
 export const MESSAGE_TARGET_KINDS = new Set(['named', 'active_conversation']);
 export const MESSAGE_RECIPIENT_ROLES = new Set(['to', 'cc', 'bcc']);
 
+// Protected attachments bind one explicit source as well as the conversation.
+// Do not authorize the ordinary upload handler's path/id fallback here: a
+// failed lookup must not silently attach a different file to a private chat.
+export function messageRecipientUploadSourceKey(args = {}) {
+  const attachment = typeof args.attachmentId === 'string' ? args.attachmentId.trim() : '';
+  const path = typeof args.filePath === 'string' ? args.filePath.trim() : '';
+  const hasDownload = args.downloadId != null && args.downloadId !== '';
+  if (Number(!!attachment) + Number(!!path) + Number(hasDownload) !== 1) return '';
+  if (attachment) return `attachment:${attachment}`;
+  if (hasDownload) {
+    const id = Number(args.downloadId);
+    return Number.isSafeInteger(id) && id >= 0 ? `download:${id}` : '';
+  }
+  return path.startsWith('/') && !/[\u0000-\u001f\u007f]/.test(path) ? `path:${path}` : '';
+}
+
 function compact(value, max = 200) {
   return String(value ?? '')
     .replace(/[\u0000-\u001f\u007f]/g, ' ')

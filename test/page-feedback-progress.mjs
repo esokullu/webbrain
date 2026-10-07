@@ -435,3 +435,343 @@ for (const build of ['chrome', 'firefox']) {
     }
   }
 }
+
+{
+  // Generic editor: no social-site adapter or media precapture is available.
+  // The content endpoint keeps identity/form data private while unrelated text
+  // changes remain visible to the real chat/stream feedback state machine.
+  const GENERIC_URL = 'https://ordinary-editor.test/draft/7';
+  const DOCUMENT_ID = 'generic-editor-document';
+  const DOCUMENT_TOKEN = 'generic-editor-content';
+  let genericTab = 5200;
+
+  function genericFixture(phase, preparationChange = null) {
+    const live = { recipient: 'Alice', formTarget: '/save/7', node: 'save-node-1', focus: 'draft-field-node', value: 'Saved draft',
+      formCounter: 100, regionCounter: 200, headingCounter: 20 };
+    const snapshots = new Map(), prepared = new Map(), messages = [], dispatched = [], feedbackAccepted = [];
+    let agent, tab, seq = 0, snapshotSequence = 0;
+    const identity = () => JSON.stringify([live.recipient, live.formTarget, live.node, live.focus, live.value]);
+    const sender = () => ({ tab: { id: tab }, frameId: 0, documentId: DOCUMENT_ID, url: GENERIC_URL });
+    const emit = (event = {}) => {
+      const state = agent.pageMonitorState(sender(), DOCUMENT_TOKEN);
+      assert.equal(state.active, true);
+      const accepted = agent.observePageFeedback(sender(), { ...state, seq: ++seq, revision: seq,
+        kind: 'dom', source: 'page', target: 'span#form-counter', ...event }).accepted;
+      feedbackAccepted.push(accepted);
+      assert.equal(accepted, true);
+    };
+    const churn = () => {
+      live.formCounter++; live.regionCounter++; live.headingCounter++;
+      for (const target of ['span#form-counter', 'span#region-counter', 'h2#sidebar-heading']) emit({ target });
+    };
+    const revoke = change => {
+      if (change === 'recipient') live.recipient = 'Bob';
+      if (change === 'form destination') live.formTarget = '/save/other';
+      if (change === 'target node') live.node = 'replacement-save-node';
+      if (change === 'field value') live.value = 'Someone else changed the draft';
+      if (change === 'focus') live.focus = 'different-field-node';
+      if (change === 'human') emit({ kind: 'click', source: 'user', interacting: false, target: 'button#human' });
+      else emit({ target: change === 'recipient' ? 'h2#recipient' : change === 'form destination' ? 'form#draft' : 'button#save' });
+    };
+    const page = () => ({ success: true, pageContent:
+      `region "Draft editor" [ref_editor]\n heading "${live.recipient}" [ref_recipient]\n`
+      + ` form "Draft" [ref_form] action="${live.formTarget}"\n`
+      + `  textbox "Draft text" [ref_body] value="${live.value}"\n`
+      + '  button "Save" [ref_save] type="submit"\n'
+      + `  text "${live.formCounter} views" [ref_form_counter]\n`
+      + ` text "${live.regionCounter} updates" [ref_region_counter]\n`
+      + `region "Unrelated sidebar" [ref_sidebar]\n heading "Trending ${live.headingCounter}" [ref_sidebar_heading]` });
+    const api = {
+      storage: { local: area, session: area },
+      runtime: { getURL: value => `extension://test/${value}`, sendMessage: async () => ({}) },
+      tabs: {
+        get: async id => ({ id, url: GENERIC_URL, title: 'Ordinary draft editor' }),
+        async sendMessage(_tab, message) {
+          messages.push(message);
+          const params = message.params || {};
+          if (message.action === 'page_monitor_state') {
+            return { ready: true, ...agent.pageMonitorState(sender(), DOCUMENT_TOKEN) };
+          }
+          if (message.action === 'page_monitor_capture_model') {
+            if (params.actionTarget) live.coverageMissing = false;
+            const snapshotToken = `generic-snapshot-${++snapshotSequence}`;
+            snapshots.set(snapshotToken, { runToken: params.runToken, identity: identity() });
+            return { ready: true, runToken: params.runToken, documentToken: DOCUMENT_TOKEN,
+              snapshotToken, targetCount: 2, focusedTargetAvailable: true, page: { ...page(), url: GENERIC_URL } };
+          }
+          if (message.action === 'page_monitor_validate_model') {
+            const snapshot = snapshots.get(params.snapshotToken);
+            const resolved = (params.tool === 'click_ax' && params.ref_id === 'ref_save')
+              || (params.tool === 'click' && params.selector === (live.selector || '#save'))
+              || (['type_text', 'press_keys'].includes(params.tool) && !params.ref_id && !params.selector && !!live.focus);
+            return { ready: !live.coverageMissing && !!snapshot && resolved && snapshot.runToken === params.runToken && snapshot.identity === identity(),
+              ...(live.coverageMissing ? { reason: live.coverageReason || 'target_uncovered' } : {}),
+              runToken: params.runToken, documentToken: DOCUMENT_TOKEN, snapshotToken: params.snapshotToken };
+          }
+          if (message.action === 'page_monitor_prepare') {
+            const preparedIdentity = identity();
+            if (phase === 'preparation') preparationChange ? revoke(preparationChange) : churn();
+            const snapshot = snapshots.get(params.expectedModelSnapshot);
+            const modelBindingValid = !!snapshot && snapshot.runToken === params.runToken && snapshot.identity === identity();
+            prepared.set(params.operationId, { identity: preparedIdentity,
+              approved: params.allowPassiveRebase === true && modelBindingValid });
+            return { ready: modelBindingValid, modelBindingValid };
+          }
+          if (message.action === 'page_monitor_dispatch') {
+            const operation = prepared.get(params.operationId);
+            const ready = !!operation && operation.identity === identity() && operation.approved;
+            return { ready, ...(!ready ? { pageFeedbackPending: true } : {}) };
+          }
+          return { ready: true };
+        },
+      },
+      webNavigation: { getAllFrames: async () => [{ frameId: 0, parentFrameId: -1, documentId: DOCUMENT_ID, url: GENERIC_URL }] },
+      scripting: { executeScript: async () => [{ result: null }] },
+    };
+    return { api, live, snapshots, messages, dispatched, feedbackAccepted, churn, emit, revoke, page,
+      attach(value, id) { agent = value; tab = id; },
+      initialize() {
+        agent.pageMonitorState(sender(), DOCUMENT_TOKEN);
+        agent._pageFeedbackRuns.get(tab).latestPage = page();
+      },
+    };
+  }
+
+  for (const build of ['chrome', 'firefox']) {
+    const { Agent } = await import(`../src/${build}/src/agent/agent.js`);
+    const { installPageFeedback, beforePageAgentDispatch } = await import(`../src/${build}/src/agent/page-feedback.js`);
+    class GenericProgressAgent extends Agent {
+      async executeTool(...args) { return this.genericExecute(...args); }
+    }
+    installPageFeedback(GenericProgressAgent);
+
+    const actionFor = target => ({
+      'native submit': { name: 'click_ax', args: { ref_id: 'ref_save' } },
+      'unique selector': { name: 'click', args: { selector: '#save' } },
+      'focused typing': { name: 'type_text', args: { text: 'Updated draft', clear: true } },
+      'focused key': { name: 'press_keys', args: { key: 'Enter' } },
+    })[target];
+    const genericFinish = (agent, tab, streaming, updates) => {
+      const update = (type, data) => updates.push({ type, data });
+      const options = { detachedRequestId: 'generic-feedback-run', askStreamingEnabled: false };
+      return streaming ? agent.processMessageStream(tab, 'Save the current draft for Alice', update, 'act', options)
+        : agent.processMessage(tab, 'Save the current draft for Alice', update, 'act', [], options);
+    };
+    const configure = (agent, fixture, tab) => {
+      fixture.attach(agent, tab);
+      agent._currentUrl = async () => GENERIC_URL;
+      agent._pageFeedbackIdleMs = 1;
+      agent._getTabUrlTitle = async () => ({ tabUrl: GENERIC_URL, tabTitle: 'Ordinary draft editor' });
+      agent._enrichUserMessageWithCurrentPage = async (_tab, _messages, content) => {
+        fixture.initialize();
+        return { role: 'user', content };
+      };
+      agent.genericExecute = async (_tab, name, args, _onUpdate, context) => {
+        if (name === 'get_accessibility_tree') {
+          const current = fixture.page();
+          if (phaseForAgent.get(agent) === 'refresh') fixture.churn();
+          return current;
+        }
+        if (name === 'done') return { done: true, success: true, summary: args.summary, outcome: args.outcome };
+        if (name === 'extract_data') return { success: true, headings: [fixture.live.recipient] };
+        if (name === 'download_files') {
+          fixture.dispatched.push({ name, args: structuredClone(args) });
+          return { success: true, downloads: [{ success: true, url: args.url,
+            downloadId: 711, state: 'complete', filename: args.filename }] };
+        }
+        assert.ok(['click', 'click_ax', 'type_text', 'press_keys'].includes(name));
+        await beforePageAgentDispatch(fixture.api, _tab, { kind: ['type_text', 'press_keys'].includes(name) ? 'input' : 'click', navigationCandidate: false });
+        context._contentActionDispatchState.started = true;
+        fixture.dispatched.push({ name, args: structuredClone(args), recipient: fixture.live.recipient });
+        return { success: true, dispatched: true };
+      };
+    };
+    const phaseForAgent = new WeakMap();
+
+    for (const streaming of [false, true]) {
+      test(`${build}: ${streaming ? 'stream' : 'chat'} private target proof preserves long selectors exactly`, async () => {
+        const previousChrome = globalThis.chrome, previousBrowser = globalThis.browser;
+        const fixture = genericFixture('model'), tab = genericTab++, updates = [];
+        globalThis.chrome = fixture.api; globalThis.browser = fixture.api;
+        try {
+          const selector = `#save\n:not([data-unused="${'x'.repeat(550)}"])`;
+          fixture.live.selector = selector;
+          const final = 'Saved the current draft.';
+          let requests = 0;
+          const agent = makeAgent(GenericProgressAgent, async () => {
+            assert.ok(++requests <= 2);
+            fixture.churn();
+            return requests === 1 ? call('exact-long-selector', 'click', { selector })
+              : call('saved', 'done', { summary: final, outcome: 'success' });
+          });
+          configure(agent, fixture, tab);
+          assert.equal(await genericFinish(agent, tab, streaming, updates), final);
+          assert.deepEqual(fixture.dispatched, [{ name: 'click', args: { selector }, recipient: 'Alice' }]);
+          for (const action of ['page_monitor_validate_model', 'page_monitor_prepare']) {
+            const messages = fixture.messages.filter(message => message.action === action && message.params.selector);
+            assert.ok(messages.length);
+            assert.ok(messages.every(message => message.params.selector === selector), 'Proof must refer to the original target string');
+          }
+        } finally { globalThis.chrome = previousChrome; globalThis.browser = previousBrowser; }
+      });
+
+      for (const reason of ['target_uncovered', 'target_unresolved']) test(`${build}: ${streaming ? 'stream' : 'chat'} ${reason} waits for a fresh priority observation without a page-change loop`, async () => {
+        const previousChrome = globalThis.chrome, previousBrowser = globalThis.browser;
+        const fixture = genericFixture('model'), tab = genericTab++, updates = [];
+        fixture.live.coverageMissing = true;
+        fixture.live.coverageReason = reason;
+        globalThis.chrome = fixture.api; globalThis.browser = fixture.api;
+        try {
+          const args = { selector: '#save' }, final = 'Inspected and saved the freshly observed draft.';
+          let requests = 0;
+          const agent = makeAgent(GenericProgressAgent, async messages => {
+            assert.ok(++requests <= 3);
+            if (requests === 1) return call('unobserved-target', 'click', args);
+            if (requests === 2) {
+              assert.equal(fixture.dispatched.length, 0);
+              const result = messages.find(message => message.role === 'tool');
+              assert.match(result.content, /action_binding_unavailable/);
+              assert.doesNotMatch(result.content, /pageFeedbackPending/);
+              assert.ok(fixture.messages.some(message => message.action === 'page_monitor_capture_model'
+                && message.params.actionTarget?.selector === args.selector));
+              return call('freshly-observed-target', 'click', args);
+            }
+            return call('saved', 'done', { summary: final, outcome: 'success' });
+          });
+          configure(agent, fixture, tab);
+          assert.equal(await genericFinish(agent, tab, streaming, updates), final);
+          assert.equal(requests, 3);
+          assert.deepEqual(fixture.dispatched, [{ name: 'click', args, recipient: 'Alice' }]);
+          assert.equal(updates.some(update => update.type === 'run_status' && update.data.status === 'page_unstable'), false);
+          assert.equal(fixture.messages.filter(message => message.action === 'page_monitor_capture_model'
+            && message.params.actionTarget).length, 1, 'Priority capture is consumed after a fresh observation');
+        } finally { globalThis.chrome = previousChrome; globalThis.browser = previousBrowser; }
+      });
+    }
+
+    for (const streaming of [false, true]) {
+      const resourceUrl = 'https://assets.ordinary-editor.test/images/draft-photo.jpg';
+      for (const phase of ['model', 'refresh', 'preflight']) {
+        test(`${build}: ${streaming ? 'stream' : 'chat'} singular-url download progresses through passive ${phase} churn`, async () => {
+          const previousChrome = globalThis.chrome, previousBrowser = globalThis.browser;
+          const fixture = genericFixture(phase), tab = genericTab++, updates = [];
+          globalThis.chrome = fixture.api; globalThis.browser = fixture.api;
+          try {
+            const args = { url: resourceUrl, filename: 'draft-photo.jpg' };
+            const final = 'Downloaded draft-photo.jpg (download ID: 711).';
+            let requests = 0;
+            const agent = makeAgent(GenericProgressAgent, async () => {
+              assert.ok(++requests <= 2, 'A concrete download URL must not be discarded because the page changed');
+              fixture.churn();
+              return requests === 1 ? call('download-exact-resource', 'download_files', args)
+                : call('downloaded', 'done', { summary: final, outcome: 'success' });
+            });
+            configure(agent, fixture, tab);
+            phaseForAgent.set(agent, phase);
+            agent._preflightRichTextToolbarTarget = async (_tab, name) => {
+              if (phase === 'preflight' && name === 'download_files') fixture.churn();
+              return { block: null };
+            };
+            assert.equal(await genericFinish(agent, tab, streaming, updates), final,
+              JSON.stringify(updates.filter(update => ['tool_result', 'warning'].includes(update.type))));
+            assert.equal(requests, 2);
+            assert.deepEqual(fixture.dispatched, [{ name: 'download_files', args }], 'The handler executes exactly once');
+            assert.ok(fixture.feedbackAccepted.length > 0 && fixture.feedbackAccepted.every(Boolean));
+            assert.ok(updates.some(update => update.type === 'page_feedback'));
+            assert.equal(updates.some(update => update.type === 'run_status' && update.data.status === 'page_unstable'), false);
+          } finally { globalThis.chrome = previousChrome; globalThis.browser = previousBrowser; }
+        });
+      }
+      test(`${build}: ${streaming ? 'stream' : 'chat'} a valid singular URL cannot override a mixed invalid download array`, async () => {
+        const previousChrome = globalThis.chrome, previousBrowser = globalThis.browser;
+        const fixture = genericFixture('model'), tab = genericTab++, updates = [];
+        globalThis.chrome = fixture.api; globalThis.browser = fixture.api;
+        try {
+          const final = 'Inspected the current page after rejecting the invalid download list.';
+          let requests = 0;
+          const agent = makeAgent(GenericProgressAgent, async () => {
+            assert.ok(++requests <= 3);
+            if (requests === 1) {
+              fixture.churn();
+              return call('invalid-download-list', 'download_files', {
+                url: resourceUrl, urls: [resourceUrl, 'javascript:alert(1)'], filename: 'draft-photo.jpg',
+              });
+            }
+            if (requests === 2) return call('inspect-current-page', 'extract_data', { type: 'headings' });
+            return call('inspected', 'done', { summary: final, outcome: 'success' });
+          });
+          configure(agent, fixture, tab);
+          assert.equal(await genericFinish(agent, tab, streaming, updates), final);
+          assert.equal(requests, 3);
+          assert.deepEqual(fixture.dispatched, [], 'The nonempty invalid array must retain precedence over url');
+          assert.ok(fixture.feedbackAccepted.length > 0 && fixture.feedbackAccepted.every(Boolean));
+        } finally { globalThis.chrome = previousChrome; globalThis.browser = previousBrowser; }
+      });
+    }
+
+    for (const streaming of [false, true]) for (const target of ['native submit', 'unique selector', 'focused typing', 'focused key']) {
+      for (const phase of ['model', 'refresh', 'preparation']) {
+        test(`${build}: ${streaming ? 'stream' : 'chat'} generic ${target} progresses through ${phase} churn in its form, region and unrelated heading`, async () => {
+          const previousChrome = globalThis.chrome, previousBrowser = globalThis.browser;
+          const fixture = genericFixture(phase), tab = genericTab++, updates = [];
+          globalThis.chrome = fixture.api; globalThis.browser = fixture.api;
+          try {
+            const action = actionFor(target), final = 'Saved the current draft for Alice.';
+            let requests = 0;
+            const inferenceCaptured = [];
+            const agent = makeAgent(GenericProgressAgent, async () => {
+              assert.ok(++requests <= 2, 'Unrelated passive updates must not require another model decision');
+              inferenceCaptured.push(fixture.snapshots.size > 0);
+              fixture.churn();
+              return requests === 1 ? call('save-current-draft', action.name, action.args)
+                : call('saved', 'done', { summary: final, outcome: 'success' });
+            });
+            phaseForAgent.set(agent, phase);
+            configure(agent, fixture, tab);
+            assert.equal(await genericFinish(agent, tab, streaming, updates), final);
+            assert.equal(requests, 2);
+            assert.deepEqual(inferenceCaptured, [true, true], 'The target must be captured privately before each inference');
+            assert.deepEqual(fixture.dispatched, [{ ...action, recipient: 'Alice' }]);
+            assert.ok(fixture.feedbackAccepted.length > 0 && fixture.feedbackAccepted.every(Boolean));
+            assert.ok(fixture.messages.filter(message => message.action === 'page_monitor_capture_model')
+              .every(message => message.params.includeTree === true), 'The observation and private binding must be captured together');
+            assert.ok(fixture.messages.some(message => message.action === 'page_monitor_validate_model'));
+            assert.ok(updates.some(update => update.type === 'page_feedback'), 'Passive updates remain observable');
+            assert.equal(updates.some(update => update.type === 'run_status' && update.data.status === 'page_unstable'), false);
+          } finally { globalThis.chrome = previousChrome; globalThis.browser = previousBrowser; }
+        });
+      }
+
+      const changes = target.startsWith('focused') ? ['recipient', 'field value', 'focus', 'human']
+        : ['recipient', 'form destination', 'target node', 'human'];
+      for (const change of changes) for (const phase of ['model', 'preparation']) {
+        test(`${build}: ${streaming ? 'stream' : 'chat'} generic ${target} rejects changed ${change} during ${phase} before dispatch`, async () => {
+          const previousChrome = globalThis.chrome, previousBrowser = globalThis.browser;
+          const fixture = genericFixture(phase, phase === 'preparation' ? change : null), tab = genericTab++, updates = [];
+          globalThis.chrome = fixture.api; globalThis.browser = fixture.api;
+          try {
+            const action = actionFor(target), final = 'Inspected the changed editor.';
+            let requests = 0, initialCapture = false;
+            const agent = makeAgent(GenericProgressAgent, async () => {
+              assert.ok(++requests <= 3);
+              if (requests === 1) {
+                initialCapture = fixture.snapshots.size > 0;
+                if (phase === 'model') fixture.revoke(change);
+                else fixture.churn();
+                return call('stale-save', action.name, action.args);
+              }
+              if (requests === 2) return call('inspect-changed-editor', 'extract_data', { type: 'headings' });
+              return call('inspected', 'done', { summary: final, outcome: 'success' });
+            });
+            configure(agent, fixture, tab);
+            assert.equal(await genericFinish(agent, tab, streaming, updates), final);
+            assert.equal(requests, 3);
+            assert.equal(initialCapture, true, 'The revoked action must have had a private snapshot before inference');
+            assert.deepEqual(fixture.dispatched, [], 'A stale action must never reach the transport');
+            assert.ok(fixture.feedbackAccepted.length > 0 && fixture.feedbackAccepted.every(Boolean));
+          } finally { globalThis.chrome = previousChrome; globalThis.browser = previousBrowser; }
+        });
+      }
+    }
+  }
+}

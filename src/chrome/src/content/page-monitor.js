@@ -14,6 +14,12 @@
   const documentToken = randomToken();
   const listeners = [];
   const operations = new Map();
+  const modelSnapshots = new Map();
+  const MODEL_SNAPSHOT_MS = 120000;
+  const MODEL_TARGET_LIMIT = 512;
+  const MODEL_SCAN_LIMIT = 2048;
+  const MODEL_PUBLIC_MAX = 12000;
+  const MODEL_EVIDENCE_MAX = 2000;
   const agentLayoutHistory = [];
   const nativeTargets = new Set();
   // Weak references keep disconnected fields from outliving the DOM until their batch is sampled.
@@ -179,7 +185,7 @@
       el = find(document) || el;
       if (el) nativeTargets.add(el);
     }
-    try { if (!el && params.selector) el = document.querySelector(params.selector); } catch {}
+    try { if (!el && params.selector) el = queryOpenTargets(params.selector).elements[0] || null; } catch {}
     if (!el && Number.isFinite(params.x) && Number.isFinite(params.y)) el = document.elementFromPoint(params.x, params.y);
     if (!el && params.textMatch) {
       const matches = [...document.querySelectorAll('button,a,input,select,[role="button"],[role="link"]')]
@@ -188,6 +194,37 @@
     }
     return el;
   };
+  function queryOpenTargets(selector) {
+    const elements = [], roots = [document];
+    let scanned = 0, rootCount = 0;
+    try {
+      while (roots.length) {
+        const root = roots.pop();
+        if (++rootCount > 64) return { elements, complete: false };
+        for (const element of root.querySelectorAll(selector)) {
+          elements.push(element);
+          if (elements.length > 1) return { elements, complete: true };
+        }
+        const nodes = root.querySelectorAll('*');
+        scanned += nodes.length;
+        if (scanned > 65536) return { elements, complete: false };
+        for (let index = nodes.length - 1; index >= 0; index--) {
+          const shadow = nodes[index].shadowRoot;
+          if (shadow?.mode === 'open') roots.push(shadow);
+        }
+      }
+      return { elements, complete: true };
+    } catch { return { elements: [], complete: false }; }
+  }
+  function deepElementFromPoint(x, y) {
+    let hit = document.elementFromPoint(x, y);
+    for (let depth = 0; depth < 24 && hit?.shadowRoot?.mode === 'open'; depth++) {
+      const next = hit.shadowRoot.elementFromPoint?.(x, y) || hit.shadowRoot.elementsFromPoint?.(x, y)?.[0];
+      if (!next || next === hit) break;
+      hit = next;
+    }
+    return hit;
+  }
   const kindFor = tool => {
     if (/type|field|key/.test(tool)) return 'input';
     if (/scroll/.test(tool)) return 'scroll';
@@ -524,12 +561,399 @@
         && (!item.files || (item.files.length === after[key][index].files?.length
           && item.files.every((file, fileIndex) => file === after[key][index].files[fileIndex])))));
   }
-  function preparedBindingChanged(op) {
-    return op?.allowPassiveRebase === true && !!op.preparedBinding && !op.dispatched
-      && !samePreparedBinding(op.preparedBinding, preparedBinding(op.preparedBinding.target));
+  // Model snapshots bind an action's meaning, not unrelated text/counts in
+  // its surrounding page. These exact values stay private in this realm.
+  const modelControlSelector = 'button,a[href],input,textarea,select,option,[contenteditable]:not([contenteditable="false"]),'
+    + '[role="button"],[role="link"],[role="checkbox"],[role="radio"],[role="switch"],[role="textbox"],'
+    + '[role="combobox"],[role="listbox"],[role="option"],[role="slider"],[role="spinbutton"],[role="tab"],[role="menuitem"],[role="menuitemcheckbox"],[role="menuitemradio"]';
+  const entityOwnerSelector = 'dialog,[role="dialog"],[role="alertdialog"],[role="region"],article,[role="article"],[role="listitem"]';
+  const modelEntityIdentityAttributes = ['data-recipient', 'data-conversation', 'data-thread', 'data-chat', 'data-channel',
+    'data-resource', 'data-entity', 'data-record', 'data-post', 'data-item', 'data-message', 'data-user', 'data-account'];
+  const modelEntityIdentitySelector = modelEntityIdentityAttributes.flatMap(attribute => [attribute,
+    `${attribute}-id`, `${attribute}-key`, `${attribute}-name`]).map(attribute => `[${attribute}]`).join(',');
+  const modelActionTools = new Set([...passiveRebaseTools].filter(tool => !tool.startsWith('iframe_')));
+  const modelFocusTools = new Set(['type_text', 'press_keys', 'input', 'focus']);
+  const semanticAttributes = ['id', 'role', 'aria-label', 'aria-labelledby', 'aria-describedby', 'aria-modal', 'aria-current',
+    'aria-required', 'aria-readonly', 'aria-disabled', 'aria-expanded', 'aria-selected', 'aria-checked', 'aria-pressed',
+    'aria-valuenow', 'aria-valuetext', 'aria-hidden', 'contenteditable', 'tabindex', 'name', 'placeholder', 'title', 'alt',
+    'for', 'form', 'type', 'href', 'target', 'download', 'action', 'method', 'enctype', 'accept', 'multiple',
+    'formaction', 'formmethod', 'formenctype', 'formtarget', 'novalidate', 'formnovalidate', 'required', 'readonly',
+    'disabled', 'open', 'inert', 'popover', 'onclick', 'data-selected'];
+  function modelSemantic(el, { text = false, directText = false, control = false, observedName = false, structuralFile = false } = {}) {
+    const style = getComputedStyle(el);
+    let accessibleName = null;
+    if (text) {
+      // The selected target retains the name the model actually observed.
+      // Other form controls use authored labels below: the AX formatter's
+      // inferred preceding-sibling label may be an unrelated live counter.
+      if (observedName && typeof window.__wb_ax_name === 'function') accessibleName = window.__wb_ax_name(el);
+      else accessibleName = [el.getAttribute('aria-label'), el.getAttribute('alt'), el.getAttribute('title'),
+        [...el.querySelectorAll('img,svg title,[aria-label]')].map(node => [node.getAttribute('alt'), node.getAttribute('aria-label'), node.textContent])];
+    }
+    return JSON.stringify([el.tagName, semanticAttributes.map(name => el.getAttribute(name)),
+      [...el.attributes].filter(attribute => /^data-(?:(?:recipient|conversation|thread|chat|channel|resource|entity|record|post|item|message|user|account)(?:-(?:id|key|name|type))?|id|key|uuid|target|action|command|operation|selected|active|current|state|status|testid)$/.test(attribute.name))
+        .map(attribute => [attribute.name, attribute.value]).sort(([left], [right]) => left.localeCompare(right)),
+      structuralFile ? null : style.display, structuralFile ? null : style.visibility,
+      structuralFile ? null : style.opacity, structuralFile ? null : style.contentVisibility, el.inert === true, popoverOpen(el),
+      text ? el.textContent : directText ? [...el.childNodes].filter(node => node.nodeType === 3).map(node => node.data) : null,
+      accessibleName, control ? controlState(el) : null,
+      control && /^(INPUT|TEXTAREA|SELECT|OPTION)$/.test(el.tagName) ? el.value : null,
+      control && el.isContentEditable ? el.innerHTML : null]);
+  }
+  function modelLabels(el) {
+    const labels = new Set(el.labels || []);
+    for (const attribute of ['aria-labelledby', 'aria-describedby']) {
+      for (const id of (el.getAttribute(attribute) || '').split(/\s+/).filter(Boolean)) {
+        const root = el.getRootNode();
+        const matches = root.querySelectorAll?.(`[id="${CSS.escape(id)}"]`);
+        if (matches?.length !== 1) return null;
+        labels.add(matches[0]);
+      }
+    }
+    return [...labels].map(node => ({ node, value: modelSemantic(node, { text: true }) }));
+  }
+  function actionFootprint(target) {
+    const structuralFile = target instanceof Element && target.tagName === 'INPUT' && target.type === 'file';
+    if (!(target instanceof Element) || target.ownerDocument !== document || !target.isConnected
+        || (!structuralFile && !visible(target)) || ignored(target)) return null;
+    for (let node = target; node; node = bindingParent(node)) {
+      const root = node.getRootNode();
+      if (root instanceof ShadowRoot && root.mode !== 'open') return null;
+    }
+    const action = target.matches(modelControlSelector) ? target : target.closest(modelControlSelector);
+    if (!action || (!structuralFile && !visible(action))) return null;
+    const form = action.form || target.closest('form,[role="form"]');
+    const ownerBase = form || action;
+    let owner = ownerBase.matches(entityOwnerSelector) ? ownerBase : ownerBase.closest(entityOwnerSelector);
+    let unstructuredOwner = false;
+    let meaningfulOwner = false;
+    if (!owner && form && [...form.querySelectorAll('h1,h2,h3,h4,h5,h6,[role="heading"],'+modelEntityIdentitySelector)]
+      .some(node => node.closest('form,[role="form"]') === form && !node.closest(entityOwnerSelector)
+        && !node.closest('aside,nav,[role="navigation"],[role="complementary"]'))) owner = form;
+    if (!owner) {
+      // A tiny toolbar is not a composer owner. Find the bounded container
+      // that includes its editor and action, with a heading outside the form
+      // when one is present. Otherwise retain the conservative heading fence.
+      let parent = bindingParent(ownerBase), fallback = null;
+      for (let depth = 0; parent && depth < 6 && parent !== document.body && parent !== document.documentElement;
+        depth++, parent = bindingParent(parent)) {
+        if (parent.querySelectorAll('*').length > 256 || parent.querySelectorAll(modelControlSelector).length > 64) break;
+        const editor = parent.querySelector('input:not([type="file"]):not([type="hidden"]),textarea,[contenteditable]:not([contenteditable="false"]),[role="textbox"]');
+        if (!form && !editor) continue;
+        if (form && parent.querySelectorAll('form,[role="form"]').length > 1) break;
+        fallback ||= parent;
+        const outsideHeading = [...parent.querySelectorAll('h1,h2,h3,h4,h5,h6,[role="heading"]')]
+          .some(node => !node.closest('form,[role="form"]') && !node.closest('aside,nav,[role="navigation"],[role="complementary"]'));
+        if (outsideHeading) { owner = parent; unstructuredOwner = true; meaningfulOwner = true; break; }
+      }
+      if (!owner) { owner = fallback; unstructuredOwner = true; }
+    }
+    const nodes = [], ancestors = [];
+    const addNode = (node, options = {}) => {
+      if (nodes.some(item => item.node === node)) return true;
+      if (nodes.length >= 256 || (node.tagName === 'INPUT' && node.type === 'file' && node.files?.length > 32)) return false;
+      const labels = modelLabels(node);
+      if (!labels) return false;
+      nodes.push({ node, value: modelSemantic(node, options),
+        ...(node.tagName === 'INPUT' && node.type === 'file' ? { files: [...node.files || []] } : {}) });
+      for (const label of labels) {
+        if (nodes.length >= 256) return false;
+        if (!nodes.some(item => item.node === label.node)) nodes.push(label);
+      }
+      return true;
+    };
+    if (!addNode(target, { text: true, control: true, observedName: !structuralFile, structuralFile })
+        || !addNode(action, { text: true, control: true, observedName: !structuralFile, structuralFile })) return null;
+    for (let ancestor = bindingParent(target); ancestor; ancestor = bindingParent(ancestor)) {
+      if (ancestors.length >= 24) return null;
+      const labels = modelLabels(ancestor);
+      if (!labels) return null;
+      const style = getComputedStyle(ancestor);
+      if (ancestor.inert || ancestor.getAttribute('aria-hidden') === 'true' || style.display === 'none' || ['hidden', 'collapse'].includes(style.visibility)
+          || Number(style.opacity) === 0 || style.contentVisibility === 'hidden') return null;
+      ancestors.push({ node: ancestor, value: modelSemantic(ancestor) });
+      for (const label of labels) if (!addNode(label.node, { text: true })) return null;
+    }
+    if (form) {
+      if (!addNode(form)) return null;
+      const controls = form.elements ? [...form.elements] : [...form.querySelectorAll(modelControlSelector)];
+      for (const control of controls) if (!addNode(control, { text: true, control: true })) return null;
+    }
+    if (owner) {
+      if (!addNode(owner, { directText: true })) return null;
+      const belongs = node => {
+        const closest = node.closest(entityOwnerSelector);
+        const relatedForm = node.closest('form,[role="form"]');
+        return (!closest || closest === owner || closest.contains(owner))
+          && (!relatedForm || relatedForm === form)
+          && !node.closest('aside,nav,[role="navigation"],[role="complementary"]');
+      };
+      const headings = [...owner.querySelectorAll('h1,h2,h3,h4,h5,h6,[role="heading"],[aria-current]')]
+        .filter(belongs);
+      if (headings.length > 32) return null;
+      for (const heading of headings) if (!addNode(heading, { text: true })) return null;
+      const identities = [...owner.querySelectorAll(modelEntityIdentitySelector)].filter(belongs);
+      if (identities.length > 64) return null;
+      for (const identity of identities) if (!addNode(identity, { text: true, control: true })) return null;
+      meaningfulOwner ||= headings.length > 0 || identities.length > 0 || owner.matches(modelEntityIdentitySelector);
+      // Recipients and attachment/caption editors may live next to the form.
+      // Bind every local control, excluding a separate entity, form or sidebar.
+      for (const control of owner.querySelectorAll(modelControlSelector)) {
+        if (belongs(control) && !addNode(control, { text: true, control: true })) return null;
+      }
+    }
+    // An arbitrary container/toolbar with no entity anchor cannot establish
+    // the recipient or item. Such targets retain strict legacy dispatch only.
+    if (!owner || !meaningfulOwner) return null;
+    if (!owner || unstructuredOwner) {
+      // Without an explicit entity boundary, an outside conversation heading
+      // may identify the recipient. Never infer that a small form/toolbar owns
+      // it; broad heading binding is a conservative fallback for these pages.
+      const headings = document.querySelectorAll('h1,h2,h3,h4,h5,h6,[role="heading"],[aria-current]');
+      if (headings.length > 64) return null;
+      for (const heading of headings) if (!addNode(heading, { text: true })) return null;
+    }
+    const rect = structuralFile ? null : target.getBoundingClientRect();
+    const hit = structuralFile ? null : deepElementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
+    if (!structuralFile && (!hit || !(target === hit || target.contains(hit) || (action.contains(target) && action.contains(hit))))) return null;
+    return { model: true, structuralFile, target, scope: owner || form || action, ancestors, nodes, hit,
+      context: JSON.stringify([location.href, document.baseURI, currentViewport(), window.scrollX, window.scrollY,
+        rect ? [rect.left, rect.top, rect.width, rect.height] : null]) };
+  }
+  function operationBinding(op, target = op?.preparedBinding?.target) {
+    return op?.preparedBinding?.model === true ? actionFootprint(target) : preparedBinding(target);
+  }
+  function inputContinuationValue(item, target) {
+    if (item.node !== target) return item.value;
+    const value = JSON.parse(item.value);
+    if (value[11]) {
+      const state = JSON.parse(value[11]);
+      // Native input can change the selected value and validity of its own
+      // field. Names, default values, disabled/read-only state and recipients
+      // remain part of the immutable context.
+      for (const index of [1, 3, 4, 8, 9]) state[index] = null;
+      value[11] = JSON.stringify(state);
+    }
+    value[12] = null;
+    if (target.isContentEditable) { value[9] = null; value[13] = null; }
+    return JSON.stringify(value);
+  }
+  function inputContinuationBindingMatches(op, after) {
+    const before = op?.preparedBinding;
+    if (!op?.dispatched || op.kind !== 'input' || before?.model !== true || !after
+        || before.target !== after.target || before.scope !== after.scope || before.hit !== after.hit || before.context !== after.context) return false;
+    return ['ancestors', 'nodes'].every(key => before[key].length === after[key].length
+      && before[key].every((item, index) => {
+        const current = after[key][index];
+        return item.node === current.node
+          && (key === 'nodes' ? inputContinuationValue(item, before.target) === inputContinuationValue(current, before.target) : item.value === current.value)
+          && (!item.files || (item.files.length === current.files?.length && item.files.every((file, fileIndex) => file === current.files[fileIndex])));
+      }));
+  }
+  function operationBindingMatches(op, target = op?.preparedBinding?.target) {
+    const current = operationBinding(op, target);
+    return samePreparedBinding(op?.preparedBinding, current) || inputContinuationBindingMatches(op, current);
+  }
+  function modelTarget(params = {}) {
+    if (!modelActionTools.has(params.tool) || Number.isFinite(params.x) || Number.isFinite(params.y)
+        || (params.frameId != null && Number(params.frameId) !== 0)) return null;
+    const focused = !params.ref_id && !params.selector && !params.nativeTarget && !params.textMatch
+      && modelFocusTools.has(params.tool);
+    const resolved = focused ? deepActiveElement()
+      : resolveTarget({ ...params, textMatch: params.textMatch || (params.tool === 'click' ? params.text : undefined) });
+    if (!(resolved instanceof Element)) return null;
+    if (params.selector) {
+      try { const query = queryOpenTargets(params.selector); if (!query.complete || query.elements.length !== 1 || query.elements[0] !== resolved) return null; }
+      catch { return null; }
+    }
+    if (!focused && !params.ref_id && !params.selector && !params.nativeTarget && !params.textMatch
+        && !(params.tool === 'click' && params.text)) return null;
+    return resolved;
+  }
+  function modelCandidateIdentity(target) {
+    // The uncertified fallback preserves original node identity without
+    // retaining arbitrarily large page subtrees during the bounded scan.
+    const value = /^(INPUT|TEXTAREA|SELECT|OPTION)$/.test(target.tagName) ? target.value : null;
+    if (target.attributes.length > 64 || sampleDescendants(target, 64).exceeded
+        || target.textContent.length > 8192 || String(value || '').length > 8192
+        || [...target.attributes].some(attribute => attribute.value.length > 8192)) return null;
+    const identity = JSON.stringify([target.tagName, [...target.attributes].map(attribute => [attribute.name, attribute.value])
+      .sort(([left], [right]) => left.localeCompare(right)), target.textContent,
+      value]);
+    return { value: identity, parent: bindingParent(target), form: target.form || target.closest('form,[role="form"]') };
+  }
+  function modelBindingResult(params = {}) {
+    const snapshot = modelSnapshots.get(params.snapshotToken || params.expectedModelSnapshot);
+    if (!active || !snapshot || snapshot.until < Date.now() || snapshot.runToken !== runToken
+        || params.runToken !== runToken || snapshot.interventionRevision !== interventionRevision
+        || snapshot.userAt !== lastUserAt || interventionUnreported || (pendingDOM && pendingDOM.source !== 'page')) return {};
+    const target = modelTarget(params);
+    if (!target) return params.ref_id && snapshot.refs.has(params.ref_id) ? {} : { reason: 'target_unresolved' };
+    const before = snapshot.targets.get(target), previous = snapshot.uncertified.get(target);
+    if (!before && !previous) return { reason: 'target_uncovered' };
+    if (params.ref_id && snapshot.hasRefs && snapshot.refs.get(params.ref_id) !== target) return {};
+    if (!params.ref_id && !params.selector && !params.nativeTarget && !params.textMatch && modelFocusTools.has(params.tool)
+        && snapshot.focusTarget !== target) return {};
+    if (before) return samePreparedBinding(before, actionFootprint(target)) ? { binding: before } : {};
+    const current = modelCandidateIdentity(target);
+    return current && previous.value === current.value && previous.parent === current.parent && previous.form === current.form
+      ? { uncertified: true } : {};
+  }
+  function modelBinding(params = {}) {
+    return modelBindingResult(params).binding || null;
+  }
+  function captureModel(params = {}) {
+    if (!active || params.runToken !== runToken) return { ready: false, runToken, documentToken };
+    flushPendingMutations(); sampleFormControls();
+    const priorityTarget = params.actionTarget && typeof params.actionTarget === 'object'
+      ? modelTarget(params.actionTarget) : null;
+    let page;
+    if (params.includeTree === true) {
+      try {
+        if (typeof window.__generateAccessibilityTree !== 'function') throw new Error('unavailable');
+        const boundedTreeText = (content, limit) => {
+          if (content.length <= limit) return content;
+          // Preserve complete AX lines so an omitted long attribute cannot
+          // make an unseen node appear covered by a partly printed ref.
+          const suffix = '\n[observation truncated]';
+          const end = content.lastIndexOf('\n', limit - suffix.length);
+          return (end >= 0 ? content.slice(0, end) : '') + suffix;
+        };
+        // Reserve space for the requested owner's current identity evidence.
+        // AX omits some visible generic wrappers (for example recipient chips).
+        const tree = window.__generateAccessibilityTree('visible', 15, priorityTarget ? 5000 : 6000);
+        if (!tree || tree.error || typeof tree.pageContent !== 'string') throw new Error('unavailable');
+        page = { success: true, ...tree, pageContent: boundedTreeText(tree.pageContent, priorityTarget ? 5000 : 6000), url: location.href };
+        if (priorityTarget) {
+          const scope = actionFootprint(priorityTarget)?.scope || priorityTarget.closest(entityOwnerSelector) || priorityTarget;
+          const scopeRef = window.__wb_ax_ref?.(scope);
+          if (!scopeRef) throw new Error('unavailable');
+          const scoped = window.__generateAccessibilityTree('visible', 15, scope === priorityTarget ? 4000 : 3000, scopeRef);
+          if (!scoped || scoped.error || typeof scoped.pageContent !== 'string') throw new Error('unavailable');
+          page.pageContent += '\n\n[CURRENT REQUESTED ACTION CONTEXT]\n' + boundedTreeText(scoped.pageContent, scope === priorityTarget ? 4000 : 3000);
+          if (scope !== priorityTarget) {
+            const targetRef = window.__wb_ax_ref?.(priorityTarget);
+            if (!targetRef) throw new Error('unavailable');
+            const targetTree = window.__generateAccessibilityTree('visible', 15, 1000, targetRef);
+            // Hidden file controls can have a structural certificate while
+            // their visible owner is the only AX observation available.
+            if (!targetTree?.error && typeof targetTree?.pageContent === 'string')
+              page.pageContent += '\n[CURRENT EXACT ACTION TARGET]\n' + boundedTreeText(targetTree.pageContent, 1000);
+          }
+        }
+        // The Agent sends this complete object through its 16k serializer.
+        // Fit it before interpreting printed refs, never after certification.
+        while (JSON.stringify(page).length > 16000 && page.pageContent.includes('\n')) {
+          page.pageContent = page.pageContent.slice(0, page.pageContent.lastIndexOf('\n'));
+        }
+        if (JSON.stringify(page).length > 16000) throw new Error('observation too large');
+      } catch { return { ready: false, runToken, documentToken, reason: 'observation_unavailable' }; }
+    }
+    const targets = new Map(), uncertified = new WeakMap(), refs = new Map(), seen = new Set(), publicNodes = new Set();
+    if (page) for (const match of page.pageContent.matchAll(/\[(ref_[A-Za-z0-9_-]+)\]/g)) {
+      const ref = match[1], node = window.__wb_ax_lookup?.(ref);
+      if (node instanceof Element) { refs.set(ref, node); publicNodes.add(node); }
+    }
+    let evidenceLength = 0;
+    const exposeIdentity = node => {
+      if (publicNodes.has(node)) return true;
+      // Emit only current rendered page labels. Editable contents, input
+      // values, data identities and private control/file state stay private.
+      if (!visible(node) || node.matches('input,textarea,select,[contenteditable]:not([contenteditable="false"])')
+          || node.closest('[aria-hidden="true"]')) return false;
+      const walker = document.createTreeWalker(node, NodeFilter.SHOW_TEXT);
+      const parts = [];
+      let visited = 0, textNode;
+      while ((textNode = walker.nextNode())) {
+        if (visited++ >= 128) return false;
+        const parent = textNode.parentElement;
+        if (parent && visible(parent) && !ignored(parent) && !parent.closest(
+          'input,textarea,select,[contenteditable]:not([contenteditable="false"]),[aria-hidden="true"]')) {
+          const part = textNode.data.replace(/\s+/g, ' ').trim();
+          if (part) parts.push(part);
+          if (parts.join(' ').length > 512) return false;
+        }
+      }
+      const rendered = parts.join(' ');
+      const authored = String(node.getAttribute('aria-label') || node.getAttribute('title') || node.getAttribute('alt') || '')
+        .replace(/\s+/g, ' ').trim();
+      const name = authored || rendered;
+      if (!name || authored.length > 512) return false;
+      const ref = window.__wb_ax_ref?.(node);
+      if (!ref || window.__wb_ax_lookup?.(ref) !== node) return false;
+      const header = evidenceLength ? '' : '\n\n[CURRENT VISIBLE ACTION IDENTITY]\n';
+      const line = header + `visible identity ${JSON.stringify(name)} [${ref}]`
+        + (authored && rendered && authored !== rendered ? ` text=${JSON.stringify(rendered)}` : '') + '\n';
+      if (evidenceLength + line.length > MODEL_EVIDENCE_MAX || page.pageContent.length + line.length > MODEL_PUBLIC_MAX
+          || JSON.stringify({ ...page, pageContent: page.pageContent + line }).length > 16000) return false;
+      page.pageContent += line;
+      evidenceLength += line.length;
+      refs.set(ref, node); publicNodes.add(node);
+      return true;
+    };
+    const observedFootprint = footprint => {
+      if (!page) return true;
+      if (!footprint.structuralFile && !publicNodes.has(footprint.target)) return false;
+      const evidence = footprint.nodes.filter(item => item.node !== footprint.target
+        && item.node.matches('h1,h2,h3,h4,h5,h6,[role="heading"],[aria-current],'+modelEntityIdentitySelector)
+        && visible(item.node));
+      return evidence.every(item => exposeIdentity(item.node))
+        && (publicNodes.has(footprint.scope) || evidence.some(item => publicNodes.has(item.node)));
+    };
+    const captureTarget = node => {
+      if (!(node instanceof Element) || ignored(node) || seen.has(node) || seen.size >= MODEL_SCAN_LIMIT) return;
+      seen.add(node);
+      const footprint = targets.size < MODEL_TARGET_LIMIT ? actionFootprint(node) : null;
+      if (footprint && !observedFootprint(footprint)) return;
+      if (!footprint && page && !publicNodes.has(node)) return;
+      if (footprint) targets.set(node, footprint);
+      else {
+        const identity = modelCandidateIdentity(node);
+        if (identity) uncertified.set(node, identity);
+      }
+    };
+    // Recovery observes this target's current semantic owner in the same task
+    // and seeds its original identity before a large page consumes the budget.
+    // The rejected previous model call never receives this fresh certificate.
+    if (priorityTarget) captureTarget(priorityTarget);
+    // The model-visible AX targets are captured before the general DOM scan,
+    // so a deep page's earlier decorative nodes do not consume their budget.
+    if (page) for (const node of publicNodes) captureTarget(node);
+    else if (window.__wbElementMap) for (const ref of Object.keys(window.__wbElementMap).slice(0, MODEL_SCAN_LIMIT)) {
+      const node = window.__wb_ax_lookup?.(ref);
+      if (node instanceof Element) { refs.set(ref, node); captureTarget(node); }
+    }
+    const stack = [document.documentElement];
+    let scanned = 0;
+    while (stack.length && scanned++ < MODEL_SCAN_LIMIT && seen.size < MODEL_SCAN_LIMIT) {
+      const node = stack.pop();
+      if (!(node instanceof Element) || ignored(node)) continue;
+      captureTarget(node);
+      const children = [...node.children, ...(node.shadowRoot?.children || [])];
+      for (let index = children.length - 1; index >= 0; index--) stack.push(children[index]);
+    }
+    const snapshotToken = randomToken();
+    const focusTarget = deepActiveElement();
+    const focusedTargetAvailable = targets.has(focusTarget);
+    // Metadata-only tests/integration use an existing AX lookup without a new
+    // tree. Record those refs lazily only when they resolve to an original node.
+    modelSnapshots.set(snapshotToken, { runToken, until: Date.now() + MODEL_SNAPSHOT_MS, targets, uncertified, refs,
+      hasRefs: !!page || !!window.__wbElementMap, focusTarget, userAt: lastUserAt, interventionRevision });
+    for (const [key, snapshot] of modelSnapshots) if (snapshot.until < Date.now()) modelSnapshots.delete(key);
+    while (modelSnapshots.size > 2) modelSnapshots.delete(modelSnapshots.keys().next().value);
+    return { ready: true, runToken, documentToken, snapshotToken, targetCount: targets.size, focusedTargetAvailable,
+      ...(page ? { page } : {}) };
+  }
+  function preparedBindingChanged(op, { allowFocusRebind = false } = {}) {
+    if (op?.allowPassiveRebase === true && op.preparedBinding?.model === true && op.focusBound
+        && !allowFocusRebind && deepActiveElement() !== op.focusTarget) return true;
+    return op?.allowPassiveRebase === true && !!op.preparedBinding
+      && (!op.dispatched || (op.preparedBinding.model === true && op.kind === 'input'))
+      && !operationBindingMatches(op);
   }
   function rebasePassivePreparation(op, params = {}) {
-    if (!active || !op || op.allowPassiveRebase !== true || op.dispatched || op.coordinateSensitive || op.layoutInvalidated
+    const continuingInput = op?.dispatched && op.kind === 'input' && op.preparedBinding?.model === true;
+    if (!active || !op || op.allowPassiveRebase !== true || (op.dispatched && !continuingInput) || op.coordinateSensitive || op.layoutInvalidated
         || op.until < Date.now() || lastUserAt > op.userAt || interventionUnreported
         || op.preparedInterventionRevision !== interventionRevision
         || (pendingDOM && pendingDOM.source !== 'page')
@@ -539,12 +963,14 @@
       if (op.preparedPageContext !== JSON.stringify([location.href, document.baseURI, currentViewport(), window.scrollX, window.scrollY])) return false;
     } else {
       if (op.selector) {
-        try { if (document.querySelectorAll(op.selector).length !== 1) return false; } catch { return false; }
+        try { const query = queryOpenTargets(op.selector); if (!query.complete || query.elements.length !== 1) return false; } catch { return false; }
       }
-      if (!passiveRebaseTools.has(op.tool) || !op.preparedBinding
+      if (!passiveRebaseTools.has(op.modelBindingTool || op.tool) || !op.preparedBinding
           || (params.element && params.element !== op.preparedBinding.target)
-          || (resolveTarget(op) || (op.focusEligible ? deepActiveElement() : null)) !== op.preparedBinding.target
-          || !samePreparedBinding(op.preparedBinding, preparedBinding(op.preparedBinding.target))) return false;
+          || (!op.tabFocusRebound && !(params.rebindFocus === true && op.tabFocusRebindAllowed)
+            && (resolveTarget(op) || (op.focusEligible ? deepActiveElement() : null)) !== op.preparedBinding.target)
+          || (continuingInput && !(params.rebindFocus === true && op.tabFocusRebindAllowed) && deepActiveElement() !== op.focusTarget)
+          || !operationBindingMatches(op)) return false;
     }
     // Do not suppress feedback. Flush it for the agent while rebasing only this
     // exact, freshly revalidated operation over unrelated passive mutations.
@@ -816,7 +1242,7 @@
       changed = true;
       target ||= targetName(el);
       if (userTurn || (Date.now() - lastUserAt < 1500 && related(lastUserTarget, el))) source = 'user';
-      else if (source !== 'user' && [...operations.values()].some(op => op.dispatched)) source = 'unknown';
+      else if (source !== 'user' && [...operations.values()].some(op => op.dispatched && op.until >= Date.now())) source = 'unknown';
     };
     const changes = [...records];
     for (const record of records) {
@@ -1023,6 +1449,7 @@
       const el = elementFor(event);
       const op = expected(['input', 'beforeinput', 'change', 'keydown'].includes(event.type) ? 'input' : 'click', el, event);
       if (!op) return;
+      if (event.type === 'keydown') op.tabFocusRebindAllowed = event.key === 'Tab';
       if (['input', 'beforeinput', 'change'].includes(event.type)) rememberAgentLayout(op);
       const marker = { userAt: op.userAt };
       agentTurn = marker;
@@ -1212,7 +1639,7 @@
     layoutObserver?.disconnect(); layoutObserver = null;
     clearTimeout(domTimer); clearTimeout(scrollTimer); clearInterval(controlTimer); domTimer = null; scrollTimer = null; controlTimer = null; unreported = 0; interventionUnreported = 0; interventionRevision = 0; pendingDOM = null; lastFeedbackDelivery = Promise.resolve();
     listeners.splice(0).forEach(remove => remove());
-    operations.clear(); localOperation = null; agentTurn = null;
+    operations.clear(); modelSnapshots.clear(); localOperation = null; agentTurn = null;
     animationAttribution = new WeakMap();
     agentLayoutHistory.length = 0;
     roots = new WeakSet(); signatures = new WeakMap(); controlSignatures = new WeakMap(); textSignatures = new WeakMap(); popoverTurns = new WeakMap(); controlReferences.clear(); controlIterator = null;
@@ -1229,28 +1656,50 @@
     } catch { stop(); }
   }
   function prepare(params) {
-    if (!active || params.runToken !== runToken) return;
+    const expected = params.expectedModelSnapshot !== undefined;
+    if (!active || params.runToken !== runToken) return expected ? { modelBindingValid: false } : {};
     flushPendingMutations();
     prune();
+    const previous = operations.get(params.operationId);
+    // A content preflight can start the transport without sending input.
+    // Its later native prepare must retain the first inference's proof until
+    // an actual action was dispatched, even if the owner omits the snapshot.
+    const inherited = !expected && previous?.preparedBinding?.model === true && !previous.dispatched;
     const target = resolveTarget(params);
-    const focusEligible = kindFor(params.tool) === 'input';
+    const focusEligible = kindFor(params.tool) === 'input' || modelFocusTools.has(params.tool);
     const focusTarget = target || (focusEligible ? deepActiveElement() : null);
     const coordinateSensitive = Number.isFinite(params.x) && Number.isFinite(params.y);
     const coordinateHit = coordinateSensitive ? document.elementFromPoint(params.x, params.y) : null;
     const coordinateTarget = coordinateSensitive ? target || coordinateHit : null;
     const coordinateTargetAtPoint = !target || !coordinateHit || target === coordinateHit || target.contains?.(coordinateHit);
     const operationTarget = target || focusTarget;
+    const certified = expected ? modelBinding(params) : inherited
+      && previous.runToken === runToken && previous.until >= Date.now()
+      && previous.preparedInterventionRevision === interventionRevision && lastUserAt === previous.userAt
+      && !interventionUnreported && (!pendingDOM || pendingDOM.source === 'page')
+      && !previous.modelBindingInvalid && !previous.layoutInvalidated
+      && operationTarget === previous.preparedBinding.target
+      && samePreparedBinding(previous.preparedBinding, actionFootprint(operationTarget)) ? previous.preparedBinding : null;
+    const proofRequired = expected || inherited;
+    const allowPassiveRebase = inherited ? previous.allowPassiveRebase === true : params.allowPassiveRebase === true;
     const controlStateAtPrepare = operationTarget && /^(INPUT|TEXTAREA|SELECT|OPTION)$/.test(operationTarget.tagName)
       ? controlState(operationTarget) : undefined;
     operations.set(params.operationId, { ...params, target: operationTarget, focusTarget, focusEligible, controlStateAtPrepare,
+      focusBound: inherited ? previous.focusBound : !!certified && modelFocusTools.has(params.tool)
+        && !params.ref_id && !params.selector && !params.nativeTarget && !params.textMatch,
+      ...(inherited ? { expectedModelSnapshot: previous.expectedModelSnapshot,
+        modelBindingTool: previous.modelBindingTool || previous.tool } : {}),
+      allowPassiveRebase: allowPassiveRebase && (!proofRequired || !!certified),
+      modelBindingInvalid: proofRequired && !certified,
       preparedTargetSignature: operationTarget ? signature(operationTarget) : undefined, kinds: new Set(),
-      preparedBinding: params.allowPassiveRebase === true && operationTarget ? preparedBinding(operationTarget) : null,
+      preparedBinding: proofRequired ? certified : allowPassiveRebase && operationTarget ? preparedBinding(operationTarget) : null,
       preparedInterventionRevision: interventionRevision,
       preparedPageContext: JSON.stringify([location.href, document.baseURI, currentViewport(), window.scrollX, window.scrollY]),
       coordinateSensitive, coordinateTarget, coordinateHit, coordinateTargetAtPoint,
       coordinatePoint: coordinateSensitive ? { x: params.x, y: params.y } : null,
       coordinateRect: rectFor(coordinateTarget),
       until: Date.now() + 30000, dispatched: false, userAt: lastUserAt, preparedRevision: revision });
+    return proofRequired ? { modelBindingValid: !!certified } : {};
   }
   function dispatch(params) {
     if (!active || (params.runToken && params.runToken !== runToken)) return;
@@ -1288,7 +1737,7 @@
     const layoutChanged = coordinatePreparationShifted(op);
     const bindingChanged = preparedBindingChanged(op);
     const rebased = !layoutChanged && rebasePassivePreparation(op, params);
-    if (!active || !op || layoutChanged || bindingChanged || (!rebased && (domTimer || unreported))
+    if (!active || !op || op.modelBindingInvalid || layoutChanged || bindingChanged || (!rebased && (domTimer || unreported))
         || (params.element && op.target !== params.element)
         || lastUserAt > op.userAt
         || (Number.isFinite(op.preparedRevision) && op.preparedRevision !== revision)) {
@@ -1305,19 +1754,31 @@
     const op = operations.get(params.operationId);
     flushPendingMutations(op);
     sampleFormControls(op?.target);
+    const currentFocus = deepActiveElement();
+    const rebindingFocus = params.rebindFocus === true;
+    const fileAssignment = op?.target?.tagName === 'INPUT' && op.target.type === 'file';
+    // A companion validates once before writing its marker and again before
+    // the native key. Revalidating the same consumed Tab rebind is safe only
+    // while its native sequence and exact deeply focused node remain current.
+    const focusRebindAvailable = rebindingFocus && (op?.tabFocusRebindAllowed === true
+      || (op?.tabFocusRebound === true && op.tabFocusRebindSequence === op.nativeSequence && currentFocus === op.focusTarget));
+    if (op?.kind === 'input' && !fileAssignment && (rebindingFocus
+      ? !(op.nativeSequence > 0) || !focusRebindAvailable || !currentFocus || currentFocus === document.body || currentFocus === document.documentElement
+      : currentFocus !== op.focusTarget)) return false;
     const shifted = coordinatePreparationShifted(op);
-    const bindingChanged = preparedBindingChanged(op);
+    const bindingChanged = preparedBindingChanged(op, { allowFocusRebind: focusRebindAvailable });
     const preparedRevision = op?.preparedRevision;
     const suppliedRevisionMatches = Number(params.revision) === preparedRevision;
     const rebased = suppliedRevisionMatches && !shifted && rebasePassivePreparation(op, params);
-    if (!active || params.runToken !== runToken || params.documentToken !== documentToken || !op || shifted || bindingChanged
+    if (!active || params.runToken !== runToken || params.documentToken !== documentToken || !op || op.modelBindingInvalid || shifted || bindingChanged
         || !suppliedRevisionMatches || op.preparedRevision !== revision
         || (!rebased && (domTimer || unreported)) || lastUserAt > op.userAt) return false;
     if (params.rebindFocus === true) {
-      const target = deepActiveElement();
-      if (!(op.nativeSequence > 0) || !target || target === document.body || target === document.documentElement) return false;
-      op.target = target;
-      op.focusTarget = target;
+      op.target = currentFocus;
+      op.focusTarget = currentFocus;
+      op.tabFocusRebindAllowed = false;
+      op.tabFocusRebound = true;
+      op.tabFocusRebindSequence = op.nativeSequence;
     }
     return true;
   }
@@ -1341,15 +1802,29 @@
     if (!active || !localMutations.has(action)) return () => {};
     const operationId = `local-${randomToken()}`;
     const previous = localOperation;
-    const target = resolveTarget({ ...params, textMatch: action === 'click' ? params.text : undefined });
-    const approved = [...operations.values()].find(op => op.allowPassiveRebase === true && !op.dispatched
+    const target = resolveTarget({ ...params, textMatch: action === 'click' ? params.text : undefined })
+      || (kindFor(action) === 'input' ? deepActiveElement() : null);
+    const approved = [...operations.values()].reverse().find(op => op.allowPassiveRebase === true && !op.dispatched
       && op.preparedBinding?.target === target && op.until >= Date.now()
       && op.preparedInterventionRevision === interventionRevision && lastUserAt <= op.userAt && !interventionUnreported
       && (!pendingDOM || pendingDOM.source === 'page')
-      && samePreparedBinding(op.preparedBinding, preparedBinding(target)));
+      && samePreparedBinding(op.preparedBinding, operationBinding(op, target)));
     prepare({ selector: params.selector, ref_id: params.ref_id, x: params.x, y: params.y,
       textMatch: action === 'click' ? params.text : undefined, tool: action, operationId, runToken,
+      ...(params.expectedModelSnapshot !== undefined || approved?.expectedModelSnapshot !== undefined
+        ? { expectedModelSnapshot: params.expectedModelSnapshot ?? approved.expectedModelSnapshot } : {}),
       allowPassiveRebase: params.allowPassiveRebase === true || !!approved });
+    if (approved?.preparedBinding?.model === true) {
+      const local = operations.get(operationId);
+      if (local) {
+        local.preparedBinding = approved.preparedBinding;
+        local.modelBindingTool = approved.modelBindingTool || approved.tool;
+        local.expectedModelSnapshot = approved.expectedModelSnapshot;
+        local.focusBound = approved.focusBound;
+        local.modelBindingInvalid = false;
+        local.allowPassiveRebase = true;
+      }
+    }
     localOperation = { operationId, kind: kindFor(action), userAt: lastUserAt, revision,
       navigationCandidate: ['click', 'click_ax', 'set_checked'].includes(action),
       scrollIntoView: /^ax_resolve|ax_prepare_field/.test(action) };
@@ -1370,7 +1845,7 @@
     const bindingChanged = preparedBindingChanged(operation);
     const rebased = !layoutChanged && rebasePassivePreparation(operation, { element: target });
     if (rebased) localOperation.revision = operation.preparedRevision;
-    if (layoutChanged || bindingChanged || (!rebased && (domTimer || unreported)) || lastUserAt > localOperation.userAt || revision !== localOperation.revision) {
+    if (operation?.modelBindingInvalid || layoutChanged || bindingChanged || (!rebased && (domTimer || unreported)) || lastUserAt > localOperation.userAt || revision !== localOperation.revision) {
       const error = new Error('Browser changed during action preparation. Re-observe before acting.');
       error.code = 'page_feedback_pending'; error.dispatched = localOperation.started === true; throw error;
     }
@@ -1405,7 +1880,15 @@
         return true;
       }
       else if (!msg.runToken || msg.runToken === runToken) { requestGeneration++; stop(); respond({ ready: true }); }
-    } else if (msg.action === 'page_monitor_prepare') { prepare(msg.params || {}); respond({ ready: true }); }
+    } else if (msg.action === 'page_monitor_capture_model') { respond(captureModel(msg.params || {})); }
+    else if (msg.action === 'page_monitor_validate_model') {
+      const params = msg.params || {};
+      flushPendingMutations(); sampleFormControls();
+      const result = modelBindingResult(params);
+      respond({ ready: !!result.binding, ...(result.uncertified ? { uncertified: true } : {}),
+        ...(result.reason ? { reason: result.reason } : {}), runToken, documentToken, snapshotToken: params.snapshotToken });
+    }
+    else if (msg.action === 'page_monitor_prepare') { respond({ ready: true, ...prepare(msg.params || {}) }); }
     else if (msg.action === 'page_monitor_resize_begin') { respond({ ready: beginAgentResize(msg.params || {}) }); }
     else if (msg.action === 'page_monitor_resize_finish') {
       void finishAgentResize(msg.params || {}).then(respond, () => respond({ ready: false })); return true;
@@ -1421,7 +1904,7 @@
       const layoutChanged = !params.release && active && coordinatePreparationShifted(prepared);
       const bindingChanged = !params.release && preparedBindingChanged(prepared);
       const rebased = !params.release && !layoutChanged && rebasePassivePreparation(prepared, params);
-      if (!params.release && active && (layoutChanged || bindingChanged || (!rebased && (domTimer || unreported)) || (prepared && prepared.preparedRevision !== revision)
+      if (!params.release && active && (prepared?.modelBindingInvalid || layoutChanged || bindingChanged || (!rebased && (domTimer || unreported)) || (prepared && prepared.preparedRevision !== revision)
           || (params.documentToken && (params.documentToken !== documentToken || (!rebased && params.documentRevision !== revision))))) {
         if (domTimer) {
           clearTimeout(domTimer); domTimer = null; const observation = pendingDOM; pendingDOM = null;

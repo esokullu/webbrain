@@ -7926,6 +7926,7 @@ test('message recipient dispatch binding detects composer and active-thread race
     let liveRecipients = null;
     let liveMessageBody = 'Hello Alice';
     let liveGmailComposeFlow = false;
+    let liveDocument = 'fixture-document';
     const helpers = vm.runInNewContext(`(() => {
       ${source.slice(start, end)}
       return {
@@ -7934,6 +7935,8 @@ test('message recipient dispatch binding detects composer and active-thread race
       };
     })()`, {
       window: {},
+      document: { addEventListener() {} },
+      _axDocumentToken: () => liveDocument,
       location: { href: 'https://www.douyin.com/chat' },
       crypto: { getRandomValues: array => { array.fill(7); return array; } },
       setTimeout: () => 1,
@@ -7969,6 +7972,13 @@ test('message recipient dispatch binding detects composer and active-thread race
     }, sendButton);
     assert.equal(replayedToken.success, false, `${label}: recipient binding was not one-use`);
     assert.equal(replayedToken.reasonCode, 'recipient_dispatch_binding_stale');
+
+    const changedDocumentToken = helpers.remember(composer, ['Alice'], dispatch);
+    liveDocument = 'replacement-document';
+    assert.equal(helpers.consume({
+      messageRecipientDispatchBinding: { token: changedDocumentToken },
+    }, sendButton).reasonCode, 'recipient_dispatch_binding_stale', `${label}: same-URL document replacement must revoke dispatch`);
+    liveDocument = 'fixture-document';
 
     const changedRecipientToken = helpers.remember(composer, ['Alice'], dispatch);
     liveIdentities = ['Bob'];
@@ -8049,7 +8059,7 @@ test('message recipient dispatch binding detects composer and active-thread race
     );
     assert.match(
       pressBranch,
-      /if \(actionDeadlineExpired\(\)\) return deadlineFailure\(\);\s*window\.__wbPageMonitor\?\.beforeLocalDispatch\(\);\s*dispatched = true;\s*target\.dispatchEvent\(down\);[\s\S]*const expiredAfterKeydown = actionDeadlineExpired\(\);\s*target\.dispatchEvent\(up\);\s*if \(expiredAfterKeydown\) return deadlineFailure\(\);/,
+      /if \(actionDeadlineExpired\(\)\) return deadlineFailure\(\);\s*const expiredAfterKeydown = withLocalPageDispatch\(\(\) => \{\s*dispatched = true;\s*target\.dispatchEvent\(down\);[\s\S]*const expired = actionDeadlineExpired\(\);\s*target\.dispatchEvent\(up\);\s*return expired;\s*\}\);\s*if \(expiredAfterKeydown\) return deadlineFailure\(\);/,
       `${label}: press_keys must guard keydown and classify deadline-only keyup cleanup as a partial dispatch`,
     );
     assert.match(
@@ -107168,7 +107178,7 @@ test('upload_file prefers a valid downloadId and falls back to filePath for an i
     assert.equal(result.attachmentState, 'input_attached');
     assert.equal(result.verified, false);
     assert.equal(result.remoteStateVerified, false);
-    assert.equal(args.filePath, realPath);
+    assert.equal(args.filePath, stalePath, 'resolved private paths must not overwrite the model/trace arguments');
     assert.deepEqual(uploaded, [[realPath]]);
     assert.deepEqual(releasedGroups, ['upload-query-1'], 'successful uploads must release selector handles');
 

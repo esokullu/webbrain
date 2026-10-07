@@ -132,7 +132,7 @@ for (const build of ['chrome', 'firefox']) {
 
   for (const change of ['feed', 'user', 'unknown', 'iframe', 'navigation', 'viewport', 'style', 'failed_read',
     'partial', 'missing_outcome', 'malformed', 'mixed', 'duplicate', 'pending']) {
-    test(`${build}: success completion ${change === 'feed' ? 'survives' : 'rejects'} ${change} feedback`, async () => {
+    test(`${build}: explicit completion ${['feed', 'partial'].includes(change) ? 'survives' : 'rejects'} ${change} feedback`, async () => {
       const agent = setup(Agent), tab = nextTab++;
       let page = { success: true, pageContent: 'article "Published WebBrain post" [ref_1]' };
       agent.executeTool = async () => page;
@@ -156,7 +156,7 @@ for (const build of ['chrome', 'firefox']) {
         const call = { function: { name: 'done', arguments: change === 'malformed' ? '{' : JSON.stringify(args) } };
         const calls = change === 'duplicate' ? [call, call] : change === 'mixed'
           ? [call, { function: { name: 'click_ax', arguments: '{"ref_id":"ref_1"}' } }] : [call];
-        assert.equal(await agent._applyPendingPageFeedback(tab, messages, () => {}, { responseToolCalls: calls }), change !== 'feed');
+        assert.equal(await agent._applyPendingPageFeedback(tab, messages, () => {}, { responseToolCalls: calls }), !['feed', 'partial'].includes(change));
         assert.equal(agent._activeTaskBinding(messages).text, 'Publish a WebBrain post');
       } finally { agent._releaseRunEntry(tab); }
     });

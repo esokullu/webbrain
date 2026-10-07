@@ -2,7 +2,7 @@ import { verifyBrowserCompletion } from './completion-runtime.js';
 import { DECISION_SETTINGS_KEYS, resolveDecisionConfig } from './decision-config.js';
 import { completionStopError } from './completion-verifier.js';
 import { COMPLETION_DOCUMENT_STAMP_SCRIPT, COMPLETION_DOCUMENT_IDENTITY_SCRIPT } from './completion-document.js';
-import { installPageFeedback, beforePageAgentDispatch } from './page-feedback.js';
+import { installPageFeedback, beforePageAgentDispatch, hasPageAgentDispatchOwner, pageFeedbackPendingResult } from './page-feedback.js';
 import { JEV_FAST_KEYS, JEV_CLASSIFIER_THRESHOLD, JEV_BROWSER_THRESHOLD, confidentChoice, buildJevBrowserRequest, decideJevBrowser, jevVisualInputRequiresMainModel, JevFastSession } from './systemone-fast.js';
 import { redactSystemOneText, wrapSystemOneData, boundedSystemOneText } from './systemone-evidence.js';
 import { createSystemOneJudge, isSystemOneResponseContractError, systemOneFailureReason, SYSTEM_ONE_COST_PROVIDER } from './systemone-judge.js';
@@ -54,7 +54,7 @@ import {
   workflowControlLabelIsRequested,
   workflowRequiredRowsAreProcessed,
 } from './adapter-workflow-evidence.js';
-import { answerNamesAllObservedRecipients, answerNamesIdentity, messageTargetMatchesObservedIdentities, normalizeMessageTarget, normalizeRecipientAnswer, normalizeRecipientIdentity, resolveClarifiedRecipients } from './message-recipient-guard.js';
+import { answerNamesAllObservedRecipients, answerNamesIdentity, messageTargetMatchesObservedIdentities, messageRecipientUploadSourceKey, normalizeMessageTarget, normalizeRecipientAnswer, normalizeRecipientIdentity, resolveClarifiedRecipients } from './message-recipient-guard.js';
 import { advanceChatSession, createChatSession, decideChatSend, markChatSendPending, normalizeChatSession, normalizeChatSnapshot, serializeChatSession } from './chat-workflow.js';
 import {
   fetchUrl,
@@ -23796,6 +23796,9 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
 
   async _messageRecipientContentProbe(tabId, params) {
     try {
+      if (params?.tool === 'upload_file') return await chrome.tabs.sendMessage(tabId, {
+        target: 'content', action: 'probe_message_recipient_guard', params,
+      }, { frameId: 0 });
       return await this._sendDevContentAction(tabId, 'probe_message_recipient_guard', params);
     } catch (error) {
       return { success: false, messageSend: null, conclusive: false, error: error?.message || String(error) };
@@ -24153,6 +24156,98 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     };
   }
 
+  _recipientBoundUploadAuthorizationKey(tabId) {
+    const guard = this._planExecutionGuards.get(tabId);
+    return JSON.stringify([normalizeMessageTarget(guard?.messaging), guard?.requiresSubmission === true,
+      guard?.requiresStateChange === true, guard?.messageRecipientApprovedAll === true,
+      guard?.approvedRecipients || [], guard?.messagingConversationScope || '']);
+  }
+
+  async _recipientBoundUploadContext(tabId, args, executionContext = {}) {
+    let pageUrl = '';
+    try { pageUrl = await this._currentUrl(tabId); } catch {}
+    const protectedPage = getMessageRecipientGuardPolicy(pageUrl)?.verifyActiveRecipient === true;
+    if (!protectedPage && executionContext.messageRecipientGuardRequired !== true) return { protected: false };
+    const context = { ...executionContext };
+    const sourceKey = messageRecipientUploadSourceKey(args);
+    if (context.messageRecipientUploadAuthorizationKey
+        && context.messageRecipientUploadAuthorizationKey !== this._recipientBoundUploadAuthorizationKey(tabId)) {
+      return { protected: true, block: { success: false, dispatched: false, noDispatch: true,
+        messageRecipientGuard: true, reasonCode: 'recipient_upload_authorization_changed',
+        error: 'Attachment blocked because its task recipient authorization changed.' } };
+    }
+    if (context.messageRecipientGuardRequired === true
+        && context.messageRecipientUploadSourceKey !== sourceKey) {
+      return { protected: true, block: { success: false, dispatched: false, noDispatch: true,
+        messageRecipientGuard: true, reasonCode: 'recipient_upload_source_changed',
+        error: 'Attachment blocked because its verified file source changed before dispatch.' } };
+    }
+    if (!context.messageRecipientDispatchBinding?.token) {
+      const block = await this._messageRecipientGuardBlock(tabId, 'upload_file', args, pageUrl, context);
+      if (block) return { protected: true, block };
+    }
+    if (!context.messageRecipientDispatchBinding?.token || !sourceKey) {
+      return { protected: true, block: { success: false, dispatched: false, noDispatch: true,
+        messageRecipientGuard: true, reasonCode: 'recipient_dispatch_binding_unavailable',
+        error: 'Attachment blocked because its recipient, file input and source could not be bound.' } };
+    }
+    return { protected: true, context, sourceKey, authorizationKey: this._recipientBoundUploadAuthorizationKey(tabId) };
+  }
+
+  async _dispatchRecipientBoundUpload(tabId, args, payload, bound) {
+    const context = bound.context || {};
+    const signal = context._contentActionAbortSignal;
+    this._throwIfAborted(signal);
+    const dispatchState = context._contentActionDispatchState || { started: false };
+    if (this._hasPendingSteering(tabId)
+        || bound.authorizationKey !== this._recipientBoundUploadAuthorizationKey(tabId)) {
+      return { success: false, dispatched: false, noDispatch: true, messageRecipientGuard: true,
+        reasonCode: 'recipient_upload_authorization_changed',
+        error: 'Attachment blocked because the user task or recipient authorization changed before dispatch.' };
+    }
+    const deadlineAt = Number(CONTENT_ACTION_SIGNAL_DEADLINES.get(signal)?.deadlineAt) || 0;
+    let pageFeedbackGuard;
+    try {
+      pageFeedbackGuard = await beforePageAgentDispatch(chrome, tabId, {
+        kind: 'input', selector: args.selector, eventTypes: ['input', 'change'], fenceOnly: true, prepareMonitor: true,
+      });
+    } catch (error) {
+      this._throwIfAborted(signal);
+      if (error?.code === 'page_feedback_pending') return pageFeedbackPendingResult();
+      throw error;
+    }
+    this._throwIfAborted(signal);
+    if (this._hasPendingSteering(tabId)
+        || bound.authorizationKey !== this._recipientBoundUploadAuthorizationKey(tabId)) {
+      return { success: false, dispatched: false, noDispatch: true, messageRecipientGuard: true,
+        reasonCode: 'recipient_upload_authorization_changed',
+        error: 'Attachment blocked because the user task or recipient authorization changed during preparation.' };
+    }
+    if (hasPageAgentDispatchOwner(tabId) && !pageFeedbackGuard?.operationId) {
+      return { success: false, dispatched: false, noDispatch: true, pageFeedbackPending: true,
+        error: 'The page monitor could not validate the exact attachment target before dispatch.' };
+    }
+    dispatchState.started = true;
+    try {
+      // No retry here: a lost response can follow an attachment's autosend.
+      const result = await chrome.tabs.sendMessage(tabId, {
+        target: 'content', action: 'attach_message_recipient_bound_upload', actionDeadlineAt: deadlineAt,
+        params: { selector: args.selector, base64: payload.base64, filename: payload.filename,
+          mimeType: payload.mimeType, uploadSourceKey: bound.sourceKey,
+          messageRecipientDispatchBinding: context.messageRecipientDispatchBinding, pageFeedbackGuard },
+      }, { frameId: 0 });
+      if (result?.dispatched === false || result?.noDispatch === true) dispatchState.started = false;
+      this._throwIfAborted(signal);
+      return result || { success: false, dispatched: true, outcomeUnknown: true, retryable: false,
+        error: 'The recipient-bound attachment returned no result. Inspect the conversation before retrying.' };
+    } catch (error) {
+      this._throwIfAborted(signal);
+      return { success: false, dispatched: dispatchState.started, noDispatch: !dispatchState.started,
+        outcomeUnknown: dispatchState.started, retryable: !dispatchState.started,
+        error: `Recipient-bound attachment communication failed: ${error?.message || String(error)}. Inspect the conversation before retrying.` };
+    }
+  }
+
   async _consumeMessageRecipientDispatchBinding(tabId, binding, params = {}) {
     if (!binding?.token) {
       return {
@@ -24288,8 +24383,8 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
 
   async _messageRecipientGuardBlock(tabId, toolName, args = {}, pageUrl = '', executionContext = null) {
     const name = String(toolName || '');
-    const ordinaryGuardedTools = new Set(['click', 'click_ax', 'set_field', 'press_keys']);
-    const unbindableDispatchTools = new Set(['iframe_click', 'execute_js', 'execute_webmcp_tool', 'upload_file']);
+    const ordinaryGuardedTools = new Set(['click', 'click_ax', 'set_field', 'press_keys', 'upload_file']);
+    const unbindableDispatchTools = new Set(['iframe_click', 'execute_js', 'execute_webmcp_tool']);
     if (!ordinaryGuardedTools.has(name) && !unbindableDispatchTools.has(name)) return null;
     if (name === 'press_keys' && String(args?.key || '') !== 'Enter') return null;
     if (name === 'set_field' && args?.submit !== true) return null;
@@ -24316,7 +24411,13 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       }
     }
 
-    if (unbindableDispatchTools.has(name)) {
+    const uploadSourceKey = name === 'upload_file' ? messageRecipientUploadSourceKey(args) : '';
+    // Compact discovery is read-only; the resolved target is checked again in
+    // the upload handler before any file bytes can reach the page.
+    if (name === 'upload_file' && !String(args.selector || '').trim()
+        && (args.targetId != null || this._resolvePromptTier() === 'compact')) return null;
+    if (unbindableDispatchTools.has(name)
+        || (name === 'upload_file' && (!String(args.selector || '').trim() || !uploadSourceKey))) {
       return {
         success: false,
         blocked: true,
@@ -24325,7 +24426,11 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
         messageRecipientGuard: true,
         unsafeMessageDispatchPath: true,
         reasonCode: 'recipient_unverifiable_dispatch_path',
-        error: `Message action blocked: ${name} cannot bind its effects to the verified active recipient. Use click, click_ax, set_field({submit:true}), or a single Enter press on the visible composer instead.`,
+        error: name === 'upload_file'
+          ? (!uploadSourceKey
+            ? 'Attachment blocked: use exactly one attachmentId, downloadId, or absolute filePath. Remove fallback sources and retry with the same authorized recipient.'
+            : 'Attachment blocked: choose an exact, unique file-input selector in the active authorized conversation. Re-read the file-input inventory before retrying.')
+          : `Message action blocked: ${name} cannot bind its effects to the verified active recipient. Use click, click_ax, set_field({submit:true}), or a single Enter press on the visible composer instead.`,
       };
     }
 
@@ -24337,6 +24442,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       adapterName: policy.adapterName,
       bindDispatch: true,
       supportsRecipientSets: policy.supportsRecipientSets === true,
+      ...(name === 'upload_file' ? { uploadSourceKey } : {}),
       ...(target?.target_kind === 'named' ? { expectedRecipients: target.recipients } : {}),
     });
     if (probe?.success === true && probe?.conclusive === true && probe.messageSend === false) {
@@ -24410,7 +24516,10 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
         && observedIdentities.every(identity => approvedRecipients.includes(identity)));
     const verified = probe?.success === true
       && probe.messageSend === true
-      && !!this._workflowMessageBody(probe?.messageBody)
+      && (name === 'upload_file'
+        ? probe.messageAttachment === true && guard?.requiresSubmission === true
+          && guard?.requiresStateChange === true && !!uploadSourceKey
+        : !!this._workflowMessageBody(probe?.messageBody))
       && Number.isInteger(messageBodyBaselineCount)
       && messageBodyBaselineCount >= 0
       && (targetMatchesObserved || approvedByUser);
@@ -24431,6 +24540,10 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       if (executionContext && typeof executionContext === 'object') {
         executionContext.messageRecipientGuardRequired = true;
         executionContext.messageRecipientDispatchBinding = binding;
+        if (name === 'upload_file') {
+          executionContext.messageRecipientUploadSourceKey = uploadSourceKey;
+          executionContext.messageRecipientUploadAuthorizationKey = this._recipientBoundUploadAuthorizationKey(tabId);
+        }
         executionContext.messageRecipientBody = this._workflowMessageBody(probe.messageBody);
         executionContext.messageRecipientBodyBaselineCount = messageBodyBaselineCount;
         if (policy.adapterName === 'twitter' && Array.isArray(probe.existingMessageIds)) {
@@ -38666,7 +38779,7 @@ If the user has already named or confirmed this exact recipient, do NOT ask agai
     // download_file is now handled by download_files (normalized above)
 
     if (name === 'upload_file') {
-      args = args || {};
+      args = { ...(args || {}) };
       // Some providers materialize omitted optional schema properties as empty
       // strings. Treat those placeholders as absent so a valid downloadId does
       // not conflict with a nonexistent user attachment or local path.
@@ -38732,6 +38845,9 @@ If the user has already named or confirmed this exact recipient, do NOT ask agai
         if (!resolved.ok) return { success: false, error: resolved.error };
         attachmentPayload = resolved;
       }
+      const recipientUpload = await this._recipientBoundUploadContext(tabId, args, dispatchContext);
+      throwIfEarlyCdpAborted();
+      if (recipientUpload.block) return recipientUpload.block;
       // Accept a downloadId as an alternative to filePath. After context
       // compaction the model often can't recall the exact on-disk path, but the
       // small integer id (returned by download_files/list_downloads and
@@ -38769,6 +38885,20 @@ If the user has already named or confirmed this exact recipient, do NOT ask agai
       }
       if (!attachmentPayload && !args.filePath) {
         return { success: false, error: 'upload_file needs attachmentId (from the current user-attachment notice), downloadId (from download_files / list_downloads), or filePath (absolute local path).' };
+      }
+      if (recipientUpload.protected) {
+        let payload = attachmentPayload;
+        if (!payload) {
+          await cdpClient.attach(tabId);
+          throwIfEarlyCdpAborted();
+          payload = await cdpClient.probeLocalFile(tabId, args.filePath, { includeData: true, maxBytes: 25 * 1024 * 1024 });
+          throwIfEarlyCdpAborted();
+          if (payload?.readable !== true || typeof payload.base64 !== 'string') {
+            return { success: false, dispatched: false, noDispatch: true, messageRecipientGuard: true,
+              error: payload?.error || 'The exact local attachment could not be read safely before dispatch.' };
+          }
+        }
+        return await this._dispatchRecipientBoundUpload(tabId, args, payload, recipientUpload);
       }
       let uploadDispatched = false;
       let uploadQuery = null;
@@ -43939,6 +44069,7 @@ If the user has already named or confirmed this exact recipient, do NOT ask agai
       onUpdate('thinking', { step: steps });
       if (runId) trace.recordStepStart(runId, steps, {});
 
+      await this._capturePageFeedbackModelState(tabId, messages);
       let result = await this._maybeJevFastTurn(tabId, userMessage, messages, mode, allowedToolNames, provider, costState, runOptions, completionRecoveryPolicy);
       try {
         if (!result) {
@@ -43968,7 +44099,6 @@ If the user has already named or confirmed this exact recipient, do NOT ask agai
           if (shouldOrderInteractiveAskTrace) queueAskStreamingTraceWrite(writeRequestTrace);
           else writeRequestTrace();
         }
-        await this._capturePageFeedbackModelState(tabId);
         const _llmStart = Date.now();
         result = await chatMainTurn(prunedMessages, chatOpts, { tabId, generationName: 'main' });
         if (result?.usage?.prompt_tokens) {
@@ -45183,6 +45313,7 @@ If the user has already named or confirmed this exact recipient, do NOT ask agai
         let streamUsage = null;
         let finishReason = '';
 
+        await this._capturePageFeedbackModelState(tabId, pendingVisionFallbackMessages || messages);
         const fastResult = await this._maybeJevFastTurn(tabId, userMessage, messages, mode, allowedToolNames, provider, costState, runOptions, completionRecoveryPolicy);
         const streamOpts = this._cloudGenerationOptions(provider, {
           signal: this._runAbortSignal(tabId),
@@ -45220,7 +45351,6 @@ If the user has already named or confirmed this exact recipient, do NOT ask agai
             runtimeMode: mode,
           });
         }
-        await this._capturePageFeedbackModelState(tabId);
         const _llmStart = Date.now();
         let costStopMessage = '';
 

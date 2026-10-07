@@ -16,10 +16,20 @@ h2 { width:250px;height:28px;margin:0; } form { width:280px;height:100px; }
 <span id="send-label" hidden>Send</span>
 <aside id="counter">100</aside><button id="human">Human control</button>`;
 
-async function fixture(browser, build) {
+const modelHtml = html
+  .replace('</style>', `
+  #in-form-counter { position:absolute;left:220px;top:55px;width:50px;height:20px; }
+  #sidebar { position:absolute;left:550px;top:200px;width:300px;height:150px; }
+  #attachment { position:absolute;left:20px;top:95px;width:200px;height:25px; }
+  </style>`)
+  .replace('</form>', '<span id="in-form-counter">200</span><input id="attachment" type="file"></form>')
+  .replace('</aside>', '</aside><aside id="sidebar"><h2 id="sidebar-heading">Unrelated sidebar</h2></aside>');
+
+async function fixture(browser, build, body = html, { realAccessibilityTree = false, contentLibrary = false,
+  fixtureUrl = 'https://monitor.test/start' } = {}) {
   const context = await browser.newContext({ viewport: { width: 1000, height: 700 } });
-  await context.route('https://monitor.test/**', route => route.fulfill({ contentType: 'text/html', body: html }));
-  await context.addInitScript(() => {
+  await context.route(`${new URL(fixtureUrl).origin}/**`, route => route.fulfill({ contentType: 'text/html', body }));
+  await context.addInitScript(realAccessibilityTree => {
     window.feedback = [];
     window.messageListeners = [];
     const runtime = { onMessage: { addListener: fn => messageListeners.push(fn), removeListener: () => {} },
@@ -29,15 +39,25 @@ async function fixture(browser, build) {
         return {};
       } };
     window.chrome = { runtime }; window.browser = window.chrome;
-    window.__wb_ax_lookup = ref => document.getElementById(ref.replace(/^ref_/, ''));
+    if (!realAccessibilityTree) window.__wb_ax_lookup = ref => document.getElementById(ref.replace(/^ref_/, ''));
     window.deliver = (action, params = {}) => new Promise(resolve => {
-      for (const listener of messageListeners) listener({ target: 'content', action,
-        params: { runToken: 'passive-test', ...params } }, {}, resolve);
+      let answered = false;
+      const respond = value => { answered = true; resolve(value); };
+      for (const listener of messageListeners) {
+        const asynchronous = listener({ target: 'content', action, params: { runToken: 'passive-test', ...params } }, {}, respond);
+        if (answered || asynchronous === true) break;
+      }
     });
+  }, realAccessibilityTree);
+  if (realAccessibilityTree) await context.addInitScript({
+    content: fs.readFileSync(new URL(`../src/${build}/src/content/accessibility-tree.js`, import.meta.url), 'utf8'),
   });
   await context.addInitScript({ content: fs.readFileSync(new URL(`../src/${build}/src/content/page-monitor.js`, import.meta.url), 'utf8') });
+  if (contentLibrary) await context.addInitScript({
+    content: fs.readFileSync(new URL(`../src/${build}/src/content/content.js`, import.meta.url), 'utf8'),
+  });
   const page = await context.newPage();
-  await page.goto('https://monitor.test/start');
+  await page.goto(fixtureUrl);
   await page.waitForFunction(() => window.__wbPageMonitor?.active);
   await page.waitForTimeout(180);
   await page.evaluate(() => { feedback = []; });
@@ -103,6 +123,1092 @@ async function dispatch(page, boundary) {
       return { ready: true };
     } catch (error) { return { ready: false, code: error.code }; }
   }, boundary);
+}
+
+async function modelMessage(page, action, params = {}) {
+  return page.evaluate(({ action, params }) => Promise.race([
+    deliver(action, params),
+    new Promise(resolve => setTimeout(() => resolve({ ready: false, code: 'monitor_response_missing' }), 2000)),
+  ]), { action, params });
+}
+
+function assertOpaqueModelMetadata(result) {
+  const allowed = new Set(['ready', 'runToken', 'documentToken', 'snapshotToken', 'targetCount', 'revision', 'code', 'reason', 'uncertified', 'focusedTargetAvailable']);
+  assert.ok(Object.keys(result).every(key => allowed.has(key)), 'Only opaque ownership metadata and counts may cross the content boundary');
+  assert.ok(Object.values(result).every(value => value === null || ['string', 'number', 'boolean'].includes(typeof value)),
+    'No node footprint, control values, file objects, or DOM arrays may be serialized');
+  const serialized = JSON.stringify(result);
+  for (const privateContent of ['Alice', 'Prepared text', 'photo-private.png', '/send', '#send', 'Unrelated sidebar']) {
+    assert.equal(serialized.includes(privateContent), false, `Model ownership metadata must not include ${privateContent}`);
+  }
+}
+
+async function captureModel(page) {
+  const result = await modelMessage(page, 'page_monitor_capture_model');
+  assert.equal(result.ready, true, `Model capture must be supported: ${JSON.stringify(result)}`);
+  assert.equal(result.runToken, 'passive-test');
+  assert.ok(result.documentToken);
+  assert.ok(result.snapshotToken);
+  assert.ok(result.targetCount >= 3, 'The snapshot includes actual controls independently of AX reference enumeration');
+  assertOpaqueModelMetadata(result);
+  return result;
+}
+
+async function validateModel(page, snapshot, target = { tool: 'click_ax', ref_id: 'ref_send' }) {
+  const result = await modelMessage(page, 'page_monitor_validate_model', { snapshotToken: snapshot.snapshotToken, ...target });
+  assertOpaqueModelMetadata(result);
+  if (result.ready) {
+    assert.equal(result.runToken, snapshot.runToken);
+    assert.equal(result.documentToken, snapshot.documentToken);
+    assert.equal(result.snapshotToken, snapshot.snapshotToken);
+  }
+  return result;
+}
+
+async function prepareModel(page, snapshot, target = { tool: 'click_ax', ref_id: 'ref_send' }) {
+  return modelMessage(page, 'page_monitor_prepare', {
+    operationId: 'model-prepared', allowPassiveRebase: true,
+    expectedModelSnapshot: snapshot.snapshotToken, ...target,
+  });
+}
+
+async function dispatchModel(page, boundary = 'message') {
+  const result = await modelMessage(page, 'page_monitor_dispatch', {
+    operationId: 'model-prepared', kind: 'click', fenceOnly: boundary === 'native',
+  });
+  if (!result.ready) return result;
+  if (boundary === 'native') {
+    const marker = createNativeActionMarker(result.guard, 'click', 1);
+    await page.evaluate(marker => { document.getElementById('send').setAttribute('data-webbrain-native-action', marker); }, marker);
+    await page.locator('#send').click();
+  } else {
+    await page.evaluate(() => __wbPageMonitor.withPreparedDispatch('model-prepared', () => document.getElementById('send').click()));
+  }
+  return result;
+}
+
+async function modelFixture(browser, build, owner = 'region') {
+  const result = await fixture(browser, build, modelHtml.replace('role="region"', `role="${owner}"`));
+  await result.page.evaluate(() => {
+    window.submissions = 0;
+    document.getElementById('form').addEventListener('submit', event => { event.preventDefault(); submissions++; });
+    const files = new DataTransfer();
+    files.items.add(new File(['AAAA'], 'photo-private.png', { type: 'image/png', lastModified: 1 }));
+    document.getElementById('attachment').files = files.files;
+  });
+  await result.page.waitForTimeout(180);
+  return result;
+}
+
+async function treeModelFixture(browser, build, body = modelHtml, options = {}) {
+  const result = await fixture(browser, build, body, { realAccessibilityTree: true, ...options });
+  await result.page.evaluate(() => {
+    window.submissions = 0; window.clicks = 0;
+    document.getElementById('form')?.addEventListener('submit', event => { event.preventDefault(); submissions++; });
+    document.addEventListener('click', event => { if (event.target.closest?.('#send')) clicks++; });
+  });
+  assert.equal(await result.page.evaluate(() => window.__wb_ax_installed), true);
+  return result;
+}
+
+async function captureTreeModel(page) {
+  const result = await modelMessage(page, 'page_monitor_capture_model', { includeTree: true });
+  assert.equal(result.ready, true, `The real accessibility tree must be captured: ${JSON.stringify(result)}`);
+  const { page: observation, ...metadata } = result;
+  assertOpaqueModelMetadata(metadata);
+  assert.equal(metadata.runToken, 'passive-test');
+  assert.ok(metadata.documentToken);
+  assert.ok(metadata.snapshotToken);
+  // The smallest chat fixture has only its editor and Send action; an
+  // unrelated body button intentionally remains uncertified.
+  assert.ok(metadata.targetCount >= 2, `Current editor/action controls must be certified: ${JSON.stringify(metadata)}`);
+  assert.equal(observation?.success, true);
+  assert.ok(JSON.stringify(observation).length <= 16000, 'The complete model-visible page must fit the Agent serializer before ref coverage is certified');
+  assert.equal(observation.url, page.url());
+  assert.equal(typeof observation.pageContent, 'string');
+  assert.ok(observation.pageContent.length > 0);
+  return result;
+}
+
+function sendRefFromTree(snapshot) {
+  const line = snapshot.page.pageContent.split('\n').find(line => /button "Send"/.test(line));
+  const ref = line?.match(/\[(ref_\d+)\]/)?.[1];
+  assert.ok(ref, `The real tree must expose the Send control: ${snapshot.page.pageContent}`);
+  assert.notEqual(ref, 'ref_send');
+  return ref;
+}
+
+const plainChatHtml = modelHtml
+  .replace('<section id="composer" role="region">', '<div id="composer">')
+  .replace('</section>', '</div>');
+
+const toolbarChatHtml = `<!doctype html><style>
+body { margin:0;width:900px;height:600px; }
+#chat { position:absolute;left:20px;top:20px;width:450px;height:250px; }
+#chat h2 { margin:0;height:30px; }
+#composer { width:400px;height:150px; }
+#field { width:280px;height:50px; }
+#toolbar { width:300px;height:40px; }
+#in-form-counter { position:absolute;left:330px;top:100px; }
+#human { position:absolute;left:600px;top:350px; }
+</style><main id="chat"><header><h2 id="recipient">Alice</h2></header>
+<div id="composer"><div id="editor"><label for="field">Message</label><textarea id="field">Prepared text</textarea></div>
+<div id="toolbar"><button id="send" type="button">Send</button><span id="in-form-counter">200</span></div></div></main>
+<button id="human">Human control</button>`;
+
+async function focusedModelFixture(browser, build) {
+  const body = `${modelHtml}<input id="other-field" value="unrelated draft" style="position:absolute;left:650px;top:450px;width:200px">`;
+  const result = await treeModelFixture(browser, build, body, { contentLibrary: true });
+  await result.page.evaluate(() => {
+    const field = document.getElementById('field'); field.focus(); field.setSelectionRange(field.value.length, field.value.length);
+    window.receivedKeys = [];
+    field.addEventListener('keydown', event => receivedKeys.push(event.key));
+  });
+  await result.page.waitForTimeout(180);
+  await result.page.evaluate(() => { feedback = []; });
+  return result;
+}
+
+async function nativeInputGuard(page, snapshot, target = { tool: 'press_keys', key: 'ArrowLeft' }) {
+  assert.equal((await prepareModel(page, snapshot, target)).modelBindingValid, true);
+  const prepared = await modelMessage(page, 'page_monitor_dispatch', { operationId: 'model-prepared', kind: 'input', fenceOnly: true });
+  assert.equal(prepared.ready, true);
+  assert.ok(prepared.guard?.nativeSecret);
+  return prepared.guard;
+}
+
+async function performNativeKey(page, guard, key, sequence, { rebindFocus = false } = {}) {
+  const validation = await modelMessage(page, 'page_monitor_validate', { ...guard, kind: 'input', rebindFocus });
+  if (!validation.ready) return validation;
+  const current = { ...guard, revision: validation.revision };
+  const marker = createNativeActionMarker(current, 'input', sequence);
+  await page.evaluate(({ marker, rebindFocus }) => {
+    const target = rebindFocus ? document.activeElement : document.getElementById('field');
+    target.setAttribute('data-webbrain-native-action', marker);
+  }, { marker, rebindFocus });
+  await page.keyboard.press(key);
+  return { ...validation, guard: current };
+}
+
+for (const [build, engine] of [['chrome', chromium], ['firefox', firefox]]) {
+  test(`${build}: newest explicit preparation supersedes an older selectorless focus proof on the same field`, async () => {
+    const browser = await engine.launch();
+    const { context, page } = await focusedModelFixture(browser, build);
+    try {
+      const previous = await captureTreeModel(page);
+      const oldTarget = { tool: 'press_keys', key: 'ArrowLeft' };
+      const oldPreparation = await modelMessage(page, 'page_monitor_prepare', {
+        operationId: 'older-focused-proof', expectedModelSnapshot: previous.snapshotToken, allowPassiveRebase: true, ...oldTarget,
+      });
+      assert.equal(oldPreparation.modelBindingValid, true);
+      await page.evaluate(() => { document.getElementById('other-field').focus(); });
+      await page.waitForTimeout(20);
+      assert.equal((await validateModel(page, previous, oldTarget)).ready, false);
+
+      const current = await captureTreeModel(page);
+      const refs = [...current.page.pageContent.matchAll(/\[(ref_[A-Za-z0-9_-]+)\]/g)].map(match => match[1]);
+      const ref_id = await page.evaluate(refs => refs.find(ref => __wb_ax_lookup(ref) === document.getElementById('field')), refs);
+      assert.ok(ref_id, 'Use the current real AX reference for the explicit field action');
+      const target = { tool: 'type_ax', ref_id, text: ' appended', clear: false };
+      assert.equal((await validateModel(page, current, target)).ready, true);
+      assert.equal((await prepareModel(page, current, target)).modelBindingValid, true);
+      const result = await modelMessage(page, 'type_ax', { ref_id, text: ' appended', clear: false });
+      assert.equal(result.success, true, JSON.stringify(result));
+      assert.equal(await page.evaluate(() => document.getElementById('field').value), 'Prepared text appended');
+      assert.equal(await page.evaluate(() => document.getElementById('other-field').value), 'unrelated draft');
+      assert.equal((await validateModel(page, previous, oldTarget)).ready, false);
+      assert.equal((await modelMessage(page, 'page_monitor_dispatch', { operationId: 'older-focused-proof', kind: 'input', fenceOnly: true })).ready, false);
+    } finally { await context.close(); await browser.close(); }
+  });
+}
+
+for (const [build, engine] of [['chrome', chromium], ['firefox', firefox]]) {
+  test(`${build}: focused snapshots reach actual content handlers and preserve native dispatch phases`, { timeout: 60000 }, async t => {
+    const browser = await engine.launch({ headless: true });
+    try {
+      for (const [name, target, action, params, expectedValue] of [
+        ['selectorless text', { tool: 'type_text', text: ' appended' }, 'type', { text: ' appended' }, 'Prepared text appended'],
+        ['selectorless keys', { tool: 'press_keys', key: 'ArrowLeft', repeat: 2 }, 'press_keys', { key: 'ArrowLeft', repeat: 2 }, 'Prepared text'],
+      ]) await t.test(`${name} inherits its original focused target through the real message handler`, async () => {
+        const { context, page } = await focusedModelFixture(browser, build);
+        try {
+          const snapshot = await captureTreeModel(page);
+          assert.equal(snapshot.focusedTargetAvailable, true);
+          await page.evaluate(() => { document.getElementById('in-form-counter').textContent = '201'; });
+          assert.equal((await validateModel(page, snapshot, target)).ready, true);
+          assert.equal((await prepareModel(page, snapshot, target)).modelBindingValid, true);
+          const result = await modelMessage(page, action, params);
+          assert.equal(result.success, true, JSON.stringify(result));
+          assert.equal(result.pageFeedbackPending, undefined);
+          assert.equal(await page.evaluate(() => document.getElementById('field').value), expectedValue);
+          if (action === 'press_keys') assert.deepEqual(await page.evaluate(() => receivedKeys), ['ArrowLeft', 'ArrowLeft']);
+          assert.equal((await page.evaluate(() => feedback)).some(event => event.source === 'user'), false);
+        } finally { await context.close(); }
+      });
+
+      for (const [name, mutate] of [
+        ['focus identity', () => document.getElementById('other-field').focus()],
+        ['recipient', () => { document.getElementById('recipient').textContent = 'Bob'; }],
+        ['field value', () => { document.getElementById('field').value = 'Different private draft'; }],
+      ]) await t.test(`selectorless typing rejects changed ${name} before its first dispatch`, async () => {
+        const { context, page } = await focusedModelFixture(browser, build);
+        try {
+          const snapshot = await captureTreeModel(page);
+          const target = { tool: 'type_text', text: ' appended' };
+          assert.equal((await validateModel(page, snapshot, target)).ready, true);
+          await page.evaluate(mutate);
+          await page.waitForTimeout(180);
+          assert.equal((await validateModel(page, snapshot, target)).ready, false);
+          assert.equal((await prepareModel(page, snapshot, target)).modelBindingValid, false);
+          const fence = await modelMessage(page, 'page_monitor_dispatch', { operationId: 'model-prepared', kind: 'input', fenceOnly: true });
+          assert.equal(fence.ready, false);
+          assert.equal((await page.evaluate(() => document.getElementById('field').value)).includes(' appended'), false);
+        } finally { await context.close(); }
+      });
+
+      await t.test('recipient race after a valid prepare remains blocked at the actual content message boundary', async () => {
+        const { context, page } = await focusedModelFixture(browser, build);
+        try {
+          const snapshot = await captureTreeModel(page);
+          const target = { tool: 'type_text', text: ' appended' };
+          assert.equal((await prepareModel(page, snapshot, target)).modelBindingValid, true);
+          await page.evaluate(() => { document.getElementById('recipient').textContent = 'Bob'; });
+          const result = await modelMessage(page, 'type', { text: ' appended' });
+          assert.equal(result.success, false);
+          assert.equal(result.noDispatch, true);
+          assert.equal(result.pageFeedbackPending, true);
+          assert.equal(await page.evaluate(() => document.getElementById('field').value), 'Prepared text');
+        } finally { await context.close(); }
+      });
+
+      await t.test('body-level keyboard actions retain the global fence', async () => {
+        const { context, page } = await treeModelFixture(browser, build);
+        try {
+          const snapshot = await captureTreeModel(page);
+          assert.equal(snapshot.focusedTargetAvailable, false);
+          for (const target of [{ tool: 'press_keys', key: 'Escape' }, { tool: 'type_text', text: 'unused' }]) {
+            const validation = await validateModel(page, snapshot, target);
+            assert.equal(validation.ready, false);
+            assert.equal((await prepareModel(page, snapshot, target)).modelBindingValid, false);
+            assert.equal((await modelMessage(page, 'page_monitor_dispatch', { operationId: 'model-prepared', kind: 'input', fenceOnly: true })).ready, false);
+          }
+        } finally { await context.close(); }
+      });
+
+      await t.test('native split typing accepts its own changed input value with the same original focus', async () => {
+        const { context, page } = await focusedModelFixture(browser, build);
+        try {
+          const snapshot = await captureTreeModel(page);
+          const guard = await nativeInputGuard(page, snapshot, { tool: 'type_text', text: 'xy' });
+          const first = await performNativeKey(page, guard, 'x', 1);
+          assert.equal(first.ready, true);
+          assert.equal(await page.evaluate(() => document.getElementById('field').value), 'Prepared textx');
+          const second = await performNativeKey(page, first.guard, 'y', 2);
+          assert.equal(second.ready, true);
+          assert.equal(await page.evaluate(() => document.getElementById('field').value), 'Prepared textxy');
+          assert.equal((await page.evaluate(() => feedback)).some(event => event.source === 'user'), false);
+        } finally { await context.close(); }
+      });
+
+      await t.test('native split typing preserves an unlabeled contenteditable body with the same recipient', async () => {
+        const body = modelHtml.replace('<label for="field">Message</label>', '')
+          .replace('<input id="field" value="Prepared text">', '<div id="field" role="textbox" contenteditable="true">Prepared text</div>');
+        const { context, page } = await treeModelFixture(browser, build, body);
+        try {
+          await page.evaluate(() => {
+            const field = document.getElementById('field'); field.focus();
+            const range = document.createRange(); range.selectNodeContents(field); range.collapse(false);
+            const selection = getSelection(); selection.removeAllRanges(); selection.addRange(range);
+          });
+          await page.waitForTimeout(180);
+          await page.evaluate(() => { feedback = []; });
+          const snapshot = await captureTreeModel(page);
+          const guard = await nativeInputGuard(page, snapshot, { tool: 'type_text', text: 'xy' });
+          const first = await performNativeKey(page, guard, 'x', 1);
+          assert.equal(first.ready, true);
+          assert.equal(await page.evaluate(() => document.getElementById('field').textContent), 'Prepared textx');
+          const second = await performNativeKey(page, first.guard, 'y', 2);
+          assert.equal(second.ready, true);
+          assert.equal(await page.evaluate(() => document.getElementById('field').textContent), 'Prepared textxy');
+          assert.equal((await page.evaluate(() => feedback)).some(event => event.source === 'user'), false);
+        } finally { await context.close(); }
+      });
+
+      await t.test('requested native Tab can rebind focus for its next native phase', async () => {
+        const { context, page } = await focusedModelFixture(browser, build);
+        try {
+          const snapshot = await captureTreeModel(page);
+          const guard = await nativeInputGuard(page, snapshot, { tool: 'press_keys' });
+          const first = await performNativeKey(page, guard, 'Tab', 1);
+          assert.equal(first.ready, true);
+          assert.equal(await page.evaluate(() => document.activeElement.id), 'send');
+          const second = await performNativeKey(page, first.guard, 'Tab', 2, { rebindFocus: true });
+          assert.equal(second.ready, true);
+          assert.equal(await page.evaluate(() => document.activeElement.id), 'attachment');
+          assert.equal((await page.evaluate(() => feedback)).some(event => event.source === 'user'), false);
+        } finally { await context.close(); }
+      });
+
+      await t.test('synchronous input handler recipient switching cannot authorize the next native key', async () => {
+        const { context, page } = await focusedModelFixture(browser, build);
+        try {
+          const snapshot = await captureTreeModel(page);
+          const guard = await nativeInputGuard(page, snapshot, { tool: 'type_text', text: 'xy' });
+          await page.evaluate(() => document.getElementById('field').addEventListener('input', () => {
+            document.getElementById('recipient').textContent = 'Bob';
+          }, { once: true }));
+          const first = await performNativeKey(page, guard, 'x', 1);
+          assert.equal(first.ready, true);
+          assert.equal(await page.evaluate(() => document.getElementById('recipient').textContent), 'Bob');
+          const next = await performNativeKey(page, first.guard, 'y', 2);
+          assert.equal(next.ready, false);
+          assert.equal(await page.evaluate(() => document.getElementById('field').value), 'Prepared textx');
+        } finally { await context.close(); }
+      });
+
+      await t.test('finished action expiry does not label subsequent clock churn as unknown', async () => {
+        const { context, page } = await focusedModelFixture(browser, build);
+        try {
+          const snapshot = await captureTreeModel(page);
+          const target = { tool: 'type_text', text: ' appended' };
+          assert.equal((await prepareModel(page, snapshot, target)).modelBindingValid, true);
+          assert.equal((await modelMessage(page, 'type', { text: ' appended' })).success, true);
+          await modelMessage(page, 'page_monitor_finish', { operationId: 'model-prepared' });
+          await page.waitForTimeout(350);
+          await page.evaluate(() => { feedback = []; document.getElementById('in-form-counter').textContent = '201'; });
+          await page.waitForTimeout(180);
+          const observations = await page.evaluate(() => feedback.filter(event => event.kind === 'dom'));
+          assert.ok(observations.length > 0);
+          assert.ok(observations.every(event => event.source === 'page'), JSON.stringify(observations));
+          const fresh = await captureTreeModel(page);
+          await page.evaluate(() => { document.getElementById('in-form-counter').textContent = '202'; });
+          assert.equal((await validateModel(page, fresh, { tool: 'type_text', text: ' again' })).ready, true);
+        } finally { await context.close(); }
+      });
+
+      for (const [name, mutate] of [
+        ['recipient', () => { document.getElementById('recipient').textContent = 'Bob'; }],
+        ['focus', () => document.getElementById('other-field').focus()],
+      ]) for (const afterFirst of [false, true]) await t.test(`native ${name} change ${afterFirst ? 'between typing phases' : 'before first input'} prevents the next key`, async () => {
+        const { context, page } = await focusedModelFixture(browser, build);
+        try {
+          const snapshot = await captureTreeModel(page);
+          let guard = await nativeInputGuard(page, snapshot, { tool: 'type_text', text: 'xy' });
+          if (afterFirst) {
+            const first = await performNativeKey(page, guard, 'x', 1);
+            assert.equal(first.ready, true); guard = first.guard;
+          }
+          await page.evaluate(mutate);
+          const result = await performNativeKey(page, guard, 'y', afterFirst ? 2 : 1);
+          assert.equal(result.ready, false);
+          assert.equal(await page.evaluate(() => document.getElementById('field').value), `Prepared text${afterFirst ? 'x' : ''}`);
+          assert.equal(await page.evaluate(() => document.getElementById('other-field').value), 'unrelated draft');
+        } finally { await context.close(); }
+      });
+
+      await t.test('certified click fallback reprepare preserves the pre-inference recipient fence', async () => {
+        const { context, page } = await treeModelFixture(browser, build);
+        try {
+          const snapshot = await captureTreeModel(page);
+          const target = { tool: 'click_ax', ref_id: sendRefFromTree(snapshot) };
+          assert.equal((await prepareModel(page, snapshot, target)).modelBindingValid, true);
+          await modelMessage(page, 'page_monitor_prepare', { operationId: 'model-prepared', ...target, allowPassiveRebase: true });
+          await page.evaluate(() => { document.getElementById('recipient').textContent = 'Bob'; });
+          assert.equal((await dispatchModel(page)).ready, false);
+          assert.equal(await page.evaluate(() => submissions), 0);
+        } finally { await context.close(); }
+      });
+    } finally { await browser.close(); }
+  });
+}
+
+for (const [build, engine] of [['chrome', chromium], ['firefox', firefox]]) {
+  test(`${build}: uncertified raw selectors preserve node identity and the strict global fence`, { timeout: 30000 }, async t => {
+    const browser = await engine.launch({ headless: true });
+    const rawBody = modelHtml.replace('</aside>', '</aside><div id="raw" onclick="window.rawClicks++" style="position:absolute;left:600px;top:500px;width:120px;height:30px">Raw action</div>');
+    try {
+      await t.test('original raw onclick node reports only an opaque uncertified result and can use strict preparation', async () => {
+        const { context, page } = await treeModelFixture(browser, build, rawBody, { contentLibrary: true });
+        try {
+          await page.evaluate(() => { window.rawClicks = 0; });
+          const snapshot = await captureTreeModel(page);
+          const target = { tool: 'click', selector: '#raw' };
+          const validation = await validateModel(page, snapshot, target);
+          assert.equal(validation.ready, false); assert.equal(validation.uncertified, true);
+          await modelMessage(page, 'page_monitor_prepare', { operationId: 'raw-strict', ...target, allowPassiveRebase: false });
+          const fence = await modelMessage(page, 'page_monitor_dispatch', { operationId: 'raw-strict', kind: 'click', fenceOnly: true });
+          assert.equal(fence.ready, true);
+          const result = await modelMessage(page, 'click', { selector: '#raw' });
+          assert.equal(result.success, true, JSON.stringify(result));
+          assert.equal(await page.evaluate(() => rawClicks), 1);
+        } finally { await context.close(); }
+      });
+      for (const [name, mutate] of [
+        ['replacement', () => { const raw = document.getElementById('raw'); raw.replaceWith(raw.cloneNode(true)); }],
+        ['action label', () => { document.getElementById('raw').textContent = 'Other raw action'; }],
+        ['authored handler', () => { document.getElementById('raw').setAttribute('onclick', 'window.changedAction=true'); }],
+      ]) await t.test(`raw ${name} cannot inherit even the uncertified old-node proof`, async () => {
+        const { context, page } = await treeModelFixture(browser, build, rawBody);
+        try {
+          const snapshot = await captureTreeModel(page);
+          const target = { tool: 'click', selector: '#raw' };
+          assert.equal((await validateModel(page, snapshot, target)).uncertified, true);
+          await page.evaluate(mutate);
+          const validation = await validateModel(page, snapshot, target);
+          assert.equal(validation.ready, false); assert.notEqual(validation.uncertified, true);
+        } finally { await context.close(); }
+      });
+      await t.test('uncertified targets never rebase a counter mutation during strict preparation', async () => {
+        const { context, page } = await treeModelFixture(browser, build, rawBody);
+        try {
+          const snapshot = await captureTreeModel(page);
+          assert.equal((await validateModel(page, snapshot, { tool: 'click', selector: '#raw' })).uncertified, true);
+          await modelMessage(page, 'page_monitor_prepare', { operationId: 'raw-strict', tool: 'click', selector: '#raw', allowPassiveRebase: false });
+          await page.evaluate(() => { document.getElementById('in-form-counter').textContent = '201'; });
+          const result = await modelMessage(page, 'page_monitor_dispatch', { operationId: 'raw-strict', kind: 'click', fenceOnly: true });
+          assert.equal(result.ready, false); assert.equal(result.pageFeedbackPending, true);
+        } finally { await context.close(); }
+      });
+    } finally { await browser.close(); }
+  });
+}
+
+const ownerIdentityHtml = modelHtml.replace('<form id="form"', `<div id="recipient-chip" data-recipient-id="Alice" style="position:absolute;left:350px;top:0;width:160px;height:25px">Alice</div>
+<label id="recipient-control-label" for="recipient-control" style="position:absolute;left:350px;top:30px">Recipient</label>
+<input id="recipient-control" value="Alice" style="position:absolute;left:350px;top:55px;width:140px">
+<span id="owner-clock" style="position:absolute;left:350px;top:90px">12:00</span>
+<aside id="owner-sidebar" role="complementary" style="position:absolute;left:600px;top:30px">
+<label for="sidebar-field">Sidebar filter</label><input id="sidebar-field" value="unrelated"></aside><form id="form"`);
+
+for (const [build, engine] of [['chrome', chromium], ['firefox', firefox]]) {
+  test(`${build}: owner-local recipient carriers outside a form remain bound without freezing sidebar state`, { timeout: 60000 }, async t => {
+    const browser = await engine.launch({ headless: true });
+    try {
+      for (const [name, mutate] of [
+        ['recipient identity carrier', () => { document.getElementById('recipient-chip').setAttribute('data-recipient-id', 'Bob'); }],
+        ['outside-form recipient input', () => { document.getElementById('recipient-control').value = 'Bob'; }],
+        ['outside-form recipient label', () => { document.getElementById('recipient-control-label').textContent = 'Other recipient'; }],
+      ]) for (const afterPrepare of [false, true]) await t.test(`${name} changes ${afterPrepare ? 'after prepare' : 'during inference'} prevent submit`, async () => {
+        const { context, page } = await treeModelFixture(browser, build, ownerIdentityHtml);
+        try {
+          const snapshot = await captureTreeModel(page);
+          const target = { tool: 'click_ax', ref_id: sendRefFromTree(snapshot) };
+          assert.equal((await validateModel(page, snapshot, target)).ready, true);
+          if (afterPrepare) assert.equal((await prepareModel(page, snapshot, target)).modelBindingValid, true);
+          await page.evaluate(mutate);
+          assert.equal((await validateModel(page, snapshot, target)).ready, false);
+          if (!afterPrepare) assert.equal((await prepareModel(page, snapshot, target)).modelBindingValid, false);
+          assert.equal((await dispatchModel(page)).ready, false);
+          assert.equal(await page.evaluate(() => submissions), 0);
+        } finally { await context.close(); }
+      });
+
+      for (const [name, mutate] of [
+        ['unrelated clock sibling', () => { document.getElementById('owner-clock').textContent = '12:01'; }],
+        ['unrelated sidebar input', () => { document.getElementById('sidebar-field').value = 'another unrelated filter'; }],
+      ]) await t.test(`${name} may update while the intended owner controls stay unchanged`, async () => {
+        const { context, page } = await treeModelFixture(browser, build, ownerIdentityHtml);
+        try {
+          const snapshot = await captureTreeModel(page);
+          const target = { tool: 'click_ax', ref_id: sendRefFromTree(snapshot) };
+          await page.evaluate(mutate);
+          assert.equal((await validateModel(page, snapshot, target)).ready, true);
+          assert.equal((await prepareModel(page, snapshot, target)).modelBindingValid, true);
+          assert.equal((await dispatchModel(page)).ready, true);
+          assert.equal(await page.evaluate(() => submissions), 1);
+        } finally { await context.close(); }
+      });
+
+      await t.test('a complete 200–400 character visible carrier label is observed and certified without exposing its private identity', async () => {
+        const { context, page } = await treeModelFixture(browser, build, ownerIdentityHtml);
+        try {
+          const label = 'Recipient "Team" '.repeat(20).trim();
+          assert.ok(label.length >= 200 && label.length <= 400);
+          await page.evaluate(label => {
+            const chip = document.getElementById('recipient-chip');
+            chip.textContent = label; chip.setAttribute('data-recipient-id', 'opaque-recipient-private');
+          }, label);
+          await page.waitForTimeout(180);
+          const snapshot = await captureTreeModel(page);
+          const carrierRef = await page.evaluate(() => __wb_ax_ref(document.getElementById('recipient-chip')));
+          const identityLine = snapshot.page.pageContent.split('\n').find(line => line.includes(`[${carrierRef}]`));
+          assert.ok(identityLine?.startsWith('visible identity '));
+          assert.ok(identityLine.includes(JSON.stringify(label)), 'A long but bounded carrier must expose its complete normalized label');
+          assert.equal(snapshot.page.pageContent.includes('opaque-recipient-private'), false);
+          const target = { tool: 'click_ax', ref_id: sendRefFromTree(snapshot) };
+          await page.evaluate(() => { document.getElementById('owner-clock').textContent = '12:01'; });
+          assert.equal((await validateModel(page, snapshot, target)).ready, true);
+          assert.equal((await prepareModel(page, snapshot, target)).modelBindingValid, true);
+          assert.equal((await dispatchModel(page)).ready, true);
+          assert.equal(await page.evaluate(() => submissions), 1);
+        } finally { await context.close(); }
+      });
+
+      for (const budget of ['label', 'text traversal']) await t.test(`${budget} overflow cannot acquire a partially observed carrier certificate`, async () => {
+        const { context, page } = await treeModelFixture(browser, build, ownerIdentityHtml);
+        try {
+          await page.evaluate(budget => {
+            const chip = document.getElementById('recipient-chip'); chip.replaceChildren();
+            chip.setAttribute('data-recipient-id', 'opaque-recipient-private');
+            if (budget === 'label') chip.textContent = 'N'.repeat(513);
+            else for (let index = 0; index < 129; index++) chip.appendChild(document.createTextNode('x '));
+          }, budget);
+          await page.waitForTimeout(180);
+          for (const actionTarget of [undefined, { tool: 'click', selector: '#send' }]) {
+            const snapshot = await captureDeepPriority(page, actionTarget);
+            const carrierRef = await page.evaluate(() => __wb_ax_ref(document.getElementById('recipient-chip')));
+            assert.equal(snapshot.page.pageContent.includes(`[${carrierRef}]`), false, 'No ref from a partial identity line may count as observed evidence');
+            assert.equal(snapshot.page.pageContent.includes('opaque-recipient-private'), false);
+            const target = { tool: 'click', selector: '#send' };
+            const validation = await validateModel(page, snapshot, target);
+            assert.equal(validation.ready, false); assert.equal(validation.reason, 'target_uncovered');
+            assert.equal((await prepareModel(page, snapshot, target)).modelBindingValid, false);
+            assert.equal((await dispatchModel(page)).ready, false);
+          }
+          assert.equal(await page.evaluate(() => submissions), 0);
+        } finally { await context.close(); }
+      });
+
+      await t.test('plain unknown recipient text without a semantic identity stays uncertified', async () => {
+        const ambiguous = modelHtml.replace('<h2 id="recipient">Alice</h2>', '<div id="recipient">Alice</div>');
+        const { context, page } = await treeModelFixture(browser, build, ambiguous);
+        try {
+          const snapshot = await modelMessage(page, 'page_monitor_capture_model', { includeTree: true });
+          assert.equal(snapshot.ready, true);
+          const { page: observation, ...metadata } = snapshot;
+          assertOpaqueModelMetadata(metadata);
+          assert.ok(observation.pageContent);
+          const target = { tool: 'click_ax', ref_id: sendRefFromTree(snapshot) };
+          const validation = await validateModel(page, snapshot, target);
+          assert.equal(validation.ready, false); assert.equal(validation.uncertified, true);
+          assert.equal((await prepareModel(page, snapshot, target)).modelBindingValid, false);
+          assert.equal((await dispatchModel(page)).ready, false);
+          assert.equal(await page.evaluate(() => submissions), 0);
+        } finally { await context.close(); }
+      });
+
+      for (const [name, mutate] of [
+        ['recipient', () => { document.getElementById('recipient').textContent = 'Bob'; }],
+        ['selected file object with identical metadata', () => {
+          const files = new DataTransfer(); files.items.add(new File(['BBBB'], 'photo-private.png', { type: 'image/png', lastModified: 1 }));
+          document.getElementById('attachment').files = files.files;
+        }],
+      ]) await t.test(`hidden file target binds its visible owner and ${name} through a selector`, async () => {
+        const body = modelHtml.replace('id="attachment" type="file"', 'id="attachment" type="file" style="display:none"');
+        const { context, page } = await treeModelFixture(browser, build, body);
+        try {
+          await page.evaluate(() => {
+            const files = new DataTransfer(); files.items.add(new File(['AAAA'], 'photo-private.png', { type: 'image/png', lastModified: 1 }));
+            document.getElementById('attachment').files = files.files;
+          });
+          await page.waitForTimeout(180);
+          const snapshot = await captureTreeModel(page);
+          const target = { tool: 'upload_file', selector: '#attachment' };
+          assert.equal((await validateModel(page, snapshot, target)).ready, true);
+          await page.evaluate(() => { document.getElementById('in-form-counter').textContent = '201'; });
+          assert.equal((await validateModel(page, snapshot, target)).ready, true);
+          assert.equal((await prepareModel(page, snapshot, target)).modelBindingValid, true);
+          await page.evaluate(mutate);
+          assert.equal((await validateModel(page, snapshot, target)).ready, false);
+          assert.equal((await modelMessage(page, 'page_monitor_dispatch', { operationId: 'model-prepared', kind: 'click', fenceOnly: true })).ready, false);
+        } finally { await context.close(); }
+      });
+    } finally { await browser.close(); }
+  });
+}
+
+const shadowComposerHtml = `<style>
+  h2 { margin:0;width:280px;height:28px; } form { width:300px;height:100px; }
+  #field { width:190px; } #in-form-counter { position:absolute;left:240px;top:85px; }
+  </style><section id="composer" role="region"><h2 id="recipient">Alice</h2>
+  <form id="form" action="/send"><label for="field">Message</label>
+  <input id="field" value="Prepared text"><button id="send" type="submit">Send</button>
+  <span id="in-form-counter">200</span></form></section>`;
+
+async function shadowModelFixture(browser, build, mode = 'open') {
+  const body = '<!doctype html><div id="shadow-owner" style="position:absolute;left:20px;top:20px;width:320px;height:180px"></div>'
+    + '<button id="human" style="position:absolute;left:650px;top:400px">Human control</button>';
+  const result = await fixture(browser, build, body, {
+    realAccessibilityTree: true, contentLibrary: true, fixtureUrl: 'https://www.linkedin.com/shadow-fixture',
+  });
+  await result.page.evaluate(({ mode, shadowComposerHtml }) => {
+    window.submissions = 0;
+    const root = document.getElementById('shadow-owner').attachShadow({ mode });
+    root.innerHTML = shadowComposerHtml;
+    root.getElementById('form').addEventListener('submit', event => { event.preventDefault(); submissions++; });
+  }, { mode, shadowComposerHtml });
+  await result.page.waitForTimeout(180);
+  await result.page.evaluate(() => { feedback = []; });
+  return result;
+}
+
+for (const [build, engine] of [['chrome', chromium], ['firefox', firefox]]) {
+  test(`${build}: exact open-shadow selectors and actual AX references retain private model certificates`, { timeout: 60000 }, async t => {
+    const browser = await engine.launch();
+    try {
+      for (const addressing of ['selector', 'ref']) await t.test(`${addressing} certifies the same shadow node for its supported AX dispatch after an unrelated counter update`, async () => {
+        const { context, page } = await shadowModelFixture(browser, build);
+        try {
+          const snapshot = await captureTreeModel(page);
+          const target = addressing === 'selector' ? { tool: 'click', selector: '#send' }
+            : { tool: 'click_ax', ref_id: sendRefFromTree(snapshot) };
+          assert.equal((await validateModel(page, snapshot, target)).ready, true);
+          await page.evaluate(() => { document.getElementById('shadow-owner').shadowRoot.getElementById('in-form-counter').textContent = '201'; });
+          assert.equal((await validateModel(page, snapshot, target)).ready, true);
+          assert.equal((await prepareModel(page, snapshot, target)).modelBindingValid, true);
+          if (addressing === 'selector') {
+            // The legacy content selector handler is document-only. Its
+            // unsupported lookup must leave the certified node untouched so
+            // the existing AX/native fallback can use the same preparation.
+            const unsupported = await modelMessage(page, 'click', { selector: '#send' });
+            assert.equal(unsupported.success, false);
+            assert.equal(unsupported.dispatched, false);
+            assert.equal(unsupported.error, 'Element not found');
+            assert.equal(await page.evaluate(() => submissions), 0);
+          }
+          const ref_id = sendRefFromTree(snapshot);
+          assert.equal(await page.evaluate(ref => __wb_ax_lookup(ref) === document.getElementById('shadow-owner').shadowRoot.getElementById('send'), ref_id), true);
+          const dispatched = await modelMessage(page, 'click_ax', { ref_id });
+          assert.equal(dispatched.success, true, JSON.stringify(dispatched));
+          assert.equal(dispatched.noDispatch, undefined);
+          assert.equal(await page.evaluate(() => submissions), 1);
+          assert.equal((await page.evaluate(() => feedback)).some(event => event.source === 'user'), false);
+        } finally { await context.close(); }
+      });
+
+      for (const addressing of ['selector', 'ref']) await t.test(`${addressing} rejects an identical shadow target replacement before dispatch`, async () => {
+        const { context, page } = await shadowModelFixture(browser, build);
+        try {
+          const snapshot = await captureTreeModel(page);
+          const target = addressing === 'selector' ? { tool: 'click', selector: '#send' }
+            : { tool: 'click_ax', ref_id: sendRefFromTree(snapshot) };
+          assert.equal((await validateModel(page, snapshot, target)).ready, true);
+          await page.evaluate(() => {
+            const original = document.getElementById('shadow-owner').shadowRoot.getElementById('send');
+            original.replaceWith(original.cloneNode(true));
+          });
+          assert.equal((await validateModel(page, snapshot, target)).ready, false);
+          assert.equal((await prepareModel(page, snapshot, target)).modelBindingValid, false);
+          assert.equal((await modelMessage(page, 'page_monitor_dispatch', { operationId: 'model-prepared', kind: 'click' })).ready, false);
+          assert.equal(await page.evaluate(() => submissions), 0);
+        } finally { await context.close(); }
+      });
+
+      await t.test('a duplicate selector in another open root cannot select an approved target', async () => {
+        const { context, page } = await shadowModelFixture(browser, build);
+        try {
+          const snapshot = await captureTreeModel(page);
+          assert.equal((await validateModel(page, snapshot, { tool: 'click', selector: '#send' })).ready, true);
+          await page.evaluate(shadowComposerHtml => {
+            const host = document.createElement('div');
+            host.style.cssText = 'position:absolute;left:450px;top:20px;width:320px;height:180px';
+            host.attachShadow({ mode: 'open' }).innerHTML = shadowComposerHtml;
+            document.body.appendChild(host);
+          }, shadowComposerHtml);
+          const fresh = await captureTreeModel(page);
+          for (const candidate of [snapshot, fresh]) {
+            assert.equal((await validateModel(page, candidate, { tool: 'click', selector: '#send' })).ready, false);
+            assert.equal((await prepareModel(page, candidate, { tool: 'click', selector: '#send' })).modelBindingValid, false);
+            assert.equal((await modelMessage(page, 'page_monitor_dispatch', { operationId: 'model-prepared', kind: 'click' })).ready, false);
+          }
+          assert.equal(await page.evaluate(() => submissions), 0);
+        } finally { await context.close(); }
+      });
+
+      await t.test('a closed shadow target remains inaccessible to model certification', async () => {
+        const { context, page } = await shadowModelFixture(browser, build, 'closed');
+        try {
+          const snapshot = await captureDeepPriority(page, { tool: 'click', selector: '#send' });
+          assert.equal(snapshot.page.pageContent.includes('button "Send"'), false);
+          assert.equal((await validateModel(page, snapshot, { tool: 'click', selector: '#send' })).ready, false);
+          assert.equal((await prepareModel(page, snapshot, { tool: 'click', selector: '#send' })).modelBindingValid, false);
+          assert.equal((await modelMessage(page, 'page_monitor_dispatch', { operationId: 'model-prepared', kind: 'click' })).ready, false);
+          assert.equal(await page.evaluate(() => submissions), 0);
+        } finally { await context.close(); }
+      });
+    } finally { await browser.close(); }
+  });
+}
+
+const deepPriorityHtml = modelHtml
+  .replace('</style>', '.priority-filler { position:absolute;left:700px;top:550px;width:240px;height:20px; }</style>')
+  // Fill the real generator's twenty-control prelude before the deep target,
+  // then exceed the monitor's DOM scan as well as the main AX output budget.
+  .replace('<section id="composer"', `${Array.from({ length: 20 }, (_, index) => `<input class="priority-filler" readonly aria-label="Unrelated decorative entry ${index}" value="${'decorative '.repeat(12)}">`).join('')}${Array.from({ length: 2300 }, (_, index) => `<h3 class="priority-filler">Unrelated decorative row ${index} with enough text to truncate the main observation</h3>`).join('')}<section id="composer"`);
+
+async function captureDeepPriority(page, actionTarget) {
+  const result = await modelMessage(page, 'page_monitor_capture_model', { includeTree: true, ...(actionTarget ? { actionTarget } : {}) });
+  assert.equal(result.ready, true);
+  const { page: observation, ...metadata } = result;
+  assertOpaqueModelMetadata(metadata);
+  assert.equal(observation.success, true);
+  assert.ok(JSON.stringify(observation).length <= 16000, 'Initial and priority observations must fit the complete serialized-page budget');
+  assert.equal(observation.url, page.url());
+  assert.ok(observation.pageContent.length > 0);
+  return result;
+}
+
+for (const [build, engine] of [['chrome', chromium], ['firefox', firefox]]) {
+  test(`${build}: bounded priority recovery observes an uncovered target before certifying a fresh decision`, { timeout: 60000 }, async t => {
+    const browser = await engine.launch();
+    try {
+      for (const selector of ['#send', `#send:not([data-never="${'x'.repeat(620)}"])`]) await t.test(`fresh scoped observation binds the exact ${selector.length > 500 ? 'long' : 'short'} selector after the original target was uncovered`, async () => {
+        const { context, page } = await treeModelFixture(browser, build, deepPriorityHtml);
+        try {
+          const target = { tool: 'click', selector };
+          const previous = await captureDeepPriority(page);
+          assert.equal(previous.page.pageContent.includes('button "Send"'), false, 'The actionable control lies beyond the returned main AX chunk');
+          const uncovered = await validateModel(page, previous, target);
+          assert.equal(uncovered.ready, false);
+          assert.equal(uncovered.reason, 'target_uncovered');
+          assert.notEqual(uncovered.uncertified, true);
+          assert.equal((await prepareModel(page, previous, target)).modelBindingValid, false);
+          assert.equal((await dispatchModel(page)).ready, false);
+          assert.equal(await page.evaluate(() => submissions), 0);
+
+          await page.evaluate(() => { document.getElementById('recipient').textContent = 'Bob'; });
+          await page.waitForTimeout(180);
+          const current = await captureDeepPriority(page, target);
+          assert.notEqual(current.snapshotToken, previous.snapshotToken);
+          assert.ok(current.page.pageContent.includes('Bob'), 'Recovery exposes the current recipient to the new decision');
+          const liveRef = sendRefFromTree(current);
+          assert.equal(await page.evaluate(ref => __wb_ax_lookup(ref) === document.getElementById('send'), liveRef), true);
+          assert.equal((await validateModel(page, current, target)).ready, true);
+          assert.equal((await validateModel(page, current, { tool: 'click_ax', ref_id: liveRef })).ready, true);
+          await page.evaluate(() => { document.getElementById('in-form-counter').textContent = '201'; });
+          assert.equal((await validateModel(page, current, target)).ready, true);
+          assert.equal((await prepareModel(page, current, target)).modelBindingValid, true);
+          assert.equal((await dispatchModel(page)).ready, true);
+          assert.equal(await page.evaluate(() => submissions), 1);
+
+          const next = await captureDeepPriority(page, target);
+          await page.evaluate(() => { document.getElementById('recipient').textContent = 'Carol'; });
+          const changed = await validateModel(page, next, target);
+          assert.equal(changed.ready, false);
+          assert.notEqual(changed.reason, 'target_uncovered', 'A changed original target must never masquerade as missing scan coverage');
+          assert.equal((await prepareModel(page, next, target)).modelBindingValid, false);
+          assert.equal((await dispatchModel(page)).ready, false);
+          assert.equal(await page.evaluate(() => submissions), 1);
+        } finally { await context.close(); }
+      });
+
+      await t.test('priority recovery preserves the hard human-intervention boundary', async () => {
+        const { context, page } = await treeModelFixture(browser, build, deepPriorityHtml);
+        try {
+          const target = { tool: 'click', selector: '#send' };
+          const snapshot = await captureDeepPriority(page, target);
+          assert.equal((await validateModel(page, snapshot, target)).ready, true);
+          assert.equal((await prepareModel(page, snapshot, target)).modelBindingValid, true);
+          await page.locator('#human').click();
+          assert.equal((await validateModel(page, snapshot, target)).ready, false);
+          assert.equal((await dispatchModel(page)).ready, false);
+          assert.equal(await page.evaluate(() => submissions), 0);
+        } finally { await context.close(); }
+      });
+
+      await t.test('coordinate and ambiguous priority requests cannot acquire an action certificate', async () => {
+        const { context, page } = await treeModelFixture(browser, build, deepPriorityHtml);
+        try {
+          for (const target of [{ tool: 'click', x: 250, y: 90 }, { tool: 'click', selector: 'button' }]) {
+            const snapshot = await captureDeepPriority(page, target);
+            const validation = await validateModel(page, snapshot, target);
+            assert.equal(validation.ready, false);
+            assert.notEqual(validation.uncertified, true);
+            assert.equal((await prepareModel(page, snapshot, target)).modelBindingValid, false);
+            assert.equal((await dispatchModel(page)).ready, false);
+          }
+          assert.equal(await page.evaluate(() => submissions), 0);
+        } finally { await context.close(); }
+      });
+    } finally { await browser.close(); }
+  });
+}
+
+for (const [build, engine] of [['chrome', chromium], ['firefox', firefox]]) {
+  test(`${build}: atomic model capture returns a fresh real AX page with matching private target bindings`, { timeout: 60000 }, async t => {
+    const browser = await engine.launch({ headless: true });
+    try {
+      await t.test('real generated references survive tree regeneration and unrelated heading updates', async () => {
+        const { context, page } = await treeModelFixture(browser, build);
+        try {
+          const snapshot = await captureTreeModel(page);
+          const ref = sendRefFromTree(snapshot);
+          assert.equal(await page.evaluate(ref => __wb_ax_lookup(ref) === document.getElementById('send'), ref), true);
+          assert.equal(await page.evaluate(() => __wb_ax_lookup('ref_send')), null, 'No hardcoded DOM-ID lookup is installed');
+          assert.match(snapshot.page.pageContent, /Alice/);
+          assert.match(snapshot.page.pageContent, /Prepared text/);
+          await page.evaluate(() => {
+            document.getElementById('sidebar-heading').textContent = 'Fresh unrelated sidebar';
+            document.getElementById('in-form-counter').textContent = '201';
+          });
+          const fresh = await captureTreeModel(page);
+          assert.match(fresh.page.pageContent, /Fresh unrelated sidebar/);
+          assert.equal(fresh.page.pageContent.includes('Unrelated sidebar'), false);
+          assert.equal(sendRefFromTree(fresh), ref);
+          assert.equal(fresh.documentToken, snapshot.documentToken);
+          assert.notEqual(fresh.snapshotToken, snapshot.snapshotToken);
+          const target = { tool: 'click_ax', ref_id: ref };
+          const validation = await validateModel(page, snapshot, target);
+          assert.equal(validation.ready, true, JSON.stringify({ validation,
+            state: await page.evaluate(() => ({ feedback, fence: document.documentElement.getAttribute('data-webbrain-page-revision') })) }));
+          assert.equal((await prepareModel(page, snapshot, target)).modelBindingValid, true);
+          assert.equal((await dispatchModel(page)).ready, true);
+          assert.equal(await page.evaluate(() => submissions), 1);
+        } finally { await context.close(); }
+      });
+
+      await t.test('tree and binding are captured in one task before a queued property change', async () => {
+        const { context, page } = await treeModelFixture(browser, build);
+        try {
+          await page.evaluate(() => {
+            const generate = window.__generateAccessibilityTree;
+            window.captureGeneratorCalls = 0;
+            window.__generateAccessibilityTree = (...args) => {
+              captureGeneratorCalls++;
+              const result = generate(...args);
+              queueMicrotask(() => { document.getElementById('field').value = 'Changed after the observed tree'; });
+              return result;
+            };
+          });
+          const snapshot = await captureTreeModel(page);
+          assert.equal(await page.evaluate(() => captureGeneratorCalls), 1, 'The production tree generator runs exactly once');
+          assert.match(snapshot.page.pageContent, /Prepared text/);
+          assert.equal(snapshot.page.pageContent.includes('Changed after the observed tree'), false);
+          assert.equal(await page.evaluate(() => document.getElementById('field').value), 'Changed after the observed tree');
+          const target = { tool: 'click_ax', ref_id: sendRefFromTree(snapshot) };
+          assert.equal((await validateModel(page, snapshot, target)).ready, false,
+            'An asynchronous gap between tree and footprint would incorrectly capture the changed value');
+          assert.equal((await prepareModel(page, snapshot, target)).modelBindingValid, false);
+          assert.equal((await dispatchModel(page)).ready, false);
+          assert.equal(await page.evaluate(() => submissions), 0);
+        } finally { await context.close(); }
+      });
+
+      await t.test('identical control replacement invalidates both its removed ref and its fresh ref against the old snapshot', async () => {
+        const { context, page } = await treeModelFixture(browser, build);
+        try {
+          const snapshot = await captureTreeModel(page);
+          const removedRef = sendRefFromTree(snapshot);
+          await page.evaluate(() => { const node = document.getElementById('send'); node.replaceWith(node.cloneNode(true)); });
+          const regenerated = await page.evaluate(() => __generateAccessibilityTree('visible', 15, 12000));
+          const newRef = sendRefFromTree({ page: regenerated });
+          assert.notEqual(newRef, removedRef);
+          assert.equal(await page.evaluate(ref => __wb_ax_lookup(ref), removedRef), null);
+          assert.equal(await page.evaluate(ref => __wb_ax_lookup(ref) === document.getElementById('send'), newRef), true);
+          for (const ref of [removedRef, newRef]) {
+            const target = { tool: 'click_ax', ref_id: ref };
+            assert.equal((await validateModel(page, snapshot, target)).ready, false);
+            assert.equal((await prepareModel(page, snapshot, target)).modelBindingValid, false);
+            assert.equal((await dispatchModel(page)).ready, false);
+          }
+          assert.equal(await page.evaluate(() => clicks), 0);
+          const fresh = await captureTreeModel(page);
+          assert.equal(sendRefFromTree(fresh), newRef);
+          const target = { tool: 'click_ax', ref_id: newRef };
+          assert.equal((await validateModel(page, fresh, target)).ready, true);
+          assert.equal((await prepareModel(page, fresh, target)).modelBindingValid, true);
+          assert.equal((await dispatchModel(page)).ready, true);
+          assert.equal(await page.evaluate(() => submissions), 1);
+        } finally { await context.close(); }
+      });
+
+      await t.test('metadata-only capture remains opaque when the real accessibility generator is installed', async () => {
+        const { context, page } = await treeModelFixture(browser, build);
+        try {
+          const withTree = await captureTreeModel(page);
+          const metadata = await captureModel(page);
+          assert.equal(Object.hasOwn(metadata, 'page'), false);
+          const target = { tool: 'click_ax', ref_id: sendRefFromTree(withTree) };
+          const validation = await validateModel(page, metadata, target);
+          assert.equal(validation.ready, true, JSON.stringify({ metadata, validation, target,
+            pageState: await page.evaluate(ref => ({ liveRef: __wb_ax_lookup(ref)?.id,
+              refKeys: Object.keys(window.__wbElementMap), feedback }), target.ref_id) }));
+          assert.equal((await prepareModel(page, metadata, target)).modelBindingValid, true);
+          assert.equal((await dispatchModel(page)).ready, true);
+          assert.equal(await page.evaluate(() => submissions), 1);
+        } finally { await context.close(); }
+      });
+
+      for (const [name, body] of [['plain chat form', plainChatHtml], ['small form-less toolbar', toolbarChatHtml]]) {
+        await t.test(`${name} binds the recipient outside its form or toolbar while allowing a local counter`, async () => {
+          const { context, page } = await treeModelFixture(browser, build, body);
+          try {
+            const snapshot = await captureTreeModel(page);
+            const target = { tool: 'click_ax', ref_id: sendRefFromTree(snapshot) };
+            assert.match(snapshot.page.pageContent, /Alice/);
+            await page.evaluate(() => { document.getElementById('in-form-counter').textContent = '201'; });
+            const validation = await validateModel(page, snapshot, target);
+            assert.equal(validation.ready, true, JSON.stringify({ validation,
+              state: await page.evaluate(() => ({ feedback, fence: document.documentElement.getAttribute('data-webbrain-page-revision') })) }));
+            assert.equal((await prepareModel(page, snapshot, target)).modelBindingValid, true);
+            assert.equal((await dispatchModel(page)).ready, true);
+            assert.equal(await page.evaluate(() => clicks), 1);
+          } finally { await context.close(); }
+        });
+        await t.test(`${name} cannot keep approval when its outside recipient heading changes`, async () => {
+          const { context, page } = await treeModelFixture(browser, build, body);
+          try {
+            const snapshot = await captureTreeModel(page);
+            const target = { tool: 'click_ax', ref_id: sendRefFromTree(snapshot) };
+            assert.equal((await validateModel(page, snapshot, target)).ready, true);
+            await page.evaluate(() => { document.getElementById('recipient').textContent = 'Bob'; });
+            await page.waitForTimeout(180);
+            assert.equal((await validateModel(page, snapshot, target)).ready, false);
+            assert.equal((await prepareModel(page, snapshot, target)).modelBindingValid, false);
+            assert.equal((await dispatchModel(page)).ready, false);
+            assert.equal(await page.evaluate(() => clicks), 0);
+          } finally { await context.close(); }
+        });
+      }
+    } finally { await browser.close(); }
+  });
+}
+
+for (const [build, engine] of [['chrome', chromium], ['firefox', firefox]]) {
+  test(`${build}: model snapshots bind intended controls before inference while harmless DOM updates progress`, { timeout: 60000 }, async t => {
+    const browser = await engine.launch({ headless: true });
+    try {
+      for (const [name, target, mutate, boundary, owner] of [
+        ['counter inside the same form', { tool: 'click_ax', ref_id: 'ref_send' }, () => { document.getElementById('in-form-counter').textContent = '201'; }],
+        ['unrelated sidebar heading', { tool: 'click_ax', ref_id: 'ref_send' }, () => { document.getElementById('sidebar-heading').textContent = 'Updated unrelated heading'; }],
+        ['independent absolute body child', { tool: 'click_ax', ref_id: 'ref_send' }, () => {
+          const decoration = document.createElement('div'); decoration.textContent = 'Updated unrelated content';
+          decoration.style.cssText = 'position:absolute;left:650px;top:450px;width:200px;height:30px'; document.body.append(decoration);
+        }],
+        ['exact selector click', { tool: 'click', selector: '#send' }, () => { document.getElementById('in-form-counter').textContent = '201'; }],
+        ['native submit control', { tool: 'click_ax', ref_id: 'ref_send' }, () => { document.getElementById('in-form-counter').textContent = '201'; }, 'native'],
+        ['dialog owner with a passive counter', { tool: 'click_ax', ref_id: 'ref_send' }, () => { document.getElementById('in-form-counter').textContent = '201'; }, 'message', 'dialog'],
+      ]) await t.test(`${name} validates the old model snapshot and performs the intended submit`, async () => {
+        const { context, page } = await modelFixture(browser, build, owner);
+        try {
+          const snapshot = await captureModel(page);
+          await page.evaluate(mutate);
+          await page.waitForTimeout(180);
+          assert.equal((await validateModel(page, snapshot, target)).ready, true);
+          const prepared = await prepareModel(page, snapshot, target);
+          assert.equal(prepared.ready, true);
+          assert.equal(prepared.modelBindingValid, true);
+          assert.equal((await dispatchModel(page, boundary)).ready, true);
+          assert.equal(await page.evaluate(() => submissions), 1);
+          const observations = await page.evaluate(() => feedback);
+          assert.ok(observations.some(event => event.kind === 'dom' && event.source === 'page'), 'Passive feedback remains observable');
+          if (boundary === 'native') assert.equal(observations.some(event => event.source === 'user'), false,
+            'The native marker still attributes the actual submit to the prepared operation');
+        } finally { await context.close(); }
+      });
+
+      await t.test('counter mutation queued between validation and prepare progresses without a new model snapshot', async () => {
+        const { context, page } = await modelFixture(browser, build);
+        try {
+          const snapshot = await captureModel(page);
+          assert.equal((await validateModel(page, snapshot)).ready, true);
+          const prepared = await page.evaluate(async snapshotToken => {
+            document.getElementById('in-form-counter').textContent = '201';
+            return deliver('page_monitor_prepare', { operationId: 'model-prepared', tool: 'click_ax', ref_id: 'ref_send',
+              allowPassiveRebase: true, expectedModelSnapshot: snapshotToken });
+          }, snapshot.snapshotToken);
+          assert.equal(prepared.modelBindingValid, true);
+          assert.equal((await dispatchModel(page)).ready, true);
+          assert.equal(await page.evaluate(() => submissions), 1);
+        } finally { await context.close(); }
+      });
+
+      for (const [name, mutate] of [
+        ['recipient heading outside the form in its owner region', () => { document.getElementById('recipient').textContent = 'Bob'; }],
+        ['field value', () => { document.getElementById('field').value = 'Changed private message'; }],
+        ['selected file with identical metadata', () => {
+          const files = new DataTransfer(); files.items.add(new File(['BBBB'], 'photo-private.png', { type: 'image/png', lastModified: 1 }));
+          document.getElementById('attachment').files = files.files;
+        }],
+        ['form action', () => { document.getElementById('form').action = '/other'; }],
+        ['external accessible label', () => { document.getElementById('send-label').textContent = 'Delete'; }],
+        ['target node identity', () => { const node = document.getElementById('send'); node.replaceWith(node.cloneNode(true)); }],
+        ['target geometry', () => { document.getElementById('send').style.transform = 'translateX(45px)'; }],
+        ['opaque occluding overlay', () => {
+          const rect = document.getElementById('send').getBoundingClientRect(); const overlay = document.createElement('div');
+          overlay.style.cssText = `position:fixed;z-index:99999;background:black;left:${rect.left}px;top:${rect.top}px;width:${rect.width}px;height:${rect.height}px`;
+          document.body.append(overlay);
+        }],
+      ]) await t.test(`${name} changed before prepare cannot be accepted by recapturing the current target`, async () => {
+        const { context, page } = await modelFixture(browser, build);
+        try {
+          const snapshot = await captureModel(page);
+          await page.evaluate(mutate);
+          await page.waitForTimeout(180);
+          assert.equal((await validateModel(page, snapshot)).ready, false);
+          const prepared = await prepareModel(page, snapshot);
+          assert.equal(prepared.modelBindingValid, false, 'Preparation must compare against the pre-inference snapshot');
+          assert.equal((await dispatchModel(page)).ready, false);
+          assert.equal(await page.evaluate(() => submissions), 0);
+        } finally { await context.close(); }
+      });
+
+      await t.test('target changed after successful model validation is checked again during prepare', async () => {
+        const { context, page } = await modelFixture(browser, build);
+        try {
+          const snapshot = await captureModel(page);
+          assert.equal((await validateModel(page, snapshot)).ready, true);
+          await page.evaluate(() => { document.getElementById('recipient').textContent = 'Bob'; });
+          await page.waitForTimeout(180);
+          assert.equal((await prepareModel(page, snapshot)).modelBindingValid, false);
+          assert.equal((await dispatchModel(page)).ready, false);
+          assert.equal(await page.evaluate(() => submissions), 0);
+        } finally { await context.close(); }
+      });
+
+      for (const [name, mutate] of [
+        ['human interaction', async page => page.locator('#human').click()],
+        ['same-document navigation', async page => page.evaluate(() => history.pushState({}, '', '/changed'))],
+        ['same-URL new document', async page => {
+          await page.reload(); await page.waitForFunction(() => window.__wbPageMonitor?.active);
+          await page.evaluate(() => { window.submissions = 0; document.getElementById('form').addEventListener('submit', event => { event.preventDefault(); submissions++; }); });
+        }],
+      ]) await t.test(`${name} invalidates a pre-inference model snapshot`, async () => {
+        const { context, page } = await modelFixture(browser, build);
+        try {
+          const snapshot = await captureModel(page);
+          await mutate(page);
+          await page.waitForTimeout(180);
+          assert.equal((await validateModel(page, snapshot)).ready, false);
+          assert.equal((await prepareModel(page, snapshot)).modelBindingValid, false);
+          assert.equal((await dispatchModel(page)).ready, false);
+          assert.equal(await page.evaluate(() => submissions), 0);
+        } finally { await context.close(); }
+      });
+
+      for (const [name, target] of [
+        ['coordinates', { tool: 'click', x: 185, y: 70 }],
+        ['ambiguous selector', { tool: 'click', selector: 'button' }],
+        ['unresolved selector', { tool: 'click', selector: '#missing' }],
+        ['unknown script target', { tool: 'execute_js' }],
+      ]) await t.test(`${name} cannot acquire approval to bypass passive feedback`, async () => {
+        const { context, page } = await modelFixture(browser, build);
+        try {
+          const snapshot = await captureModel(page);
+          await page.evaluate(() => { document.getElementById('in-form-counter').textContent = '201'; });
+          assert.equal((await validateModel(page, snapshot, target)).ready, false);
+          assert.equal((await prepareModel(page, snapshot, target)).modelBindingValid, false);
+          assert.equal((await dispatchModel(page)).ready, false);
+          assert.equal(await page.evaluate(() => submissions), 0);
+        } finally { await context.close(); }
+      });
+
+      await t.test('model tokens remain tied to their run and document rather than being reusable opaque approvals', async () => {
+        const { context, page } = await modelFixture(browser, build);
+        try {
+          const snapshot = await captureModel(page);
+          for (const params of [
+            { runToken: 'different-run', snapshotToken: snapshot.snapshotToken },
+            { snapshotToken: 'unknown-snapshot' },
+          ]) {
+            const result = await modelMessage(page, 'page_monitor_validate_model', { tool: 'click_ax', ref_id: 'ref_send', ...params });
+            assertOpaqueModelMetadata(result);
+            assert.equal(result.ready, false);
+          }
+        } finally { await context.close(); }
+      });
+    } finally { await browser.close(); }
+  });
 }
 
 for (const [build, engine] of [['chrome', chromium], ['firefox', firefox]]) {

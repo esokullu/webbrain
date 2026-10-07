@@ -310,3 +310,109 @@ for (const [build, Agent] of variants) {
     });
   }
 }
+
+// Real MV3 content messages and actual Agent handlers on an ordinary editor.
+// Only monitor registration/feedback delivery are locally owned by this fixture;
+// AX generation, private binding, preparation and click/text dispatch are real.
+for (const [tool, change] of [['click_ax', 'counter'], ['click_ax', 'recipient'], ['set_field', 'counter'],
+  ['type_text', 'counter'], ['press_keys', 'counter'], ['type_text', 'focus'], ['press_keys', 'focus'], ['click', 'stable']]) {
+  test(`installed Chrome MV3: generic ${tool} ${change} uses the old private model footprint`, async () => {
+    const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'webbrain-generic-mv3-'));
+    const extension = path.resolve('src/chrome');
+    let context;
+    try {
+      context = await chromium.launchPersistentContext(profile, { headless: true, channel: 'chromium',
+        args: [`--disable-extensions-except=${extension}`, `--load-extension=${extension}`] });
+      const worker = context.serviceWorkers()[0] || await context.waitForEvent('serviceworker');
+      const extensionId = new URL(worker.url()).host;
+      await context.route('https://ordinary-editor.test/**', route => route.fulfill({ contentType: 'text/html', body:
+        `<!doctype html><style>body{margin:0}section{position:absolute;left:20px;top:20px;width:400px;height:220px}
+        #counter{position:absolute;left:260px;top:100px}aside{position:absolute;left:600px;top:100px}</style>
+        <section role="region" aria-label="Editor"><h2 id="recipient">Alice</h2><form>
+        <label for="caption">Caption</label><input id="caption" value="Original">
+        <button id="preview" type="button">Preview</button><span id="counter">100 views</span></form></section>
+        <aside><h2 id="sidebar">Trending 20</h2><button id="other-focus">Other control</button></aside>
+        <div id="plain" tabindex="0" style="position:absolute;left:20px;top:300px">Plain listener</div>
+        <script>window.previewCount=0;window.plainCount=0;window.keyCount=0;
+        document.getElementById('preview').onclick=()=>previewCount++;
+        document.getElementById('plain').onclick=()=>plainCount++;
+        document.getElementById('caption').onkeydown=()=>keyCount++;</script>` }));
+      const editor = await context.newPage();
+      await editor.goto('https://ordinary-editor.test/editor');
+      const ui = await context.newPage();
+      await ui.goto(`chrome-extension://${extensionId}/src/ui/settings.html`);
+      const capture = await ui.evaluate(async ({ tool }) => {
+        const { Agent } = await import(chrome.runtime.getURL('src/agent/agent.js'));
+        const provider = { name: 'generic MV3 capture', model: 'test', supportsVision: false };
+        const agent = new Agent({ getActive: () => provider, getProvider: () => provider, getVisionProvider: async () => null });
+        const tab = (await chrome.tabs.query({ url: 'https://ordinary-editor.test/editor' }))[0];
+        agent.isRunning = () => true;
+        agent._checkAbort = () => false;
+        agent._uncertainTextMutationBlock = async () => null;
+        agent._richTextToolbarToolBlock = async () => null;
+        agent._finalizeToolResultOnce = async (_tab, _name, _args, result) => result;
+        agent._isPdfTab = async () => false;
+        await agent._beginPageFeedbackRun(tab.id, 'fixture');
+        const run = agent._pageFeedbackRuns.get(tab.id);
+        await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: runToken => {
+          const send = chrome.runtime.sendMessage.bind(chrome.runtime);
+          chrome.runtime.sendMessage = message => {
+            if (message.action === 'get_page_monitor_state') return Promise.resolve({ active: true, runToken, documentToken: message.documentToken });
+            if (message.action === 'page_feedback') return Promise.resolve({ accepted: true });
+            return send(message);
+          };
+        }, args: [run.token] });
+        await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['src/content/page-monitor.js',
+          'src/content/accessibility-tree.js', 'src/content/rich-text-toolbar-heuristic.js', 'src/content/content.js'] });
+        const registration = await chrome.tabs.sendMessage(tab.id, { target: 'content', action: 'page_monitor_state', active: true }, { frameId: 0 });
+        const document = (await chrome.webNavigation.getAllFrames({ tabId: tab.id })).find(frame => frame.frameId === 0);
+        agent.pageMonitorState({ tab: { id: tab.id }, frameId: 0, documentId: document.documentId, url: tab.url }, registration.documentToken);
+        if (['type_text', 'press_keys'].includes(tool)) await chrome.scripting.executeScript({ target: { tabId: tab.id },
+          func: () => document.getElementById('caption').focus() });
+        const messages = [{ role: 'user', content: 'Preview the current caption for Alice.' }];
+        await agent._capturePageFeedbackModelState(tab.id, messages);
+        const content = run.modelState.page?.pageContent || '';
+        const line = content.split('\n').find(line => tool === 'click_ax' ? /button.*Preview/.test(line) : /textbox.*Caption/.test(line));
+        const refId = /\[(ref_[A-Za-z0-9_-]+)\]/.exec(line || '')?.[1];
+        window.genericAgent = agent; window.genericTab = tab.id; window.genericRef = refId;
+        return { captured: !!run.modelState.actionBinding, content, refId,
+          observationCount: messages.filter(message => message.webbrainAppOwnedKind === 'page_action_observation').length,
+          privateTokenInMessages: JSON.stringify(messages).includes(run.modelState.actionBinding?.snapshotToken || 'missing-token') };
+      }, { tool });
+      assert.equal(capture.captured, true, JSON.stringify(capture));
+      if (tool !== 'click') assert.ok(capture.refId, capture.content);
+      assert.equal(capture.observationCount, 1);
+      assert.equal(capture.privateTokenInMessages, false);
+      if (change !== 'stable') await editor.evaluate(change => {
+        document.getElementById('counter').textContent = '101 views';
+        document.getElementById('sidebar').textContent = 'Trending 21';
+        if (change === 'recipient') document.getElementById('recipient').textContent = 'Bob';
+        if (change === 'focus') document.getElementById('other-focus').focus();
+      }, change);
+      const result = await ui.evaluate(async ({ tool, change }) => {
+        if (change !== 'stable') genericAgent._queuePageFeedback(genericTab, { kind: 'dom', source: 'page', frameId: 0, target: 'span#counter' });
+        const args = tool === 'type_text' ? { text: 'Updated caption' } : tool === 'press_keys' ? { key: 'ArrowRight', repeat: 2 }
+          : tool === 'click' ? { selector: '#plain' } : { ref_id: genericRef, ...(tool === 'set_field' ? { text: 'Updated caption' } : {}) };
+        return genericAgent.executeTool(genericTab, tool, { ...args, expectedModelSnapshot: 'model cannot supply this' });
+      }, { tool, change });
+      const effects = await editor.evaluate(() => ({ previews: previewCount, plain: plainCount, keys: keyCount,
+        value: document.getElementById('caption').value }));
+      if (['recipient', 'focus'].includes(change)) {
+        assert.equal(result.noDispatch, true, JSON.stringify(result));
+        assert.deepEqual(effects, { previews: 0, plain: 0, keys: 0, value: 'Original' });
+      } else {
+        assert.equal(result.success, true, JSON.stringify(result));
+        assert.equal(effects.previews, tool === 'click_ax' ? 1 : 0);
+        assert.equal(effects.plain, tool === 'click' ? 1 : 0);
+        if (tool === 'press_keys') assert.equal(effects.keys, 2);
+        if (tool === 'set_field') assert.equal(effects.value, 'Updated caption');
+        else if (tool === 'type_text') assert.ok(effects.value.includes('Updated caption'));
+        else assert.equal(effects.value, 'Original');
+      }
+      await ui.evaluate(() => genericAgent._finishPageFeedbackRun(genericTab));
+    } finally {
+      await context?.close();
+      fs.rmSync(profile, { recursive: true, force: true });
+    }
+  });
+}

@@ -89,7 +89,11 @@ Steer or grant authorization. Enter and Alt+Enter retain their existing behavior
   network requests, request replay, coordinates and arbitrary scripts retain
   strict invalidation. Model state binds the URL, document identity and steering
   revision before inference; human activity and unknown attribution still require
-  a new decision.
+  a new decision. Explicit downloads normalize `url` and `urls` with the same
+  precedence as their handler; both browser schemas also accept the singular
+  URL and filename. Fresh PDF/capability reads and authorized generation,
+  scheduling and window operations retain their own validation instead of
+  being discarded for unrelated DOM updates.
 - Focused social-media downloads bind the selected document, node, container and
   exact media asset before inference. The downloader validates that identity
   before fetching and again before saving. A replaced asset fails without a
@@ -105,13 +109,51 @@ Steer or grant authorization. Enter and Alt+Enter retain their existing behavior
   browser omits document IDs, an active content-monitor acknowledgement must
   prove the same run/document token; a failed registration cannot verify media.
   Bulk and scrolling downloads keep their existing conservative behavior.
-- An unchanged AX target can opt into passive revalidation only after a fresh
-  target/context comparison. The content monitor then checks immutable node,
-  recipient/form/control/file state, labels, geometry and intervention identity
-  at preparation and dispatch. Guard tokens already issued retain strict fences.
-- A single explicit `done` success candidate survives passive DOM updates before
-  and after its tool batch. The completion verifier still checks fresh evidence;
-  the summary does not establish success.
+- Exact main-frame AX/selector actions can opt into passive revalidation on any
+  HTTP(S) site. Immediately before each decision, the content monitor generates
+  the current visible AX observation and captures private action footprints in
+  the same synchronous task. The observation enters the model request; opaque
+  tokens alone cross the monitor boundary. No private control values or files
+  are added to feedback, traces or model arguments.
+  The footprint binds the actual target and semantic ancestor identities,
+  associated labels, recipient/entity headings in its owner, complete form and
+  control/file state, exact target geometry/hit, document/base URL, viewport and
+  intervention identity. Unrelated sibling text, counters, ancestor child counts
+  and headings in another sidebar/entity do not invalidate an unchanged action.
+  The old footprint is validated after the model response, during preparation,
+  and again at local/native dispatch, including changes during each round trip.
+  Focus-dependent typing and keyboard calls bind the exact focused element
+  captured before inference. Repeated keys are attributed only within their
+  synchronous dispatch; a page script moving focus cannot reuse a native typing
+  guard for the next key. Preflight messages that sent no input preserve the
+  original snapshot through native preparation. Submissions retain the existing
+  authorization, form and recipient gates.
+  Snapshots are bounded, expire after two minutes and are discarded with the run;
+  unavailable or ambiguous targets retain conservative validation. Coordinates,
+  scripts, child-frame actions, human activity, navigation and unknown feedback
+  retain strict fences. Without a private snapshot, legacy AX comparisons and
+  native-submit restrictions remain in force.
+  A target outside the snapshot's coverage returns `action_binding_unavailable`
+  instead of claiming that the page changed. The old call stays undispatched.
+  The next normal decision prioritizes that target and receives a fresh bounded
+  AX observation of its owner together with the new private footprint. Target
+  selectors and labels retain their exact strings throughout validation and
+  preparation; truncation cannot certify a different target.
+- Protected conversation attachments use the existing submission and recipient
+  authorization. One explicit source is bound to one exact main-frame file input
+  and its local composer. Hidden inputs retain structural identity, input
+  metadata, file state and recipient context; visibility alone does not make
+  an input unverifiable. The final recipient/node check and native file-list
+  assignment run in the same content task. Chrome reads local bytes through a
+  detached input in an isolated realm; protected uploads retain the 25MB cap.
+  A changed source, input, owner, document or recipient blocks attachment.
+  Communication loss after dispatch and a recipient change during an input
+  handler produce an uncertain result without an automatic retry. Attaching a
+  file does not establish that the website sent or received it.
+- A single explicit `done` candidate survives passive DOM updates before and
+  after its tool batch. Success still requires the completion verifier's fresh
+  evidence; partial/failure outcomes remain incomplete. The summary does not
+  establish success.
 - Five consecutive passive invalidations without dispatch/progress end the run
   with `page_unstable` and an explicit incomplete result. A recovery nudge is sent
   after two. Successful reads/actions reset this budget; user intervention starts
@@ -122,6 +164,10 @@ Steer or grant authorization. Enter and Alt+Enter retain their existing behavior
   refresh time, stage, tool names, retention policies and retry streak without
   action arguments. `media_binding_capture` reports sanitized capture status,
   target-specific reason codes and bounded counts without URLs or page labels.
+  `page_action_binding_capture` reports capture availability, bounded target
+  count, focus eligibility and local capture time without tokens or field data.
+  No warmup delay, heuristic DOM-location suppression or extra model call is
+  required to distinguish irrelevant updates from changed action context.
 
 ## Workflow and notifications
 

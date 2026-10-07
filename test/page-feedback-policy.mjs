@@ -81,3 +81,77 @@ for (const build of ['chrome', 'firefox']) {
     });
   }
 }
+
+for (const build of ['chrome', 'firefox']) {
+  const { canRetainPageFeedbackCalls, pageFeedbackCallPolicy } = await import(`../src/${build}/src/agent/page-feedback-policy.js`);
+  const state = { url: 'https://ordinary.test/editor', page,
+    actionBinding: { snapshotToken: 'private-snapshot', runToken: 'private-run', documentToken: 'private-document' } };
+  for (const name of ['download_files', 'download_file']) {
+    for (const args of [{ url: 'https://images.test/photo.jpg' },
+      { url: 'https://images.test/photo.jpg', filename: 'photo.jpg', urls: [] },
+      { url: 'https://images.test/photo.jpg', urls: 'legacy malformed alias' },
+      { url: 'javascript:wrong-alias', urls: ['https://images.test/intended.jpg'] }]) {
+      test(`${build}: passive download ${name} uses handler URL normalization ${JSON.stringify(args)}`, () => {
+        assert.equal(pageFeedbackCallPolicy(name, args, state, page).kind, 'independent');
+        assert.equal(canRetainPageFeedbackCalls([call(name, args)], state, page, passive, { pending: true }), true);
+      });
+    }
+    for (const args of [{}, { url: 'javascript:alert(1)' }, { url: 'file:///tmp/private' },
+      { url: 'https://images.test/photo.jpg', urls: ['javascript:alert(1)'] },
+      { urls: ['https://images.test/photo.jpg', 'file:///tmp/private'] }, { urls: [{ url: 'https://images.test/photo.jpg' }] }]) {
+      test(`${build}: passive download ${name} rejects unbound/invalid requests ${JSON.stringify(args)}`, () => {
+        assert.equal(canRetainPageFeedbackCalls([call(name, args)], state, page, passive), false);
+      });
+    }
+  }
+  test(`${build}: a private snapshot makes a submit/selector only a local validation candidate`, () => {
+    const changed = { ...page, truncated: true, pageContent: page.pageContent.replace('Current photo', 'Other photo') };
+    assert.equal(pageFeedbackCallPolicy('click_ax', { ref_id: 'ref_7' }, state, changed).kind, 'bound_target');
+    assert.equal(pageFeedbackCallPolicy('click', { selector: '#save' }, state, changed).kind, 'bound_target');
+    assert.equal(canRetainPageFeedbackCalls([call('click', { selector: '#save' })], state, changed,
+      [{ kind: 'pointer', source: 'user', frameId: 0 }]), false);
+  });
+  for (const [name, args] of [['click', {}], ['click', { selector: '#save', x: 1, y: 1 }],
+    ['click', { selector: '#save', allFrames: true }], ['click', { selector: '#save', frameId: 1 }],
+    ['click', { selector: '#save', urlFilter: 'other.test' }], ['execute_js', { code: 'save()' }],
+    ['iframe_click', { selector: '#save' }]]) {
+    test(`${build}: private action snapshots do not certify ${name} ${JSON.stringify(args)}`, () => {
+      assert.notEqual(pageFeedbackCallPolicy(name, args, state, page).kind, 'bound_target');
+    });
+  }
+  test(`${build}: model-supplied snapshot fields cannot enable local binding`, () => {
+    assert.equal(pageFeedbackCallPolicy('click', { selector: '#save', expectedModelSnapshot: 'invented',
+      actionBinding: state.actionBinding }, { page }, page).kind, 'unsafe');
+  });
+}
+
+for (const build of ['chrome', 'firefox']) {
+  const { canRetainPageFeedbackCalls, pageFeedbackCallPolicy } = await import(`../src/${build}/src/agent/page-feedback-policy.js`);
+  const state = { url: 'https://ordinary.test/editor', page };
+  for (const [name, args] of [['read_pdf', {}], ['get_captcha_capabilities', {}], ['find_text', { text: 'literal match' }],
+    ['generate_image', { prompt: 'An authorized illustration' }], ['schedule_task', { title: 'Authorized reminder', prompt: 'Inspect the draft' }],
+    ['schedule_resume', { after_seconds: 60 }], ['resize_window', { width: 1280, height: 720 }]]) {
+    test(`${build}: self-validating ${name} does not starve under unrelated DOM feedback`, () => {
+      assert.notEqual(pageFeedbackCallPolicy(name, args, state, page).kind, 'unsafe');
+      assert.equal(canRetainPageFeedbackCalls([call(name, args)], state, page, passive, { pending: true }), true);
+      for (const event of [{ kind: 'pointer', source: 'user', frameId: 0 }, { kind: 'navigation', source: 'page', frameId: 0 },
+        { kind: 'dom', source: 'unknown', frameId: 0 }]) {
+        assert.equal(canRetainPageFeedbackCalls([call(name, args)], state, page, [event]), false);
+      }
+    });
+  }
+  for (const outcome of ['partial', 'failure']) {
+    test(`${build}: explicit ${outcome} completion survives counters without becoming success`, () => {
+      const candidate = call('done', { summary: 'The task remains incomplete.', outcome });
+      assert.equal(canRetainPageFeedbackCalls([candidate], state, { success: false }, passive, { pending: true }), true);
+      assert.equal(canRetainPageFeedbackCalls([candidate, call('click', { selector: '#save' })], state, page, passive), false);
+      assert.equal(canRetainPageFeedbackCalls([candidate], state, page, [{ kind: 'pointer', source: 'user', frameId: 0 }]), false);
+    });
+  }
+  test(`${build}: selectorless input needs a captured focus before becoming a binding candidate`, () => {
+    for (const name of ['type_text', 'press_keys']) {
+      assert.equal(pageFeedbackCallPolicy(name, {}, state, page).kind, 'unsafe');
+      assert.equal(pageFeedbackCallPolicy(name, {}, { ...state, actionBinding: { snapshotToken: 'private', focusedTargetAvailable: true } }, page).kind, 'bound_target');
+    }
+  });
+}

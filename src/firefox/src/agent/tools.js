@@ -914,13 +914,14 @@ export const AGENT_TOOLS = [
     type: 'function',
     function: {
       name: 'download_files',
-      description: 'Download multiple files in parallel (max 3 concurrent, max 50 total). Returns per-URL results with the downloadId, completion state, and a browser-reported filename for immediate verification. The downloadId (not the path/filename) is auto-recorded to your scratchpad. Do not copy downloaded filenames or paths into scratchpad; use list_downloads only when you need to verify details.',
+      description: 'Download one or more files. Pass a single url string or an array of urls (max 3 concurrent, max 50 total). Returns per-URL results with the downloadId, completion state, and a browser-reported filename for immediate verification. The downloadId (not the path/filename) is auto-recorded to your scratchpad. To attach a downloaded file to a form later, pass its downloadId to upload_file — you do NOT need to remember the path. Do not copy downloaded filenames or paths into scratchpad; use list_downloads only when you need to verify details.',
       parameters: {
         type: 'object',
         properties: {
-          urls: { type: 'array', items: { type: 'string' }, description: 'Array of URLs' },
+          url: { type: 'string', description: 'Single file URL to download' },
+          urls: { type: 'array', items: { type: 'string' }, description: 'Array of file URLs to download' },
+          filename: { type: 'string', description: 'Name to save as (only for single url)' },
         },
-        required: ['urls'],
       },
     },
   },

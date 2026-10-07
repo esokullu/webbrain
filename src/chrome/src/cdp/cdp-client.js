@@ -3028,7 +3028,7 @@ export class CDPClient {
    * zones cannot treat the probe as a real user upload. Returns
    * {exists, readable, size}, or null if the probe could not run.
    */
-  async probeLocalFile(tabId, filePath) {
+  async probeLocalFile(tabId, filePath, options = {}) {
     let objectId = null;
     try {
       await this.sendCommand(tabId, 'DOM.enable');
@@ -3052,6 +3052,10 @@ export class CDPClient {
         contextId = null;
       }
 
+      // A protected conversation's file bytes must come from a detached
+      // native input in an isolated realm. Do not fall back to page globals.
+      if (options.includeData === true && !contextId) return null;
+
       const created = await this.sendCommand(tabId, 'Runtime.evaluate', {
         expression: `(() => {
           const i = document.createElement('input');
@@ -3065,15 +3069,32 @@ export class CDPClient {
       if (!objectId) return null;
       await this.sendCommand(tabId, 'DOM.setFileInputFiles', { objectId, files: [filePath] });
       const res = await this.sendCommand(tabId, 'Runtime.callFunctionOn', {
-        functionDeclaration: `async function () {
+        functionDeclaration: `async function (includeData, maxBytes) {
           const f = this.files && this.files[0];
           if (!f) return { exists: false, readable: null, size: 0 };
           let readable = null;
           try { await f.slice(0, 1).arrayBuffer(); readable = true; }
           catch (e) { readable = false; }
-          return { exists: true, readable, size: f.size };
+          if (!includeData || !readable) return { exists: true, readable, size: f.size };
+          if (f.size > maxBytes) return { exists: true, readable: false, size: f.size,
+            error: 'Recipient-bound attachment exceeds the 25MB limit.' };
+          try {
+            const bytes = new Uint8Array(await f.arrayBuffer());
+            if (bytes.length > maxBytes) return { exists: true, readable: false, size: bytes.length,
+              error: 'Recipient-bound attachment exceeds the 25MB limit.' };
+            let binary = '';
+            for (let i = 0; i < bytes.length; i += 0x8000) {
+              binary += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+            }
+            return { exists: true, readable: true, size: bytes.length,
+              base64: btoa(binary), filename: f.name, mimeType: f.type };
+          } catch { return { exists: true, readable: false, size: f.size }; }
         }`,
         objectId,
+        arguments: [
+          { value: options.includeData === true },
+          { value: Math.min(25 * 1024 * 1024, Math.max(0, Number(options.maxBytes) || 25 * 1024 * 1024)) },
+        ],
         returnByValue: true,
         awaitPromise: true,
       });

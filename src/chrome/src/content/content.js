@@ -2837,14 +2837,16 @@
       // the same event object on document again would fire those listeners
       // twice per key (double-advancing ARIA listboxes, menus, etc.).
       if (actionDeadlineExpired()) return deadlineFailure();
-      window.__wbPageMonitor?.beforeLocalDispatch();
-      dispatched = true;
-      target.dispatchEvent(down);
-      // A keydown listener may run across the deadline. Always release the
-      // synthetic key before returning the partial-dispatch timeout so pages
-      // that track held keys are not left in a stuck state.
-      const expiredAfterKeydown = actionDeadlineExpired();
-      target.dispatchEvent(up);
+      const expiredAfterKeydown = withLocalPageDispatch(() => {
+        dispatched = true;
+        target.dispatchEvent(down);
+        // A keydown listener may run across the deadline. Always release the
+        // synthetic key before returning the partial-dispatch timeout so pages
+        // that track held keys are not left in a stuck state.
+        const expired = actionDeadlineExpired();
+        target.dispatchEvent(up);
+        return expired;
+      });
       if (expiredAfterKeydown) return deadlineFailure();
       if (key === 'Tab' && !moveTabFocus()) return deadlineFailure();
     }
@@ -4980,6 +4982,62 @@
     return _messageRecipientDispatchControl(expected) === _messageRecipientDispatchControl(actual);
   }
 
+  let _messageRecipientHumanRevision = 0;
+  for (const type of ['pointerdown', 'mousedown', 'keydown', 'input', 'change']) {
+    document.addEventListener(type, event => { if (event.isTrusted) _messageRecipientHumanRevision++; }, true);
+  }
+
+  function _messageRecipientUploadTarget(selector) {
+    if (window !== window.top || typeof selector !== 'string' || !selector.trim()) return null;
+    try {
+      const matches = [];
+      const visit = root => {
+        matches.push(...root.querySelectorAll(selector));
+        for (const el of root.querySelectorAll('*')) if (el.shadowRoot) visit(el.shadowRoot);
+      };
+      visit(document);
+      const target = matches.length === 1 ? matches[0] : null;
+      return target instanceof HTMLInputElement && target.type === 'file'
+        && !target.disabled && !target.matches(':disabled')
+        && target.getAttribute('aria-disabled') !== 'true' && target.isConnected ? target : null;
+    } catch { return null; }
+  }
+
+  function _messageRecipientUploadOwner(target, composer) {
+    if (!target || !composer || target.ownerDocument !== document || composer.ownerDocument !== document) return null;
+    const composerForm = _composedClosestElement(composer, 'form');
+    if (target.form || target.hasAttribute('form')) {
+      const modal = _findTopmostBlockingModal();
+      return target.form && target.form === composerForm
+        && (!modal || (_isComposedAncestor(modal, target) && _isComposedAncestor(modal, composer)))
+        ? target.form : null;
+    }
+    // A hidden input can be a sibling of the editor. Require a local shared
+    // compose container rather than treating the whole page as its owner.
+    for (let owner = _composedParent(target), depth = 0; owner && depth < 8;
+      owner = _composedParent(owner), depth++) {
+      if (owner === document.body || owner === document.documentElement || owner === document) return null;
+      if (owner.nodeType !== 1 || /^(?:MAIN|HTML|BODY)$/.test(owner.tagName)
+          || owner.getAttribute('role') === 'main') continue;
+      if (_isComposedAncestor(owner, composer)) {
+        const modal = _findTopmostBlockingModal();
+        return !modal || _isComposedAncestor(modal, owner) ? owner : null;
+      }
+    }
+    return null;
+  }
+
+  function _messageRecipientUploadInputSignature(target) {
+    return JSON.stringify(['type','accept','multiple','name','id','form','capture','webkitdirectory']
+      .map(name => target?.getAttribute?.(name))
+      .concat([!!target?.disabled, target?.getAttribute?.('aria-disabled'),
+        target?.form?.action || '', target?.form?.method || '']));
+  }
+
+  function _messageRecipientUploadFilesSignature(target) {
+    return JSON.stringify(Array.from(target?.files || []).map(file => [file.name, file.size, file.type, file.lastModified]));
+  }
+
   function _rememberMessageRecipientDispatchBinding(composer, identities, dispatch = {}) {
     const tool = String(dispatch.tool || '');
     const actionTarget = dispatch.actionTarget || null;
@@ -5012,6 +5070,14 @@
       composerSubject: String(dispatch.composerSubject || ''),
       composerSubjectAvailable: dispatch.composerSubjectAvailable === true,
       pageUrl: location.href,
+      documentToken: _axDocumentToken(),
+      messageAttachment: dispatch.messageAttachment === true,
+      uploadSourceKey: String(dispatch.uploadSourceKey || ''),
+      uploadOwner: dispatch.messageAttachment === true ? _messageRecipientUploadOwner(actionTarget, composer) : null,
+      uploadInputSignature: dispatch.messageAttachment === true ? _messageRecipientUploadInputSignature(actionTarget) : '',
+      uploadFilesSignature: dispatch.messageAttachment === true ? _messageRecipientUploadFilesSignature(actionTarget) : '',
+      uploadFiles: dispatch.messageAttachment === true ? Array.from(actionTarget.files || []) : [],
+      humanRevision: _messageRecipientHumanRevision,
       timer: null,
     };
     _messageRecipientDispatchBindings.set(token, record);
@@ -5028,6 +5094,10 @@
     const expected = token ? _messageRecipientDispatchBindings.get(token) : null;
     if (token) _messageRecipientDispatchBindings.delete(token);
     if (expected?.timer) clearTimeout(expected.timer);
+    return _validateMessageRecipientDispatchBinding(expected, params, actualTarget);
+  }
+
+  function _validateMessageRecipientDispatchBinding(expected, params = {}, actualTarget = null, afterAttachment = false) {
     let pointTarget = null;
     const pointX = Number(params.dispatchPoint?.x);
     const pointY = Number(params.dispatchPoint?.y);
@@ -5037,6 +5107,16 @@
     const dispatchedTarget = actualTarget || pointTarget;
     if (!expected || !expected.composer?.isConnected || !expected.actionTarget?.isConnected
       || expected.pageUrl !== location.href
+      || expected.documentToken !== _axDocumentToken()
+      || (expected.messageAttachment && (window !== window.top
+        || expected.humanRevision !== _messageRecipientHumanRevision
+        || dispatchedTarget !== expected.actionTarget
+        || params.uploadSourceKey !== expected.uploadSourceKey
+        || _messageRecipientUploadOwner(expected.actionTarget, expected.composer) !== expected.uploadOwner
+        || _messageRecipientUploadInputSignature(expected.actionTarget) !== expected.uploadInputSignature
+        || (!afterAttachment && (_messageRecipientUploadFilesSignature(expected.actionTarget) !== expected.uploadFilesSignature
+          || Array.from(expected.actionTarget.files || []).some((file, index) => file !== expected.uploadFiles[index])
+          || expected.actionTarget.files.length !== expected.uploadFiles.length))))
       || (dispatchedTarget && !_messageRecipientDispatchTargetsMatch(expected.actionTarget, dispatchedTarget))) {
       return {
         success: false,
@@ -5056,6 +5136,7 @@
       adapterName: expected.adapterName,
       expectedRecipients: expected.expectedRecipients,
       supportsRecipientSets: expected.supportsRecipientSets,
+      uploadSourceKey: expected.uploadSourceKey,
     });
     if (live?.dispatchTargetChanged === true) {
       return {
@@ -5074,7 +5155,7 @@
     );
     if (live?.success !== true || live?.conclusive !== true || live?.messageSend !== true
       || liveIdentityKey !== expected.identityKey
-      || !expected.messageBody
+      || (expected.messageAttachment ? live?.messageAttachment !== true : !expected.messageBody)
       || live?.messageBody !== expected.messageBody
       || (expected.existingMessageIds
         && JSON.stringify(live?.existingMessageIds) !== JSON.stringify(expected.existingMessageIds))
@@ -5093,6 +5174,80 @@
       };
     }
     return { success: true, matched: true };
+  }
+
+  function _attachMessageRecipientBoundUpload(params = {}, deadlineExpired = () => false) {
+    const fail = (error, extra = {}) => ({ success: false, dispatched: false, noDispatch: true,
+      messageRecipientGuard: true, error, ...extra });
+    const target = _messageRecipientUploadTarget(params.selector);
+    const expected = _messageRecipientDispatchBindings.get(String(params.messageRecipientDispatchBinding?.token || ''));
+    if (!target || !expected || expected.tool !== 'upload_file' || expected.actionTarget !== target) {
+      return fail('Attachment blocked because the exact verified file input is unavailable.',
+        { reasonCode: 'recipient_dispatch_binding_stale' });
+    }
+    if (deadlineExpired()) return fail('Upload action deadline expired before attachment.', { deadlineExpired: true });
+    const base64 = params.base64;
+    // Match the existing Firefox upload cap and reject oversized data before
+    // allocation or file assignment. These bytes come from the private source
+    // resolver, never a model argument or page attribute.
+    if (typeof base64 !== 'string' || base64.length > Math.ceil(25 * 1024 * 1024 / 3) * 4) {
+      return fail('Recipient-bound attachment exceeds the 25MB limit or has no file data.');
+    }
+    let file, transfer;
+    try {
+      const binary = atob(base64);
+      if (binary.length > 25 * 1024 * 1024) return fail('Recipient-bound attachment exceeds the 25MB limit.');
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+      file = new File([bytes], String(params.filename || 'attachment'),
+        { type: String(params.mimeType || 'application/octet-stream') });
+      transfer = new DataTransfer();
+      transfer.items.add(file);
+    } catch { return fail('Recipient-bound attachment data could not be decoded.'); }
+    const pageGuard = params.pageFeedbackGuard;
+    const monitor = window.__wbPageMonitor;
+    if (pageGuard?.operationId) {
+      if (typeof monitor?.activatePreparedDispatch !== 'function' || typeof monitor?.withPreparedDispatch !== 'function') {
+        return fail('The page monitor is unavailable before attachment.', { pageFeedbackPending: true });
+      }
+      monitor.activatePreparedDispatch({ operationId: pageGuard.operationId, kind: 'input', element: target });
+    }
+    if (deadlineExpired()) return fail('Upload action deadline expired before attachment.', { deadlineExpired: true });
+    const guard = _consumeMessageRecipientDispatchBinding(params, target);
+    if (!guard.success) return guard;
+    let dispatched = false;
+    try {
+      const attach = () => {
+        monitor?.beforeLocalDispatch?.({ kind: 'input', target });
+        const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'files')?.set;
+        if (!setter) throw new Error('Native file-input assignment is unavailable.');
+        setter.call(target, transfer.files);
+        const assignedFiles = [...target.files || []];
+        dispatched = true;
+        target.dispatchEvent(new Event('input', { bubbles: true }));
+        // An input handler may synchronously switch a conversation. Never
+        // follow it with a change event against a different recipient.
+        const stillBound = _validateMessageRecipientDispatchBinding(expected, params, target, true);
+        if (!stillBound.success) return { ...stillBound, dispatched: true, noDispatch: false,
+          outcomeUnknown: true, retryable: false };
+        const currentFiles = [...target.files || []];
+        if (assignedFiles.length !== currentFiles.length || assignedFiles.some((file, index) => file !== currentFiles[index])) {
+          return { ...fail('The page changed the attached file during its input handler. Inspect the conversation before retrying.',
+            { reasonCode: 'recipient_upload_file_changed_during_dispatch' }), dispatched: true, noDispatch: false,
+            outcomeUnknown: true, retryable: false };
+        }
+        target.dispatchEvent(new Event('change', { bubbles: true }));
+        return { success: true, dispatched: true, file: file.name,
+          attached: { name: file.name, size: file.size }, verified: false,
+          attachmentState: target.isConnected && target.files?.length ? 'input_attached' : 'page_consumed',
+          remoteStateVerified: false };
+      };
+      return pageGuard?.operationId ? monitor.withPreparedDispatch(pageGuard.operationId, attach) : attach();
+    } catch (error) {
+      if (error?.code === 'page_feedback_pending') throw error;
+      return { success: false, dispatched, noDispatch: !dispatched, outcomeUnknown: dispatched,
+        retryable: !dispatched, messageRecipientGuard: true, error: error?.message || String(error) };
+    }
   }
 
   // Above this length the per-candidate rescan below stops being worth its
@@ -5729,7 +5884,10 @@
       let target = null;
       let dispatchTarget = null;
       let targetResolved = observationOnly || tool === 'press_keys';
-      if (tool === 'click_ax' || tool === 'set_field') {
+      if (tool === 'upload_file') {
+        target = _messageRecipientUploadTarget(args.selector);
+        targetResolved = !!target;
+      } else if (tool === 'click_ax' || tool === 'set_field') {
         const refId = String(args.ref_id || '');
         if (refId && typeof window.__wb_ax_lookup === 'function') target = window.__wb_ax_lookup(refId);
         targetResolved = !!target;
@@ -6239,7 +6397,23 @@
           nonMessagingTarget: true, reasonCode: 'non_messaging_target', identityCandidates: [],
         };
       }
-      if (observationOnly) {
+      if (tool === 'upload_file') {
+        composer = layoutComposer;
+        const uploadOwner = _messageRecipientUploadOwner(target, composer);
+        const linkedInPrivateComposer = params.adapterName !== 'linkedin'
+          || (/^\/messaging(?:\/|$)/.test(location.pathname)
+            || !!_composedClosestElement(uploadOwner, '.msg-form,.msg-overlay-conversation-bubble,.msg-convo-wrapper'));
+        const linkedInPublicComposer = params.adapterName === 'linkedin'
+          && (!!_composedClosestElement(composer, '.share-box')
+            || !!uploadOwner?.querySelector?.('[data-control-name="share.post"]'));
+        if (!targetResolved || !composer || !String(params.uploadSourceKey || '')
+            || !uploadOwner || !linkedInPrivateComposer || linkedInPublicComposer) {
+          return { success: true, messageSend: null, conclusive: false,
+            composerAvailable: !!composer, reasonCode: 'recipient_upload_target_unverifiable', identityCandidates: [] };
+        }
+        dispatchTarget = target;
+        messageSend = true;
+      } else if (observationOnly) {
         composer = layoutComposer;
       } else if (tool === 'press_keys') {
         if (!editable(active) || !visible(active) || !layoutComposer) {
@@ -6906,7 +7080,7 @@
       );
       const messageRecipientDispatchToken = params.bindDispatch === true
         && messageSend === true
-        && !!messageBody
+        && (tool === 'upload_file' || !!messageBody)
         && (!twitterConversation || twitterBaselineComplete)
         && (params.supportsRecipientSets === true
           ? strongRecipients.length > 0
@@ -6920,6 +7094,8 @@
             supportsRecipientSets: params.supportsRecipientSets,
             messageBody,
             messageBodyBaselineCount,
+            messageAttachment: tool === 'upload_file',
+            uploadSourceKey: params.uploadSourceKey,
             ...(twitterConversation ? {
               existingMessageIds: twitterMessageIds,
               ...(twitterEmptyConversationBaseline ? { twitterEmptyConversationBaseline: true } : {}),
@@ -6938,6 +7114,7 @@
         messageSend: observationOnly ? false : messageSend === true,
         conclusive: true,
         composerAvailable: true,
+        ...(tool === 'upload_file' ? { messageAttachment: true } : {}),
         ...(composerRef ? { composerRef } : {}),
         composerEmpty: composerText.replace(/[\u200b-\u200d\ufeff]/g, '').trim() === '',
         messageBody,
@@ -7023,6 +7200,7 @@
       'release_dispatch_binding': () => _releaseDispatchBinding(msg.params || {}),
       'consume_focused_dispatch_binding': () => _consumeFocusedDispatchBinding(msg.params || {}),
       'consume_message_recipient_dispatch_binding': () => _consumeMessageRecipientDispatchBinding(msg.params || {}),
+      'attach_message_recipient_bound_upload': () => _attachMessageRecipientBoundUpload(msg.params || {}, actionDeadlineExpired),
       'prepare_focused_type_dispatch': () => _prepareFocusedTypeDispatch(msg.params || {}),
       'verify_focused_type_dispatch': () => _verifyFocusedTypeDispatch(msg.params || {}),
       'wait_for_rich_text_toolbar_focused_child_frame': () => _waitForRichTextToolbarFocusedChildFrame(msg.params || {}),
