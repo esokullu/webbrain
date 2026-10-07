@@ -6,6 +6,7 @@ import {
 import { isCredentialField } from './agent/credential-fields.js';
 import { validateResumeArgs } from './agent/scheduler.js';
 import { PRIVATE_RESULT_TYPE, importPrivateResultRecipient, encryptPrivateResult } from './private-results.js';
+const PRIVATE_RESULT_PLACEHOLDER = '[Private final answer encrypted for this workspace.]';
 
 const DEFAULT_CLOUD_BRIDGE_URL = 'ws://127.0.0.1:17374/extension';
 const CLOUD_RUN_STORAGE_KEY = 'webbrainCloudRunSnapshots';
@@ -901,7 +902,7 @@ export function createCloudRunController({
   function pushUpdate(run, type, data, runtimeValues = []) {
     run.updatedAt = isoNow();
     const previous = run.updates.at(-1);
-    const strictSecretMode = agent.strictSecretMode === true;
+    const strictSecretMode = privateRecipients.has(run.runId) || agent.strictSecretMode === true;
     if (strictSecretMode) rememberStrictSecrets(run, type, data);
     // Consecutive text_delta events upsert the same seq: content grows in place
     // and ts advances. Full-array pollers are fine; append-only / seq-cursor
@@ -941,7 +942,7 @@ export function createCloudRunController({
       // declares survives. Redacting those by leaf type returned `completed`
       // with every string and number replaced by a placeholder, which satisfies
       // strict mode by making the run useless.
-      const publicSummary = strictSecretMode
+      const publicSummary = privateRecipients.has(run.runId) ? PRIVATE_RESULT_PLACEHOLDER : strictSecretMode
         ? redactStrictSecretValues(run, result.summary, true)
         : safeResult.summary;
       if (result.cloudFailed) {
@@ -950,7 +951,7 @@ export function createCloudRunController({
         run.summary = publicSummary || run.summary;
       } else if (Object.prototype.hasOwnProperty.call(result, 'cloudResult')) {
         if (privateRecipients.has(run.runId)) privateStructuredResults.set(run.runId, structuredClone(result.cloudResult));
-        run.result = strictSecretMode
+        run.result = privateRecipients.has(run.runId) ? PRIVATE_RESULT_PLACEHOLDER : strictSecretMode
           ? redactStrictSecretValues(run, result.cloudResult, true)
           : result.cloudResult;
         run.summary = publicSummary || run.summary;
@@ -1151,7 +1152,7 @@ export function createCloudRunController({
 
     (async () => {
       let recordingId = null;
-      const strictSecretMode = agent.strictSecretMode === true;
+      const strictSecretMode = !!recipient || agent.strictSecretMode === true;
       try {
         // A continuation starts only after its parent has finished, so the
         // agent's active-run map cannot identify the parent here. The cloud
@@ -1295,7 +1296,7 @@ export function createCloudRunController({
         // told not to. Value redaction rather than blanking, because for an
         // unstructured run this text *is* the result: the answer survives with
         // the literal struck.
-        run.content = strictSecretMode && structured
+        run.content = recipient ? PRIVATE_RESULT_PLACEHOLDER : strictSecretMode && structured
           ? (run.summary || '[redacted strict structured completion]')
           : redactStrictTerminal(run, redactWorkflowValue(content), strictSecretMode);
         run.finalUrl = cloudTerminalUrl(redactWorkflowValue(await getTabUrl(tabId)), { strictSecretMode });
@@ -1329,7 +1330,8 @@ export function createCloudRunController({
               run.status = 'aborted';
               run.error = run.error || 'Aborted by cloud_abort.';
             } else {
-              run.result = { type: PRIVATE_RESULT_TYPE, public_result: run.result,
+              run.summary = PRIVATE_RESULT_PLACEHOLDER;
+              run.result = { type: PRIVATE_RESULT_TYPE, public_result: PRIVATE_RESULT_PLACEHOLDER,
                 private_result: privateResult };
               run.status = terminalStatus;
             }
@@ -1338,7 +1340,7 @@ export function createCloudRunController({
       } catch (error) {
         run.pendingInput = null;
         run.status = run.status === 'aborting' ? 'aborted' : 'failed';
-        run.error = redactStrictTerminal(
+        run.error = recipient ? 'Private Cloud run failed before delivering its encrypted final answer. Review the redacted trace before retrying.' : redactStrictTerminal(
           run, redactWorkflowValue(error?.message || String(error)), strictSecretMode,
         );
         run.finalUrl = cloudTerminalUrl(redactWorkflowValue(await getTabUrl(tabId)), { strictSecretMode });

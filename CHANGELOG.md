@@ -4,6 +4,11 @@ All notable changes to WebBrain are documented in this file.
 
 This changelog was generated from the repository Git history and release tags. Versions without a Git tag are inferred from version-bump commits and the current `package.json` / browser manifest versions.
 
+## [38.0.16] - 2026-10-07
+
+### Fixed
+- Keep all opted-in final values inside ciphertext, including credentials read from a page without being typed. Use a public placeholder for the final result and summary, and keep private-run exception messages generic.
+
 ## [38.0.15] - 2026-10-07
 
 ### Changed

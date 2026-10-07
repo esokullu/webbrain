@@ -18,14 +18,14 @@ function decrypt(result, runId) {
 for (const browser of ['chrome', 'firefox']) {
   const { createCloudRunController } = await import(`../src/${browser}/src/cloud-runs.js`);
   const { importPrivateResultRecipient, encryptPrivateResult } = await import(`../src/${browser}/src/private-results.js`);
-  function harness(structured = false, output = secret) {
+  function harness(structured = false, output = secret, typed = true) {
     const stored = {};
     let calls = 0, lastOptions;
     const agent = { strictSecretMode: true, isRunning: () => false, abort() {},
       async processMessage(_tab, _task, update, _mode, _attachments, options) {
         calls++;
         lastOptions = options;
-        update('tool_call', {name: 'set_field', args: {text: secret}});
+        if (typed) update('tool_call', {name: 'set_field', args: {text: secret}});
         if (structured) update('tool_result', { name: 'done_json', result: {
           cloudResult: { password: secret, success: true }, summary: 'Finished', cloudDone: true,
         }});
@@ -77,6 +77,20 @@ for (const browser of ['chrome', 'firefox']) {
     assert.equal(done.status, 'completed');
     assert.ok(decrypt(done.result, done.runId).password === secret);
     assert.ok(!JSON.stringify(done).includes(secret));
+  });
+  test(`${browser}: private final values never appear in public completion even when not typed or registered`, async () => {
+    for (const structured of [false, true]) {
+      const h = harness(structured, secret, false);
+      h.extra.agent.strictSecretMode = false;
+      const start = await h.c.startRun({task: 'Read an owner-requested credential', private_result_public_key: publicKey,
+        ...(structured ? {output_schema: {type: 'object', properties: {password: {type: 'string'}, success: {type: 'boolean'}}}} : {})});
+      const done = await finish(h.c, start);
+      assert.equal(done.status, 'completed');
+      assert.ok(!JSON.stringify(done).includes(secret));
+      const value = decrypt(done.result, done.runId);
+      assert.ok(structured ? value.password === secret : value === secret);
+      assert.match(done.result.public_result, /Private final answer encrypted/);
+    }
   });
   test(`${browser}: invalid recipient fails before browser actions and oversized output fails without replay`, async () => {
     const h = harness();
