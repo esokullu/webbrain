@@ -2432,7 +2432,7 @@ function renderQueuedComposerMessages(tabId = currentTabId) {
       'edit',
       item.id,
       'sp.queue.edit',
-      '<path d="M12 19V5"></path><path d="M5 12l7-7 7 7"></path>',
+      '<path d="M17 3a2.828 2.828 0 0 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"></path><path d="m15 5 4 4"></path>',
     );
     const remove = queuedComposerButton(
       'queued-message-delete',
@@ -2447,7 +2447,7 @@ function renderQueuedComposerMessages(tabId = currentTabId) {
     if (isTabProcessing(tabId) && !isTabAbortRequested(tabId)) {
       const steer = queuedComposerButton(
         'queued-message-steer', 'steer', item.id, 'sp.steer.title',
-        '<path d="M4 19v-5a7 7 0 0 1 7-7h9"></path><path d="m15 2 5 5-5 5"></path>',
+        '<path d="M12 19V5"></path><path d="M5 12l7-7 7 7"></path>',
       );
       steer.disabled = steeringRequestsByTab.has(Number(tabId)) || isAwaitingPlanReviewForTab(tabId);
       row.classList.add('has-steer');
