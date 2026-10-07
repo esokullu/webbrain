@@ -2150,6 +2150,35 @@ for (const [build, engine] of [['chrome', chromium], ['firefox', firefox]]) {
     } finally { await browser.close(); }
   });
 
+  test(`${build}: validation bypass changes invalidate a prepared submit click`, async () => {
+    const { browser, page } = await fixture(engine, build);
+    try {
+      await page.evaluate(() => {
+        const form = document.createElement('form'); form.id = 'validation-form';
+        form.innerHTML = '<input required><button id="validation-submit" type="submit">Continue</button>';
+        form.addEventListener('submit', event => event.preventDefault());
+        document.body.append(form);
+      });
+      await page.waitForTimeout(150);
+      for (const [attribute, target] of [['novalidate', '#validation-form'], ['formnovalidate', '#validation-submit']]) {
+        const operationId = `validation-${attribute}`;
+        await page.evaluate(id => {
+          feedback = [];
+          deliver('page_monitor_prepare', { operationId: id, tool: 'click', selector: '#validation-submit' });
+          deliver('page_monitor_dispatch', { operationId: id, kind: 'click', selector: '#validation-submit', fenceOnly: true });
+        }, operationId);
+        await page.locator(target).evaluate((element, name) => element.setAttribute(name, ''), attribute);
+        await page.waitForFunction(() => feedback.some(event => event.kind === 'dom' && event.source === 'page'), null, { timeout: 1000 });
+        const blocked = await page.evaluate(id => {
+          try { __wbPageMonitor.activatePreparedDispatch({ operationId: id, kind: 'click' }); return null; }
+          catch (error) { return error.code; }
+        }, operationId);
+        assert.equal(blocked, 'page_feedback_pending', `${attribute} must stale the prepared submit click`);
+        await page.waitForTimeout(180);
+      }
+    } finally { await browser.close(); }
+  });
+
   test(`${build}: GET submitter activity omits serialized form values from its navigation marker`, async () => {
     const { browser, page } = await fixture(engine, build);
     try {

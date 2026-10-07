@@ -392,6 +392,7 @@
       el.getAttribute('type'),
       el.getAttribute('href'), el.getAttribute('target'), el.getAttribute('download'), el.getAttribute('action'), el.getAttribute('method'),
       el.getAttribute('formaction'), el.getAttribute('formmethod'), el.getAttribute('formtarget'),
+      el.hasAttribute('novalidate'), el.hasAttribute('formnovalidate'),
       el.getAttribute('popover'), popoverOpen(el),
       el.selected === true, el.defaultSelected === true,
       Number.isInteger(el.selectedIndex) ? el.selectedIndex : null,
@@ -491,7 +492,7 @@
       attributeFilter: ['role', 'aria-label', 'id', 'for', 'form', 'name', 'placeholder', 'title', 'alt', 'aria-labelledby', 'rel', 'media', 'data-selected',
         'aria-required', 'aria-readonly', 'contenteditable', 'tabindex', 'onclick', 'required',
         'aria-expanded', 'aria-selected', 'aria-checked', 'aria-pressed', 'aria-disabled',
-        'type', 'href', 'target', 'download', 'action', 'method', 'formaction', 'formmethod', 'formtarget',
+        'type', 'href', 'target', 'download', 'action', 'method', 'formaction', 'formmethod', 'formtarget', 'novalidate', 'formnovalidate',
         'aria-valuenow', 'aria-valuetext', 'aria-hidden', 'hidden', 'disabled', 'readonly', 'checked', 'selected', 'open', 'popover', 'inert', 'class', 'style'] });
     for (const name of ['animationend', 'animationcancel', 'transitionend', 'transitioncancel'])
       listen(root, name, checkSettledAnimation);
