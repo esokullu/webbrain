@@ -5061,6 +5061,7 @@
           )).filter(value => value.identity && /^(?:to|cc|bcc)$/.test(value.role)).slice(0, 16)
         : [],
       supportsRecipientSets: dispatch.supportsRecipientSets === true,
+      conversationRecipientEvidence: dispatch.conversationRecipientEvidence || null,
       identityKey,
       messageBody: String(dispatch.messageBody || ''),
       messageBodyBaselineCount: Number(dispatch.messageBodyBaselineCount || 0),
@@ -5137,6 +5138,7 @@
       expectedRecipients: expected.expectedRecipients,
       supportsRecipientSets: expected.supportsRecipientSets,
       uploadSourceKey: expected.uploadSourceKey,
+      expectedConversationRecipientEvidence: expected.conversationRecipientEvidence,
     });
     if (live?.dispatchTargetChanged === true) {
       return {
@@ -5695,7 +5697,36 @@
   // conversation before a message can be sent. It deliberately ignores input
   // values and ordinary page text: a searched recipient name is not proof that
   // the corresponding conversation is active.
-  function _probeMessageRecipientGuard(params = {}) {
+  // Isolated-world, read-only bridge for private pre-inference footprints.
+  // Only controls in the verified composer's own native footer are eligible;
+  // neither runtime params nor the page's main world receive DOM references.
+  window.__wb_get_message_conversation_context = target => {
+    try {
+      if (WEBBRAIN_GENERATION !== (Number(window.__webbrain_generation) || 0)
+          || target?.nodeType !== 1 || !target.isConnected || target.ownerDocument !== document) return null;
+      const footer = target.closest('footer');
+      const control = target.closest('button,[role="button"],input,select,textarea,'
+        + '[contenteditable="true"],[contenteditable=""],[role="textbox"]');
+      const excluded = 'aside,nav,search,[role="navigation"],[role="complementary"],[role="search"],'
+        + '[role="searchbox"],[role="log"],[role="listbox"],[role="menu"],'
+        + '[data-message-id],[data-message-direction],[data-outgoing],article';
+      if (!footer || !control || !footer.contains(control) || target.closest(excluded)
+          || /^search$/i.test(control.getAttribute('type') || '')) return null;
+      let context = null;
+      _probeMessageRecipientGuard({ tool: 'observe_active_conversation', adapterName: 'generic-messaging', args: {} }, evidence => {
+        if (evidence?.footer !== footer || evidence.composer?.closest('footer') !== footer
+            || !footer.contains(target) || !evidence.pane.contains(evidence.carrier)) return null;
+        context = Object.freeze({ ...evidence, name: evidence.aliases[0],
+          aliases: Object.freeze([...evidence.aliases]),
+          labelledByNodes: Object.freeze([...evidence.labelledByNodes]),
+          contextNodes: Object.freeze([...evidence.contextNodes]) });
+        return null;
+      });
+      return context;
+    } catch { return null; }
+  };
+
+  function _probeMessageRecipientGuard(params = {}, receiveConversationContext = null) {
     try {
       const tool = String(params.tool || '');
       const observationOnly = tool === 'observe_active_conversation';
@@ -6653,6 +6684,7 @@
       const strongRecipients = [];
       const strongSeen = new Set();
       const observedRecipientCandidates = [];
+      let conversationRecipientEvidence = null;
       const gmailRecipientMode = params.adapterName === 'gmail';
       const inConversationHeaderBand = (el) => {
         if (headerBandBottom <= 0) return false;
@@ -6940,11 +6972,99 @@
           addStrongIdentity(el);
           if (strongIdentities.length >= 8) break;
         }
+        if (!strongIdentities.length && params.adapterName === 'generic-messaging'
+            && params.supportsRecipientSets !== true) {
+          // Some conversation headers expose the contact name as a button
+          // rather than a heading. A shared local header/footer pane proves
+          // ownership; a page-wide button or a sidebar name proves nothing.
+          try {
+            const footer = composer.closest?.('footer');
+            const excluded = 'aside,nav,[role="navigation"],[role="complementary"],[role="log"],'
+              + '[role="listbox"],[role="menu"],[role="toolbar"],[data-message-id],[data-message-direction],[data-outgoing],article';
+            const actionLabel = /^(?:call(?:\s|$)|(?:voice|video|audio)\s+call(?:\s|$)|search(?:\s|$)|menu(?:\s|$)|more(?:\s|$)|settings(?:\s|$)|back(?:\s|$)|close(?:\s|$)|arama(?:\s|$)|ara(?:\s|$)|suchen(?:\s|$)|rechercher(?:\s|$)|buscar(?:\s|$)|llamar(?:\s|$)|appel(?:\s|$))/iu;
+            if (footer && !footer.closest(excluded)) {
+              for (let pane = footer.parentElement, depth = 0; pane && depth < 8
+                && pane !== document.body && pane !== document.documentElement; pane = pane.parentElement, depth++) {
+                if (pane.closest(excluded)) break;
+                const ownedHeader = header => {
+                  let branch = header;
+                  for (let level = 0; level < 4; level++) {
+                    const parent = branch.parentElement;
+                    if (parent === pane) return true;
+                    if (parent?.tagName !== 'DIV' || parent.children.length !== 1) return false;
+                    branch = parent;
+                  }
+                  return false;
+                };
+                const headers = Array.from(pane.querySelectorAll('header')).filter(header => (
+                  ownedHeader(header) && visible(header) && !footer.contains(header) && !header.closest(excluded)
+                    && inConversationHeaderBand(header) && !independentScrollableRegion(header, composer)
+                ));
+                if (!headers.length) continue;
+                // Stop at the closest pane with a header, including when its
+                // evidence is ambiguous. A broader app header cannot rescue it.
+                if (headers.length !== 1 || composerCandidates.some(editor => editor !== composer
+                    && pane.contains(editor) && !composer.contains(editor) && !editor.contains(composer)
+                    && !verifiedNavigationEditable(editor))) break;
+                const header = headers[0];
+                const modal = typeof _findTopmostBlockingModal === 'function' ? _findTopmostBlockingModal() : null;
+                if (modal && (!modal.contains(composer) || !modal.contains(header))) break;
+                const contacts = Array.from(header.querySelectorAll('button,[role="button"]')).filter(control => {
+                  if (!visible(control) || editable(control) || control.closest('header') !== header
+                      || control.closest(excluded) || control.disabled || control.getAttribute('aria-disabled') === 'true'
+                      || control.form || control.hasAttribute('form') || !inConversationHeaderBand(control)
+                      || independentScrollableRegion(control, composer)) return false;
+                  const name = String(control.innerText || '').replace(/[\u200b-\u200d\ufeff]/g, '').replace(/\s+/g, ' ').trim();
+                  const labels = [name, control.getAttribute('aria-label'), control.getAttribute('title')].filter(Boolean);
+                  return !!name && name.length <= 120 && !labels.some(label => actionLabel.test(String(label).trim())
+                    || _hasMessageCommitName(label) || _COMPOSER_UTILITY_LABEL_RE.test(String(label).trim()));
+                });
+                if (contacts.length !== 1) break;
+                const carrier = contacts[0];
+                const name = compact(carrier.innerText, 120);
+                const labelledByNodes = [];
+                let labelledByValid = true;
+                for (const id of String(composer.getAttribute('aria-labelledby') || '').split(/\s+/).filter(Boolean)) {
+                  const matches = composer.getRootNode().querySelectorAll(`[id="${CSS.escape(id)}"]`);
+                  if (matches.length !== 1) { labelledByValid = false; break; }
+                  labelledByNodes.push(matches[0]);
+                }
+                if (!labelledByValid) break;
+                const identityAttributes = ['id','role','aria-label','title','aria-labelledby','aria-hidden','inert',
+                  'data-recipient-id','data-conversation-id','data-thread-id','data-chat-id'];
+                const contextNodes = new Set([carrier, header, pane, footer, composer]);
+                for (const start of [carrier, composer]) {
+                  for (let node = start.parentElement; node && node !== pane; node = node.parentElement) contextNodes.add(node);
+                }
+                conversationRecipientEvidence = { carrier, header, pane, footer, composer, labelledByNodes, contextNodes: [...contextNodes],
+                  signature: JSON.stringify([name,
+                    [...contextNodes].map(node => identityAttributes.map(attribute => node.getAttribute(attribute))),
+                    ['aria-label','aria-labelledby','placeholder','title'].map(attribute => composer.getAttribute(attribute)),
+                    labelledByNodes.map(node => node.textContent)]) };
+                strongIdentities.push(name);
+                const phone = String(composer.getAttribute('aria-label') || '').trim()
+                  .match(/^(?:type|write|send)\s+(?:a\s+)?message\s+to\s+(\+?[\d ()-]{7,32})$/i)?.[1]?.trim() || '';
+                const phoneDigits = phone.replace(/\D/g, '').length;
+                conversationRecipientEvidence.aliases = phone && phoneDigits >= 7 && phoneDigits <= 15
+                  ? [name, phone] : [name];
+                break;
+              }
+            }
+          } catch { /* An unsupported header remains unverified. */ }
+        }
         for (const identity of strongIdentities) {
-          const item = { identity, role: 'to', aliases: [identity] };
+          const item = { identity, role: 'to', aliases: conversationRecipientEvidence?.aliases || [identity] };
           strongRecipients.push({ identity, role: 'to' });
           observedRecipientCandidates.push(item);
         }
+      }
+
+      // The isolated monitor reads this exact local proof synchronously. Its
+      // closure-only callback never participates in the public message API,
+      // authorizes an action, or needs the expensive message-history scan.
+      if (typeof receiveConversationContext === 'function') {
+        return receiveConversationContext(observationOnly && params.adapterName === 'generic-messaging'
+          && params.supportsRecipientSets !== true ? conversationRecipientEvidence : null);
       }
 
       // ── Generic recipient discovery (every site) ────────────────────────
@@ -7045,6 +7165,19 @@
         } catch { /* chip read is best-effort */ }
       }
 
+      const expectedConversation = params.expectedConversationRecipientEvidence;
+      if (expectedConversation && (!conversationRecipientEvidence
+          || ['carrier','header','pane','footer'].some(key => expectedConversation[key] !== conversationRecipientEvidence[key])
+          || expectedConversation.signature !== conversationRecipientEvidence.signature
+          || expectedConversation.contextNodes.length !== conversationRecipientEvidence.contextNodes.length
+          || expectedConversation.contextNodes.some((node, index) => node !== conversationRecipientEvidence.contextNodes[index])
+          || expectedConversation.labelledByNodes.length !== conversationRecipientEvidence.labelledByNodes.length
+          || expectedConversation.labelledByNodes.some((node, index) => node !== conversationRecipientEvidence.labelledByNodes[index]))) {
+        return { success: false, messageSend: null, conclusive: false, dispatchTargetChanged: true,
+          identityCandidates: [], strongIdentityCandidates: [],
+          error: 'The verified conversation header or composer destination changed before dispatch.' };
+      }
+
       const composerText = (() => {
         try {
           if ('value' in composer) return String(composer.value || '');
@@ -7092,6 +7225,7 @@
             adapterName: params.adapterName,
             expectedRecipients: params.expectedRecipients,
             supportsRecipientSets: params.supportsRecipientSets,
+            conversationRecipientEvidence,
             messageBody,
             messageBodyBaselineCount,
             messageAttachment: tool === 'upload_file',

@@ -92230,6 +92230,103 @@ test('execution evidence and trusted continuation are scoped to the authorized t
   }
 });
 
+async function recipientContinuationFixture(AgentClass, tabId, allowAll = false) {
+  const agent = new AgentClass({});
+  agent.conversationIds.set(tabId, `recipient_continuation_${tabId}`);
+  agent.conversations.set(tabId, [
+    { role: 'system', content: 'sys' },
+    { role: 'user', content: 'Send the updates to the contacts I confirm.' },
+  ]);
+  const gate = { requestKind: 'execute', requiresStateChange: true, requiresSubmission: true,
+    messaging: { target_kind: 'named', recipients: ['Original contact'] } };
+  const guard = agent._startPlanExecutionGuard(tabId, 'act', gate);
+  let identity = 'Anne';
+  agent._messageRecipientContentProbe = async () => ({
+    success: true, conclusive: true, messageSend: true, messageBody: 'Hello', messageBodyBaselineCount: 0,
+    strongRecipientCandidates: [{ identity, role: 'to' }],
+    messageRecipientDispatchBinding: { token: 'local-recipient-proof' },
+  });
+  const check = () => agent._messageRecipientGuardBlock(tabId, 'click', { selector: '#send' },
+    'https://example.test/chat/one', {});
+  const grant = async (recipient, all = false) => {
+    identity = recipient;
+    assert.equal((await check())?.reasonCode, 'active_recipient_unverified');
+    assert.equal(agent._bindClarifiedMessageRecipient(tabId,
+      all ? 'Send all remaining messages in this task without asking again' : recipient,
+      'option', { purpose: 'recipient_change', question: `Send to ${recipient} instead?`,
+        options: [recipient, 'Send all remaining messages in this task without asking again', 'Cancel'] }), true);
+  };
+  await grant('Anne', allowAll);
+  return { agent, guard, check, grant, gate: { ...gate, messaging: structuredClone(guard.messaging) },
+    observe: recipient => { identity = recipient; } };
+}
+
+test('trusted continuation retains authentic recipient grants without treating approval as execution evidence', async () => {
+  for (const [index, AgentClass] of [AgentCh, AgentFx].entries()) {
+    for (const allowAll of [false, true]) for (const hasProgress of [false, true]) {
+      const tabId = 8680 + index;
+      const f = await recipientContinuationFixture(AgentClass, tabId, allowAll);
+      if (!allowAll) {
+        await f.grant('Beatrice');
+        f.gate.messaging = structuredClone(f.guard.messaging);
+      }
+      if (hasProgress) f.agent._markPlanExecutionToolCall(tabId, 'read_page', { success: true });
+      f.guard.pendingRecipientAuthorization = 'recipient_change';
+      f.guard.observedRecipientCandidates = [{ identity: 'Unapproved contact', role: 'to' }];
+      f.guard.messageRecipientDispatchBinding = { token: 'must-not-carry' };
+      f.agent._storeContinuationExecutionEvidence(tabId);
+      const continued = f.agent._startPlanExecutionGuard(tabId, 'act', f.gate, { trustedContinuation: true });
+      const label = `${AgentClass.name}: all=${allowAll}, prior progress=${hasProgress}`;
+      assert.deepEqual(continued.approvedRecipients, allowAll ? ['anne'] : ['anne', 'beatrice'], label);
+      assert.equal(continued.messageRecipientApprovedAll, allowAll, label);
+      assert.equal(continued.successfulTaskToolCalls, hasProgress ? 1 : 0, label);
+      assert.equal(continued.successfulConsequentialToolCalls, 0, label);
+      assert.equal(continued.verifiedSubmissionEvidence, false, label);
+      assert.equal(f.agent._executionEvidenceSatisfied(continued), false, `${label}: approval proved completion`);
+      assert.equal(continued.pendingRecipientAuthorization, undefined, label);
+      assert.equal(continued.observedRecipientCandidates, undefined, label);
+      assert.equal(continued.messageRecipientDispatchBinding, undefined, label);
+      // A named grant remains valid when returning to an earlier contact;
+      // the all-remaining grant covers another freshly observed recipient.
+      f.observe(allowAll ? 'Beatrice' : 'Anne');
+      assert.equal(await f.check(), null, `${label}: Continue requested the same approval again`);
+      // Approval still requires fresh physical recipient evidence.
+      f.observe('');
+      assert.equal((await f.check())?.reasonCode, 'recipient_identity_unavailable', label);
+    }
+  }
+});
+
+test('recipient continuation grants reject changed tasks, steering, gates, conversations and ordinary turns', async () => {
+  for (const [index, AgentClass] of [AgentCh, AgentFx].entries()) {
+    for (const change of ['ordinary turn', 'task', 'steering', 'conversation', 'recipient gate', 'submission gate', 'task drift']) {
+      const tabId = 8682 + index;
+      const f = await recipientContinuationFixture(AgentClass, tabId, true);
+      if (change === 'task drift') f.guard.taskDrifted = true;
+      f.agent._storeContinuationExecutionEvidence(tabId);
+      let runOptions = { trustedContinuation: true };
+      if (change === 'ordinary turn') runOptions = {};
+      if (change === 'task') f.agent.conversations.get(tabId).push({ role: 'user', content: 'Send a different report to a new contact.' });
+      if (change === 'steering') f.agent.conversations.get(tabId).push({ role: 'user', content: 'Only send to Carol now.',
+        webbrainSteering: { requestId: 'local-steer', messageId: 'steer-turn', revision: 1,
+          parentTaskKey: f.agent._progressTaskKeyHash(tabId) } });
+      if (change === 'conversation') f.agent.conversationIds.set(tabId, 'different-conversation');
+      if (change === 'recipient gate') f.gate.messaging = { target_kind: 'named', recipients: ['Carol'] };
+      if (change === 'submission gate') f.gate.requiresSubmission = false;
+      // Planner output cannot create recipient grants in a fresh guard.
+      f.gate.approvedRecipients = ['anne'];
+      f.gate.messageRecipientApprovedAll = true;
+      const next = f.agent._startPlanExecutionGuard(tabId, 'act', f.gate, runOptions);
+      const label = `${AgentClass.name}: ${change}`;
+      assert.deepEqual(next.approvedRecipients, [], label);
+      assert.equal(next.messageRecipientApprovedAll, false, label);
+      assert.equal(next.successfulTaskToolCalls, 0, label);
+      f.observe('Beatrice');
+      assert.equal((await f.check())?.noDispatch, true, `${label}: a stale grant authorized another contact`);
+    }
+  }
+});
+
 test('empty-step planner JSON remains plan-only after successful task evidence', () => {
   for (const [index, AgentClass] of [AgentCh, AgentFx].entries()) {
     const agent = new AgentClass({});

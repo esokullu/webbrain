@@ -26,7 +26,7 @@ const modelHtml = html
   .replace('</aside>', '</aside><aside id="sidebar"><h2 id="sidebar-heading">Unrelated sidebar</h2></aside>');
 
 async function fixture(browser, build, body = html, { realAccessibilityTree = false, contentLibrary = false,
-  fixtureUrl = 'https://monitor.test/start' } = {}) {
+  richTextLibrary = false, fixtureUrl = 'https://monitor.test/start' } = {}) {
   const context = await browser.newContext({ viewport: { width: 1000, height: 700 } });
   await context.route(`${new URL(fixtureUrl).origin}/**`, route => route.fulfill({ contentType: 'text/html', body }));
   await context.addInitScript(realAccessibilityTree => {
@@ -49,6 +49,9 @@ async function fixture(browser, build, body = html, { realAccessibilityTree = fa
       }
     });
   }, realAccessibilityTree);
+  if (richTextLibrary) await context.addInitScript({
+    content: fs.readFileSync(new URL(`../src/${build}/src/content/rich-text-toolbar-heuristic.js`, import.meta.url), 'utf8'),
+  });
   if (realAccessibilityTree) await context.addInitScript({
     content: fs.readFileSync(new URL(`../src/${build}/src/content/accessibility-tree.js`, import.meta.url), 'utf8'),
   });
@@ -567,6 +570,172 @@ for (const [build, engine] of [['chrome', chromium], ['firefox', firefox]]) {
           await page.evaluate(() => { document.getElementById('in-form-counter').textContent = '201'; });
           const result = await modelMessage(page, 'page_monitor_dispatch', { operationId: 'raw-strict', kind: 'click', fenceOnly: true });
           assert.equal(result.ready, false); assert.equal(result.pageFeedbackPending, true);
+        } finally { await context.close(); }
+      });
+    } finally { await browser.close(); }
+  });
+}
+
+const conversationPaneHtml = `<!doctype html><style>
+body { margin:0;font:16px sans-serif; } aside { position:absolute;left:0;top:0;width:300px;height:650px;overflow:auto; }
+#main { position:absolute;left:320px;top:0;width:670px;height:650px; }
+#main>header { height:70px;display:flex;align-items:center;gap:20px;padding-left:30px; }
+#contact { width:180px;height:24px; } #messages { height:440px;overflow:auto; }
+footer { display:flex;gap:15px;align-items:center; } #body { width:380px;min-height:32px; }
+button { min-height:28px; } #footer-clock { position:absolute;left:550px;top:570px; }
+</style><aside><header><h1>App title</h1></header><button>Anne</button><h2 id="sidebar-heading">Sidebar recipient</h2></aside>
+<main id="main"><header><img alt="" width="40" height="40">
+<div id="contact" role="button" tabindex="0"><span title="Anne">Anne</span></div>
+<button aria-label="Voice call">Call</button><button aria-label="Search">Search</button></header>
+<section id="messages"><span id="history-counter">100</span><div>Anne</div><button id="history-action">Other person</button></section>
+<footer><button id="attach">Attach</button><div id="body" contenteditable="true" role="textbox" aria-label="Type a message to +90 555 000 00 01">Selam</div>
+<input id="file" type="file" accept="image/*" hidden><button id="send" aria-label="Send">Send</button><span id="footer-clock">12:00</span></footer></main>`;
+
+async function conversationPaneFixture(browser, build, body = conversationPaneHtml, fixtureUrl = 'https://web.whatsapp.com/') {
+  const result = await fixture(browser, build, body, { realAccessibilityTree: true, contentLibrary: true, richTextLibrary: true, fixtureUrl });
+  await result.page.evaluate(() => {
+    window.submissions = 0; document.getElementById('send').addEventListener('click', () => submissions++);
+  });
+  return result;
+}
+
+async function conversationRecipientBinding(page) {
+  const result = await modelMessage(page, 'probe_message_recipient_guard', {
+    adapterName: 'generic-messaging', tool: 'click', args: { selector: '#send' }, bindDispatch: true, expectedRecipients: ['anne'],
+  });
+  assert.equal(result.conclusive, true);
+  assert.equal(result.strongRecipientCandidates?.length, 1);
+  assert.ok(result.messageRecipientDispatchBinding?.token);
+  return { messageRecipientGuardRequired: true, messageRecipientDispatchBinding: result.messageRecipientDispatchBinding };
+}
+
+for (const [build, engine] of [['chrome', chromium], ['firefox', firefox]]) {
+  test(`${build}: heading-free native conversation panes share exact recipient evidence with model snapshots`, { timeout: 60000 }, async t => {
+    const browser = await engine.launch();
+    try {
+      for (const [name, body, fixtureUrl, mutate] of [
+        ['history counter', conversationPaneHtml, 'https://web.whatsapp.com/', () => { document.getElementById('history-counter').textContent = '101'; }],
+        ['history action and sidebar heading', conversationPaneHtml, 'https://example.test/chat/one', () => {
+          document.getElementById('history-action').textContent = 'An unrelated history action';
+          document.getElementById('sidebar-heading').textContent = 'Another sidebar heading';
+        }],
+        ['footer clock', conversationPaneHtml, 'https://web.whatsapp.com/', () => { document.getElementById('footer-clock').textContent = '12:01'; }],
+        ['inner footer action toolbar', conversationPaneHtml.replace('<button id="send" aria-label="Send">Send</button>', '<div role="toolbar"><button id="send" aria-label="Send">Send</button></div>'), 'https://web.whatsapp.com/', () => { document.getElementById('history-counter').textContent = '101'; }],
+      ]) await t.test(`${name} can update around a captured contact-button send`, async () => {
+        const { context, page } = await conversationPaneFixture(browser, build, body, fixtureUrl);
+        try {
+          const snapshot = await captureTreeModel(page);
+          assert.ok(snapshot.page.pageContent.includes('Anne'));
+          assert.ok(snapshot.page.pageContent.includes('Type a message to +90 555 000 00 01'));
+          for (const privateField of ['signature', 'aliases', 'contextNodes', 'labelledByNodes']) {
+            assert.equal(JSON.stringify(snapshot).includes(`"${privateField}"`), false);
+          }
+          const target = { tool: 'click', selector: '#send' };
+          assert.equal((await validateModel(page, snapshot, target)).ready, true);
+          await page.evaluate(mutate);
+          assert.equal((await validateModel(page, snapshot, target)).ready, true);
+          assert.equal((await prepareModel(page, snapshot, target)).modelBindingValid, true);
+          const recipient = name === 'inner footer action toolbar' ? null : await conversationRecipientBinding(page);
+          await page.evaluate(() => { document.getElementById('history-counter').textContent = '102'; });
+          // The monitor also covers an exact footer action in a small inner
+          // toolbar. Preserve the recipient classifier's existing utility
+          // outcome for that shape; exercise its certified dispatch directly.
+          if (recipient) {
+            const result = await modelMessage(page, 'click', { selector: '#send', ...recipient });
+            assert.equal(result.success, true, JSON.stringify(result));
+          } else assert.equal((await dispatchModel(page)).ready, true);
+          assert.equal(await page.evaluate(() => submissions), 1);
+          assert.equal((await page.evaluate(() => feedback)).some(event => event.source === 'user'), false);
+        } finally { await context.close(); }
+      });
+
+      await t.test('priority capture exposes the complete composer destination when history truncates its AX node', async () => {
+        const history = Array.from({ length: 250 }, (_, index) => `<button type="submit" style="position:absolute;left:20px;top:140px">Unrelated history action ${index} with enough rendered text to truncate this pane observation</button>`).join('');
+        const body = conversationPaneHtml.replace('<section id="messages">', `<section id="messages">${history}`);
+        const { context, page } = await conversationPaneFixture(browser, build, body);
+        try {
+          const target = { tool: 'click', selector: '#send' };
+          const snapshot = await captureDeepPriority(page, target);
+          assert.match(snapshot.page.pageContent, /visible identity "Type a message to \+90 555 000 00 01" \[ref_/);
+          assert.ok(snapshot.page.pageContent.includes('Anne'));
+          assert.equal(snapshot.page.pageContent.includes('Selam'), false, 'The supplemental label must not serialize the omitted editor contents');
+          assert.equal((await validateModel(page, snapshot, target)).ready, true);
+          await page.evaluate(() => { document.getElementById('history-counter').textContent = '101'; });
+          assert.equal((await prepareModel(page, snapshot, target)).modelBindingValid, true);
+          assert.equal((await dispatchModel(page)).ready, true);
+          assert.equal(await page.evaluate(() => submissions), 1);
+
+          const current = await captureDeepPriority(page, target);
+          await page.evaluate(() => { document.getElementById('body').setAttribute('aria-label', 'Type a message to +90 555 000 00 02'); });
+          assert.equal((await validateModel(page, current, target)).ready, false);
+          assert.equal((await prepareModel(page, current, target)).modelBindingValid, false);
+          assert.equal(await page.evaluate(() => submissions), 1);
+        } finally { await context.close(); }
+      });
+
+      await t.test('a complete long composer label is exposed once per capture across multiple footer controls', async () => {
+        const authoredLabel = `Type a message to +90 555 000 00 01 ${'complete destination details '.repeat(10).trim()}`;
+        assert.ok(authoredLabel.length > 120 && authoredLabel.length <= 512);
+        const controls = Array.from({ length: 8 }, (_, index) => `<button id="footer-action-${index}" style="position:absolute;left:400px;top:${120 + index * 35}px">Post action ${index}</button>`).join('');
+        const body = conversationPaneHtml.replace('aria-label="Type a message to +90 555 000 00 01"', `aria-label="${authoredLabel}"`)
+          .replace('<footer>', `<footer>${controls}`);
+        const { context, page } = await conversationPaneFixture(browser, build, body);
+        try {
+          const target = { tool: 'click', selector: '#send' };
+          for (const actionTarget of [undefined, target]) {
+            const snapshot = await captureDeepPriority(page, actionTarget);
+            const completeLines = snapshot.page.pageContent.split('\n').filter(line => line.startsWith(`visible identity ${JSON.stringify(authoredLabel)} `));
+            assert.equal(completeLines.length, 1, 'Each new snapshot must publish one complete authored label despite repeated footer proofs');
+            assert.equal((await validateModel(page, snapshot, target)).ready, true);
+            for (let index = 0; index < 8; index++) {
+              assert.equal((await validateModel(page, snapshot, { tool: 'click', selector: `#footer-action-${index}` })).ready, true);
+            }
+            await page.evaluate(() => { document.getElementById('history-counter').textContent += '1'; });
+            assert.equal((await prepareModel(page, snapshot, target)).modelBindingValid, true);
+          }
+          assert.equal((await dispatchModel(page)).ready, true);
+          assert.equal(await page.evaluate(() => submissions), 1);
+        } finally { await context.close(); }
+      });
+
+      for (const [name, mutate] of [
+        ['same-name destination phone', () => { document.getElementById('body').setAttribute('aria-label', 'Type a message to +90 555 000 00 02'); }],
+        ['same-name contact replacement', () => { const contact = document.getElementById('contact'); contact.replaceWith(contact.cloneNode(true)); }],
+        ['composer replacement', () => { const editor = document.getElementById('body'); editor.replaceWith(editor.cloneNode(true)); }],
+        ['header scope', () => { document.getElementById('messages').appendChild(document.querySelector('#main>header')); }],
+        ['new ambiguous header contact', () => { const contact = document.createElement('div'); contact.setAttribute('role', 'button'); contact.textContent = 'Bob'; document.querySelector('#main>header').appendChild(contact); }],
+      ]) await t.test(`${name} changes reject the original contact-button proof before dispatch`, async () => {
+        const { context, page } = await conversationPaneFixture(browser, build);
+        try {
+          const snapshot = await captureTreeModel(page);
+          const target = { tool: 'click', selector: '#send' };
+          assert.equal((await validateModel(page, snapshot, target)).ready, true);
+          assert.equal((await prepareModel(page, snapshot, target)).modelBindingValid, true);
+          await page.evaluate(mutate);
+          assert.equal((await validateModel(page, snapshot, target)).ready, false);
+          assert.equal((await modelMessage(page, 'page_monitor_dispatch', { operationId: 'model-prepared', kind: 'click', fenceOnly: true })).ready, false);
+          assert.equal(await page.evaluate(() => submissions), 0);
+        } finally { await context.close(); }
+      });
+
+      await t.test('the original public contact and private conversation proof are captured in the same task', async () => {
+        const { context, page } = await conversationPaneFixture(browser, build);
+        try {
+          await page.evaluate(() => {
+            const original = window.__generateAccessibilityTree; let queued = false;
+            window.__generateAccessibilityTree = (...args) => {
+              const result = original(...args);
+              if (!queued) { queued = true; queueMicrotask(() => { const label = document.querySelector('#contact span'); label.textContent = 'Bob'; label.title = 'Bob'; }); }
+              return result;
+            };
+          });
+          const snapshot = await captureTreeModel(page);
+          assert.ok(snapshot.page.pageContent.includes('Anne'));
+          assert.equal(snapshot.page.pageContent.includes('Bob'), false);
+          assert.equal(await page.evaluate(() => document.getElementById('contact').innerText), 'Bob');
+          assert.equal((await validateModel(page, snapshot, { tool: 'click', selector: '#send' })).ready, false);
+          assert.equal((await prepareModel(page, snapshot, { tool: 'click', selector: '#send' })).modelBindingValid, false);
+          assert.equal(await page.evaluate(() => submissions), 0);
         } finally { await context.close(); }
       });
     } finally { await browser.close(); }

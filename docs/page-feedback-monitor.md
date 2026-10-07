@@ -150,6 +150,20 @@ Steer or grant authorization. Enter and Alt+Enter retain their existing behavior
   Communication loss after dispatch and a recipient change during an input
   handler produce an uncertain result without an automatic retry. Attaching a
   file does not establish that the website sent or received it.
+- Generic chat recipients can use a unique contact-name button in the local
+  conversation header above the composer's footer. Sidebar, message-history
+  and toolbar buttons do not establish the recipient. The private dispatch
+  proof binds the contact, header, pane and composer destination label so a
+  same-name conversation replacement still invalidates the action.
+  Pre-inference action capture uses the same isolated, read-only evidence and
+  scopes editor/control state to that footer; unrelated history updates do not
+  invalidate its certified actions.
+  Existing recipient approvals survive trusted Continue within the same task
+  and execution scope; independent tasks and changed scope clear them. Missing live
+  identity, draft, baseline or dispatch proof produces a technical blocker;
+  another approval question cannot repair missing evidence. Recipient
+  clarifications report `recipientBinding` separately from general user
+  authorization and suppress repeated questions for known technical blockers.
 - A single explicit `done` candidate survives passive DOM updates before and
   after its tool batch. Success still requires the completion verifier's fresh
   evidence; partial/failure outcomes remain incomplete. The summary does not

@@ -612,6 +612,26 @@
     }
     return [...labels].map(node => ({ node, value: modelSemantic(node, { text: true }) }));
   }
+  function currentConversationContext(target) {
+    if (!target.closest('footer') || typeof window.__wb_get_message_conversation_context !== 'function') return null;
+    try {
+      const context = window.__wb_get_message_conversation_context(target);
+      if (!context || typeof context.signature !== 'string' || context.signature.length > 8192
+          || !Array.isArray(context.contextNodes) || context.contextNodes.length > 32
+          || !Array.isArray(context.labelledByNodes) || context.labelledByNodes.length > 32
+          || !Array.isArray(context.aliases) || context.aliases.length > 8
+          || context.aliases.some(alias => typeof alias !== 'string' || alias.length > 256)) return null;
+      const nodes = [context.carrier, context.header, context.pane, context.footer, context.composer,
+        ...context.contextNodes, ...context.labelledByNodes];
+      if (nodes.some(node => !(node instanceof Element) || node.ownerDocument !== document || !node.isConnected)
+          || context.header.tagName !== 'HEADER' || context.footer.tagName !== 'FOOTER'
+          || context.pane === document.body || context.pane === document.documentElement
+          || !context.header.contains(context.carrier) || !context.footer.contains(target)
+          || !context.footer.contains(context.composer) || !context.pane.contains(context.header)
+          || !context.pane.contains(context.footer)) return null;
+      return context;
+    } catch { return null; }
+  }
   function actionFootprint(target) {
     const structuralFile = target instanceof Element && target.tagName === 'INPUT' && target.type === 'file';
     if (!(target instanceof Element) || target.ownerDocument !== document || !target.isConnected
@@ -624,9 +644,11 @@
     if (!action || (!structuralFile && !visible(action))) return null;
     const form = action.form || target.closest('form,[role="form"]');
     const ownerBase = form || action;
-    let owner = ownerBase.matches(entityOwnerSelector) ? ownerBase : ownerBase.closest(entityOwnerSelector);
+    const conversation = currentConversationContext(target);
+    if (conversation && form && !conversation.footer.contains(form)) return null;
+    let owner = conversation?.pane || (ownerBase.matches(entityOwnerSelector) ? ownerBase : ownerBase.closest(entityOwnerSelector));
     let unstructuredOwner = false;
-    let meaningfulOwner = false;
+    let meaningfulOwner = !!conversation;
     if (!owner && form && [...form.querySelectorAll('h1,h2,h3,h4,h5,h6,[role="heading"],'+modelEntityIdentitySelector)]
       .some(node => node.closest('form,[role="form"]') === form && !node.closest(entityOwnerSelector)
         && !node.closest('aside,nav,[role="navigation"],[role="complementary"]'))) owner = form;
@@ -679,7 +701,20 @@
       const controls = form.elements ? [...form.elements] : [...form.querySelectorAll(modelControlSelector)];
       for (const control of controls) if (!addNode(control, { text: true, control: true })) return null;
     }
-    if (owner) {
+    if (conversation) {
+      // Reuse the recipient guard's exact local conversation proof. Its
+      // matcher is re-run for every comparison; history and sidebar controls
+      // are outside this footprint, including when their counters update.
+      for (const node of new Set([conversation.carrier, conversation.header, conversation.pane,
+        conversation.footer, conversation.composer, ...conversation.contextNodes])) {
+        if (!addNode(node, node === conversation.carrier || node === conversation.composer
+          ? { text: true, control: true, observedName: true } : {})) return null;
+      }
+      for (const node of conversation.labelledByNodes) if (!addNode(node, { text: true })) return null;
+      const controls = conversation.footer.querySelectorAll(modelControlSelector);
+      if (controls.length > 64) return null;
+      for (const control of controls) if (!addNode(control, { text: true, control: true })) return null;
+    } else if (owner) {
       if (!addNode(owner, { directText: true })) return null;
       const belongs = node => {
         const closest = node.closest(entityOwnerSelector);
@@ -705,7 +740,7 @@
     // An arbitrary container/toolbar with no entity anchor cannot establish
     // the recipient or item. Such targets retain strict legacy dispatch only.
     if (!owner || !meaningfulOwner) return null;
-    if (!owner || unstructuredOwner) {
+    if (!conversation && (!owner || unstructuredOwner)) {
       // Without an explicit entity boundary, an outside conversation heading
       // may identify the recipient. Never infer that a small form/toolbar owns
       // it; broad heading binding is a conservative fallback for these pages.
@@ -717,8 +752,10 @@
     const hit = structuralFile ? null : deepElementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
     if (!structuralFile && (!hit || !(target === hit || target.contains(hit) || (action.contains(target) && action.contains(hit))))) return null;
     return { model: true, structuralFile, target, scope: owner || form || action, ancestors, nodes, hit,
+      ...(conversation ? { conversationCarrier: conversation.carrier, conversationComposer: conversation.composer } : {}),
       context: JSON.stringify([location.href, document.baseURI, currentViewport(), window.scrollX, window.scrollY,
-        rect ? [rect.left, rect.top, rect.width, rect.height] : null]) };
+        rect ? [rect.left, rect.top, rect.width, rect.height] : null,
+        ...(conversation ? [[conversation.signature, conversation.aliases]] : [])]) };
   }
   function operationBinding(op, target = op?.preparedBinding?.target) {
     return op?.preparedBinding?.model === true ? actionFootprint(target) : preparedBinding(target);
@@ -855,16 +892,17 @@
       if (node instanceof Element) { refs.set(ref, node); publicNodes.add(node); }
     }
     let evidenceLength = 0;
-    const exposeIdentity = node => {
-      if (publicNodes.has(node)) return true;
+    const exposedEditableNames = new WeakMap();
+    const exposeIdentity = (node, { authoredEditableName = false } = {}) => {
+      if (publicNodes.has(node) && !authoredEditableName) return true;
       // Emit only current rendered page labels. Editable contents, input
       // values, data identities and private control/file state stay private.
-      if (!visible(node) || node.matches('input,textarea,select,[contenteditable]:not([contenteditable="false"])')
+      if (!visible(node) || (!authoredEditableName && node.matches('input,textarea,select,[contenteditable]:not([contenteditable="false"])'))
           || node.closest('[aria-hidden="true"]')) return false;
       const walker = document.createTreeWalker(node, NodeFilter.SHOW_TEXT);
       const parts = [];
       let visited = 0, textNode;
-      while ((textNode = walker.nextNode())) {
+      while (!authoredEditableName && (textNode = walker.nextNode())) {
         if (visited++ >= 128) return false;
         const parent = textNode.parentElement;
         if (parent && visible(parent) && !ignored(parent) && !parent.closest(
@@ -875,10 +913,12 @@
         }
       }
       const rendered = parts.join(' ');
-      const authored = String(node.getAttribute('aria-label') || node.getAttribute('title') || node.getAttribute('alt') || '')
+      const authored = String(node.getAttribute('aria-label') || node.getAttribute('title')
+        || (authoredEditableName ? node.getAttribute('placeholder') : node.getAttribute('alt')) || '')
         .replace(/\s+/g, ' ').trim();
       const name = authored || rendered;
       if (!name || authored.length > 512) return false;
+      if (authoredEditableName && exposedEditableNames.get(node) === authored) return true;
       const ref = window.__wb_ax_ref?.(node);
       if (!ref || window.__wb_ax_lookup?.(ref) !== node) return false;
       const header = evidenceLength ? '' : '\n\n[CURRENT VISIBLE ACTION IDENTITY]\n';
@@ -889,13 +929,26 @@
       page.pageContent += line;
       evidenceLength += line.length;
       refs.set(ref, node); publicNodes.add(node);
+      if (authoredEditableName) exposedEditableNames.set(node, authored);
       return true;
     };
     const observedFootprint = footprint => {
       if (!page) return true;
       if (!footprint.structuralFile && !publicNodes.has(footprint.target)) return false;
+      if (footprint.conversationComposer) {
+        const composer = footprint.conversationComposer;
+        const authored = String(composer.getAttribute('aria-label') || composer.getAttribute('title')
+          || composer.getAttribute('placeholder') || '').replace(/\s+/g, ' ').trim();
+        // The private recipient proof may bind a destination label omitted
+        // from a large AX tree. Expose only that complete authored label,
+        // never editor contents, before certifying the footer action.
+        if (authored && (!publicNodes.has(composer) || authored.length > 120)) {
+          if (!exposeIdentity(composer, { authoredEditableName: true })) return false;
+        } else if (!publicNodes.has(composer)) return false;
+      }
       const evidence = footprint.nodes.filter(item => item.node !== footprint.target
-        && item.node.matches('h1,h2,h3,h4,h5,h6,[role="heading"],[aria-current],'+modelEntityIdentitySelector)
+        && (item.node === footprint.conversationCarrier
+          || item.node.matches('h1,h2,h3,h4,h5,h6,[role="heading"],[aria-current],'+modelEntityIdentitySelector))
         && visible(item.node));
       return evidence.every(item => exposeIdentity(item.node))
         && (publicNodes.has(footprint.scope) || evidence.some(item => publicNodes.has(item.node)));

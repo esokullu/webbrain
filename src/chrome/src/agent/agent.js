@@ -24497,7 +24497,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       && guard?.requiresSubmission === true && guard?.requiresStateChange === true
       ? this._resolveTwitterNamedMessagingTarget(target, probe) : null;
     if (resolvedTwitterTarget) target = resolvedTwitterTarget;
-    const messageBodyBaselineCount = Number(probe?.messageBodyBaselineCount);
+    const messageBodyBaselineCount = probe?.messageBodyBaselineCount;
     const targetMatchesObserved = messageTargetMatchesObservedIdentities(
       target,
       this._messageRecipientCandidates(probe),
@@ -24514,6 +24514,34 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     const approvedByUser = guard?.messageRecipientApprovedAll === true
       || (observedIdentities.length > 0
         && observedIdentities.every(identity => approvedRecipients.includes(identity)));
+    const technicalBlock = (reasonCode, error) => {
+      if (guard) {
+        guard.pendingRecipientAuthorization = false;
+        guard.observedRecipientCandidates = null;
+        guard.messageRecipientTechnicalBlock = reasonCode;
+      }
+      return { success: false, blocked: true, noDispatch: true, dispatched: false,
+        messageRecipientGuard: true, retryable: false, recipientAuthorizationRequired: false,
+        reasonCode, error };
+    };
+    const conclusiveSend = probe?.success === true && probe?.conclusive === true && probe?.messageSend === true;
+    if (conclusiveSend && observedIdentities.length === 0) {
+      return technicalBlock('recipient_identity_unavailable',
+        'Message send blocked because WebBrain cannot establish the active recipient identity from this page. Re-read the active conversation header or open the intended chat. If identity remains unavailable, report this technical blocker; additional recipient approval cannot resolve missing page evidence.');
+    }
+    if (conclusiveSend && observedIdentities.length > 0 && guard) delete guard.messageRecipientTechnicalBlock;
+    // An already authorized recipient can still lack draft or delivery
+    // evidence. Asking to authorize that recipient again cannot repair it.
+    if (conclusiveSend && (targetMatchesObserved || approvedByUser)) {
+      if (name !== 'upload_file' && !this._workflowMessageBody(probe?.messageBody)) {
+        return technicalBlock('message_body_unverified',
+          'Message send blocked because WebBrain could not verify the draft body for the authorized recipient. Re-read the current composer and verify the intended draft. If the body remains unavailable, report this technical blocker instead of asking for recipient approval again.');
+      }
+      if (!Number.isInteger(messageBodyBaselineCount) || messageBodyBaselineCount < 0) {
+        return technicalBlock('message_body_baseline_unavailable',
+          'Message send blocked because WebBrain could not establish the existing-message baseline needed to verify a new send. Re-read the active conversation before attempting delivery. If the baseline remains unavailable, report this technical blocker instead of asking for recipient approval again.');
+      }
+    }
     const verified = probe?.success === true
       && probe.messageSend === true
       && (name === 'upload_file'
@@ -24526,15 +24554,8 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     if (verified) {
       const binding = probe?.messageRecipientDispatchBinding;
       if (!binding?.token) {
-        return {
-          success: false,
-          blocked: true,
-          noDispatch: true,
-          dispatched: false,
-          messageRecipientGuard: true,
-          reasonCode: 'recipient_dispatch_binding_unavailable',
-          error: 'Message send blocked because WebBrain could not bind recipient verification to the final action dispatch. Re-read the active conversation and retry once.',
-        };
+        return technicalBlock('recipient_dispatch_binding_unavailable',
+          'Message send blocked because WebBrain could not bind recipient verification to the final action dispatch. Re-read the active conversation and retry once. If binding remains unavailable, report this technical blocker instead of asking for recipient approval again.');
       }
       if (resolvedTwitterTarget) guard.messaging = resolvedTwitterTarget;
       if (executionContext && typeof executionContext === 'object') {
@@ -30617,7 +30638,7 @@ If the user has already named or confirmed this exact recipient, do NOT ask agai
       ? this._continuationExecutionEvidence.get(tabId)
       : null;
     this._continuationExecutionEvidence.delete(tabId);
-    const carryMatches = enabled
+    const carryScopeMatches = enabled
       && carried?.requestKind === 'execute'
       && carried.requiresStateChange === requiresStateChange
       && carried.requiresSubmission === requiresSubmission
@@ -30630,8 +30651,12 @@ If the user has already named or confirmed this exact recipient, do NOT ask agai
       && JSON.stringify(carried.siteWorkflow || null) === JSON.stringify(siteWorkflow || null)
       && JSON.stringify(carried.conditionalSiteWorkflow || null) === JSON.stringify(gateOutcome.conditionalSiteWorkflow || null)
       && carried.taskKey === taskKey
-      && carried.evidenceTaskKey === taskKey
       && carried.conversationId === (this.conversationIds.get(tabId) || null);
+    const carryMatches = carryScopeMatches && carried.evidenceTaskKey === taskKey;
+    // Human recipient grants are task authorization, not execution evidence.
+    // They can survive Continue even when the last step only approved a send.
+    const carryRecipientAuthorization = carryScopeMatches && requiresSubmission === true
+      && requiresStateChange === true && !!messaging;
     const approvedPlanAnchor = gateApprovedPlanAnchor
       || (carryMatches ? carried.approvedPlanAnchor || '' : '');
     const approvedPlanText = String(gateOutcome?.approvedScratchpadText || '')
@@ -30644,6 +30669,9 @@ If the user has already named or confirmed this exact recipient, do NOT ask agai
       siteWorkflowUrl: String(gateOutcome?.siteWorkflowUrl || ''),
       messaging,
       messagingConversationScope,
+      approvedRecipients: carryRecipientAuthorization && Array.isArray(carried.approvedRecipients)
+        ? [...carried.approvedRecipients] : [],
+      messageRecipientApprovedAll: carryRecipientAuthorization && carried.messageRecipientApprovedAll === true,
       draftRecipients,
       requiresDownload,
       allowsPlannerShapedResult: gateOutcome?.allowsPlannerShapedResult === true,
@@ -31045,8 +31073,12 @@ If the user has already named or confirmed this exact recipient, do NOT ask agai
 
   _storeContinuationExecutionEvidence(tabId) {
     const guard = this._planExecutionGuards.get(tabId);
+    const hasRecipientAuthorization = guard?.requiresSubmission === true && guard?.requiresStateChange === true
+      && !!normalizeMessageTarget(guard.messaging)
+      && (guard.messageRecipientApprovedAll === true || (guard.approvedRecipients || []).length > 0);
     if (guard?.enabled && !guard.taskDrifted && (
-      guard.successfulTaskToolCalls > 0
+      hasRecipientAuthorization
+      || guard.successfulTaskToolCalls > 0
       || guard.successfulConsequentialToolCalls > 0
       || guard.pendingDownloadIds.length > 0
       || guard.verifiedSubmissionEvidence === true
@@ -31070,6 +31102,9 @@ If the user has already named or confirmed this exact recipient, do NOT ask agai
         requiresSubmission: guard.requiresSubmission,
         messaging: guard.messaging,
         messagingConversationScope: guard.messagingConversationScope,
+        approvedRecipients: hasRecipientAuthorization && Array.isArray(guard.approvedRecipients)
+          ? [...guard.approvedRecipients] : [],
+        messageRecipientApprovedAll: hasRecipientAuthorization && guard.messageRecipientApprovedAll === true,
         draftRecipients: guard.draftRecipients,
         requiresDownload: guard.requiresDownload,
         allowsAppStateToolEvidence: guard.allowsAppStateToolEvidence,
@@ -35205,6 +35240,25 @@ If the user has already named or confirmed this exact recipient, do NOT ask agai
         : (args?.purpose === 'recipient_change'
           ? 'recipient_change'
           : (args?.purpose === 'message_recipient' ? 'message_recipient' : null));
+      const explicitRecipientQuestion = purpose === 'message_recipient' || purpose === 'recipient_change';
+      const recipientBindingRequired = explicitRecipientQuestion
+        || (!!clarificationGuard?.pendingRecipientAuthorization
+          && this._isRecipientClarification({ question, options, reason, purpose },
+            typeof clarificationGuard.pendingRecipientAuthorization === 'string'
+              ? clarificationGuard.pendingRecipientAuthorization : 'message_recipient',
+            clarificationGuard.observedRecipientCandidates || []));
+      const technicalRecipientReasons = new Set(['recipient_identity_unavailable', 'message_body_unverified',
+        'message_body_baseline_unavailable', 'recipient_dispatch_binding_unavailable']);
+      const technicalRecipientReason = technicalRecipientReasons.has(clarificationGuard?.messageRecipientTechnicalBlock)
+        ? clarificationGuard.messageRecipientTechnicalBlock : '';
+      if (technicalRecipientReason && (explicitRecipientQuestion
+          || this._isRecipientClarification({ question, options, reason, purpose }, 'recipient_change', [])
+          || this._isRecipientClarification({ question, options, reason, purpose }, 'message_recipient', []))) {
+        return { success: false, blocked: true, noDispatch: true, dispatched: false, retryable: false,
+          messageRecipientGuard: true, reasonCode: technicalRecipientReason,
+          recipientBinding: { required: true, bound: false, reasonCode: technicalRecipientReason },
+          error: 'Recipient confirmation cannot repair the unresolved technical message guard. No clarification was shown. Re-read the active recipient and composer evidence; if it remains unavailable, report the blocker instead of requesting the same approval again.' };
+      }
       const isResearchEscalation = purpose === 'research_escalation';
       const requireExplicitAnswer = isResearchEscalation || args?.require_explicit_answer === true;
       const researchRequest = isResearchEscalation ? normalizeResearchRequest(args?.research_request) : '';
@@ -35307,7 +35361,9 @@ If the user has already named or confirmed this exact recipient, do NOT ask agai
 
       if (response && response.cancelled) {
         this._bindClarifiedMessageRecipient(tabId, '', 'cancelled', { question, options, reason, purpose });
-        return { success: false, cancelled: true, reason: response.reason || 'clarify cancelled' };
+        return { success: false, cancelled: true, reason: response.reason || 'clarify cancelled',
+          ...(recipientBindingRequired ? { recipientBinding: { required: true, bound: false,
+            reasonCode: 'recipient_clarification_cancelled' } } : {}) };
       }
       const answer = String(response?.answer || '').trim();
       const source = response?.source || 'user';
@@ -35320,7 +35376,11 @@ If the user has already named or confirmed this exact recipient, do NOT ask agai
       // nothing, matching how research escalation treats those sources below.
       // Every clarification outcome (human answer, timeout, auto) must consume
       // the staged recipient consent so a later unrelated clarify does not inherit it.
-      this._bindClarifiedMessageRecipient(tabId, answer, source, { question, options, reason, purpose, safeFirst: entrySafeFirst });
+      const recipientBound = this._bindClarifiedMessageRecipient(tabId, answer, source,
+        { question, options, reason, purpose, safeFirst: entrySafeFirst });
+      const recipientBinding = recipientBindingRequired ? { required: true, bound: recipientBound,
+        ...(!recipientBound ? { reasonCode: technicalRecipientReasons.has(clarificationGuard?.messageRecipientTechnicalBlock)
+          ? clarificationGuard.messageRecipientTechnicalBlock : 'recipient_authorization_not_bound' } : {}) } : null;
       this._recordSocialPublicationClarification(tabId, clarificationGuard, question, answer, source);
       const explicitResearchApproval = isResearchEscalation
         && source !== 'timeout'
@@ -35350,6 +35410,7 @@ If the user has already named or confirmed this exact recipient, do NOT ask agai
         source,
         authorized,
         requiresExplicitConfirmation: !authorized,
+        ...(recipientBinding ? { recipientBinding } : {}),
         ...(isResearchEscalation ? {
           researchEscalationApproved: explicitResearchApproval,
           authorization_token: authorizationToken,
