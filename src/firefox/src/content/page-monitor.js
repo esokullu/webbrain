@@ -23,6 +23,7 @@
   let textSignatures = new WeakMap();
   let popoverTurns = new WeakMap();
   let roots = new WeakSet();
+  let animationAttribution = new WeakMap();
   let active = false, disposed = false, runToken = '', seq = 0, revision = 0;
   let observer = null, layoutObserver = null, domTimer = null, scrollTimer = null, controlTimer = null, lastUserAt = 0;
   let pointerHeld = false, composing = false, localOperation = null, controlIterator = null;
@@ -469,6 +470,8 @@
         'aria-expanded', 'aria-selected', 'aria-checked', 'aria-pressed', 'aria-disabled',
         'type', 'href', 'target', 'download', 'action', 'method', 'formaction', 'formmethod', 'formtarget',
         'aria-valuenow', 'aria-valuetext', 'aria-hidden', 'hidden', 'disabled', 'readonly', 'checked', 'selected', 'open', 'popover', 'inert', 'class', 'style'] });
+    for (const name of ['animationend', 'animationcancel', 'transitionend', 'transitioncancel'])
+      listen(root, name, checkSettledAnimation);
     listen(root, 'beforetoggle', event => {
       const el = elementFor(event);
       if (ignored(el) || !el.hasAttribute('popover') || !('popover' in el)) return;
@@ -571,6 +574,39 @@
     }
     return stylesheets;
   }
+  function baseNavigationMutation(record, el) {
+    if (record.type === 'attributes' && el?.tagName === 'BASE' && ['href', 'target'].includes(record.attributeName))
+      return record.oldValue !== el.getAttribute(record.attributeName);
+    return record.type === 'childList' && [...record.addedNodes, ...record.removedNodes]
+      .some(node => node.nodeType === 1 && node.tagName === 'BASE');
+  }
+  function runningAnimations(el) {
+    try {
+      const animations = el?.getAnimations?.();
+      return (Array.isArray(animations) ? animations : []).filter(animation => animation.playState === 'running');
+    } catch { return []; }
+  }
+  function deferAnimationCheck(record, el) {
+    const animations = runningAnimations(el);
+    if (!animations.length) return false;
+    const agentUserAt = Number.isFinite(record.agentUserAt) ? record.agentUserAt
+      : agentTurn && lastUserAt <= agentTurn.userAt ? agentTurn.userAt : undefined;
+    if (Number.isFinite(agentUserAt)) for (const animation of animations) {
+      const target = animation.effect?.target;
+      animationAttribution.set(target instanceof Element ? target : el, agentUserAt);
+    }
+    return true;
+  }
+  function checkSettledAnimation(event) {
+    const el = event.target;
+    if (!active || !(el instanceof Element) || ignored(el)) return;
+    const finiteAnimationRunning = runningAnimations(el).some(animation =>
+      animation.effect?.getComputedTiming?.().iterations !== Infinity);
+    if (finiteAnimationRunning) return;
+    const agentUserAt = animationAttribution.get(el);
+    animationAttribution.delete(el);
+    onMutations([{ type: 'animation-settled', target: el, ...(Number.isFinite(agentUserAt) ? { agentUserAt } : {}) }]);
+  }
   function onMutations(records) {
     if (!active) return;
     let changed = false, source = 'page', target = '';
@@ -591,7 +627,7 @@
     for (const record of records) {
       if (record.type !== 'popover' && (record.type !== 'attributes' || !['class', 'style', 'hidden', 'aria-hidden', 'open', 'inert', 'selected'].includes(record.attributeName))) continue;
       if (ignored(record.target)) continue;
-      if (record.target.getAnimations?.().some(animation => animation.playState === 'running')) continue;
+      if (deferAnimationCheck(record, record.target)) continue;
       if (record.type === 'attributes' && record.attributeName === 'selected'
           && record.oldValue !== record.target.getAttribute('selected')) {
         const select = record.target.closest?.('select');
@@ -615,6 +651,7 @@
     for (const record of changes) {
       const el = record.target.nodeType === 1 ? record.target
         : record.target.host || record.target.parentElement || record.target.getRootNode?.().host;
+      if (baseNavigationMutation(record, el)) { noteChange(document.documentElement, record.agentUserAt); continue; }
       const changedStylesheets = stylesheetMutation(record);
       if (changedStylesheets.length) {
         if (changedStylesheets.some(style => !decorations.has(style))) noteChange(document.documentElement, record.agentUserAt);
@@ -628,7 +665,8 @@
       // while observing independent page-script changes to editable text.
       if (editableTextMutation && (userTurn || (agentTurn && lastUserAt <= agentTurn.userAt))) continue;
       if (record.type === 'attributes' && ['class', 'style'].includes(record.attributeName)
-          && el.getAnimations?.().some(animation => animation.playState === 'running')) continue;
+          && deferAnimationCheck(record, el)) continue;
+      if (record.type === 'layout' && deferAnimationCheck(record, el)) continue;
       if (++measured > 300) {
         // The remaining records are intentionally uninspected. Invalidate the
         // prepared page conservatively so a later visible target cannot vanish
@@ -804,7 +842,8 @@
     for (const name of ['pointerover', 'mouseover']) listen(document, name, event => {
       if (event.isTrusted) expected('click', elementFor(event), event, true);
     });
-    for (const name of ['click', 'input', 'beforeinput', 'change', 'keydown', 'pointerdown', 'pointermove']) listen(document, name, noteAgentTurn);
+    for (const name of ['click', 'input', 'beforeinput', 'change', 'keydown', 'pointerover', 'pointerenter', 'mouseover', 'mouseenter', 'pointermove', 'mousemove', 'pointerdown', 'mousedown', 'pointerup', 'mouseup'])
+      listen(document, name, noteAgentTurn);
     listen(document, 'pointerdown', event => {
       const el = elementFor(event);
       if (!event.isTrusted || ignored(el) || expected('click', el, event)) return;
@@ -931,6 +970,7 @@
     clearTimeout(domTimer); clearTimeout(scrollTimer); clearInterval(controlTimer); domTimer = null; scrollTimer = null; controlTimer = null; unreported = 0; pendingDOM = null; lastFeedbackDelivery = Promise.resolve();
     listeners.splice(0).forEach(remove => remove());
     operations.clear(); localOperation = null; agentTurn = null;
+    animationAttribution = new WeakMap();
     agentLayoutHistory.length = 0;
     roots = new WeakSet(); signatures = new WeakMap(); controlSignatures = new WeakMap(); textSignatures = new WeakMap(); popoverTurns = new WeakMap(); controlReferences.clear(); controlIterator = null;
   }

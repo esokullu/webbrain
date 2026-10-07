@@ -420,12 +420,20 @@ for (const siteIsolation of [false, true]) {
       }
       rootSession = await context.newCDPSession(page);
       const client = new CDPClient(); client.sessions.set(tab, { attached: true });
+      await child.evaluate(() => document.getElementById('agent').addEventListener('pointerover', () => {
+        document.getElementById('status').textContent = 'Hover changed this';
+      }, { once: true }));
+      const hover = await child.locator('#agent').boundingBox();
+      await client.dispatchMouseEvent(tab, 'mouseMoved', hover.x + hover.width / 2, hover.y + hover.height / 2);
+      await child.waitForFunction(() => document.getElementById('status').textContent === 'Hover changed this');
+      await child.waitForTimeout(200);
+      assert.deepEqual(await child.evaluate(() => feedback), [], 'CDP pointer-entry handlers must remain agent-attributed');
       const rect = await child.locator('#field').boundingBox();
       await client.dispatchMouseEvent(tab, 'mousePressed', rect.x + 8, rect.y + 8);
       await client.dispatchMouseEvent(tab, 'mouseReleased', rect.x + 8, rect.y + 8);
       await client.sendCommand(tab, 'Input.insertText', { text: 'agent' });
       assert.equal(await child.locator('#field').inputValue(), 'agent');
-      assert.deepEqual(registrations, [2, 2, 2]);
+      assert.deepEqual(registrations, [2, 2, 2, 2]);
       const container = await child.locator('#container').boundingBox();
       await client.sendCommand(tab, 'Input.dispatchMouseEvent', { type: 'mouseWheel', x: container.x + 20, y: container.y + 20,
         deltaX: 0, deltaY: 100 });
@@ -852,6 +860,96 @@ for (const [build, engine] of [['chrome', chromium], ['firefox', firefox]]) {
         setTimeout(() => resolve(lastMonitorResponse), 0);
       }));
       assert.equal(response.pageFeedbackPending, true, 'An ancestor opacity change must hide its descendants from prepared state');
+    } finally { await browser.close(); }
+  });
+
+  test(`${build}: base URL changes invalidate prepared relative navigation`, async () => {
+    const { browser, page } = await fixture(engine, build);
+    try {
+      await page.evaluate(() => {
+        const base = document.createElement('base'); base.id = 'page-base'; base.href = '/before/';
+        const link = document.createElement('a'); link.id = 'relative-link'; link.href = 'next'; link.textContent = 'Continue';
+        document.head.append(base); document.body.append(link);
+      });
+      await page.waitForFunction(() => feedback.some(event => event.kind === 'dom'));
+      await page.waitForTimeout(180);
+      const guard = await page.evaluate(() => {
+        feedback = [];
+        deliver('page_monitor_prepare', { operationId: 'relative-navigation', tool: 'click', selector: '#relative-link' });
+        deliver('page_monitor_dispatch', { operationId: 'relative-navigation', kind: 'click', selector: '#relative-link', fenceOnly: true });
+        return lastMonitorResponse.guard;
+      });
+      await page.locator('#page-base').evaluate(el => el.setAttribute('href', '/after/'));
+      await page.waitForFunction(() => feedback.some(event => event.kind === 'dom' && event.target === 'html'), null, { timeout: 1000 });
+      const accepted = await page.evaluate(value => window.dispatchEvent(new CustomEvent('webbrain-agent-dom-dispatch', {
+        detail: JSON.stringify({ ...value, dispatchPhase: 'click' }), cancelable: true,
+      })), guard);
+      assert.equal(accepted, false, 'Changing the base URL must stale relative link destinations');
+    } finally { await browser.close(); }
+  });
+
+  test(`${build}: visibility signatures are rechecked after animations and transitions settle`, async () => {
+    const { browser, page } = await fixture(engine, build);
+    try {
+      await page.evaluate(() => {
+        const style = document.createElement('style');
+        style.textContent = `@keyframes hide-target { to { opacity: 0; } }
+          #animated-target { opacity: 1; }
+          #animated-target.hide { animation: hide-target 120ms linear forwards; }
+          #transition-target { opacity: 1; transition: opacity 120ms linear; }
+          #transition-target.hide { opacity: 0; }
+          #mixed-transition { opacity: 1; transition: opacity 400ms linear; }
+          #mixed-container.hide #mixed-hidden { visibility: hidden; }
+          #mixed-container.hide #mixed-transition { opacity: 0; }`;
+        const animated = document.createElement('button'); animated.id = 'animated-target'; animated.textContent = 'Animated target';
+        const transitioned = document.createElement('button'); transitioned.id = 'transition-target'; transitioned.textContent = 'Transition target';
+        const mixed = document.createElement('div'); mixed.id = 'mixed-container';
+        mixed.innerHTML = '<button id="mixed-hidden">Hidden sibling</button><button id="mixed-transition">Animated sibling</button>';
+        const shadowHost = document.createElement('div'); shadowHost.id = 'shadow-host';
+        const shadow = shadowHost.attachShadow({ mode: 'open' });
+        shadow.innerHTML = `<style>@keyframes shadow-hide { to { opacity: 0; } } #shadow-target.hide { animation: shadow-hide 120ms linear forwards; }</style>
+          <button id="shadow-target">Shadow target</button>`;
+        document.head.append(style); document.body.append(animated, transitioned, mixed, shadowHost);
+      });
+      await page.waitForFunction(() => feedback.some(event => event.kind === 'dom'));
+      await page.waitForTimeout(180);
+      for (const id of ['animated-target', 'transition-target']) {
+        const guard = await page.evaluate(targetId => {
+          feedback = [];
+          deliver('page_monitor_prepare', { operationId: targetId, tool: 'click', selector: `#${targetId}` });
+          deliver('page_monitor_dispatch', { operationId: targetId, kind: 'click', selector: `#${targetId}`, fenceOnly: true });
+          return lastMonitorResponse.guard;
+        }, id);
+        await page.locator(`#${id}`).evaluate(el => el.classList.add('hide'));
+        await page.waitForFunction(targetId => feedback.some(event => event.kind === 'dom' && event.target === `button#${targetId}`), id,
+          { timeout: 1500 });
+        const accepted = await page.evaluate(value => window.dispatchEvent(new CustomEvent('webbrain-agent-dom-dispatch', {
+          detail: JSON.stringify({ ...value, dispatchPhase: 'click' }), cancelable: true,
+        })), guard);
+        assert.equal(accepted, false, `${id} must invalidate the prepared click after its final hidden state`);
+      }
+      await page.evaluate(() => {
+        feedback = [];
+        document.getElementById('shadow-host').shadowRoot.getElementById('shadow-target').classList.add('hide');
+      });
+      await page.waitForFunction(() => feedback.some(event => event.kind === 'dom' && event.target === 'button#shadow-target'), null,
+        { timeout: 1500 });
+
+      const mixedGuard = await page.evaluate(() => {
+        feedback = [];
+        deliver('page_monitor_prepare', { operationId: 'mixed-animation', tool: 'click', selector: '#mixed-hidden' });
+        deliver('page_monitor_dispatch', { operationId: 'mixed-animation', kind: 'click', selector: '#mixed-hidden', fenceOnly: true });
+        return lastMonitorResponse.guard;
+      });
+      await page.locator('#mixed-container').evaluate(el => el.classList.add('hide'));
+      await page.waitForFunction(revision => Number(document.documentElement.getAttribute('data-webbrain-page-revision').split(':').at(-1)) > revision,
+        mixedGuard.revision, { timeout: 500 });
+      const mixedAccepted = await page.evaluate(value => window.dispatchEvent(new CustomEvent('webbrain-agent-dom-dispatch', {
+        detail: JSON.stringify({ ...value, dispatchPhase: 'click' }), cancelable: true,
+      })), mixedGuard);
+      assert.equal(mixedAccepted, false, 'A transition on one descendant must not defer checks for hidden siblings');
+      await page.waitForFunction(revision => Number(document.documentElement.getAttribute('data-webbrain-page-revision').split(':').at(-1)) > revision + 1,
+        mixedGuard.revision, { timeout: 1500 });
     } finally { await browser.close(); }
   });
 

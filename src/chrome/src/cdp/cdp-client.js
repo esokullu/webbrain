@@ -446,8 +446,10 @@ export class CDPClient {
         ...(Number.isFinite(params.x) ? { x: params.x, y: params.y } : {}),
         release,
         ...(method === 'Input.insertText' ? { eventTypes: ['beforeinput', 'input', 'change'] } : {}),
-        ...(method === 'Input.dispatchMouseEvent' ? { eventTypes: params.type === 'mouseMoved' ? ['pointermove']
-          : params.type === 'mouseWheel' ? ['wheel'] : ['pointerdown', 'click', 'input', 'change'] } : {}),
+        ...(method === 'Input.dispatchMouseEvent' ? { eventTypes: params.type === 'mouseMoved'
+          ? ['pointerover', 'pointerenter', 'mouseover', 'mouseenter', 'pointermove', 'mousemove']
+          : params.type === 'mousePressed' ? ['pointerover', 'pointerenter', 'mouseover', 'mouseenter', 'pointerdown', 'mousedown', 'click', 'input', 'change']
+            : params.type === 'mouseWheel' ? ['wheel'] : ['pointerup', 'mouseup', 'click', 'input', 'change'] } : {}),
         ...target,
       });
     }
