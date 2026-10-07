@@ -26839,6 +26839,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       || c.startsWith('[PLAN EXECUTION BLOCK')
       || c.startsWith('[RUNTIME MODE CORRECTION')
       || c.startsWith('[NAVIGATION OCCURRED')
+      || c.startsWith('[BROWSER STATE UPDATE')
       || c.startsWith('[Auto-screenshot')
       || c.startsWith('[Completion verification screenshot omitted')
       || c.startsWith('[UNTRUSTED CAPTURE')
@@ -36999,7 +37000,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
         break;
       }
 
-      if ((await this._applyPendingPageFeedback(tabId, messages, onUpdate))
+      if ((await this._applyPendingPageFeedback(tabId, messages, onUpdate, { responseToolCalls: result?.toolCalls }))
           || this._applyPendingSteering(tabId, messages, onUpdate)) {
         onUpdate('text', { content: '', replace: true });
         continue;
@@ -38017,7 +38018,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
           toolCalls: streamedToolCalls,
         }));
 
-        if ((await this._applyPendingPageFeedback(tabId, messages, onUpdate))
+        if ((await this._applyPendingPageFeedback(tabId, messages, onUpdate, { responseToolCalls: streamedToolCalls }))
             || this._applyPendingSteering(tabId, messages, onUpdate)) {
           onUpdate('text', { content: '', replace: true });
           continue;

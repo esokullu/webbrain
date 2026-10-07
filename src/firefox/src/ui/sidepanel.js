@@ -9682,9 +9682,9 @@ function handleAgentUpdateMessage(msg) {
 
     case 'thinking':
       if (data?.note) {
-        // Planner notes carry more information than a generic wait state, so
-        // keep them intact instead of immediately replacing them with a step.
+        // Keep the planner phase visible until the first main execution step.
         showActivity(String(data.note));
+        if (data.step === 0) activityDisplayMode = 'planning';
       } else {
         startThinkingActivity();
       }
@@ -12492,9 +12492,9 @@ function beginThinkingActivity() {
 }
 
 function startThinkingActivity() {
-  // Generic thinking copy is only an initial placeholder. Once a concrete
-  // status arrives, later generic updates must not replace it.
-  if (activityDisplayMode !== 'idle') return;
+  // A main step ends the planner status. Keep concrete tool statuses until
+  // another concrete update arrives.
+  if (activityDisplayMode !== 'idle' && activityDisplayMode !== 'planning') return;
   beginThinkingActivity();
 }
 

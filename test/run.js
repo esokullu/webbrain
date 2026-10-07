@@ -54516,7 +54516,7 @@ test('status-strip clicks hide default compact history while verbose restores fu
     );
     assert.match(
       panel,
-      /function startThinkingActivity\(\) \{[\s\S]*?if \(activityDisplayMode !== 'idle'\) return;[\s\S]*?function showActivity\(text\)[\s\S]*?clearThinkingActivityTimers\(\);[\s\S]*?activityDisplayMode = 'concrete';[\s\S]*?function hideActivity\(\) \{\s*clearThinkingActivityTimers\(\);/,
+      /function startThinkingActivity\(\) \{[\s\S]*?if \(activityDisplayMode !== 'idle' && activityDisplayMode !== 'planning'\) return;[\s\S]*?function showActivity\(text\)[\s\S]*?clearThinkingActivityTimers\(\);[\s\S]*?activityDisplayMode = 'concrete';[\s\S]*?function hideActivity\(\) \{\s*clearThinkingActivityTimers\(\);/,
       `${label}: concrete and terminal activity should stop pending generic rotations`,
     );
     assert.doesNotMatch(

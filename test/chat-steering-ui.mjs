@@ -13,6 +13,41 @@ function extract(source, name) {
 
 for (const [build, engine] of [['chrome', chromium], ['firefox', firefox]]) {
   const { DECISION_SETTINGS_KEYS } = await import(`../src/${build}/src/agent/decision-config.js`);
+  test(`${build}: main execution clears the planner activity and preserves tool activity`, async () => {
+    const browser = await engine.launch({ headless: true });
+    try {
+      const page = await browser.newPage();
+      const source = read(build, 'src/ui/sidepanel.js');
+      const activityStart = source.indexOf('const THINKING_ACTIVITY_KEYS = [');
+      const activityEnd = source.indexOf('// A new turn is reading-first', activityStart);
+      const thinkingStart = source.indexOf("    case 'thinking':");
+      const thinkingEnd = source.indexOf("    case 'text':", thinkingStart);
+      await page.setContent('<div id="activity"><span id="text"></span><span id="live"></span></div>');
+      await page.addScriptTag({ content: `
+        const agentActivity = document.querySelector('#activity');
+        const activityText = document.querySelector('#text');
+        const activityLiveStatus = document.querySelector('#live');
+        const t = value => value;
+        const compactProgressVisible = true;
+        function hideInspectionBanner() {}
+        ${source.slice(activityStart, activityEnd)}
+        function update(type, data) { switch(type) { ${source.slice(thinkingStart, thinkingEnd)} } }
+      ` });
+      for (const step of [1, 8]) {
+        await page.evaluate(step => {
+          update('thinking', { step: 0, note: 'Planning…' });
+          if (activityText.textContent !== 'Planning…') throw new Error('Planner status missing');
+          update('thinking', { step });
+        }, step);
+        assert.equal(await page.locator('#text').textContent(), 'sp.activity.communicating');
+        assert.equal(await page.locator('#live').textContent(), 'sp.activity.communicating');
+        await page.evaluate(() => { showActivity('Opening composer'); update('thinking', { step: 9 }); });
+        assert.equal(await page.locator('#text').textContent(), 'Opening composer');
+      }
+      await page.evaluate(() => hideActivity());
+      assert.equal(await page.locator('#live').textContent(), '');
+    } finally { await browser.close(); }
+  });
   test(`${build}: native composer honors delivery settings, explicitly steers, and preserves drafts across races`, async () => {
     const browser = await engine.launch({ headless: true });
     try {

@@ -29229,6 +29229,7 @@ If the user has already named or confirmed this exact recipient, do NOT ask agai
       || c.startsWith('[PLAN EXECUTION BLOCK')
       || c.startsWith('[RUNTIME MODE CORRECTION')
       || c.startsWith('[NAVIGATION OCCURRED')
+      || c.startsWith('[BROWSER STATE UPDATE')
       || c.startsWith('[Auto-screenshot')
       || c.startsWith('[Completion verification screenshot omitted')
       || c.startsWith('[UNTRUSTED CAPTURE')
@@ -44074,7 +44075,7 @@ If the user has already named or confirmed this exact recipient, do NOT ask agai
         break;
       }
 
-      if ((await this._applyPendingPageFeedback(tabId, messages, onUpdate))
+      if ((await this._applyPendingPageFeedback(tabId, messages, onUpdate, { responseToolCalls: result?.toolCalls }))
           || this._applyPendingSteering(tabId, messages, onUpdate)) {
         onUpdate('text', { content: '', replace: true });
         continue;
@@ -45241,7 +45242,7 @@ If the user has already named or confirmed this exact recipient, do NOT ask agai
           toolCalls: streamedToolCalls,
         }));
 
-        if ((await this._applyPendingPageFeedback(tabId, messages, onUpdate))
+        if ((await this._applyPendingPageFeedback(tabId, messages, onUpdate, { responseToolCalls: streamedToolCalls }))
             || this._applyPendingSteering(tabId, messages, onUpdate)) {
           onUpdate('text', { content: '', replace: true });
           continue;

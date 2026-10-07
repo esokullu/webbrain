@@ -90,6 +90,36 @@ for (const build of ['chrome', 'firefox']) {
   const { Agent } = await import(`../src/${build}/src/agent/agent.js`);
   const { beforePageAgentDispatch } = await import(`../src/${build}/src/agent/page-feedback.js`);
 
+  for (const change of ['feed', 'label', 'href', 'ancestor', 'user', 'unknown', 'iframe', 'base', 'truncated', 'missing', 'submit', 'coordinates']) {
+    test(`${build}: response navigation ${change === 'feed' ? 'survives' : 'rejects'} ${change} feedback`, async () => {
+      const agent = setup(Agent), tab = nextTab++;
+      const original = 'region "Timeline" [ref_1]\n article "News A" [ref_2]\n time "1m" [ref_3]\nregion "Account" [ref_4]\n link "Yeni Gönderi" [ref_5] href="/publish"\nform [ref_7]\n button "Publish" [ref_8] type="submit"';
+      let page = { success: true, pageContent: original };
+      agent.executeTool = async () => page;
+      await agent._claimRunEntry(tab, 'interactive');
+      try {
+        const binding = bind(agent, tab), messages = [{ role: 'system', content: '' }, { role: 'user', content: 'Post about WebBrain' }];
+        binding.send({ kind: 'dom', source: 'page', target: 'time' });
+        assert.equal(await agent._applyPendingPageFeedback(tab, messages), true);
+        assert.equal(messages.at(-1).webbrainAppOwnedKind, 'page_feedback');
+        assert.equal(agent._activeTaskBinding(messages).text, 'Post about WebBrain');
+        page = { success: true, pageContent: original.replace('News A', 'News B').replace('1m', '2m') };
+        if (change === 'label') page.pageContent = page.pageContent.replace('Yeni Gönderi', 'Delete account');
+        if (change === 'href') page.pageContent = page.pageContent.replace('/publish', '/delete');
+        if (change === 'ancestor') page.pageContent = page.pageContent.replace('Account', 'Other account');
+        if (change === 'missing') page.pageContent = page.pageContent.replace('ref_5', 'ref_6');
+        if (change === 'truncated') page.depthTruncated = true;
+        binding.send({ kind: 'dom', source: change === 'user' ? 'user' : change === 'unknown' ? 'unknown' : 'page', target: change === 'base' ? 'base' : 'time' });
+        if (change === 'iframe') agent._queuePageFeedback(tab, { kind: 'dom', source: 'page', frameId: 1, target: 'time' });
+        const call = { function: { name: change === 'coordinates' ? 'click' : 'click_ax',
+          arguments: JSON.stringify(change === 'coordinates' ? { x: 50, y: 50 } : { ref_id: change === 'submit' ? 'ref_8' : 'ref_5' }) } };
+        const superseded = await agent._applyPendingPageFeedback(tab, messages, () => {}, { responseToolCalls: [call] });
+        assert.equal(superseded, change !== 'feed');
+        assert.equal(agent._activeTaskBinding(messages).text, 'Post about WebBrain');
+      } finally { agent._releaseRunEntry(tab); }
+    });
+  }
+
   if (build === 'chrome') {
     test('Chrome execute_js returns without dispatch when the page-side revision gate rejects it', async () => {
       const tab = nextTab++, agent = setup(Agent);
