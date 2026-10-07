@@ -585,21 +585,21 @@ for (const [build, engine] of [['chrome', chromium], ['firefox', firefox]]) {
     const typeStart = source.indexOf('async function _typeTextInner(');
     const findTextStart = source.indexOf('\n  function findText(', typeStart);
     assert.ok(typeStart >= 0 && findTextStart > typeStart);
-    assert.equal((source.slice(typeStart, findTextStart).match(/withLocalInputDispatch\(\(\) => \{/g) || []).length, 2,
+    assert.equal((source.slice(typeStart, findTextStart).match(/withLocalPageDispatch\(\(\) => \{/g) || []).length, 2,
       `${build}: both native form and select setters must include their synthetic events in the local dispatch`);
-    const helper = source.match(/^  function withLocalInputDispatch\(callback\) \{[\s\S]*?^  \}/m)?.[0];
+    const helper = source.match(/^  function withLocalPageDispatch\(callback\) \{[\s\S]*?^  \}/m)?.[0];
     assert.ok(helper, `${build}: local input events must use the production monitor boundary`);
 
     const { browser, page } = await fixture(engine, build);
     try {
-      await page.addScriptTag({ content: `window.withLocalInputDispatch = ${helper};` });
+      await page.addScriptTag({ content: `window.withLocalPageDispatch = ${helper};` });
       for (const [selector, tag, value] of [['#field', 'input', 'agent-synthetic-value'], ['#select', 'select', 'B']]) {
         await page.evaluate(() => { feedback = []; });
         await page.evaluate(({ selector, tag, value }) => {
           const field = document.querySelector(selector);
           const finish = __wbPageMonitor.beginContentAction('type', { selector });
           try {
-            withLocalInputDispatch(() => {
+            withLocalPageDispatch(() => {
               const prototype = tag === 'select' ? HTMLSelectElement.prototype : HTMLInputElement.prototype;
               Object.getOwnPropertyDescriptor(prototype, 'value').set.call(field, value);
               field.dispatchEvent(new Event('input', { bubbles: true }));
@@ -612,6 +612,52 @@ for (const [build, engine] of [['chrome', chromium], ['firefox', firefox]]) {
         assert.equal(events.some(event => event.source !== 'agent'), false, `${build}: synthetic ${tag} events must not become page feedback`);
         assert.equal(JSON.stringify(events).includes(value), false, `${build}: page feedback must not include form values`);
       }
+    } finally { await browser.close(); }
+  });
+
+  test(`${build}: local synthetic clicks attribute checkbox changes and navigation`, async () => {
+    const source = read(build, 'content/content.js');
+    const clickStart = source.indexOf('function clickElement(params, actionDeadlineExpired = () => false)');
+    const typeStart = source.indexOf('function typeText(params, actionDeadlineExpired = () => false)', clickStart);
+    const clickAxStart = source.indexOf("'click_ax':");
+    const checkedStart = source.indexOf("'set_checked':", clickAxStart);
+    const typeAxStart = source.indexOf("'type_ax':", checkedStart);
+    assert.ok(clickStart >= 0 && typeStart > clickStart && clickAxStart >= 0 && checkedStart > clickAxStart && typeAxStart > checkedStart);
+    for (const body of [source.slice(clickStart, typeStart), source.slice(clickAxStart, checkedStart), source.slice(checkedStart, typeAxStart)]) {
+      assert.match(body, /withLocalPageDispatch\(\(\) => \{[\s\S]*?el\.click\(\)/,
+        `${build}: every synthetic click path must keep the monitor's local dispatch scope active`);
+    }
+    const helper = source.match(/^  function withLocalPageDispatch\(callback\) \{[\s\S]*?^  \}/m)?.[0];
+    assert.ok(helper, `${build}: synthetic clicks must use the production local dispatch boundary`);
+
+    const { browser, page } = await fixture(engine, build);
+    try {
+      await page.evaluate(() => {
+        document.body.insertAdjacentHTML('beforeend', '<input id="local-click-checkbox" type="checkbox"><input id="local-checked-checkbox" type="checkbox"><a id="local-click-link" href="#local-click-destination">Continue</a>');
+      });
+      await page.waitForTimeout(160);
+      await page.addScriptTag({ content: `window.withLocalPageDispatch = ${helper};` });
+      const events = await page.evaluate(() => {
+        feedback = [];
+        const actions = [
+          ['click', document.getElementById('local-click-link')],
+          ['click_ax', document.getElementById('local-click-checkbox')],
+          ['set_checked', document.getElementById('local-checked-checkbox')],
+        ];
+        for (const [action, target] of actions) {
+          const finish = __wbPageMonitor.beginContentAction(action, { selector: '#' + target.id });
+          try { withLocalPageDispatch(() => target.click()); }
+          finally { finish(); }
+        }
+        return new Promise(resolve => setTimeout(() => resolve(feedback), 150));
+      });
+      assert.ok(events.some(event => event.source === 'agent' && event.operation === 'click'
+        && event.navigationUrl === 'https://monitor.test/start#local-click-destination'),
+      `${build}: a synthetic link click must arm its agent navigation`);
+      assert.equal(events.some(event => event.source !== 'agent'), false,
+        `${build}: synthetic checkbox changes must not be reported as page/user feedback`);
+      assert.equal(await page.locator('#local-click-checkbox').isChecked(), true);
+      assert.equal(await page.locator('#local-checked-checkbox').isChecked(), true);
     } finally { await browser.close(); }
   });
 

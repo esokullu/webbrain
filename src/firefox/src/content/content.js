@@ -2535,9 +2535,10 @@
         ...(coordinateClick ? { point: { x: Math.round(params.x), y: Math.round(params.y) } } : {}),
         _filePickerGuardId: clickWithoutNativeFilePicker(() => {}).guardId };
     }
-    window.__wbPageMonitor?.beforeLocalDispatch();
-    dispatched = true;
-    const filePickerGuard = clickWithoutNativeFilePicker(() => el.click());
+    const filePickerGuard = withLocalPageDispatch(() => {
+      dispatched = true;
+      return clickWithoutNativeFilePicker(() => el.click());
+    });
     if (filePickerGuard.blocked) {
       return {
         ...filePickerBlockedResponse(filePickerGuard.blocked, params.text || el.innerText?.trim() || ''),
@@ -2609,7 +2610,7 @@
     return _typeTextInner(params, actionDeadlineExpired);
   }
 
-  function withLocalInputDispatch(callback) {
+  function withLocalPageDispatch(callback) {
     const monitor = window.__wbPageMonitor;
     if (typeof monitor?.withLocalDispatch === 'function') return monitor.withLocalDispatch(callback);
     monitor?.beforeLocalDispatch();
@@ -2866,7 +2867,7 @@
       }
       const nativeSetter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')?.set;
       if (actionDeadlineExpired()) return deadlineFailure();
-      const dispatchResult = withLocalInputDispatch(() => {
+      const dispatchResult = withLocalPageDispatch(() => {
         dispatched = true;
         if (nativeSetter) nativeSetter.call(el, match.value);
         else el.value = match.value;
@@ -2888,7 +2889,7 @@
     const nativeInputValueSetter = Object.getOwnPropertyDescriptor(proto, 'value')?.set;
 
     if (actionDeadlineExpired()) return deadlineFailure();
-    const dispatchResult = withLocalInputDispatch(() => {
+    const dispatchResult = withLocalPageDispatch(() => {
       dispatched = true;
       if (nativeInputValueSetter) {
         nativeInputValueSetter.call(el, (params.clear ? '' : (el.value || '')) + params.text);
@@ -6467,11 +6468,12 @@
               _filePickerGuardId: clickWithoutNativeFilePicker(() => {}).guardId,
             };
           }
-          window.__wbPageMonitor?.beforeLocalDispatch();
-          dispatched = true;
           const syntheticClickStartedAt = Date.now();
           const syntheticClickDispatchStartedAt = performance.now();
-          const filePickerGuard = clickWithoutNativeFilePicker(() => el.click());
+          const filePickerGuard = withLocalPageDispatch(() => {
+            dispatched = true;
+            return clickWithoutNativeFilePicker(() => el.click());
+          });
           const syntheticClickDispatchMs = Math.max(0, performance.now() - syntheticClickDispatchStartedAt);
           if (filePickerGuard.blocked) {
             return failure(
@@ -6690,9 +6692,10 @@
             };
           }
           if (actionDeadlineExpired()) return deadlineFailure();
-          window.__wbPageMonitor?.beforeLocalDispatch();
-          dispatched = true;
-          el.click();
+          withLocalPageDispatch(() => {
+            dispatched = true;
+            el.click();
+          });
           if (actionDeadlineExpired()) return deadlineFailure();
           await new Promise(resolve => setTimeout(resolve, SET_FIELD_VERIFY_DELAY_MS));
           if (actionDeadlineExpired()) return deadlineFailure();
