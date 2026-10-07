@@ -612,6 +612,61 @@ window.SocialMediaDownloader = (() => {
     return [...urls];
   };
 
+  const paintCarrierVisible = (carrier, backingImage) => {
+    if (!isVisibleElement(carrier)) return false;
+    for (let node = carrier; node; node = node.parentElement) {
+      const style = window.getComputedStyle(node);
+      if (node.inert || node.hasAttribute('inert') || style.display === 'none'
+          || ['hidden', 'collapse'].includes(style.visibility) || Number(style.opacity) === 0
+          || style.contentVisibility === 'hidden') return false;
+    }
+    if (typeof document.elementFromPoint !== 'function') return false;
+    const rect = carrier.getBoundingClientRect(), vp = viewportSize();
+    const left = Math.max(0, rect.left), top = Math.max(0, rect.top);
+    const right = Math.min(vp.w, rect.right), bottom = Math.min(vp.h, rect.bottom);
+    if (right <= left || bottom <= top) return false;
+    const dx = Math.min(2, (right - left) / 4), dy = Math.min(2, (bottom - top) / 4);
+    const points = [[(left + right) / 2, (top + bottom) / 2], [left + dx, top + dy],
+      [right - dx, top + dy], [left + dx, bottom - dy], [right - dx, bottom - dy]];
+    return points.some(([x, y]) => {
+      const hit = document.elementFromPoint(x, y);
+      if (hit === carrier || hit === backingImage) return true;
+      // React Native's paint layer can disable pointer events. Accept only its
+      // immediate shared wrapper with no unrelated rendered child surface.
+      const wrapper = carrier.parentElement;
+      return hit === wrapper && window.getComputedStyle(carrier).pointerEvents === 'none'
+        && wrapper.contains(backingImage)
+        && [...wrapper.children].every(child => child === carrier || child === backingImage);
+    });
+  };
+
+  const matchingPaintCarrier = el => {
+    // React Native Web paints an Image as a background and leaves its backing
+    // IMG transparent. Accept only the same asset, in the same rendered box,
+    // on the immediate parent or a direct sibling. An arbitrary hidden IMG
+    // cannot nominate an unrelated ancestor's background as visible media.
+    if (el?.tagName !== 'IMG' || !el.parentElement || !window.getComputedStyle) return null;
+    const style = window.getComputedStyle(el);
+    if (Number(style.opacity) !== 0 || style.display === 'none' || style.visibility === 'hidden') return null;
+    const imageRect = el.getBoundingClientRect();
+    if (imageRect.width < 24 || imageRect.height < 24) return null;
+    const assets = directMediaUrls(el);
+    const carriers = [el.parentElement, ...el.parentElement.children].filter(node => node !== el);
+    const matches = [];
+    for (const carrier of carriers) {
+      if (!paintCarrierVisible(carrier, el)) continue;
+      const background = window.getComputedStyle(carrier).backgroundImage.trim();
+      const match = /^url\((?:"([^"\\]*)"|'([^'\\]*)'|([^"'()\\]*))\)$/.exec(background);
+      if (!match) continue;
+      const url = absoluteUrl(match[1] ?? match[2] ?? match[3]);
+      if (!isMediaUrl(url) || !assets.includes(url)) continue;
+      const rect = carrier.getBoundingClientRect();
+      if (['left', 'top', 'width', 'height'].some(key => Math.abs(rect[key] - imageRect[key]) > 1)) continue;
+      matches.push({ element: carrier, url });
+    }
+    return matches.length === 1 ? matches[0] : null;
+  };
+
   const mediaElementsIn = root => {
     if (!root) return [];
     const out = [];
@@ -622,8 +677,7 @@ window.SocialMediaDownloader = (() => {
     return out;
   };
 
-  const mediaElementScore = el => {
-    const box = mediaBoxElement(el);
+  const mediaElementScore = (el, box = mediaBoxElement(el)) => {
     if (!box || !box.getBoundingClientRect) return -Infinity;
     const rect = box.getBoundingClientRect();
     const area = visibleArea(rect);
@@ -640,26 +694,30 @@ window.SocialMediaDownloader = (() => {
     return score;
   };
 
-  const bestFocusedMedia = (roots, excluded) => {
+  const bestFocusedMedia = (roots, excluded, { target = 'auto', allowPaintCarrier = false } = {}) => {
     const candidates = [];
     for (const root of roots || []) {
       if (!root || isExcluded(root, excluded) || !isVisibleElement(root)) continue;
       for (const el of mediaElementsIn(root)) {
-        const box = mediaBoxElement(el);
+        if (target === 'image' && el.tagName !== 'IMG' && !(el.tagName === 'SOURCE' && el.closest('picture'))) continue;
+        if (target === 'video' && el.tagName !== 'VIDEO' && !(el.tagName === 'SOURCE' && el.closest('video'))) continue;
+        const paint = allowPaintCarrier ? matchingPaintCarrier(el) : null;
+        const box = paint?.element || mediaBoxElement(el);
         if (!box || isExcluded(box, excluded) || !isVisibleElement(box)) continue;
         const rect = box.getBoundingClientRect();
         const intrinsicW = el.naturalWidth || el.videoWidth || el.width || rect.width || 0;
         const intrinsicH = el.naturalHeight || el.videoHeight || el.height || rect.height || 0;
         if (intrinsicW < 120 || intrinsicH < 120) continue;
-        const urls = directMediaUrls(el);
+        const rawUrls = directMediaUrls(el);
+        const urls = filterUrlsForTarget(paint ? [paint.url] : rawUrls, target);
         if (!urls.length) continue;
-        candidates.push({ el, root, urls, score: mediaElementScore(el) });
+        candidates.push({ el, root, box, paint, urls, rawUrls, score: mediaElementScore(el, box) });
       }
     }
     candidates.sort((a, b) => b.score - a.score);
     const best = candidates[0];
     if (!best) return null;
-    const rival = candidates.find(candidate => mediaBoxElement(candidate.el) !== mediaBoxElement(best.el));
+    const rival = candidates.find(candidate => candidate.box !== best.box);
     return { ...best, ambiguous: !!rival && Math.abs(best.score - rival.score) < 1 };
   };
 
@@ -674,18 +732,18 @@ window.SocialMediaDownloader = (() => {
     return roots;
   };
 
-  const collectFocusedMedia = (profile, excluded) => {
+  const collectFocusedMedia = (profile, excluded, options) => {
     const dialogRoots = queryVisibleRoots(
       'dialog[open], [aria-modal="true"], [role="dialog"], ' +
       '[data-pagelet*="MediaViewer" i], [data-testid*="lightbox" i]'
     );
-    let best = bestFocusedMedia(dialogRoots, excluded);
+    let best = bestFocusedMedia(dialogRoots, excluded, options);
     if (best) return { ...best, scope: 'dialog' };
 
-    best = bestFocusedMedia(queryVisibleRoots(profile.focusSel), excluded);
+    best = bestFocusedMedia(queryVisibleRoots(profile.focusSel), excluded, options);
     if (best) return { ...best, scope: 'main' };
 
-    best = bestFocusedMedia([document.body || document.documentElement], excluded);
+    best = bestFocusedMedia([document.body || document.documentElement], excluded, options);
     return best ? { ...best, scope: 'document' } : null;
   };
 
@@ -1510,13 +1568,13 @@ window.SocialMediaDownloader = (() => {
 
   // ---------- Main extraction entry point ----------
   // mode: 'auto' | 'main' | 'all'
-  const collect = (mode = 'auto') => {
+  const collect = (mode = 'auto', focusOptions = undefined) => {
     const profile = activeProfile();
     const excluded = buildExclusionSet(profile);
     const bindingSources = [];
 
     const focusedMedia = mode === 'auto'
-      ? collectFocusedMedia(profile, excluded)
+      ? collectFocusedMedia(profile, excluded, focusOptions)
       : null;
     const focusedUrls = focusedMedia?.urls || [];
     let useMain;
@@ -1539,7 +1597,8 @@ window.SocialMediaDownloader = (() => {
     if (focusedUrls.length) {
       urls = focusedUrls;
       sourceMode = 'focused';
-      bindingSources.push({ root: focusedMedia.root, node: focusedMedia.el, urls: focusedUrls });
+      bindingSources.push({ root: focusedMedia.root, node: focusedMedia.el, urls: focusedUrls,
+        rawUrls: focusedMedia.rawUrls, paint: focusedMedia.paint, box: focusedMedia.box });
     } else if (useGallery) {
       const galleryUrls = [];
       const galleryEls = document.querySelectorAll(profile.gallerySel);
@@ -1645,8 +1704,8 @@ window.SocialMediaDownloader = (() => {
     return result;
   };
 
-  const collectBoundMedia = mode => {
-    const focused = collect('auto');
+  const collectBoundMedia = (mode, target) => {
+    const focused = collect('auto', { target, allowPaintCarrier: true });
     // Main-mode selectors may include a timeline behind an open photo modal.
     // A bound single-media call uses the same focused selection as its capture;
     // unbound main/bulk calls keep their existing collection behavior.
@@ -1654,24 +1713,30 @@ window.SocialMediaDownloader = (() => {
     return collect(mode);
   };
 
-  const getMediaBinding = ({ mode = 'main', target = 'auto', all = false, limit = 1 } = {}) => {
-    if (all || !['main', 'auto'].includes(mode) || Number(limit) !== 1) return null;
+  const mediaBindingDetails = ({ mode = 'main', target = 'auto', all = false, limit = 1 } = {}) => {
+    const unavailable = (reason, candidateCount = 0, sourceCount = 0, paintCarrierCount = 0) => ({
+      binding: null, diagnostics: { status: 'unavailable', reason, candidateCount, sourceCount, paintCarrierCount },
+    });
+    if (all || !['main', 'auto'].includes(mode) || Number(limit) !== 1) return unavailable('unsupported_scope');
     if (target === 'media') target = 'auto';
-    if (!['auto', 'image', 'video'].includes(target)) return null;
-    const collection = collectBoundMedia(mode);
-    if (collectionFocusAmbiguity.get(collection)) return null;
-    const selected = filterUrlsForTarget(collection.urls, target).slice(0, 1);
-    if (selected.length !== 1 || !['main', 'focused'].includes(collection.mode)) return null;
+    if (!['auto', 'image', 'video'].includes(target)) return unavailable('unsupported_target');
+    const collection = collectBoundMedia(mode, target);
+    const candidates = filterUrlsForTarget(collection.urls, target);
+    if (collectionFocusAmbiguity.get(collection)) return unavailable('ambiguous_media', candidates.length);
+    const selected = candidates.slice(0, 1);
+    if (selected.length !== 1) return unavailable('no_matching_media', candidates.length);
+    if (!['main', 'focused'].includes(collection.mode)) return unavailable('unsupported_scope', candidates.length);
     const sources = (collectionBindingSources.get(collection) || []).filter(source =>
       preferHighQuality(source.urls).some(url => selected.includes(url)));
     // Do not retain downloads inferred from a URL without a live, identifiable
     // media source, or a page's arbitrary main-container fallback.
-    if (!sources.length || sources.some(source => !source.node || !source.root)
-        || !sources.some(source => ['IMG', 'VIDEO', 'SOURCE'].includes(source.node.tagName)
-          && isVisibleElement(mediaBoxElement(source.node)))) return null;
+    if (!sources.length || sources.some(source => !source.node || !source.root)) return unavailable('source_unbound', candidates.length, sources.length);
+    const sourceVisible = source => isVisibleElement(source.box || mediaBoxElement(source.node));
+    if (!sources.some(source => ['IMG', 'VIDEO', 'SOURCE'].includes(source.node.tagName)
+        && sourceVisible(source))) return unavailable('no_visible_media', candidates.length, sources.length);
     const state = mediaBindingState();
     const focusScope = collectionFocusScopes.get(collection);
-    return {
+    const binding = {
       schema: 1, documentToken: state.token, pageUrl: location.href,
       site: collection.profile.name, sourceMode: collection.mode,
       focused: collection.mode === 'focused' && ['dialog', 'main'].includes(focusScope),
@@ -1682,15 +1747,37 @@ window.SocialMediaDownloader = (() => {
       // while the browser is loading a newly assigned src/srcset.
       sources: sources.map(source => ({ root: mediaNodeIdentity(source.root), node: mediaNodeIdentity(source.node),
         container: mediaNodeIdentity(mediaBoxElement(source.node)?.parentElement),
-        assets: source.urls, visible: ['IMG', 'VIDEO', 'SOURCE'].includes(source.node.tagName)
-          ? isVisibleElement(mediaBoxElement(source.node)) : null })),
+        assets: source.rawUrls || source.urls,
+        paintCarrier: source.paint ? { node: mediaNodeIdentity(source.paint.element), url: source.paint.url } : null,
+        visible: ['IMG', 'VIDEO', 'SOURCE'].includes(source.node.tagName) ? sourceVisible(source) : null })),
     };
+    return { binding, diagnostics: { status: 'bound', reason: 'bound', candidateCount: candidates.length,
+      sourceCount: sources.length, paintCarrierCount: sources.filter(source => source.paint).length } };
+  };
+  const getMediaBinding = options => mediaBindingDetails(options).binding;
+  const getMediaBindingDiagnostics = options => {
+    try { return mediaBindingDetails(options).diagnostics; }
+    catch { return { status: 'unavailable', reason: 'capture_error', candidateCount: 0, sourceCount: 0, paintCarrierCount: 0 }; }
+  };
+
+  const sameBindingValue = (left, right) => {
+    if (Object.is(left, right)) return true;
+    if (!left || !right || typeof left !== 'object' || typeof right !== 'object') return false;
+    const leftArray = Array.isArray(left), rightArray = Array.isArray(right);
+    if (leftArray !== rightArray || (leftArray && left.length !== right.length)) return false;
+    if (!leftArray && (Object.prototype.toString.call(left) !== '[object Object]'
+        || Object.prototype.toString.call(right) !== '[object Object]')) return false;
+    const leftKeys = Object.keys(left), rightKeys = Object.keys(right);
+    return leftKeys.length === rightKeys.length && leftKeys.every(key => Object.prototype.hasOwnProperty.call(right, key)
+      && sameBindingValue(left[key], right[key]));
   };
 
   const mediaBindingMatches = (expected, options) => {
     if (!expected || expected.schema !== 1) return false;
     const current = getMediaBinding(options);
-    return current !== null && JSON.stringify(current) === JSON.stringify(expected);
+    // Extension transports can reorder object keys recursively. Arrays, key
+    // sets, primitive types and every value still bind the exact same resource.
+    return current !== null && sameBindingValue(current, expected);
   };
   const changedMediaBinding = () => ({
     success: false, noDispatch: true, dispatched: false, pageFeedbackPending: true,
@@ -1843,7 +1930,7 @@ window.SocialMediaDownloader = (() => {
     const urls = all
       ? await scrollAndCollect({ maxScrolls, scrollDelay, settleDelay,
                                   mode: mode === 'auto' ? 'all' : mode })
-      : (bindingGuard ? collectBoundMedia(mode).urls : list(mode));
+      : (bindingGuard ? collectBoundMedia(mode, target).urls : list(mode));
     const eligibleUrls = filterUrlsForTarget(urls, target);
     const selected = eligibleUrls.slice(0, limit);
     console.log(`[SMD] downloading ${selected.length} of ${eligibleUrls.length} target-matching URLs`);
@@ -1897,7 +1984,7 @@ window.SocialMediaDownloader = (() => {
   };
 
   return {
-    run, single, list, scrollAndCollect, getMediaBinding,
+    run, single, list, scrollAndCollect, getMediaBinding, getMediaBindingDiagnostics,
     // MSE recorder (v4). Arm BEFORE the player loads:
     //   SocialMediaDownloader.armMseRecorder()
     //   <reload the page>

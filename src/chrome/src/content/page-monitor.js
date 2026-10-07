@@ -1222,7 +1222,10 @@
     try {
       const state = await api.runtime.sendMessage({ target: 'background', action: 'get_page_monitor_state', documentToken,
         frameName: compact(window.name.slice(0, 256), 256) });
-      if (generation === requestGeneration && !disposed) start(state);
+      if (generation === requestGeneration && !disposed) {
+        if (state?.active) start(state);
+        else stop();
+      }
     } catch { stop(); }
   }
   function prepare(params) {
@@ -1397,7 +1400,10 @@
   const onMessage = (msg, _sender, respond) => {
     if (disposed || msg?.target !== 'content') return;
     if (msg.action === 'page_monitor_state') {
-      if (msg.active) { void requestState().then(() => respond({ ready: true })); return true; }
+      if (msg.active) {
+        void requestState().then(() => respond({ ready: true, active, documentToken, runToken: active ? runToken : '' }));
+        return true;
+      }
       else if (!msg.runToken || msg.runToken === runToken) { requestGeneration++; stop(); respond({ ready: true }); }
     } else if (msg.action === 'page_monitor_prepare') { prepare(msg.params || {}); respond({ ready: true }); }
     else if (msg.action === 'page_monitor_resize_begin') { respond({ ready: beginAgentResize(msg.params || {}) }); }

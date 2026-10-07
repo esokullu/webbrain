@@ -78,12 +78,18 @@ export function pageFeedbackCallPolicy(name, args = {}, state = {}, currentPage 
   if (name === 'download_public_media' && (httpUrl(args.url) || httpUrl(state.url))) return { kind: 'independent' };
   if (name === 'navigate' && httpUrl(args.url)) return { kind: 'navigate' };
   if (name === 'done' && args.outcome === 'success' && currentPage?.success !== false) return { kind: 'observe', terminal: true };
-  if (name === 'download_social_media' && args.strategy !== 'vision' && !args.scroll && args.mode !== 'all'
-      && (!args.limit || args.limit === 1)) {
+  if (name === 'download_social_media' && !args.scroll && !args.all
+      && [undefined, 'main', 'auto'].includes(args.mode)
+      && [undefined, 'dom', 'auto'].includes(args.strategy)
+      && (args.limit == null || args.limit === 1)) {
     const target = !args.target || args.target === 'media' ? 'auto' : args.target;
-    const binding = state.mediaBindings?.[target];
-    if (binding && (args.mode === 'main' || ((!args.mode || args.mode === 'auto') && binding.focused))) {
-      return { kind: 'media', binding, target };
+    if (['auto', 'image', 'video'].includes(target)) {
+      const binding = state.mediaBindings?.[target];
+      if (binding && (args.mode === 'main' || binding.focused)) return { kind: 'media', binding, target };
+      // An unavailable optional precapture is not a changed page. Dispatch a
+      // read-only resolver result so the model can inspect actual media sources;
+      // this policy never permits an unbound fetch/save or a fallback mutation.
+      return { kind: 'media_resolve', target, reason: binding ? 'focus_unverified' : 'media_binding_missing' };
     }
   }
   if (!AX_ACTIONS.has(name) || !currentPage || events.some(event => /^(?:form|input|textarea|select|option)(?:$|[\s#.])/.test(event.target || ''))) return { kind: 'unsafe' };

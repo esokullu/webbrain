@@ -1,6 +1,6 @@
 import { canRetainPageFeedbackCalls, isPassivePageFeedback, pageFeedbackCallPolicy } from './page-feedback-policy.js';
 import { accountFeedbackSupersession, resetFeedbackSupersession } from './page-feedback-recovery.js';
-import { captureMediaDownloadBindingInPage } from './media-download-binding.js';
+import { captureMediaDownloadStateInPage } from './media-download-binding.js';
 import * as trace from '../trace/recorder.js';
 
 /** Run-owned browser observations. Keep the Firefox copy byte-identical. */
@@ -11,6 +11,42 @@ const dispatchOwners = new Map();
 const clean = (value, limit = 240) => String(value ?? '').replace(/[\u0000-\u001f]/g, ' ').slice(0, limit);
 const token = () => globalThis.crypto.randomUUID();
 const apiFor = () => globalThis.browser || globalThis.chrome;
+
+async function captureMediaState(api, tabId) {
+  let stage = 'injection_failed';
+  try {
+    let result;
+    if (typeof api.tabs.executeScript === 'function') {
+      await api.tabs.executeScript(tabId, { file: 'src/agent/social-media-downloader.js' });
+      stage = 'capture_failed';
+      result = (await api.tabs.executeScript(tabId, { code: `(${captureMediaDownloadStateInPage.toString()})()` }))?.[0];
+    } else {
+      await api.scripting.executeScript({ target: { tabId }, world: 'MAIN', files: ['src/agent/social-media-downloader.js'] });
+      stage = 'capture_failed';
+      result = (await api.scripting.executeScript({ target: { tabId }, world: 'MAIN', func: captureMediaDownloadStateInPage }))?.[0]?.result;
+    }
+    return result || { bindings: {}, diagnostics: {}, status: 'capture_failed' };
+  } catch {
+    return { bindings: {}, diagnostics: {}, status: stage };
+  }
+}
+
+function mediaCaptureMetadata(capture) {
+  const statuses = new Set(['ready', 'unavailable', 'library_unavailable', 'injection_failed', 'capture_failed', 'context_changed', 'context_unverified']);
+  const reasons = new Set(['verified_resource', 'no_verified_media', 'capture_failed', 'unsupported_request',
+    'ambiguous_media', 'no_visible_media', 'no_live_source', 'no_matching_media', 'no_single_media',
+    'unsupported_target', 'unsupported_scope', 'source_unbound', 'capture_error', 'bound', 'media_unavailable', 'focus_unverified']);
+  const targets = {};
+  for (const target of ['auto', 'image', 'video']) {
+    const diagnostic = capture?.diagnostics?.[target];
+    targets[target] = { status: capture?.bindings?.[target] ? 'bound' : 'unavailable',
+      reason: reasons.has(diagnostic?.reason) ? diagnostic.reason : 'no_verified_media' };
+    for (const key of ['candidateCount', 'sourceCount', 'paintCarrierCount']) {
+      if (Number.isSafeInteger(diagnostic?.[key])) targets[target][key] = Math.max(0, Math.min(128, diagnostic[key]));
+    }
+  }
+  return { status: statuses.has(capture?.status) ? capture.status : 'unavailable', targets };
+}
 
 function clearGestureLease(run, frameId) {
   const lease = run.gestureLeases?.get(frameId);
@@ -438,22 +474,54 @@ export const pageFeedbackMethods = {
     // The downloader is lazy-loaded. Capture its private document/node/asset
     // binding before inference, never from model arguments or page instructions.
     if (/^https?:\/\/(?:[^/]+\.)?(?:x\.com|twitter\.com|instagram\.com|youtube\.com|youtu\.be|tiktok\.com|facebook\.com|reddit\.com)\//i.test(url)) {
+      let capture = await captureMediaState(apiFor(), tabId);
+      // Injection is asynchronous. Never attach a new document's media to the
+      // URL/document/frame/steering snapshot sampled before that injection.
+      let contextVerified = false, contextStatus = 'context_unverified';
       try {
         const api = apiFor();
-        if (typeof api.tabs.executeScript === 'function') {
-          // Firefox MV2 downloads in the isolated extension world. Capture in
-          // that same world so its private node/document identities match.
-          await api.tabs.executeScript(tabId, { file: 'src/agent/social-media-downloader.js' });
-          const results = await api.tabs.executeScript(tabId, { code: `(${captureMediaDownloadBindingInPage.toString()})()` });
-          state.mediaBindings = results?.[0] || {};
-        } else {
-          await api.scripting.executeScript({ target: { tabId }, world: 'MAIN', files: ['src/agent/social-media-downloader.js'] });
-          const results = await api.scripting.executeScript({ target: { tabId }, world: 'MAIN', func: captureMediaDownloadBindingInPage });
-          state.mediaBindings = results?.[0]?.result || {};
+        let monitorVerified = false;
+        if (!documentId && state.frames.get(0)?.token) {
+          // Firefox versions without browser document IDs must round-trip the
+          // current content monitor registration, rather than trust a cached
+          // token that could belong to a just-reloaded same-URL document.
+          const response = await api.tabs.sendMessage(tabId, { target: 'content', action: 'page_monitor_state', active: true }, { frameId: 0 });
+          monitorVerified = response?.ready === true && response.active === true
+            && response.documentToken === state.frames.get(0).token && response.runToken === run.token;
         }
-      } catch { /* No binding means a stale media response cannot be retained. */ }
+        const [tab, frames] = await Promise.all([api.tabs.get(tabId), api.webNavigation?.getAllFrames?.({ tabId })]);
+        const currentDocument = frames?.find(frame => frame.frameId === 0)?.documentId;
+        const mainFrame = state.frames.get(0);
+        const identified = documentId ? currentDocument === documentId : !!mainFrame?.token && monitorVerified;
+        contextVerified = identified && tab.url === url
+          && this._pageFeedbackStateCurrent(tabId, run, state, url)
+          && Object.values(capture.bindings || {}).every(binding => !binding || binding.pageUrl === url);
+        contextStatus = contextVerified ? 'ready' : !documentId && !identified ? 'context_unverified' : 'context_changed';
+      } catch { /* Failed identity verification permits observation only. */ }
+      if (!contextVerified) capture = { bindings: {}, diagnostics: {}, status: contextStatus };
+      state.mediaBindings = capture.bindings || {};
+      state.mediaCapture = mediaCaptureMetadata(capture);
+      const runId = this.currentRunId?.get(tabId);
+      if (runId) trace.recordNote(runId, 0, 'media_binding_capture', state.mediaCapture);
     }
     if (this._pageFeedbackRuns?.get(tabId) === run) { run.modelState = state; run.validatedTargets = new Map(); }
+  },
+
+  async _resolvePageFeedbackMedia(tabId, target) {
+    const capture = await captureMediaState(apiFor(), tabId);
+    const diagnostic = mediaCaptureMetadata(capture);
+    const binding = capture.bindings?.[target];
+    // This is an observation only. A later model turn must choose a download
+    // with a binding captured before that inference or an explicit observed URL.
+    return { success: false, dispatched: false, noDispatch: true,
+      errorCode: 'media_binding_unavailable', mediaResolution: binding ? 'resolved' : 'unavailable',
+      ...(binding ? { currentCandidates: binding.candidates.map(({ url, type }) => ({ url, type })) } : {}),
+      bindingDiagnostic: diagnostic.targets[target], captureStatus: diagnostic.status,
+      error: 'The current media could not be verified before inference. No download was attempted. '
+        + (target === 'image' ? 'Inspect current image sources with extract_data({type:"images"})'
+          : 'Inspect current media sources with read_page_source or inspect_network_requests')
+        + ' and download the intended explicit URL with download_files, or retry this tool after a unique focused resource is verified. '
+        + 'Do not repeat an unresolved download.' };
   },
 
   _pageFeedbackStateCurrent(tabId, run, state, url = run.url) {
@@ -634,6 +702,14 @@ export const pageFeedbackMethods = {
     if (runId) trace.recordNote(runId, 0, 'page_feedback_decision', { stage, disposition: responseToolCalls === null ? 'observed' : accepted ? 'retained' : 'superseded',
       reason: sameDocument && isPassivePageFeedback(events) ? 'passive_dom' : 'intervention_or_document',
       refreshMs: Date.now() - started, streak: run.passiveSupersessionStreak || 0,
+      toolPolicies: (responseToolCalls || []).flatMap(call => {
+        try {
+          const name = call.function?.name;
+          if (!/^[a-z][a-z0-9_]{0,63}$/.test(name || '')) return [];
+          const policy = pageFeedbackCallPolicy(name, JSON.parse(call.function.arguments), state, page, events);
+          return [{ name, kind: policy.kind, ...(policy.reason ? { reason: policy.reason } : {}) }];
+        } catch { return []; }
+      }).slice(0, 16),
       toolNames: (responseToolCalls || []).map(call => call.function?.name).filter(name => /^[a-z][a-z0-9_]{0,63}$/.test(name || '')).slice(0, 16) });
     this._persist(tabId);
     return !accepted;
@@ -651,6 +727,7 @@ export function installPageFeedback(Agent) {
     // A model cannot supply the private expected binding. Even without queued
     // feedback, use the identity captured before inference for a focused download.
     const policy = pageFeedbackCallPolicy(name, args || {}, run?.modelState, run?.latestPage);
+    if (run && policy.kind === 'media_resolve') return this._resolvePageFeedbackMedia(tabId, policy.target);
     const targetValidated = !!run && run.validatedTargets?.get(`${name}:${JSON.stringify(args)}`) === run.revision;
     const allowPassiveRebase = targetValidated || (policy.kind === 'navigate'
       && !!run && this._pageFeedbackStateCurrent(tabId, run, run.modelState));

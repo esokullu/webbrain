@@ -44,6 +44,35 @@ async function fixture(browser, build) {
   return { context, page };
 }
 
+async function registrationFixture(browser, build, mode = 'active') {
+  const context = await browser.newContext();
+  await context.route('https://registration.test/**', route => route.fulfill({ contentType: 'text/html', body: '<!doctype html><p>Registration fixture</p>' }));
+  await context.addInitScript(mode => {
+    window.registrationRequests = [];
+    window.registrationMode = mode;
+    window.registrationListeners = [];
+    const runtime = { onMessage: { addListener: listener => registrationListeners.push(listener), removeListener: () => {} },
+      async sendMessage(message) {
+        if (message.action === 'get_page_monitor_state') {
+          registrationRequests.push(message);
+          if (registrationMode === 'throw') throw new Error('Background registration failed');
+          if (registrationMode === 'inactive') return { active: false };
+          return { active: true, runToken: 'registration-run', documentToken: message.documentToken };
+        }
+        return { accepted: true };
+      } };
+    window.chrome = { runtime }; window.browser = window.chrome;
+    window.activateMonitor = () => new Promise(resolve => {
+      for (const listener of registrationListeners) listener({ target: 'content', action: 'page_monitor_state', active: true }, {}, resolve);
+    });
+  }, mode);
+  await context.addInitScript({ content: fs.readFileSync(new URL(`../src/${build}/src/content/page-monitor.js`, import.meta.url), 'utf8') });
+  const page = await context.newPage();
+  await page.goto('https://registration.test/same-url');
+  await page.waitForFunction(() => window.__wbPageMonitor && registrationRequests.length > 0);
+  return { context, page };
+}
+
 async function prepare(page, boundary, extra = {}) {
   return page.evaluate(async ({ boundary, extra }) => {
     const params = { operationId: 'prepared', tool: 'click_ax', selector: '#send', allowPassiveRebase: true, ...extra };
@@ -236,6 +265,57 @@ for (const [build, engine] of [['chrome', chromium], ['firefox', firefox]]) {
             document.getElementById('counter').textContent = '101';
           });
           assert.equal((await dispatch(page, 'message')).ready, false);
+        } finally { await context.close(); }
+      });
+    } finally { await browser.close(); }
+  });
+}
+
+for (const [build, engine] of [['chrome', chromium], ['firefox', firefox]]) {
+  test(`${build}: monitor registration acknowledgment proves current document ownership`, { timeout: 30000 }, async t => {
+    const browser = await engine.launch({ headless: true });
+    try {
+      await t.test('successful registration returns the active document and run tokens', async () => {
+        const { context, page } = await registrationFixture(browser, build);
+        try {
+          const acknowledgment = await page.evaluate(() => activateMonitor());
+          const requestedToken = await page.evaluate(() => registrationRequests.at(-1).documentToken);
+          assert.equal(acknowledgment.ready, true);
+          assert.equal(acknowledgment.active, true);
+          assert.equal(acknowledgment.documentToken, requestedToken);
+          assert.equal(acknowledgment.runToken, 'registration-run');
+          assert.ok(acknowledgment.documentToken);
+          assert.equal(await page.evaluate(() => __wbPageMonitor.active), true);
+        } finally { await context.close(); }
+      });
+
+      for (const mode of ['inactive', 'throw']) for (const previouslyActive of [false, true]) await t.test(`${mode} background registration (${previouslyActive ? 'previously active' : 'new document'}) cannot acknowledge active ownership`, async () => {
+        const { context, page } = await registrationFixture(browser, build, previouslyActive ? 'active' : mode);
+        try {
+          if (previouslyActive) {
+            assert.equal((await page.evaluate(() => activateMonitor())).active, true);
+            await page.evaluate(value => { registrationMode = value; }, mode);
+          }
+          const acknowledgment = await page.evaluate(() => activateMonitor());
+          assert.equal(acknowledgment.ready, true);
+          assert.equal(acknowledgment.active, false);
+          assert.notEqual(acknowledgment.runToken, 'registration-run');
+          assert.equal(await page.evaluate(() => __wbPageMonitor.active), false);
+        } finally { await context.close(); }
+      });
+
+      await t.test('reloading the same URL returns a fresh document token', async () => {
+        const { context, page } = await registrationFixture(browser, build);
+        try {
+          const previous = await page.evaluate(() => activateMonitor());
+          await page.reload();
+          await page.waitForFunction(() => window.__wbPageMonitor && registrationRequests.length > 0);
+          const current = await page.evaluate(() => activateMonitor());
+          assert.equal(current.active, true);
+          assert.equal(current.runToken, previous.runToken);
+          assert.notEqual(current.documentToken, previous.documentToken);
+          assert.equal(current.documentToken, await page.evaluate(() => registrationRequests.at(-1).documentToken));
+          assert.equal(page.url(), 'https://registration.test/same-url');
         } finally { await context.close(); }
       });
     } finally { await browser.close(); }

@@ -94,6 +94,16 @@ Steer or grant authorization. Enter and Alt+Enter retain their existing behavior
   exact media asset before inference. The downloader validates that identity
   before fetching and again before saving. A replaced asset fails without a
   download; a bound attempt cannot fall back to another MSE or vision resource.
+  A transparent backing image can bind to the same visible image painted by its
+  immediate parent/sibling; the carrier, exact asset and rendered box must match.
+  Binding comparison ignores object-key ordering introduced by browser API
+  serialization, while preserving every key, value and array position.
+  Missing capture yields a read-only `media_binding_unavailable` tool result;
+  the model can inspect sources and choose an explicit URL. It does not attempt
+  an unbound fetch/save or count optional capture failure as a page-change retry.
+  Capture rechecks URL, document and steering identity after injection. When a
+  browser omits document IDs, an active content-monitor acknowledgement must
+  prove the same run/document token; a failed registration cannot verify media.
   Bulk and scrolling downloads keep their existing conservative behavior.
 - An unchanged AX target can opt into passive revalidation only after a fresh
   target/context comparison. The content monitor then checks immutable node,
@@ -109,7 +119,9 @@ Steer or grant authorization. Enter and Alt+Enter retain their existing behavior
   responses. App-owned feedback trees and captures are replaced by the latest
   observation, preserving user instructions and tool results instead of growing
   the prompt with repeated copies. Trace notes record disposition, reason,
-  refresh time, stage, tool names and retry streak without action arguments.
+  refresh time, stage, tool names, retention policies and retry streak without
+  action arguments. `media_binding_capture` reports sanitized capture status,
+  target-specific reason codes and bounded counts without URLs or page labels.
 
 ## Workflow and notifications
 

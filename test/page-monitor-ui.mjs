@@ -3059,8 +3059,9 @@ for (const [build, engine] of [['chrome', chromium], ['firefox', firefox]]) {
       });
       const mark = sequence => page.evaluate(marker => document.getElementById('field')
         .setAttribute('data-webbrain-native-action', marker), createNativeActionMarker(guard, 'input', sequence));
-      await mark(1); await page.keyboard.down('Control');
-      await mark(2); await page.keyboard.press('a'); await page.keyboard.up('Control');
+      const selectModifier = await page.evaluate(() => /Mac|iPhone|iPad|iPod/i.test(navigator.platform) ? 'Meta' : 'Control');
+      await mark(1); await page.keyboard.down(selectModifier);
+      await mark(2); await page.keyboard.press('a'); await page.keyboard.up(selectModifier);
       await mark(3); await page.keyboard.press('Delete');
       await mark(4); await page.keyboard.insertText('new');
       assert.equal(await page.locator('#field').inputValue(), 'new');

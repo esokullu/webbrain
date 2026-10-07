@@ -62,3 +62,22 @@ for (const build of ['chrome', 'firefox']) {
     assert.equal(keep('click_ax', { ref_id: 'ref_7' }), false);
   });
 }
+
+for (const build of ['chrome', 'firefox']) {
+  const { canRetainPageFeedbackCalls, pageFeedbackCallPolicy } = await import(`../src/${build}/src/agent/page-feedback-policy.js`);
+  for (const args of [{ target: 'image' }, { mode: 'main', target: 'image' }, { target: 'video' }, { target: 'auto' }]) {
+    test(`${build}: missing ${args.target} prebinding retains only a readonly resolution under counter churn`, () => {
+      const state = { url: 'https://x.com/account/status/123/photo/1', mediaBindings: {} };
+      assert.equal(pageFeedbackCallPolicy('download_social_media', args, state, page).kind, 'media_resolve');
+      assert.equal(canRetainPageFeedbackCalls([call('download_social_media', args)], state, page, passive), true);
+      assert.equal(canRetainPageFeedbackCalls([call('download_social_media', args)], state, page,
+        [{ kind: 'pointer', source: 'user', frameId: 0 }]), false);
+    });
+  }
+  for (const extra of [{ scroll: true }, { all: true }, { mode: 'all' }, { strategy: 'vision' }, { limit: 2 }]) {
+    test(`${build}: media resolution does not authorize ${JSON.stringify(extra)}`, () => {
+      assert.equal(pageFeedbackCallPolicy('download_social_media', { target: 'image', ...extra }, {}, page).kind, 'unsafe');
+      assert.equal(canRetainPageFeedbackCalls([call('download_social_media', { target: 'image', ...extra })], {}, page, passive), false);
+    });
+  }
+}
