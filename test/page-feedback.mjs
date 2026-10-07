@@ -896,6 +896,32 @@ for (const build of ['chrome', 'firefox']) {
     });
   }
 
+  test(`${build}: workflow fallback refreshes the page after replay mutations`, async () => {
+    const agent = setup(Agent), tab = nextTab++;
+    await agent._claimRunEntry(tab, 'workflow');
+    await agent._beginPageFeedbackRun(tab, 'workflow');
+    const run = agent._pageFeedbackRuns.get(tab);
+    run.latestObservation = 'stale page tree from before replay';
+    let reads = 0;
+    agent.executeTool = async (_tab, name, args, _onUpdate, executionContext) => {
+      assert.equal(name, 'get_accessibility_tree');
+      assert.deepEqual(args, { filter: 'visible', maxChars: 12000 });
+      assert.equal(executionContext.pageFeedbackRead, true);
+      reads++;
+      return { success: true, pageContent: 'Fresh page tree at workflow fallback' };
+    };
+    try {
+      const prompt = await agent._workflowFeedbackFallbackPrompt(tab, 'Continue from the failed step.', () => {});
+      assert.equal(reads, 1, 'fallback should capture the page after replay has stopped');
+      assert.match(prompt, /Fresh page tree at workflow fallback/);
+      assert.doesNotMatch(prompt, /stale page tree from before replay/);
+      assert.match(run.latestObservation, /Fresh page tree at workflow fallback/);
+    } finally {
+      agent._finishPageFeedbackRun(tab);
+      agent._releaseRunEntry(tab);
+    }
+  });
+
   test(`${build}: cloud feedback redacts navigation details in both secret modes`, async () => {
     const { createCloudRunController } = await import(`../src/${build}/src/cloud-runs.js`);
     for (const strictSecretMode of [false, true]) {
