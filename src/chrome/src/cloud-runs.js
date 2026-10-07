@@ -1235,6 +1235,7 @@ export function createCloudRunController({
             run.agentOutcome = null;
             content = await agent.processMessage(tabId, prompt, publishUpdate, mode, [], {
               cloudRun: true,
+              privateFinalResult: !!recipient,
               independentRun: !continuation,
               trustedContinuation: continuation,
               apiMutationsDenied: mode === 'ask',

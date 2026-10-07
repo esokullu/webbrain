@@ -4,6 +4,16 @@ All notable changes to WebBrain are documented in this file.
 
 This changelog was generated from the repository Git history and release tags. Versions without a Git tag are inferred from version-bump commits and the current `package.json` / browser manifest versions.
 
+## [38.0.15] - 2026-10-07
+
+### Changed
+- Scope credential delivery instructions to opted-in encrypted Cloud final answers; ordinary strict-mode prompts and trace redaction remain unchanged.
+
+## [38.0.14] - 2026-10-07
+
+### Added
+- Optional encrypted private Cloud final results using a workspace public key, with strict trace redaction preserved in Chrome and Firefox.
+
 ## [38.0.13] - 2026-10-01
 
 ### Changed

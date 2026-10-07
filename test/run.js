@@ -27178,7 +27178,7 @@ test('offscreen cloud bridge reconnects with backoff and rejects remote control 
   assert.equal(sockets[0].sent[0].protocolVersion, 2);
   assert.deepEqual(
     JSON.parse(JSON.stringify(sockets[0].sent[0].capabilities)),
-    ['saved_workflows_v1', 'run_modes_v1', 'scheduled_jobs_v1'],
+    ['saved_workflows_v1', 'run_modes_v1', 'scheduled_jobs_v1', 'private_results_v1'],
   );
   sockets[0].close();
   assert.equal(timers[0].delay, 500);
@@ -28682,6 +28682,33 @@ test('delivery recovery keeps generated credential delivery in loose mode only',
     const strictDone = agent._deliveryRecoveryDoneTool();
     assert.match(strictDone?.function?.description || '', /Never include passwords/i);
     assert.doesNotMatch(strictDone?.function?.description || '', /generated a new credential for this task/i);
+  }
+});
+
+test('encrypted final delivery is scoped to its Cloud tab and leaves ordinary strict prompts intact', () => {
+  for (const AgentClass of [AgentCh, AgentFx]) {
+    const agent = new AgentClass({});
+    agent.strictSecretMode = true;
+    agent.cloudRunContexts.set(7, { privateFinalResult: true });
+    const privatePrompt = agent._buildSystemPrompt('act', 7);
+    assert.match(privatePrompt, /PRIVATE FINAL DELIVERY/);
+    assert.doesNotMatch(privatePrompt, /STRICT SECRET HANDLING IS ON/);
+    assert.match(agent._buildSystemPrompt('act', 8), /STRICT SECRET HANDLING IS ON/);
+    const privateDone = agent._deliveryRecoveryDoneTool('delivery_recovery', null, 'en', 7);
+    assert.match(privateDone.function.description, /generated a new credential/);
+    const ordinaryDone = agent._deliveryRecoveryDoneTool('delivery_recovery', null, 'en', 8);
+    assert.match(ordinaryDone.function.description, /Never include passwords/);
+    const field = {actual: 'not-published', fieldMeta: {type: 'password'}};
+    agent._annotateCredentialField('set_field', field, 7);
+    assert.equal(field.actual, undefined);
+    assert.match(field.note, /PRIVATE FINAL DELIVERY/);
+    assert.equal(field.strictSecretMode, true);
+    const ordinary = {actual: 'not-published', fieldMeta: {type: 'password'}};
+    agent._annotateCredentialField('set_field', ordinary, 8);
+    assert.match(ordinary.note, /STRICT MODE IS ON/);
+    assert.equal(agent.strictSecretMode, true);
+    agent.cloudRunContexts.delete(7);
+    assert.match(agent._buildSystemPrompt('act', 7), /STRICT SECRET HANDLING IS ON/);
   }
 });
 
@@ -64798,7 +64825,7 @@ test('failed sensitive field-tool readbacks are annotated and redacted', () => {
     ['firefox', 'src/firefox/src/agent/agent.js', isCredentialFieldFx, CREDENTIAL_NOTE_STRICT_FX],
   ]) {
     const source = fs.readFileSync(path.join(ROOT, rel), 'utf8');
-    const start = source.indexOf('_annotateCredentialField(toolName, response) {');
+    const start = source.indexOf('_annotateCredentialField(toolName, response, tabId = null) {');
     const end = source.indexOf('\n  }\n\n', start);
     assert.ok(start >= 0 && end > start, `${label}: credential result annotator should remain independently testable`);
     const method = vm.runInNewContext(`({${source.slice(start, end + 4)}})._annotateCredentialField`, {

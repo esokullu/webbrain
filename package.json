@@ -1,6 +1,6 @@
 {
   "name": "webbrain",
-  "version": "38.0.14",
+  "version": "38.0.15",
   "description": "Open-source AI browser agent \u2014 chat with pages, automate tasks, multi-provider LLM support.",
   "private": true,
   "type": "module",

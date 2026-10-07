@@ -20,10 +20,11 @@ for (const browser of ['chrome', 'firefox']) {
   const { importPrivateResultRecipient, encryptPrivateResult } = await import(`../src/${browser}/src/private-results.js`);
   function harness(structured = false, output = secret) {
     const stored = {};
-    let calls = 0;
+    let calls = 0, lastOptions;
     const agent = { strictSecretMode: true, isRunning: () => false, abort() {},
       async processMessage(_tab, _task, update, _mode, _attachments, options) {
         calls++;
+        lastOptions = options;
         update('tool_call', {name: 'set_field', args: {text: secret}});
         if (structured) update('tool_result', { name: 'done_json', result: {
           cloudResult: { password: secret, success: true }, summary: 'Finished', cloudDone: true,
@@ -37,7 +38,7 @@ for (const browser of ['chrome', 'firefox']) {
       query: async () => [{id: 7, url: 'https://example.com'}], update: async () => {},
     }};
     const extra = {chromeApi: api, agent, makeRunId: () => 'run_private', ensureOffscreen: async () => {}};
-    return {c: createCloudRunController(extra), stored, extra, calls: () => calls};
+    return {c: createCloudRunController(extra), stored, extra, calls: () => calls, options: () => lastOptions};
   }
   async function finish(c, started) {
     for (let i = 0; i < 300; i++) {
@@ -53,6 +54,8 @@ for (const browser of ['chrome', 'firefox']) {
       const start = await h.c.startRun({task: 'Owner fixture', ...(optIn ? {private_result_public_key: publicKey} : {})});
       const done = await finish(h.c, start);
       assert.equal(done.status, 'completed');
+      assert.equal(h.options().privateFinalResult, optIn);
+      assert.equal(h.extra.agent.strictSecretMode, true);
       assert.ok(!JSON.stringify(done).includes(secret));
       assert.ok(!JSON.stringify(h.stored).includes(secret));
       if (optIn) {
