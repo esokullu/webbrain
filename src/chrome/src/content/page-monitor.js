@@ -283,8 +283,10 @@
     const match = op => {
       if (event && !event.isTrusted && !op.synchronous) return null;
       if (event) {
-        if (op.eventTypes && !op.eventTypes.has(event.type)
-            && !(kind === 'click' && event.detail === 0 && op.submitTarget && related(op.submitTarget, el))) return null;
+        const keyboardClick = kind === 'click' && event.type === 'click' && event.isTrusted === true && op.keyboardClickTarget
+          && related(op.keyboardClickTarget, el);
+        const submitClick = kind === 'click' && event.detail === 0 && op.submitTarget && related(op.submitTarget, el);
+        if (op.eventTypes && !op.eventTypes.has(event.type) && !keyboardClick && !submitClick) return null;
         // One native dispatch owns one occurrence of each input phase. A later
         // human action on the same target must not fit that expectation again.
         if (!op.synchronous && event.type !== 'pointermove' && op.seenEvents?.has(event.type)) return null;
@@ -300,13 +302,18 @@
       }
       if (!op.dispatched) continue;
       if (lastUserAt > op.userAt) continue;
+      // Keyboard-activated clicks can report detail=1 in Firefox. Do not let
+      // the temporary click expectation absorb a physical pointer sequence.
+      if (kind === 'click' && op.keyboardClickTarget && event && event.type !== 'click') continue;
       // Moving agent focus commits the previous field's native change event.
       if (kind === 'input' && event?.type === 'change' && op.blurTarget === el) { const found = match(op); if (found) return found; }
       if (kind === 'scroll' && op.blurTarget === el && editable(el)) { const found = match(op); if (found) return found; }
       if (!op.kinds.has(kind)) continue;
       if (['wheel', 'touchmove'].includes(event?.type) && !op.nativeWheel) continue;
       const target = op.target || (op.focused ? document.activeElement : null);
-      if (kind === 'click' && event?.detail === 0 && op.submitTarget && related(op.submitTarget, el)) {
+      if (kind === 'click' && event?.type === 'click' && event?.isTrusted === true
+          && ((event.detail === 0 && op.submitTarget && related(op.submitTarget, el))
+            || (op.keyboardClickTarget && related(op.keyboardClickTarget, el)))) {
         const found = match(op); if (found) return found;
       }
       if (kind === 'scroll' && op.scrollAncestors?.has(el)) { const found = match(op); if (found) return found; }
@@ -580,6 +587,20 @@
       || (root === document ? document.getElementById(previousFor) : null);
     return visibleControl(priorControl);
   }
+  const descendantTextNameRoles = new Set([
+    'option', 'menuitem', 'menuitemcheckbox', 'menuitemradio', 'tab', 'treeitem', 'row', 'gridcell', 'cell', 'listitem',
+  ]);
+  const nonImplicitSubmitInputTypes = new Set([
+    'button', 'submit', 'reset', 'checkbox', 'radio', 'file', 'image', 'hidden', 'color', 'range',
+  ]);
+  function hasVisibleTextNameConsumer(el) {
+    for (let node = el.parentElement || el.getRootNode?.().host; node; node = node.parentElement || node.getRootNode?.().host) {
+      if (!visible(node)) continue;
+      const tag = node.tagName, role = (node.getAttribute('role') || '').toLowerCase();
+      if (['BUTTON', 'A', 'SUMMARY', 'LI'].includes(tag) || /^H[1-6]$/.test(tag) || descendantTextNameRoles.has(role)) return true;
+    }
+    return false;
+  }
   function stylesheetNode(node) {
     if (!(node instanceof Element)) return false;
     return node.tagName === 'STYLE' || (node.tagName === 'LINK'
@@ -725,6 +746,7 @@
       const hiddenAccessibleNameChanged = !visible(el)
         && ((accessibleNameContentMutation && hasVisibleAriaLabelledbyConsumer(el))
           || (hiddenAriaLabelIdMutation && hasVisibleAriaLabelledbyConsumer(el, record.oldValue))
+          || (accessibleNameContentMutation && hasVisibleTextNameConsumer(el))
           || ((accessibleNameContentMutation || nativeLabelAssociationMutation)
             && hasVisibleNativeLabelConsumer(el, nativeLabelAssociationMutation ? record.oldValue : '')));
       let identityChanged = (record.type === 'popover' && record.stateChanged)
@@ -855,8 +877,21 @@
       const marker = { userAt: op.userAt };
       agentTurn = marker;
       const enterFormSubmit = event.type === 'keydown' && event.key === 'Enter' && op.kind === 'input'
-        && el?.tagName !== 'TEXTAREA' && !el?.isContentEditable && !!el?.form;
-      if ((op.navigationCandidate && ['click', 'pointerdown'].includes(event.type)) || enterFormSubmit) {
+        && !el?.isContentEditable && !!el?.form
+        && ((el.tagName === 'INPUT' && !nonImplicitSubmitInputTypes.has(el.type))
+          || el.matches?.('button:not([type]),button[type="submit"],input[type="submit"],input[type="image"]'));
+      if (event.type === 'keydown' && !enterFormSubmit) {
+        const key = event.key === 'Spacebar' ? ' ' : event.key;
+        const keyboardClickTarget = event.composedPath().find(node => node instanceof Element && (
+          (key === 'Enter' && node.matches('a[href],area[href]'))
+          || (['Enter', ' '].includes(key) && node.matches('button,summary,input[type="button"],input[type="submit"],input[type="reset"],input[type="image"]'))
+          || (key === ' ' && node.matches('input[type="checkbox"],input[type="radio"]'))
+        ));
+        if (keyboardClickTarget) { op.keyboardClickTarget = keyboardClickTarget; op.kinds.add('click'); }
+      }
+      const keyboardClick = event.type === 'click' && event.isTrusted === true && op.keyboardClickTarget
+        && related(op.keyboardClickTarget, el);
+      if ((op.navigationCandidate && ['click', 'pointerdown'].includes(event.type)) || enterFormSubmit || keyboardClick) {
         const path = event.composedPath();
         const link = enterFormSubmit ? null : path.find(node => node instanceof Element && node.matches('a[href],area[href]'));
         let submitter = path.find(node => node instanceof Element

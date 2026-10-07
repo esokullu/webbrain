@@ -2029,6 +2029,76 @@ for (const [build, engine] of [['chrome', chromium], ['firefox', firefox]]) {
     } finally { await browser.close(); }
   });
 
+  test(`${build}: boxless text changes invalidate visible descendant-name controls`, async () => {
+    const { browser, page } = await fixture(engine, build);
+    try {
+      await page.evaluate(() => {
+        const button = document.createElement('button'); button.id = 'boxless-name-button';
+        const label = document.createElement('span'); label.style.display = 'contents'; label.textContent = 'Initial action';
+        button.append(label); document.body.append(button);
+      });
+      await page.waitForTimeout(300);
+      const guard = await page.evaluate(() => {
+        feedback = [];
+        deliver('page_monitor_prepare', { operationId: 'boxless-name', tool: 'click', selector: '#boxless-name-button' });
+        deliver('page_monitor_dispatch', { operationId: 'boxless-name', kind: 'click', selector: '#boxless-name-button' });
+        return lastMonitorResponse.guard;
+      });
+      await page.locator('#boxless-name-button span').evaluate(label => { label.textContent = 'Updated action'; });
+      await page.waitForFunction(() => feedback.some(event => event.kind === 'dom'), null, { timeout: 1000 });
+      assert.equal(JSON.stringify(await page.evaluate(() => feedback)).includes('Updated action'), false,
+        'The changed accessible name must not be copied into feedback');
+      const accepted = await page.evaluate(value => window.dispatchEvent(new CustomEvent('webbrain-agent-dom-dispatch', {
+        detail: JSON.stringify({ ...value, dispatchPhase: 'click' }), cancelable: true,
+      })), guard);
+      assert.equal(accepted, false, 'Changing text in a boxless name descendant must invalidate the prepared action');
+    } finally { await browser.close(); }
+  });
+
+  test(`${build}: Enter and Space keyboard activations stay attributed to the agent`, async () => {
+    const { browser, page } = await fixture(engine, build);
+    try {
+      await page.evaluate(() => {
+        const link = document.createElement('a'); link.id = 'keyboard-link'; link.href = '/keyboard-destination';
+        link.textContent = 'Open page'; link.addEventListener('click', event => event.preventDefault());
+        const button = document.createElement('button'); button.id = 'keyboard-button'; button.type = 'button';
+        button.textContent = 'Run action'; button.addEventListener('click', event => event.preventDefault());
+        document.body.append(link, button);
+      });
+      await page.waitForTimeout(300);
+      const linkDispatch = await page.evaluate(() => {
+        feedback = [];
+        deliver('page_monitor_prepare', { operationId: 'keyboard-link', tool: 'press_keys', selector: '#keyboard-link' });
+        deliver('page_monitor_dispatch', { operationId: 'keyboard-link', kind: 'input', selector: '#keyboard-link' });
+        return lastMonitorResponse;
+      });
+      assert.equal(linkDispatch.ready, true, JSON.stringify(linkDispatch));
+      await page.locator('#keyboard-link').press('Enter');
+      await page.waitForFunction(() => feedback.some(event => event.source === 'agent' && event.operation === 'click'), null, { timeout: 1000 });
+      const linkEvents = await page.evaluate(() => feedback);
+      assert.equal(linkEvents.some(event => event.source === 'agent' && event.operation === 'click'
+        && event.navigationUrl === 'https://monitor.test/keyboard-destination'), true, JSON.stringify(linkEvents));
+      assert.equal(linkEvents.some(event => event.kind === 'click' && event.source === 'user'), false, JSON.stringify(linkEvents));
+
+      await page.evaluate(() => {
+        feedback = [];
+        deliver('page_monitor_prepare', { operationId: 'keyboard-button', tool: 'press_keys', selector: '#keyboard-button' });
+        deliver('page_monitor_dispatch', { operationId: 'keyboard-button', kind: 'input', selector: '#keyboard-button' });
+      });
+      await page.locator('#keyboard-button').press('Space');
+      await page.waitForFunction(() => feedback.some(event => event.source === 'agent' && event.operation === 'click'), null, { timeout: 1000 });
+      const buttonEvents = await page.evaluate(() => feedback);
+      assert.equal(buttonEvents.some(event => event.source === 'agent' && event.operation === 'click'), true, JSON.stringify(buttonEvents));
+      assert.equal(buttonEvents.some(event => event.kind === 'click' && event.source === 'user'), false, JSON.stringify(buttonEvents));
+
+      await page.evaluate(() => { feedback = []; });
+      await page.locator('#keyboard-button').click();
+      await page.waitForFunction(() => feedback.some(event => event.kind === 'click' && event.source === 'user'), null, { timeout: 1000 });
+      assert.equal((await page.evaluate(() => feedback)).some(event => event.kind === 'click' && event.source === 'user'), true,
+        'A later pointer click must remain user activity after keyboard attribution');
+    } finally { await browser.close(); }
+  });
+
   test(`${build}: aria-modal changes invalidate prepared page context`, async () => {
     const { browser, page } = await fixture(engine, build);
     try {
