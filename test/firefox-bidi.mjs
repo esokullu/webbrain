@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import vm from 'node:vm';
 import { FirefoxBidiClient } from '../src/firefox/src/bidi/client.js';
 import { BidiSession } from '../firefox-companion/session.mjs';
-import { installPageFeedback, pageFeedbackMethods } from '../src/firefox/src/agent/page-feedback.js';
+import { installPageFeedback, pageFeedbackMethods, validateNativePageDispatch } from '../src/firefox/src/agent/page-feedback.js';
 
 const id = () => crypto.randomUUID();
 
@@ -12,17 +12,19 @@ test('uploads register input dispatches with the extension monitor', async () =>
   const guard = { documentToken: 'file-document', revision: 0, operationId: 'upload' };
   const registrations = [];
   const client = new FirefoxBidiClient({ tabs: { sendMessage: async (_tab, message) => {
-    registrations.push(message.params); return { guard };
+    registrations.push(message);
+    return message.action === 'page_monitor_prepare' ? { ready: true } : { ready: true, guard };
   } } });
   client.runs.set(tab, { runId: id(), bound: true });
   client.request = async (_command, args) => { assert.deepEqual(args.payload.pageFeedbackGuard, guard); return { success: true }; };
   await owner._beginPageFeedbackRun(tab, 'interactive');
   try {
     await client.perform(tab, 'upload', { selector: '#file' });
-    assert.equal(registrations.length, 1);
-    assert.equal(registrations[0].kind, 'input');
-    assert.equal(registrations[0].navigationCandidate, false);
-    assert.equal(registrations[0].fenceOnly, true);
+    assert.deepEqual(registrations.map(message => message.action), ['page_monitor_prepare', 'page_monitor_dispatch']);
+    assert.equal(registrations[0].params.tool, 'upload');
+    assert.equal(registrations[1].params.kind, 'input');
+    assert.equal(registrations[1].params.navigationCandidate, false);
+    assert.equal(registrations[1].params.fenceOnly, true);
   } finally { owner._finishPageFeedbackRun(tab); }
 });
 
@@ -149,6 +151,73 @@ test('native dispatch validation returns through the extension-owned frame monit
     await action;
   } finally {
     releaseAction();
+    agent._finishPageFeedbackRun(tabId);
+    if (originalBrowser === undefined) delete globalThis.browser;
+    else globalThis.browser = originalBrowser;
+  }
+});
+test('BiDi prepares the target frame before validating native dispatch', async () => {
+  const originalBrowser = globalThis.browser;
+  const tabId = 957, runId = id(), deliveries = [], prepared = new Map();
+  const api = {
+    tabs: {
+      get: async () => ({ url: 'https://example.test/' }),
+      sendMessage: async (tab, message, options) => {
+        const frameId = options?.frameId || 0;
+        const params = message.params || {};
+        deliveries.push({ tab, frameId, action: message.action, params });
+        const key = `${frameId}:${params.operationId}`;
+        if (message.action === 'page_monitor_prepare') {
+          prepared.set(key, params);
+          return { ready: true };
+        }
+        if (message.action === 'page_monitor_dispatch') return { ready: true, guard: {
+          documentToken: frameId === 9 ? 'document-9' : 'document-0', revision: 4,
+          operationId: params.operationId, runToken: params.runToken,
+        } };
+        if (message.action === 'page_monitor_validate') return { ready: prepared.has(key) };
+        return { ready: true };
+      },
+    },
+    webNavigation: { getAllFrames: async () => [
+      { frameId: 0, documentId: 'doc-0', url: 'https://example.test/' },
+      { frameId: 9, documentId: 'doc-9', url: 'https://frame.test/' },
+    ] },
+  };
+  class TestAgent {
+    static STATE_CHANGE_TOOLS = new Set(['click']);
+    isRunning() { return true; }
+    _checkAbort() { return false; }
+    _hasPendingPageFeedback() { return false; }
+    async executeTool(tab, action, args) {
+      this.pageMonitorState({ tab: { id: tab }, frameId: 9, documentId: 'doc-9', url: 'https://frame.test/' }, 'document-9');
+      return client.perform(tab, action, { ...args, frameId: 9 });
+    }
+  }
+  installPageFeedback(TestAgent);
+  const agent = new TestAgent();
+  const client = new FirefoxBidiClient(api);
+  client.runs.set(tabId, { runId, bound: true });
+  globalThis.browser = api;
+  let validatedGuard;
+  client.request = async (_command, args) => {
+    validatedGuard = args.payload.pageFeedbackGuard;
+    assert.ok(validatedGuard, 'The child-frame monitor must return a dispatch guard');
+    assert.equal(await validateNativePageDispatch(api, tabId, validatedGuard, { kind: 'input' }), true,
+      'The child-frame monitor must validate the prepared operation');
+    return { success: true };
+  };
+  try {
+    await agent._beginPageFeedbackRun(tabId, 'interactive');
+    await agent.executeTool(tabId, 'click', { selector: '#target' });
+    const prepare = deliveries.find(item => item.action === 'page_monitor_prepare' && item.frameId === 9);
+    const dispatch = deliveries.find(item => item.action === 'page_monitor_dispatch' && item.frameId === 9);
+    assert.ok(prepare, 'The resolved target frame must receive a preparation message');
+    assert.ok(dispatch, 'The resolved target frame must receive the dispatch fence');
+    assert.equal(prepare.params.operationId, dispatch.params.operationId);
+    assert.equal(prepare.params.tool, 'click');
+    assert.ok(deliveries.indexOf(prepare) < deliveries.indexOf(dispatch), 'Preparation must precede dispatch');
+  } finally {
     agent._finishPageFeedbackRun(tabId);
     if (originalBrowser === undefined) delete globalThis.browser;
     else globalThis.browser = originalBrowser;

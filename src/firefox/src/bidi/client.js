@@ -158,6 +158,7 @@ export class FirefoxBidiClient {
         : ['type', 'field', 'key', 'upload'].includes(action) ? 'input' : 'click',
       ...(payload.point ? { x: payload.point.x, y: payload.point.y } : {}),
       selector: payload.selector, ref_id: payload.ref_id, frameId: payload.frameId || 0,
+      tool: action, prepareMonitor: true,
       navigationCandidate: ['click', 'checked'].includes(action),
       fenceOnly: true,
       url: action === 'navigate' ? payload.url : undefined,
