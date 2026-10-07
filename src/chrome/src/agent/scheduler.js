@@ -1,3 +1,4 @@
+import { DECISION_SETTINGS_KEYS, resolveDecisionConfig } from './decision-config.js';
 import { createSystemOneEvidence, systemOneEvidenceState } from './systemone-evidence.js';
 import {
   buildCompletionQuestions,
@@ -156,10 +157,11 @@ function normalizeDoneOutcome(value) {
 }
 
 function doneOutcomeFromUpdate(type, data) {
-  if (type !== 'tool_result' || data?.name !== 'done') return null;
+  if (type !== 'tool_result' || !['done', 'done_json'].includes(data?.name)) return null;
   const result = data?.result;
+  if (result?.cloudFailed) return 'failed';
   if (!result?.done || result?.success === false || result?.blockedDone || result?.error) return null;
-  return normalizeDoneOutcome(result.outcome);
+  return normalizeDoneOutcome(result.outcome || (data.name === 'done_json' ? 'success' : null));
 }
 
 // Ask-mode scheduled runs never emit a done update, so their success verdict
@@ -654,6 +656,7 @@ export class ScheduledJobManager {
 
   async _getSettings() {
     const stored = await this.api.storage.local.get([
+      ...DECISION_SETTINGS_KEYS,
       SCHEDULED_TASKS_ENABLED_KEY,
       SCHEDULED_REQUIRE_CONFIRMATION_KEY,
       SYSTEM_ONE_API_KEY,
@@ -665,6 +668,7 @@ export class ScheduledJobManager {
       'strictSecretMode',
     ]);
     return {
+      ...stored,
       enabled: stored[SCHEDULED_TASKS_ENABLED_KEY] !== false,
       requireConsequentialConfirmation: stored[SCHEDULED_REQUIRE_CONFIRMATION_KEY] !== false,
       typesafeApiKey: typeof stored[SYSTEM_ONE_API_KEY] === 'string'
@@ -1457,14 +1461,15 @@ export class ScheduledJobManager {
     const isWatch = job.source === 'watch';
     const skip = reason => ({ decision: 'skip', reason });
     if (outcome !== 'success') return skip('not_success');
-    if (!this.systemOneJudge || settings.systemOneEnabled !== true
-      || !(isWatch ? settings.systemOneWatchEnabled : settings.systemOneCompletionEnabled)
-      || !settings.typesafeApiKey) return skip('disabled');
+    if (!isWatch && runMeta.completionVerdict?.outcome === 'succeeded') return { decision: 'keep', reason: 'done_verified', model: runMeta.completionVerdict.model };
+    const config = resolveDecisionConfig(settings);
+    if (!this.systemOneJudge || !config.enabled || settings.systemOneEnabled !== true
+      || !(isWatch ? settings.systemOneWatchEnabled : settings.systemOneCompletionEnabled)) return skip('disabled');
     if (settings.strictSecretMode || runMeta.sidecarAllowed === false || runMeta.signal?.aborted) return skip('unavailable');
     const state = systemOneEvidenceState(job.prompt || job.resumeInstruction || job.reason || '', runMeta.evidence, isWatch ? job.watch?.systemOneBaseline : null);
     if (!state) return skip('no_evidence');
     try {
-      const args = { apiKey: settings.typesafeApiKey, state,
+      const args = { config, apiKey: settings.typesafeApiKey, state,
         questions: isWatch ? buildWatchQuestions() : buildCompletionQuestions(), signal: runMeta.signal };
       const verdict = this.agent.evaluateSystemOne
         ? await this.agent.evaluateSystemOne(job.tabId, this.systemOneJudge, args, runMeta.judgeContext)
@@ -1503,7 +1508,7 @@ export class ScheduledJobManager {
       ), () => ({ status: 'needs_user_input', reconciliationRequired: true,
         clarificationRequired: true, clarificationAuthorizationRequired: true,
         lastOutcome: 'partial', lastResult: String(result || '').slice(0, 2000),
-        lastError: 'Jev could not verify the completed action. Check its result before running this task again.',
+        lastError: 'The decision model could not verify the completed action. Check its result before running this task again.',
         nextRunAt: null, pendingClarify: null,
       }));
       if (waiting) this._emit(waiting, 'clarification_required');
@@ -1915,6 +1920,7 @@ export class ScheduledJobManager {
     this._emit(running, 'running');
 
     let runOutcome = null;
+    let completionVerdict = null;
     let runStatus = null;
     let watchAlert = null;
     let sawFailureLikeUpdate = false;
@@ -1924,7 +1930,11 @@ export class ScheduledJobManager {
       judgeContext = this.agent.systemOneContext?.(tabId) || judgeContext;
       evidence.observe(type, data);
       const doneOutcome = doneOutcomeFromUpdate(type, data);
-      if (doneOutcome) runOutcome = doneOutcome;
+      if (doneOutcome) {
+        runOutcome = doneOutcome;
+        completionVerdict = data?.result?.verification?.decision
+          || (data?.name === 'done_json' ? this.agent._completionVerdicts?.get(tabId) : null) || null;
+      }
       if (type === 'error' || type === 'attachment_rejected' || type === 'max_steps_reached'
         || data?.error || data?.data?.error) {
         sawFailureLikeUpdate = true;
@@ -2085,7 +2095,7 @@ export class ScheduledJobManager {
             ? 'success'
             : null);
         await this._complete(running, result, effectiveOutcome, {
-          watchAlert,
+          watchAlert, completionVerdict,
           evidence: evidence.snapshot(),
           judgeContext,
           executionId: execution.id,

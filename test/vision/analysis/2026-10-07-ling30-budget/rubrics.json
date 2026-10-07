@@ -1,0 +1,6752 @@
+{
+  "100": {
+    "schemaVersion": 1,
+    "id": "100",
+    "image": "images/100.png",
+    "threshold": 0.74,
+    "checks": [
+      {
+        "id": "purpose",
+        "dimension": "page_purpose",
+        "section": 1,
+        "kind": "any",
+        "values": [
+          "account",
+          "label",
+          "receipt",
+          "contract",
+          "telemetry",
+          "document"
+        ],
+        "weight": 1,
+        "critical": false
+      },
+      {
+        "id": "heading",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Telemetry capture",
+        "weight": 1,
+        "critical": false,
+        "caseSensitive": true
+      },
+      {
+        "id": "visible-fragment",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Node ••7? / region eu-?",
+        "weight": 2,
+        "critical": true,
+        "caseSensitive": true
+      },
+      {
+        "id": "unknown",
+        "dimension": "unknowns",
+        "section": 6,
+        "kind": "any",
+        "values": [
+          "unknown",
+          "unreadable",
+          "blurred",
+          "smudged",
+          "redacted",
+          "cannot read"
+        ],
+        "weight": 3,
+        "critical": true
+      },
+      {
+        "id": "no-guess",
+        "dimension": "visual_reasoning",
+        "section": null,
+        "kind": "any",
+        "values": [
+          "Node ••7? / region eu-?"
+        ],
+        "weight": 1,
+        "critical": false
+      }
+    ],
+    "successRubric": "Transcribe only Node ••7? / region eu-? and explicitly say node and region identifiers are partially unreadable."
+  },
+  "001": {
+    "schemaVersion": 1,
+    "id": "001",
+    "image": "images/001.png",
+    "threshold": 0.72,
+    "checks": [
+      {
+        "id": "purpose",
+        "dimension": "page_purpose",
+        "section": 1,
+        "kind": "any",
+        "values": [
+          "sign in",
+          "login",
+          "identity verification",
+          "session expired"
+        ],
+        "weight": 1,
+        "critical": true
+      },
+      {
+        "id": "heading",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Welcome back",
+        "weight": 2,
+        "critical": true,
+        "caseSensitive": true
+      },
+      {
+        "id": "button",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Sign in",
+        "weight": 2,
+        "critical": true,
+        "caseSensitive": true
+      },
+      {
+        "id": "email-input",
+        "dimension": "inputs",
+        "section": 3,
+        "kind": "all",
+        "values": [
+          "Email",
+          "empty"
+        ],
+        "weight": 1,
+        "critical": false
+      },
+      {
+        "id": "blocker",
+        "dimension": "blockers",
+        "section": 5,
+        "kind": "any",
+        "values": [
+          "missing",
+          "email",
+          "password"
+        ],
+        "weight": 2,
+        "critical": false
+      }
+    ],
+    "successRubric": "Identify the Welcome back authentication surface, quote Sign in, and report missing email and password."
+  },
+  "002": {
+    "schemaVersion": 1,
+    "id": "002",
+    "image": "images/002.png",
+    "threshold": 0.72,
+    "checks": [
+      {
+        "id": "purpose",
+        "dimension": "page_purpose",
+        "section": 1,
+        "kind": "any",
+        "values": [
+          "search",
+          "results"
+        ],
+        "weight": 1,
+        "critical": true
+      },
+      {
+        "id": "heading",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Search",
+        "weight": 1,
+        "critical": false,
+        "caseSensitive": true
+      },
+      {
+        "id": "tab",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "All",
+        "weight": 2,
+        "critical": true,
+        "caseSensitive": true
+      },
+      {
+        "id": "count",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "24 results",
+        "weight": 2,
+        "critical": true,
+        "caseSensitive": true
+      },
+      {
+        "id": "query",
+        "dimension": "inputs",
+        "section": 3,
+        "kind": "all",
+        "values": [
+          "Search",
+          "camera"
+        ],
+        "weight": 2,
+        "critical": true
+      }
+    ],
+    "successRubric": "Read the active query camera, selected tab All, and exact count 24 results."
+  },
+  "003": {
+    "schemaVersion": 1,
+    "id": "003",
+    "image": "images/003.png",
+    "threshold": 0.72,
+    "checks": [
+      {
+        "id": "purpose",
+        "dimension": "page_purpose",
+        "section": 1,
+        "kind": "any",
+        "values": [
+          "checkout",
+          "cart",
+          "order",
+          "purchase"
+        ],
+        "weight": 1,
+        "critical": true
+      },
+      {
+        "id": "heading",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Your cart",
+        "weight": 1,
+        "critical": false,
+        "caseSensitive": true
+      },
+      {
+        "id": "item",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Canvas tote",
+        "weight": 1,
+        "critical": false,
+        "caseSensitive": true
+      },
+      {
+        "id": "total",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "$24.00",
+        "weight": 2,
+        "critical": true,
+        "caseSensitive": true
+      },
+      {
+        "id": "button",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Checkout",
+        "weight": 2,
+        "critical": true,
+        "caseSensitive": true
+      }
+    ],
+    "successRubric": "Quote $24.00 and Checkout; correctly report whether the action is disabled and why."
+  },
+  "004": {
+    "schemaVersion": 1,
+    "id": "004",
+    "image": "images/004.png",
+    "threshold": 0.72,
+    "checks": [
+      {
+        "id": "purpose",
+        "dimension": "page_purpose",
+        "section": 1,
+        "kind": "any",
+        "values": [
+          "form",
+          "profile",
+          "shipping",
+          "invite",
+          "dataset",
+          "tax"
+        ],
+        "weight": 1,
+        "critical": false
+      },
+      {
+        "id": "heading",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Create profile",
+        "weight": 1,
+        "critical": false,
+        "caseSensitive": true
+      },
+      {
+        "id": "button",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Save profile",
+        "weight": 1,
+        "critical": false,
+        "caseSensitive": true
+      },
+      {
+        "id": "input",
+        "dimension": "inputs",
+        "section": 3,
+        "kind": "all",
+        "values": [
+          "Display name",
+          "empty",
+          "e.g. Maya"
+        ],
+        "weight": 2,
+        "critical": true
+      },
+      {
+        "id": "error",
+        "dimension": "state_signals",
+        "section": 4,
+        "kind": "literal",
+        "value": "Display name is required",
+        "weight": 2,
+        "critical": true,
+        "caseSensitive": true
+      },
+      {
+        "id": "blocker",
+        "dimension": "blockers",
+        "section": 5,
+        "kind": "any",
+        "values": [
+          "invalid",
+          "required",
+          "incomplete",
+          "missing",
+          "format"
+        ],
+        "weight": 1,
+        "critical": true
+      }
+    ],
+    "successRubric": "Name Display name, preserve its current value and placeholder, and quote Display name is required."
+  },
+  "005": {
+    "schemaVersion": 1,
+    "id": "005",
+    "image": "images/005.png",
+    "threshold": 0.72,
+    "checks": [
+      {
+        "id": "purpose",
+        "dimension": "page_purpose",
+        "section": 1,
+        "kind": "any",
+        "values": [
+          "files",
+          "dialog",
+          "modal"
+        ],
+        "weight": 1,
+        "critical": false
+      },
+      {
+        "id": "title",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Delete file?",
+        "weight": 2,
+        "critical": true,
+        "caseSensitive": true
+      },
+      {
+        "id": "primary",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Delete",
+        "weight": 2,
+        "critical": true,
+        "caseSensitive": true
+      },
+      {
+        "id": "secondary",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Cancel",
+        "weight": 1,
+        "critical": false,
+        "caseSensitive": true
+      },
+      {
+        "id": "modal-signal",
+        "dimension": "state_signals",
+        "section": 4,
+        "kind": "all",
+        "values": [
+          "modal",
+          "This action cannot be undone."
+        ],
+        "weight": 2,
+        "critical": true
+      },
+      {
+        "id": "overlay-blocker",
+        "dimension": "blockers",
+        "section": 5,
+        "kind": "any",
+        "values": [
+          "modal",
+          "overlay",
+          "dialog"
+        ],
+        "weight": 1,
+        "critical": true
+      }
+    ],
+    "successRubric": "Recognize a blocking modal, quote Delete file?, Delete, and Cancel."
+  },
+  "006": {
+    "schemaVersion": 1,
+    "id": "006",
+    "image": "images/006.png",
+    "threshold": 0.72,
+    "checks": [
+      {
+        "id": "purpose",
+        "dimension": "page_purpose",
+        "section": 1,
+        "kind": "any",
+        "values": [
+          "notes",
+          "settings",
+          "upload",
+          "export"
+        ],
+        "weight": 1,
+        "critical": false
+      },
+      {
+        "id": "heading",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Notes",
+        "weight": 1,
+        "critical": false,
+        "caseSensitive": true
+      },
+      {
+        "id": "button",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Done",
+        "weight": 1,
+        "critical": false,
+        "caseSensitive": true
+      },
+      {
+        "id": "toast",
+        "dimension": "state_signals",
+        "section": 4,
+        "kind": "literal",
+        "value": "Saved",
+        "weight": 2,
+        "critical": true,
+        "caseSensitive": true
+      }
+    ],
+    "successRubric": "Quote Saved, and classify the visible state."
+  },
+  "007": {
+    "schemaVersion": 1,
+    "id": "007",
+    "image": "images/007.png",
+    "threshold": 0.72,
+    "checks": [
+      {
+        "id": "purpose",
+        "dimension": "page_purpose",
+        "section": 1,
+        "kind": "any",
+        "values": [
+          "loading",
+          "processing",
+          "reconnecting",
+          "import"
+        ],
+        "weight": 1,
+        "critical": true
+      },
+      {
+        "id": "heading",
+        "dimension": "visible_text",
+        "section": null,
+        "kind": "literal",
+        "value": "Loading messages…",
+        "weight": 2,
+        "critical": true,
+        "caseSensitive": true
+      },
+      {
+        "id": "spinner",
+        "dimension": "state_signals",
+        "section": 4,
+        "kind": "any",
+        "values": [
+          "loading",
+          "spinner",
+          "processing",
+          "reconnecting",
+          "progress"
+        ],
+        "weight": 2,
+        "critical": true
+      },
+      {
+        "id": "wait-blocker",
+        "dimension": "blockers",
+        "section": 5,
+        "kind": "any",
+        "values": [
+          "loading",
+          "wait",
+          "processing",
+          "reconnecting",
+          "not ready"
+        ],
+        "weight": 1,
+        "critical": false
+      }
+    ],
+    "successRubric": "Report the loading state and preserve Loading messages… without inventing completion."
+  },
+  "008": {
+    "schemaVersion": 1,
+    "id": "008",
+    "image": "images/008.png",
+    "threshold": 0.72,
+    "checks": [
+      {
+        "id": "purpose",
+        "dimension": "page_purpose",
+        "section": 1,
+        "kind": "any",
+        "values": [
+          "privacy",
+          "cookie",
+          "consent",
+          "video"
+        ],
+        "weight": 1,
+        "critical": false
+      },
+      {
+        "id": "title",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "We use cookies",
+        "weight": 2,
+        "critical": true,
+        "caseSensitive": true
+      },
+      {
+        "id": "choice-1",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Accept all",
+        "weight": 1,
+        "critical": true,
+        "caseSensitive": true
+      },
+      {
+        "id": "choice-2",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Reject all",
+        "weight": 1,
+        "critical": false,
+        "caseSensitive": true
+      },
+      {
+        "id": "consent-signal",
+        "dimension": "state_signals",
+        "section": 4,
+        "kind": "any",
+        "values": [
+          "cookie",
+          "consent",
+          "privacy",
+          "overlay",
+          "banner"
+        ],
+        "weight": 2,
+        "critical": true
+      },
+      {
+        "id": "consent-blocker",
+        "dimension": "blockers",
+        "section": 5,
+        "kind": "any",
+        "values": [
+          "cookie",
+          "consent",
+          "overlay",
+          "blocked"
+        ],
+        "weight": 1,
+        "critical": false
+      }
+    ],
+    "successRubric": "Recognize the consent UI and quote Accept all / Reject all."
+  },
+  "009": {
+    "schemaVersion": 1,
+    "id": "009",
+    "image": "images/009.png",
+    "threshold": 0.72,
+    "checks": [
+      {
+        "id": "purpose",
+        "dimension": "page_purpose",
+        "section": 1,
+        "kind": "any",
+        "values": [
+          "dashboard",
+          "overview",
+          "system health",
+          "incident"
+        ],
+        "weight": 1,
+        "critical": true
+      },
+      {
+        "id": "heading",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Overview",
+        "weight": 1,
+        "critical": false,
+        "caseSensitive": true
+      },
+      {
+        "id": "target-metric",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "all",
+        "values": [
+          "Orders",
+          "86"
+        ],
+        "weight": 2,
+        "critical": true
+      }
+    ],
+    "successRubric": "Read Orders = 86 and report the alert without guessing unknown values."
+  },
+  "010": {
+    "schemaVersion": 1,
+    "id": "010",
+    "image": "images/010.png",
+    "threshold": 0.72,
+    "checks": [
+      {
+        "id": "purpose",
+        "dimension": "page_purpose",
+        "section": 1,
+        "kind": "any",
+        "values": [
+          "chart",
+          "dashboard",
+          "weekly signups"
+        ],
+        "weight": 1,
+        "critical": false
+      },
+      {
+        "id": "heading",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Weekly signups",
+        "weight": 1,
+        "critical": false,
+        "caseSensitive": true
+      },
+      {
+        "id": "highest-label",
+        "dimension": "visual_reasoning",
+        "section": null,
+        "kind": "any",
+        "values": [
+          "Tue"
+        ],
+        "weight": 2,
+        "critical": true
+      },
+      {
+        "id": "highest-value",
+        "dimension": "visual_reasoning",
+        "section": null,
+        "kind": "any",
+        "values": [
+          "18"
+        ],
+        "weight": 2,
+        "critical": true
+      }
+    ],
+    "successRubric": "Use the rendered bars, not source order: Tue is tallest."
+  },
+  "011": {
+    "schemaVersion": 1,
+    "id": "011",
+    "image": "images/011.png",
+    "threshold": 0.72,
+    "checks": [
+      {
+        "id": "purpose",
+        "dimension": "page_purpose",
+        "section": 1,
+        "kind": "any",
+        "values": [
+          "table",
+          "orders",
+          "members",
+          "deployment",
+          "invoice",
+          "audit"
+        ],
+        "weight": 1,
+        "critical": false
+      },
+      {
+        "id": "heading",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Recent orders",
+        "weight": 1,
+        "critical": false,
+        "caseSensitive": true
+      },
+      {
+        "id": "target-row",
+        "dimension": "visual_reasoning",
+        "section": null,
+        "kind": "all",
+        "values": [
+          "#1043",
+          "Pending"
+        ],
+        "weight": 3,
+        "critical": true
+      }
+    ],
+    "successRubric": "Keep row association intact: #1043 — Pending."
+  },
+  "012": {
+    "schemaVersion": 1,
+    "id": "012",
+    "image": "images/012.png",
+    "threshold": 0.72,
+    "checks": [
+      {
+        "id": "purpose",
+        "dimension": "page_purpose",
+        "section": 1,
+        "kind": "any",
+        "values": [
+          "email",
+          "compose",
+          "message"
+        ],
+        "weight": 1,
+        "critical": true
+      },
+      {
+        "id": "heading",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "New message",
+        "weight": 1,
+        "critical": false,
+        "caseSensitive": true
+      },
+      {
+        "id": "button",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Send",
+        "weight": 2,
+        "critical": true,
+        "caseSensitive": true
+      },
+      {
+        "id": "to-input",
+        "dimension": "inputs",
+        "section": 3,
+        "kind": "all",
+        "values": [
+          "To",
+          "empty"
+        ],
+        "weight": 1,
+        "critical": false
+      },
+      {
+        "id": "subject-input",
+        "dimension": "inputs",
+        "section": 3,
+        "kind": "all",
+        "values": [
+          "Subject",
+          "empty"
+        ],
+        "weight": 1,
+        "critical": false
+      }
+    ],
+    "successRubric": "Report the compose fields exactly and surface the empty required fields."
+  },
+  "013": {
+    "schemaVersion": 1,
+    "id": "013",
+    "image": "images/013.png",
+    "threshold": 0.72,
+    "checks": [
+      {
+        "id": "purpose",
+        "dimension": "page_purpose",
+        "section": 1,
+        "kind": "any",
+        "values": [
+          "board",
+          "kanban",
+          "project",
+          "sprint",
+          "incident"
+        ],
+        "weight": 1,
+        "critical": false
+      },
+      {
+        "id": "heading",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Project board",
+        "weight": 1,
+        "critical": false,
+        "caseSensitive": true
+      },
+      {
+        "id": "card-column",
+        "dimension": "visual_reasoning",
+        "section": null,
+        "kind": "all",
+        "values": [
+          "Write brief",
+          "To do"
+        ],
+        "weight": 3,
+        "critical": true
+      }
+    ],
+    "successRubric": "Preserve the spatial association: Write brief is in To do."
+  },
+  "014": {
+    "schemaVersion": 1,
+    "id": "014",
+    "image": "images/014.png",
+    "threshold": 0.72,
+    "checks": [
+      {
+        "id": "purpose",
+        "dimension": "page_purpose",
+        "section": 1,
+        "kind": "any",
+        "values": [
+          "calendar",
+          "schedule"
+        ],
+        "weight": 1,
+        "critical": false
+      },
+      {
+        "id": "heading",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "August 2026",
+        "weight": 1,
+        "critical": false,
+        "caseSensitive": true
+      },
+      {
+        "id": "selected-event",
+        "dimension": "visual_reasoning",
+        "section": null,
+        "kind": "all",
+        "values": [
+          "21",
+          "Design review",
+          "10:00"
+        ],
+        "weight": 3,
+        "critical": true
+      }
+    ],
+    "successRubric": "Associate day 21 with Design review at 10:00."
+  },
+  "015": {
+    "schemaVersion": 1,
+    "id": "015",
+    "image": "images/015.png",
+    "threshold": 0.72,
+    "checks": [
+      {
+        "id": "purpose",
+        "dimension": "page_purpose",
+        "section": 1,
+        "kind": "any",
+        "values": [
+          "map",
+          "tracking",
+          "route",
+          "hotel",
+          "café"
+        ],
+        "weight": 1,
+        "critical": false
+      },
+      {
+        "id": "heading",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Nearby cafés",
+        "weight": 1,
+        "critical": false,
+        "caseSensitive": true
+      },
+      {
+        "id": "selection",
+        "dimension": "visual_reasoning",
+        "section": null,
+        "kind": "all",
+        "values": [
+          "Pine Café",
+          "4 min walk"
+        ],
+        "weight": 3,
+        "critical": true
+      },
+      {
+        "id": "pin-count",
+        "dimension": "visual_reasoning",
+        "section": null,
+        "kind": "any",
+        "values": [
+          "2",
+          "two"
+        ],
+        "weight": 1,
+        "critical": false
+      }
+    ],
+    "successRubric": "Read the selected Pine Café card, its 4 min walk detail, and 2 pins."
+  },
+  "016": {
+    "schemaVersion": 1,
+    "id": "016",
+    "image": "images/016.png",
+    "threshold": 0.72,
+    "checks": [
+      {
+        "id": "purpose",
+        "dimension": "page_purpose",
+        "section": 1,
+        "kind": "any",
+        "values": [
+          "gallery",
+          "archive",
+          "collection",
+          "comparison"
+        ],
+        "weight": 1,
+        "critical": false
+      },
+      {
+        "id": "heading",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Street archive",
+        "weight": 1,
+        "critical": false,
+        "caseSensitive": true
+      },
+      {
+        "id": "caption",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Talad Noi",
+        "weight": 2,
+        "critical": true,
+        "caseSensitive": true
+      },
+      {
+        "id": "badge",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Color photo",
+        "weight": 1,
+        "critical": false,
+        "caseSensitive": true
+      },
+      {
+        "id": "visual-content",
+        "dimension": "visual_reasoning",
+        "section": null,
+        "kind": "any",
+        "values": [
+          "Talad Noi"
+        ],
+        "weight": 2,
+        "critical": false
+      }
+    ],
+    "successRubric": "Combine the rendered image with its UI labels; do not infer a place or date beyond Talad Noi."
+  },
+  "017": {
+    "schemaVersion": 1,
+    "id": "017",
+    "image": "images/017.png",
+    "threshold": 0.72,
+    "checks": [
+      {
+        "id": "purpose",
+        "dimension": "page_purpose",
+        "section": 1,
+        "kind": "any",
+        "values": [
+          "sign",
+          "payment",
+          "order",
+          "security",
+          "login",
+          "checkout",
+          "settings"
+        ],
+        "weight": 1,
+        "critical": false
+      },
+      {
+        "id": "heading",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Bienvenue",
+        "weight": 2,
+        "critical": true,
+        "caseSensitive": true
+      },
+      {
+        "id": "button",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Continuer",
+        "weight": 2,
+        "critical": true,
+        "caseSensitive": true
+      },
+      {
+        "id": "input",
+        "dimension": "inputs",
+        "section": 3,
+        "kind": "all",
+        "values": [
+          "Adresse e-mail",
+          "empty"
+        ],
+        "weight": 2,
+        "critical": true
+      }
+    ],
+    "successRubric": "Preserve Unicode exactly: Bienvenue; Adresse e-mail; Continuer."
+  },
+  "018": {
+    "schemaVersion": 1,
+    "id": "018",
+    "image": "images/018.png",
+    "threshold": 0.72,
+    "checks": [
+      {
+        "id": "purpose",
+        "dimension": "page_purpose",
+        "section": 1,
+        "kind": "any",
+        "values": [
+          "account",
+          "pricing",
+          "report",
+          "editor",
+          "trading"
+        ],
+        "weight": 1,
+        "critical": false
+      },
+      {
+        "id": "heading",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Account",
+        "weight": 1,
+        "critical": false,
+        "caseSensitive": true
+      },
+      {
+        "id": "target",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Save changes",
+        "weight": 2,
+        "critical": true,
+        "caseSensitive": true
+      },
+      {
+        "id": "cover",
+        "dimension": "state_signals",
+        "section": 4,
+        "kind": "literal",
+        "value": "Help",
+        "weight": 2,
+        "critical": true,
+        "caseSensitive": true
+      },
+      {
+        "id": "occlusion",
+        "dimension": "blockers",
+        "section": 5,
+        "kind": "any",
+        "values": [
+          "cover",
+          "overlap",
+          "overlay",
+          "obstruct",
+          "block"
+        ],
+        "weight": 2,
+        "critical": true
+      }
+    ],
+    "successRubric": "Detect the visual obstruction: Help interferes with Save changes."
+  },
+  "019": {
+    "schemaVersion": 1,
+    "id": "019",
+    "image": "images/019.png",
+    "threshold": 0.72,
+    "checks": [
+      {
+        "id": "purpose",
+        "dimension": "page_purpose",
+        "section": 1,
+        "kind": "any",
+        "values": [
+          "security",
+          "verification",
+          "captcha",
+          "challenge"
+        ],
+        "weight": 1,
+        "critical": true
+      },
+      {
+        "id": "heading",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Security check",
+        "weight": 1,
+        "critical": false,
+        "caseSensitive": true
+      },
+      {
+        "id": "label",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "I’m not a robot",
+        "weight": 2,
+        "critical": true,
+        "caseSensitive": true
+      },
+      {
+        "id": "button",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Continue",
+        "weight": 1,
+        "critical": false,
+        "caseSensitive": true
+      },
+      {
+        "id": "captcha-signal",
+        "dimension": "state_signals",
+        "section": 4,
+        "kind": "any",
+        "values": [
+          "CAPTCHA",
+          "challenge",
+          "verification"
+        ],
+        "weight": 2,
+        "critical": true
+      },
+      {
+        "id": "security-blocker",
+        "dimension": "blockers",
+        "section": 5,
+        "kind": "any",
+        "values": [
+          "verification",
+          "challenge",
+          "CAPTCHA",
+          "disabled"
+        ],
+        "weight": 2,
+        "critical": true
+      }
+    ],
+    "successRubric": "Identify the synthetic challenge and disabled state; do not solve or invent unreadable characters."
+  },
+  "020": {
+    "schemaVersion": 1,
+    "id": "020",
+    "image": "images/020.png",
+    "threshold": 0.68,
+    "checks": [
+      {
+        "id": "purpose",
+        "dimension": "page_purpose",
+        "section": 1,
+        "kind": "any",
+        "values": [
+          "account",
+          "label",
+          "receipt",
+          "contract",
+          "telemetry",
+          "document"
+        ],
+        "weight": 1,
+        "critical": false
+      },
+      {
+        "id": "heading",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Account ID",
+        "weight": 1,
+        "critical": false,
+        "caseSensitive": true
+      },
+      {
+        "id": "visible-fragment",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "ACCT-1042",
+        "weight": 2,
+        "critical": true,
+        "caseSensitive": true
+      }
+    ],
+    "successRubric": "Transcribe only ACCT-1042."
+  },
+  "021": {
+    "schemaVersion": 1,
+    "id": "021",
+    "image": "images/021.png",
+    "threshold": 0.72,
+    "checks": [
+      {
+        "id": "purpose",
+        "dimension": "page_purpose",
+        "section": 1,
+        "kind": "any",
+        "values": [
+          "sign in",
+          "login",
+          "identity verification",
+          "session expired"
+        ],
+        "weight": 1,
+        "critical": true
+      },
+      {
+        "id": "heading",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Sign in to Atlas",
+        "weight": 2,
+        "critical": true,
+        "caseSensitive": true
+      },
+      {
+        "id": "button",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Continue",
+        "weight": 2,
+        "critical": true,
+        "caseSensitive": true
+      },
+      {
+        "id": "email-input",
+        "dimension": "inputs",
+        "section": 3,
+        "kind": "all",
+        "values": [
+          "Email",
+          "maya@example.com"
+        ],
+        "weight": 1,
+        "critical": false
+      },
+      {
+        "id": "blocker",
+        "dimension": "blockers",
+        "section": 5,
+        "kind": "any",
+        "values": [
+          "missing",
+          "password"
+        ],
+        "weight": 2,
+        "critical": true
+      },
+      {
+        "id": "disabled",
+        "dimension": "inputs",
+        "section": 3,
+        "kind": "any",
+        "values": [
+          "disabled",
+          "unavailable"
+        ],
+        "weight": 1,
+        "critical": false
+      }
+    ],
+    "successRubric": "Identify the Sign in to Atlas authentication surface, quote Continue, and report missing password."
+  },
+  "022": {
+    "schemaVersion": 1,
+    "id": "022",
+    "image": "images/022.png",
+    "threshold": 0.72,
+    "checks": [
+      {
+        "id": "purpose",
+        "dimension": "page_purpose",
+        "section": 1,
+        "kind": "any",
+        "values": [
+          "search",
+          "results"
+        ],
+        "weight": 1,
+        "critical": true
+      },
+      {
+        "id": "heading",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Product search",
+        "weight": 1,
+        "critical": false,
+        "caseSensitive": true
+      },
+      {
+        "id": "tab",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Products",
+        "weight": 2,
+        "critical": true,
+        "caseSensitive": true
+      },
+      {
+        "id": "count",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "18 results",
+        "weight": 2,
+        "critical": true,
+        "caseSensitive": true
+      },
+      {
+        "id": "query",
+        "dimension": "inputs",
+        "section": 3,
+        "kind": "all",
+        "values": [
+          "Search",
+          "wireless keyboard"
+        ],
+        "weight": 2,
+        "critical": true
+      },
+      {
+        "id": "chip",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "In stock",
+        "weight": 1,
+        "critical": false,
+        "caseSensitive": true
+      }
+    ],
+    "successRubric": "Read the active query wireless keyboard, selected tab Products, and exact count 18 results."
+  },
+  "023": {
+    "schemaVersion": 1,
+    "id": "023",
+    "image": "images/023.png",
+    "threshold": 0.72,
+    "checks": [
+      {
+        "id": "purpose",
+        "dimension": "page_purpose",
+        "section": 1,
+        "kind": "any",
+        "values": [
+          "checkout",
+          "cart",
+          "order",
+          "purchase"
+        ],
+        "weight": 1,
+        "critical": true
+      },
+      {
+        "id": "heading",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Checkout",
+        "weight": 1,
+        "critical": false,
+        "caseSensitive": true
+      },
+      {
+        "id": "item",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Desk lamp",
+        "weight": 1,
+        "critical": false,
+        "caseSensitive": true
+      },
+      {
+        "id": "total",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "$67.40",
+        "weight": 2,
+        "critical": true,
+        "caseSensitive": true
+      },
+      {
+        "id": "button",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Place order",
+        "weight": 2,
+        "critical": true,
+        "caseSensitive": true
+      },
+      {
+        "id": "banner",
+        "dimension": "state_signals",
+        "section": 4,
+        "kind": "literal",
+        "value": "Add a delivery address",
+        "weight": 2,
+        "critical": true,
+        "caseSensitive": true
+      },
+      {
+        "id": "blocked",
+        "dimension": "blockers",
+        "section": 5,
+        "kind": "any",
+        "values": [
+          "delivery",
+          "address"
+        ],
+        "weight": 2,
+        "critical": true
+      }
+    ],
+    "successRubric": "Quote $67.40 and Place order; correctly report whether the action is disabled and why."
+  },
+  "024": {
+    "schemaVersion": 1,
+    "id": "024",
+    "image": "images/024.png",
+    "threshold": 0.72,
+    "checks": [
+      {
+        "id": "purpose",
+        "dimension": "page_purpose",
+        "section": 1,
+        "kind": "any",
+        "values": [
+          "form",
+          "profile",
+          "shipping",
+          "invite",
+          "dataset",
+          "tax"
+        ],
+        "weight": 1,
+        "critical": false
+      },
+      {
+        "id": "heading",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Shipping details",
+        "weight": 1,
+        "critical": false,
+        "caseSensitive": true
+      },
+      {
+        "id": "button",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Continue",
+        "weight": 1,
+        "critical": false,
+        "caseSensitive": true
+      },
+      {
+        "id": "input",
+        "dimension": "inputs",
+        "section": 3,
+        "kind": "all",
+        "values": [
+          "Postal code",
+          "10A2",
+          "5 digits"
+        ],
+        "weight": 2,
+        "critical": true
+      },
+      {
+        "id": "error",
+        "dimension": "state_signals",
+        "section": 4,
+        "kind": "literal",
+        "value": "Enter a valid postal code",
+        "weight": 2,
+        "critical": true,
+        "caseSensitive": true
+      },
+      {
+        "id": "blocker",
+        "dimension": "blockers",
+        "section": 5,
+        "kind": "any",
+        "values": [
+          "invalid",
+          "required",
+          "incomplete",
+          "missing",
+          "format"
+        ],
+        "weight": 1,
+        "critical": true
+      }
+    ],
+    "successRubric": "Name Postal code, preserve its current value and placeholder, and quote Enter a valid postal code."
+  },
+  "025": {
+    "schemaVersion": 1,
+    "id": "025",
+    "image": "images/025.png",
+    "threshold": 0.72,
+    "checks": [
+      {
+        "id": "purpose",
+        "dimension": "page_purpose",
+        "section": 1,
+        "kind": "any",
+        "values": [
+          "team settings",
+          "dialog",
+          "modal"
+        ],
+        "weight": 1,
+        "critical": false
+      },
+      {
+        "id": "title",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Leave workspace?",
+        "weight": 2,
+        "critical": true,
+        "caseSensitive": true
+      },
+      {
+        "id": "primary",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Leave",
+        "weight": 2,
+        "critical": true,
+        "caseSensitive": true
+      },
+      {
+        "id": "secondary",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Stay",
+        "weight": 1,
+        "critical": false,
+        "caseSensitive": true
+      },
+      {
+        "id": "modal-signal",
+        "dimension": "state_signals",
+        "section": 4,
+        "kind": "all",
+        "values": [
+          "modal",
+          "You will lose access to 12 projects."
+        ],
+        "weight": 2,
+        "critical": true
+      },
+      {
+        "id": "overlay-blocker",
+        "dimension": "blockers",
+        "section": 5,
+        "kind": "any",
+        "values": [
+          "modal",
+          "overlay",
+          "dialog"
+        ],
+        "weight": 1,
+        "critical": true
+      }
+    ],
+    "successRubric": "Recognize a blocking modal, quote Leave workspace?, Leave, and Stay."
+  },
+  "026": {
+    "schemaVersion": 1,
+    "id": "026",
+    "image": "images/026.png",
+    "threshold": 0.72,
+    "checks": [
+      {
+        "id": "purpose",
+        "dimension": "page_purpose",
+        "section": 1,
+        "kind": "any",
+        "values": [
+          "preferences",
+          "settings",
+          "upload",
+          "export"
+        ],
+        "weight": 1,
+        "critical": false
+      },
+      {
+        "id": "heading",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Preferences",
+        "weight": 1,
+        "critical": false,
+        "caseSensitive": true
+      },
+      {
+        "id": "button",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Close",
+        "weight": 1,
+        "critical": false,
+        "caseSensitive": true
+      },
+      {
+        "id": "toast",
+        "dimension": "state_signals",
+        "section": 4,
+        "kind": "literal",
+        "value": "Settings updated",
+        "weight": 2,
+        "critical": true,
+        "caseSensitive": true
+      },
+      {
+        "id": "detail",
+        "dimension": "state_signals",
+        "section": 4,
+        "kind": "literal",
+        "value": "Synced just now",
+        "weight": 2,
+        "critical": true,
+        "caseSensitive": true
+      }
+    ],
+    "successRubric": "Quote Settings updated and Synced just now, and classify the visible state."
+  },
+  "027": {
+    "schemaVersion": 1,
+    "id": "027",
+    "image": "images/027.png",
+    "threshold": 0.72,
+    "checks": [
+      {
+        "id": "purpose",
+        "dimension": "page_purpose",
+        "section": 1,
+        "kind": "any",
+        "values": [
+          "loading",
+          "processing",
+          "reconnecting",
+          "import"
+        ],
+        "weight": 1,
+        "critical": true
+      },
+      {
+        "id": "heading",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Preparing dashboard",
+        "weight": 2,
+        "critical": true,
+        "caseSensitive": true
+      },
+      {
+        "id": "spinner",
+        "dimension": "state_signals",
+        "section": 4,
+        "kind": "any",
+        "values": [
+          "loading",
+          "spinner",
+          "processing",
+          "reconnecting",
+          "progress"
+        ],
+        "weight": 2,
+        "critical": true
+      },
+      {
+        "id": "wait-blocker",
+        "dimension": "blockers",
+        "section": 5,
+        "kind": "any",
+        "values": [
+          "loading",
+          "wait",
+          "processing",
+          "reconnecting",
+          "not ready"
+        ],
+        "weight": 1,
+        "critical": false
+      },
+      {
+        "id": "detail",
+        "dimension": "state_signals",
+        "section": 4,
+        "kind": "literal",
+        "value": "Fetching latest metrics",
+        "weight": 1,
+        "critical": false,
+        "caseSensitive": true
+      },
+      {
+        "id": "progress",
+        "dimension": "state_signals",
+        "section": 4,
+        "kind": "literal",
+        "value": "38%",
+        "weight": 2,
+        "critical": false,
+        "caseSensitive": true
+      }
+    ],
+    "successRubric": "Report the loading state and preserve 38% without inventing completion."
+  },
+  "028": {
+    "schemaVersion": 1,
+    "id": "028",
+    "image": "images/028.png",
+    "threshold": 0.72,
+    "checks": [
+      {
+        "id": "purpose",
+        "dimension": "page_purpose",
+        "section": 1,
+        "kind": "any",
+        "values": [
+          "privacy",
+          "cookie",
+          "consent",
+          "video"
+        ],
+        "weight": 1,
+        "critical": false
+      },
+      {
+        "id": "title",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Privacy choices",
+        "weight": 2,
+        "critical": true,
+        "caseSensitive": true
+      },
+      {
+        "id": "choice-1",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Manage settings",
+        "weight": 1,
+        "critical": true,
+        "caseSensitive": true
+      },
+      {
+        "id": "choice-2",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Save choices",
+        "weight": 1,
+        "critical": false,
+        "caseSensitive": true
+      },
+      {
+        "id": "consent-signal",
+        "dimension": "state_signals",
+        "section": 4,
+        "kind": "any",
+        "values": [
+          "cookie",
+          "consent",
+          "privacy",
+          "overlay",
+          "banner"
+        ],
+        "weight": 2,
+        "critical": true
+      },
+      {
+        "id": "consent-blocker",
+        "dimension": "blockers",
+        "section": 5,
+        "kind": "any",
+        "values": [
+          "cookie",
+          "consent",
+          "overlay",
+          "blocked"
+        ],
+        "weight": 1,
+        "critical": false
+      }
+    ],
+    "successRubric": "Recognize the consent UI and quote Manage settings / Save choices."
+  },
+  "029": {
+    "schemaVersion": 1,
+    "id": "029",
+    "image": "images/029.png",
+    "threshold": 0.72,
+    "checks": [
+      {
+        "id": "purpose",
+        "dimension": "page_purpose",
+        "section": 1,
+        "kind": "any",
+        "values": [
+          "dashboard",
+          "overview",
+          "system health",
+          "incident"
+        ],
+        "weight": 1,
+        "critical": true
+      },
+      {
+        "id": "heading",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Sales dashboard",
+        "weight": 1,
+        "critical": false,
+        "caseSensitive": true
+      },
+      {
+        "id": "target-metric",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "all",
+        "values": [
+          "Conversion",
+          "3.8%"
+        ],
+        "weight": 2,
+        "critical": true
+      }
+    ],
+    "successRubric": "Read Conversion = 3.8% and report the alert without guessing unknown values."
+  },
+  "030": {
+    "schemaVersion": 1,
+    "id": "030",
+    "image": "images/030.png",
+    "threshold": 0.72,
+    "checks": [
+      {
+        "id": "purpose",
+        "dimension": "page_purpose",
+        "section": 1,
+        "kind": "any",
+        "values": [
+          "chart",
+          "dashboard",
+          "quarterly revenue"
+        ],
+        "weight": 1,
+        "critical": false
+      },
+      {
+        "id": "heading",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Quarterly revenue",
+        "weight": 1,
+        "critical": false,
+        "caseSensitive": true
+      },
+      {
+        "id": "highest-label",
+        "dimension": "visual_reasoning",
+        "section": null,
+        "kind": "any",
+        "values": [
+          "Q4"
+        ],
+        "weight": 2,
+        "critical": true
+      },
+      {
+        "id": "highest-value",
+        "dimension": "visual_reasoning",
+        "section": null,
+        "kind": "any",
+        "values": [
+          "44",
+          "$44K"
+        ],
+        "weight": 2,
+        "critical": true
+      }
+    ],
+    "successRubric": "Use the rendered bars, not source order: Q4 is tallest and is labeled $44K."
+  },
+  "031": {
+    "schemaVersion": 1,
+    "id": "031",
+    "image": "images/031.png",
+    "threshold": 0.72,
+    "checks": [
+      {
+        "id": "purpose",
+        "dimension": "page_purpose",
+        "section": 1,
+        "kind": "any",
+        "values": [
+          "table",
+          "orders",
+          "members",
+          "deployment",
+          "invoice",
+          "audit"
+        ],
+        "weight": 1,
+        "critical": false
+      },
+      {
+        "id": "heading",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Team members",
+        "weight": 1,
+        "critical": false,
+        "caseSensitive": true
+      },
+      {
+        "id": "target-row",
+        "dimension": "visual_reasoning",
+        "section": null,
+        "kind": "all",
+        "values": [
+          "Noah Park",
+          "Suspended"
+        ],
+        "weight": 3,
+        "critical": true
+      }
+    ],
+    "successRubric": "Keep row association intact: Noah Park — Suspended."
+  },
+  "032": {
+    "schemaVersion": 1,
+    "id": "032",
+    "image": "images/032.png",
+    "threshold": 0.72,
+    "checks": [
+      {
+        "id": "purpose",
+        "dimension": "page_purpose",
+        "section": 1,
+        "kind": "any",
+        "values": [
+          "email",
+          "compose",
+          "message"
+        ],
+        "weight": 1,
+        "critical": true
+      },
+      {
+        "id": "heading",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Compose",
+        "weight": 1,
+        "critical": false,
+        "caseSensitive": true
+      },
+      {
+        "id": "button",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Send",
+        "weight": 2,
+        "critical": true,
+        "caseSensitive": true
+      },
+      {
+        "id": "to-input",
+        "dimension": "inputs",
+        "section": 3,
+        "kind": "all",
+        "values": [
+          "To",
+          "alex@example.com"
+        ],
+        "weight": 1,
+        "critical": false
+      },
+      {
+        "id": "subject-input",
+        "dimension": "inputs",
+        "section": 3,
+        "kind": "all",
+        "values": [
+          "Subject",
+          "Project update"
+        ],
+        "weight": 1,
+        "critical": false
+      },
+      {
+        "id": "status",
+        "dimension": "state_signals",
+        "section": 4,
+        "kind": "literal",
+        "value": "Draft saved",
+        "weight": 2,
+        "critical": true,
+        "caseSensitive": true
+      }
+    ],
+    "successRubric": "Report the compose fields exactly and surface Draft saved."
+  },
+  "033": {
+    "schemaVersion": 1,
+    "id": "033",
+    "image": "images/033.png",
+    "threshold": 0.72,
+    "checks": [
+      {
+        "id": "purpose",
+        "dimension": "page_purpose",
+        "section": 1,
+        "kind": "any",
+        "values": [
+          "board",
+          "kanban",
+          "project",
+          "sprint",
+          "incident"
+        ],
+        "weight": 1,
+        "critical": false
+      },
+      {
+        "id": "heading",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Sprint 18",
+        "weight": 1,
+        "critical": false,
+        "caseSensitive": true
+      },
+      {
+        "id": "card-column",
+        "dimension": "visual_reasoning",
+        "section": null,
+        "kind": "all",
+        "values": [
+          "Fix checkout",
+          "In progress"
+        ],
+        "weight": 3,
+        "critical": true
+      }
+    ],
+    "successRubric": "Preserve the spatial association: Fix checkout is in In progress."
+  },
+  "034": {
+    "schemaVersion": 1,
+    "id": "034",
+    "image": "images/034.png",
+    "threshold": 0.72,
+    "checks": [
+      {
+        "id": "purpose",
+        "dimension": "page_purpose",
+        "section": 1,
+        "kind": "any",
+        "values": [
+          "calendar",
+          "schedule"
+        ],
+        "weight": 1,
+        "critical": false
+      },
+      {
+        "id": "heading",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Team calendar",
+        "weight": 1,
+        "critical": false,
+        "caseSensitive": true
+      },
+      {
+        "id": "selected-event",
+        "dimension": "visual_reasoning",
+        "section": null,
+        "kind": "all",
+        "values": [
+          "24",
+          "Sprint planning",
+          "14:30"
+        ],
+        "weight": 3,
+        "critical": true
+      }
+    ],
+    "successRubric": "Associate day 24 with Sprint planning at 14:30."
+  },
+  "035": {
+    "schemaVersion": 1,
+    "id": "035",
+    "image": "images/035.png",
+    "threshold": 0.72,
+    "checks": [
+      {
+        "id": "purpose",
+        "dimension": "page_purpose",
+        "section": 1,
+        "kind": "any",
+        "values": [
+          "map",
+          "tracking",
+          "route",
+          "hotel",
+          "café"
+        ],
+        "weight": 1,
+        "critical": false
+      },
+      {
+        "id": "heading",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Hotel map",
+        "weight": 1,
+        "critical": false,
+        "caseSensitive": true
+      },
+      {
+        "id": "selection",
+        "dimension": "visual_reasoning",
+        "section": null,
+        "kind": "all",
+        "values": [
+          "Harbor House",
+          "$142/night"
+        ],
+        "weight": 3,
+        "critical": true
+      },
+      {
+        "id": "pin-count",
+        "dimension": "visual_reasoning",
+        "section": null,
+        "kind": "any",
+        "values": [
+          "3",
+          "three"
+        ],
+        "weight": 1,
+        "critical": false
+      }
+    ],
+    "successRubric": "Read the selected Harbor House card, its $142/night detail, and 3 pins."
+  },
+  "036": {
+    "schemaVersion": 1,
+    "id": "036",
+    "image": "images/036.png",
+    "threshold": 0.72,
+    "checks": [
+      {
+        "id": "purpose",
+        "dimension": "page_purpose",
+        "section": 1,
+        "kind": "any",
+        "values": [
+          "gallery",
+          "archive",
+          "collection",
+          "comparison"
+        ],
+        "weight": 1,
+        "critical": false
+      },
+      {
+        "id": "heading",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Winter collection",
+        "weight": 1,
+        "critical": false,
+        "caseSensitive": true
+      },
+      {
+        "id": "caption",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Snowbound avenue",
+        "weight": 2,
+        "critical": true,
+        "caseSensitive": true
+      },
+      {
+        "id": "badge",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Historic photo",
+        "weight": 1,
+        "critical": false,
+        "caseSensitive": true
+      },
+      {
+        "id": "visual-content",
+        "dimension": "visual_reasoning",
+        "section": null,
+        "kind": "any",
+        "values": [
+          "snow",
+          "winter"
+        ],
+        "weight": 2,
+        "critical": true
+      }
+    ],
+    "successRubric": "Combine the rendered image with its UI labels; do not infer a place or date beyond Snowbound avenue."
+  },
+  "037": {
+    "schemaVersion": 1,
+    "id": "037",
+    "image": "images/037.png",
+    "threshold": 0.72,
+    "checks": [
+      {
+        "id": "purpose",
+        "dimension": "page_purpose",
+        "section": 1,
+        "kind": "any",
+        "values": [
+          "sign",
+          "payment",
+          "order",
+          "security",
+          "login",
+          "checkout",
+          "settings"
+        ],
+        "weight": 1,
+        "critical": false
+      },
+      {
+        "id": "heading",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Willkommen zurück",
+        "weight": 2,
+        "critical": true,
+        "caseSensitive": true
+      },
+      {
+        "id": "button",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Anmelden",
+        "weight": 2,
+        "critical": true,
+        "caseSensitive": true
+      },
+      {
+        "id": "input",
+        "dimension": "inputs",
+        "section": 3,
+        "kind": "all",
+        "values": [
+          "Passwort",
+          "••••••"
+        ],
+        "weight": 2,
+        "critical": true
+      },
+      {
+        "id": "status",
+        "dimension": "state_signals",
+        "section": 4,
+        "kind": "literal",
+        "value": "Passwort ist falsch",
+        "weight": 2,
+        "critical": true,
+        "caseSensitive": true
+      }
+    ],
+    "successRubric": "Preserve Unicode exactly: Willkommen zurück; Passwort; Anmelden; Passwort ist falsch."
+  },
+  "038": {
+    "schemaVersion": 1,
+    "id": "038",
+    "image": "images/038.png",
+    "threshold": 0.72,
+    "checks": [
+      {
+        "id": "purpose",
+        "dimension": "page_purpose",
+        "section": 1,
+        "kind": "any",
+        "values": [
+          "account",
+          "pricing",
+          "report",
+          "editor",
+          "trading"
+        ],
+        "weight": 1,
+        "critical": false
+      },
+      {
+        "id": "heading",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Pricing",
+        "weight": 1,
+        "critical": false,
+        "caseSensitive": true
+      },
+      {
+        "id": "target",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Start trial",
+        "weight": 2,
+        "critical": true,
+        "caseSensitive": true
+      },
+      {
+        "id": "cover",
+        "dimension": "state_signals",
+        "section": 4,
+        "kind": "literal",
+        "value": "Chat with us",
+        "weight": 2,
+        "critical": true,
+        "caseSensitive": true
+      },
+      {
+        "id": "occlusion",
+        "dimension": "blockers",
+        "section": 5,
+        "kind": "any",
+        "values": [
+          "cover",
+          "overlap",
+          "overlay",
+          "obstruct",
+          "block"
+        ],
+        "weight": 2,
+        "critical": true
+      }
+    ],
+    "successRubric": "Detect the visual obstruction: Chat with us interferes with Start trial."
+  },
+  "039": {
+    "schemaVersion": 1,
+    "id": "039",
+    "image": "images/039.png",
+    "threshold": 0.72,
+    "checks": [
+      {
+        "id": "purpose",
+        "dimension": "page_purpose",
+        "section": 1,
+        "kind": "any",
+        "values": [
+          "security",
+          "verification",
+          "captcha",
+          "challenge"
+        ],
+        "weight": 1,
+        "critical": true
+      },
+      {
+        "id": "heading",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Confirm it’s you",
+        "weight": 1,
+        "critical": false,
+        "caseSensitive": true
+      },
+      {
+        "id": "label",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Select all traffic lights",
+        "weight": 2,
+        "critical": true,
+        "caseSensitive": true
+      },
+      {
+        "id": "button",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Verify",
+        "weight": 1,
+        "critical": false,
+        "caseSensitive": true
+      },
+      {
+        "id": "captcha-signal",
+        "dimension": "state_signals",
+        "section": 4,
+        "kind": "any",
+        "values": [
+          "CAPTCHA",
+          "challenge",
+          "verification",
+          "Challenge not completed"
+        ],
+        "weight": 2,
+        "critical": true
+      },
+      {
+        "id": "security-blocker",
+        "dimension": "blockers",
+        "section": 5,
+        "kind": "any",
+        "values": [
+          "verification",
+          "challenge",
+          "CAPTCHA",
+          "disabled"
+        ],
+        "weight": 2,
+        "critical": true
+      }
+    ],
+    "successRubric": "Identify the synthetic challenge and disabled state; do not solve or invent unreadable characters."
+  },
+  "040": {
+    "schemaVersion": 1,
+    "id": "040",
+    "image": "images/040.png",
+    "threshold": 0.74,
+    "checks": [
+      {
+        "id": "purpose",
+        "dimension": "page_purpose",
+        "section": 1,
+        "kind": "any",
+        "values": [
+          "account",
+          "label",
+          "receipt",
+          "contract",
+          "telemetry",
+          "document"
+        ],
+        "weight": 1,
+        "critical": false
+      },
+      {
+        "id": "heading",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Shipment label",
+        "weight": 1,
+        "critical": false,
+        "caseSensitive": true
+      },
+      {
+        "id": "visible-fragment",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "ZX-81",
+        "weight": 2,
+        "critical": true,
+        "caseSensitive": true
+      },
+      {
+        "id": "unknown",
+        "dimension": "unknowns",
+        "section": 6,
+        "kind": "any",
+        "values": [
+          "unknown",
+          "unreadable",
+          "blurred",
+          "smudged",
+          "redacted",
+          "cannot read"
+        ],
+        "weight": 3,
+        "critical": true
+      },
+      {
+        "id": "no-guess",
+        "dimension": "visual_reasoning",
+        "section": null,
+        "kind": "any",
+        "values": [
+          "ZX-81"
+        ],
+        "weight": 1,
+        "critical": false
+      }
+    ],
+    "successRubric": "Transcribe only ZX-81 and explicitly say last 3 characters blurred."
+  },
+  "041": {
+    "schemaVersion": 1,
+    "id": "041",
+    "image": "images/041.png",
+    "threshold": 0.72,
+    "checks": [
+      {
+        "id": "purpose",
+        "dimension": "page_purpose",
+        "section": 1,
+        "kind": "any",
+        "values": [
+          "sign in",
+          "login",
+          "identity verification",
+          "session expired"
+        ],
+        "weight": 1,
+        "critical": true
+      },
+      {
+        "id": "heading",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Administrator login",
+        "weight": 2,
+        "critical": true,
+        "caseSensitive": true
+      },
+      {
+        "id": "button",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Log in",
+        "weight": 2,
+        "critical": true,
+        "caseSensitive": true
+      },
+      {
+        "id": "email-input",
+        "dimension": "inputs",
+        "section": 3,
+        "kind": "all",
+        "values": [
+          "Email",
+          "ops@example.com"
+        ],
+        "weight": 1,
+        "critical": false
+      },
+      {
+        "id": "blocker",
+        "dimension": "blockers",
+        "section": 5,
+        "kind": "any",
+        "values": [
+          "incorrect",
+          "password"
+        ],
+        "weight": 2,
+        "critical": true
+      },
+      {
+        "id": "status",
+        "dimension": "state_signals",
+        "section": 4,
+        "kind": "literal",
+        "value": "Incorrect password",
+        "weight": 2,
+        "critical": true,
+        "caseSensitive": true
+      }
+    ],
+    "successRubric": "Identify the Administrator login authentication surface, quote Log in, and report incorrect password."
+  },
+  "042": {
+    "schemaVersion": 1,
+    "id": "042",
+    "image": "images/042.png",
+    "threshold": 0.72,
+    "checks": [
+      {
+        "id": "purpose",
+        "dimension": "page_purpose",
+        "section": 1,
+        "kind": "any",
+        "values": [
+          "search",
+          "results"
+        ],
+        "weight": 1,
+        "critical": true
+      },
+      {
+        "id": "heading",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Research library",
+        "weight": 1,
+        "critical": false,
+        "caseSensitive": true
+      },
+      {
+        "id": "tab",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Articles",
+        "weight": 2,
+        "critical": true,
+        "caseSensitive": true
+      },
+      {
+        "id": "count",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "1,248 results",
+        "weight": 2,
+        "critical": true,
+        "caseSensitive": true
+      },
+      {
+        "id": "query",
+        "dimension": "inputs",
+        "section": 3,
+        "kind": "all",
+        "values": [
+          "Search",
+          "urban heat island"
+        ],
+        "weight": 2,
+        "critical": true
+      },
+      {
+        "id": "chip",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Since 2024",
+        "weight": 1,
+        "critical": false,
+        "caseSensitive": true
+      },
+      {
+        "id": "notice",
+        "dimension": "state_signals",
+        "section": 4,
+        "kind": "literal",
+        "value": "Sorted by relevance",
+        "weight": 1,
+        "critical": false,
+        "caseSensitive": true
+      }
+    ],
+    "successRubric": "Read the active query urban heat island, selected tab Articles, and exact count 1,248 results."
+  },
+  "043": {
+    "schemaVersion": 1,
+    "id": "043",
+    "image": "images/043.png",
+    "threshold": 0.72,
+    "checks": [
+      {
+        "id": "purpose",
+        "dimension": "page_purpose",
+        "section": 1,
+        "kind": "any",
+        "values": [
+          "checkout",
+          "cart",
+          "order",
+          "purchase"
+        ],
+        "weight": 1,
+        "critical": true
+      },
+      {
+        "id": "heading",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Review order",
+        "weight": 1,
+        "critical": false,
+        "caseSensitive": true
+      },
+      {
+        "id": "item",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Travel backpack",
+        "weight": 1,
+        "critical": false,
+        "caseSensitive": true
+      },
+      {
+        "id": "total",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "€132.90",
+        "weight": 2,
+        "critical": true,
+        "caseSensitive": true
+      },
+      {
+        "id": "button",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Pay now",
+        "weight": 2,
+        "critical": true,
+        "caseSensitive": true
+      },
+      {
+        "id": "banner",
+        "dimension": "state_signals",
+        "section": 4,
+        "kind": "literal",
+        "value": "Card ending 1842 was declined",
+        "weight": 2,
+        "critical": true,
+        "caseSensitive": true
+      },
+      {
+        "id": "blocked",
+        "dimension": "blockers",
+        "section": 5,
+        "kind": "any",
+        "values": [
+          "card",
+          "ending",
+          "1842",
+          "declined"
+        ],
+        "weight": 2,
+        "critical": true
+      }
+    ],
+    "successRubric": "Quote €132.90 and Pay now; correctly report whether the action is disabled and why."
+  },
+  "044": {
+    "schemaVersion": 1,
+    "id": "044",
+    "image": "images/044.png",
+    "threshold": 0.72,
+    "checks": [
+      {
+        "id": "purpose",
+        "dimension": "page_purpose",
+        "section": 1,
+        "kind": "any",
+        "values": [
+          "form",
+          "profile",
+          "shipping",
+          "invite",
+          "dataset",
+          "tax"
+        ],
+        "weight": 1,
+        "critical": false
+      },
+      {
+        "id": "heading",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Invite teammate",
+        "weight": 1,
+        "critical": false,
+        "caseSensitive": true
+      },
+      {
+        "id": "button",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Send invite",
+        "weight": 1,
+        "critical": false,
+        "caseSensitive": true
+      },
+      {
+        "id": "input",
+        "dimension": "inputs",
+        "section": 3,
+        "kind": "all",
+        "values": [
+          "Work email",
+          "lee@sample",
+          "name@company.com"
+        ],
+        "weight": 2,
+        "critical": true
+      },
+      {
+        "id": "error",
+        "dimension": "state_signals",
+        "section": 4,
+        "kind": "literal",
+        "value": "Email domain is incomplete",
+        "weight": 2,
+        "critical": true,
+        "caseSensitive": true
+      },
+      {
+        "id": "blocker",
+        "dimension": "blockers",
+        "section": 5,
+        "kind": "any",
+        "values": [
+          "invalid",
+          "required",
+          "incomplete",
+          "missing",
+          "format"
+        ],
+        "weight": 1,
+        "critical": true
+      }
+    ],
+    "successRubric": "Name Work email, preserve its current value and placeholder, and quote Email domain is incomplete."
+  },
+  "045": {
+    "schemaVersion": 1,
+    "id": "045",
+    "image": "images/045.png",
+    "threshold": 0.72,
+    "checks": [
+      {
+        "id": "purpose",
+        "dimension": "page_purpose",
+        "section": 1,
+        "kind": "any",
+        "values": [
+          "api keys",
+          "dialog",
+          "modal"
+        ],
+        "weight": 1,
+        "critical": false
+      },
+      {
+        "id": "title",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Rotate production key?",
+        "weight": 2,
+        "critical": true,
+        "caseSensitive": true
+      },
+      {
+        "id": "primary",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Rotate key",
+        "weight": 2,
+        "critical": true,
+        "caseSensitive": true
+      },
+      {
+        "id": "secondary",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Not now",
+        "weight": 1,
+        "critical": false,
+        "caseSensitive": true
+      },
+      {
+        "id": "modal-signal",
+        "dimension": "state_signals",
+        "section": 4,
+        "kind": "all",
+        "values": [
+          "modal",
+          "Existing clients will stop working immediately."
+        ],
+        "weight": 2,
+        "critical": true
+      },
+      {
+        "id": "overlay-blocker",
+        "dimension": "blockers",
+        "section": 5,
+        "kind": "any",
+        "values": [
+          "modal",
+          "overlay",
+          "dialog"
+        ],
+        "weight": 1,
+        "critical": true
+      }
+    ],
+    "successRubric": "Recognize a blocking modal, quote Rotate production key?, Rotate key, and Not now."
+  },
+  "046": {
+    "schemaVersion": 1,
+    "id": "046",
+    "image": "images/046.png",
+    "threshold": 0.72,
+    "checks": [
+      {
+        "id": "purpose",
+        "dimension": "page_purpose",
+        "section": 1,
+        "kind": "any",
+        "values": [
+          "upload center",
+          "settings",
+          "upload",
+          "export"
+        ],
+        "weight": 1,
+        "critical": false
+      },
+      {
+        "id": "heading",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Upload center",
+        "weight": 1,
+        "critical": false,
+        "caseSensitive": true
+      },
+      {
+        "id": "button",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Retry",
+        "weight": 1,
+        "critical": false,
+        "caseSensitive": true
+      },
+      {
+        "id": "toast",
+        "dimension": "state_signals",
+        "section": 4,
+        "kind": "literal",
+        "value": "Upload failed",
+        "weight": 2,
+        "critical": true,
+        "caseSensitive": true
+      },
+      {
+        "id": "detail",
+        "dimension": "state_signals",
+        "section": 4,
+        "kind": "literal",
+        "value": "Network connection lost",
+        "weight": 2,
+        "critical": true,
+        "caseSensitive": true
+      }
+    ],
+    "successRubric": "Quote Upload failed and Network connection lost, and classify the visible state."
+  },
+  "047": {
+    "schemaVersion": 1,
+    "id": "047",
+    "image": "images/047.png",
+    "threshold": 0.72,
+    "checks": [
+      {
+        "id": "purpose",
+        "dimension": "page_purpose",
+        "section": 1,
+        "kind": "any",
+        "values": [
+          "loading",
+          "processing",
+          "reconnecting",
+          "import"
+        ],
+        "weight": 1,
+        "critical": true
+      },
+      {
+        "id": "heading",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Processing 12 files",
+        "weight": 2,
+        "critical": true,
+        "caseSensitive": true
+      },
+      {
+        "id": "spinner",
+        "dimension": "state_signals",
+        "section": 4,
+        "kind": "any",
+        "values": [
+          "loading",
+          "spinner",
+          "processing",
+          "reconnecting",
+          "progress"
+        ],
+        "weight": 2,
+        "critical": true
+      },
+      {
+        "id": "wait-blocker",
+        "dimension": "blockers",
+        "section": 5,
+        "kind": "any",
+        "values": [
+          "loading",
+          "wait",
+          "processing",
+          "reconnecting",
+          "not ready"
+        ],
+        "weight": 1,
+        "critical": false
+      },
+      {
+        "id": "detail",
+        "dimension": "state_signals",
+        "section": 4,
+        "kind": "literal",
+        "value": "File 7 of 12",
+        "weight": 1,
+        "critical": false,
+        "caseSensitive": true
+      },
+      {
+        "id": "progress",
+        "dimension": "state_signals",
+        "section": 4,
+        "kind": "literal",
+        "value": "58%",
+        "weight": 2,
+        "critical": false,
+        "caseSensitive": true
+      }
+    ],
+    "successRubric": "Report the loading state and preserve 58% without inventing completion."
+  },
+  "048": {
+    "schemaVersion": 1,
+    "id": "048",
+    "image": "images/048.png",
+    "threshold": 0.72,
+    "checks": [
+      {
+        "id": "purpose",
+        "dimension": "page_purpose",
+        "section": 1,
+        "kind": "any",
+        "values": [
+          "privacy",
+          "cookie",
+          "consent",
+          "video"
+        ],
+        "weight": 1,
+        "critical": false
+      },
+      {
+        "id": "title",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Your privacy",
+        "weight": 2,
+        "critical": true,
+        "caseSensitive": true
+      },
+      {
+        "id": "choice-1",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Allow selected",
+        "weight": 1,
+        "critical": true,
+        "caseSensitive": true
+      },
+      {
+        "id": "choice-2",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Continue without accepting",
+        "weight": 1,
+        "critical": false,
+        "caseSensitive": true
+      },
+      {
+        "id": "consent-signal",
+        "dimension": "state_signals",
+        "section": 4,
+        "kind": "any",
+        "values": [
+          "cookie",
+          "consent",
+          "privacy",
+          "overlay",
+          "banner"
+        ],
+        "weight": 2,
+        "critical": true
+      },
+      {
+        "id": "consent-blocker",
+        "dimension": "blockers",
+        "section": 5,
+        "kind": "any",
+        "values": [
+          "cookie",
+          "consent",
+          "overlay",
+          "blocked"
+        ],
+        "weight": 1,
+        "critical": false
+      }
+    ],
+    "successRubric": "Recognize the consent UI and quote Allow selected / Continue without accepting."
+  },
+  "049": {
+    "schemaVersion": 1,
+    "id": "049",
+    "image": "images/049.png",
+    "threshold": 0.72,
+    "checks": [
+      {
+        "id": "purpose",
+        "dimension": "page_purpose",
+        "section": 1,
+        "kind": "any",
+        "values": [
+          "dashboard",
+          "overview",
+          "system health",
+          "incident"
+        ],
+        "weight": 1,
+        "critical": true
+      },
+      {
+        "id": "heading",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "System health",
+        "weight": 1,
+        "critical": false,
+        "caseSensitive": true
+      },
+      {
+        "id": "target-metric",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "all",
+        "values": [
+          "Errors",
+          "17"
+        ],
+        "weight": 2,
+        "critical": true
+      },
+      {
+        "id": "alert",
+        "dimension": "state_signals",
+        "section": 4,
+        "kind": "literal",
+        "value": "Error rate is above target",
+        "weight": 2,
+        "critical": true,
+        "caseSensitive": true
+      }
+    ],
+    "successRubric": "Read Errors = 17 and report the alert without guessing unknown values."
+  },
+  "050": {
+    "schemaVersion": 1,
+    "id": "050",
+    "image": "images/050.png",
+    "threshold": 0.72,
+    "checks": [
+      {
+        "id": "purpose",
+        "dimension": "page_purpose",
+        "section": 1,
+        "kind": "any",
+        "values": [
+          "chart",
+          "dashboard",
+          "latency by region"
+        ],
+        "weight": 1,
+        "critical": false
+      },
+      {
+        "id": "heading",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Latency by region",
+        "weight": 1,
+        "critical": false,
+        "caseSensitive": true
+      },
+      {
+        "id": "highest-label",
+        "dimension": "visual_reasoning",
+        "section": null,
+        "kind": "any",
+        "values": [
+          "APAC"
+        ],
+        "weight": 2,
+        "critical": true
+      },
+      {
+        "id": "highest-value",
+        "dimension": "visual_reasoning",
+        "section": null,
+        "kind": "any",
+        "values": [
+          "240",
+          "240 ms"
+        ],
+        "weight": 2,
+        "critical": true
+      }
+    ],
+    "successRubric": "Use the rendered bars, not source order: APAC is tallest and is labeled 240 ms."
+  },
+  "051": {
+    "schemaVersion": 1,
+    "id": "051",
+    "image": "images/051.png",
+    "threshold": 0.72,
+    "checks": [
+      {
+        "id": "purpose",
+        "dimension": "page_purpose",
+        "section": 1,
+        "kind": "any",
+        "values": [
+          "table",
+          "orders",
+          "members",
+          "deployment",
+          "invoice",
+          "audit"
+        ],
+        "weight": 1,
+        "critical": false
+      },
+      {
+        "id": "heading",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Deployment history",
+        "weight": 1,
+        "critical": false,
+        "caseSensitive": true
+      },
+      {
+        "id": "target-row",
+        "dimension": "visual_reasoning",
+        "section": null,
+        "kind": "all",
+        "values": [
+          "v4.8.2",
+          "Rolled back"
+        ],
+        "weight": 3,
+        "critical": true
+      }
+    ],
+    "successRubric": "Keep row association intact: v4.8.2 — Rolled back."
+  },
+  "052": {
+    "schemaVersion": 1,
+    "id": "052",
+    "image": "images/052.png",
+    "threshold": 0.72,
+    "checks": [
+      {
+        "id": "purpose",
+        "dimension": "page_purpose",
+        "section": 1,
+        "kind": "any",
+        "values": [
+          "email",
+          "compose",
+          "message"
+        ],
+        "weight": 1,
+        "critical": true
+      },
+      {
+        "id": "heading",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "New Message",
+        "weight": 1,
+        "critical": false,
+        "caseSensitive": true
+      },
+      {
+        "id": "button",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Send",
+        "weight": 2,
+        "critical": true,
+        "caseSensitive": true
+      },
+      {
+        "id": "to-input",
+        "dimension": "inputs",
+        "section": 3,
+        "kind": "all",
+        "values": [
+          "To",
+          "finance@example.com"
+        ],
+        "weight": 1,
+        "critical": false
+      },
+      {
+        "id": "subject-input",
+        "dimension": "inputs",
+        "section": 3,
+        "kind": "all",
+        "values": [
+          "Subject",
+          "Invoice 8832"
+        ],
+        "weight": 1,
+        "critical": false
+      },
+      {
+        "id": "status",
+        "dimension": "state_signals",
+        "section": 4,
+        "kind": "literal",
+        "value": "Attachment scanning…",
+        "weight": 2,
+        "critical": true,
+        "caseSensitive": true
+      }
+    ],
+    "successRubric": "Report the compose fields exactly and surface Attachment scanning…."
+  },
+  "053": {
+    "schemaVersion": 1,
+    "id": "053",
+    "image": "images/053.png",
+    "threshold": 0.72,
+    "checks": [
+      {
+        "id": "purpose",
+        "dimension": "page_purpose",
+        "section": 1,
+        "kind": "any",
+        "values": [
+          "board",
+          "kanban",
+          "project",
+          "sprint",
+          "incident"
+        ],
+        "weight": 1,
+        "critical": false
+      },
+      {
+        "id": "heading",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Launch plan",
+        "weight": 1,
+        "critical": false,
+        "caseSensitive": true
+      },
+      {
+        "id": "card-column",
+        "dimension": "visual_reasoning",
+        "section": null,
+        "kind": "all",
+        "values": [
+          "Legal review",
+          "Blocked"
+        ],
+        "weight": 3,
+        "critical": true
+      }
+    ],
+    "successRubric": "Preserve the spatial association: Legal review is in Blocked."
+  },
+  "054": {
+    "schemaVersion": 1,
+    "id": "054",
+    "image": "images/054.png",
+    "threshold": 0.72,
+    "checks": [
+      {
+        "id": "purpose",
+        "dimension": "page_purpose",
+        "section": 1,
+        "kind": "any",
+        "values": [
+          "calendar",
+          "schedule"
+        ],
+        "weight": 1,
+        "critical": false
+      },
+      {
+        "id": "heading",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Conference schedule",
+        "weight": 1,
+        "critical": false,
+        "caseSensitive": true
+      },
+      {
+        "id": "selected-event",
+        "dimension": "visual_reasoning",
+        "section": null,
+        "kind": "all",
+        "values": [
+          "27",
+          "Vision benchmarks",
+          "16:15–17:00"
+        ],
+        "weight": 3,
+        "critical": true
+      }
+    ],
+    "successRubric": "Associate day 27 with Vision benchmarks at 16:15–17:00."
+  },
+  "055": {
+    "schemaVersion": 1,
+    "id": "055",
+    "image": "images/055.png",
+    "threshold": 0.72,
+    "checks": [
+      {
+        "id": "purpose",
+        "dimension": "page_purpose",
+        "section": 1,
+        "kind": "any",
+        "values": [
+          "map",
+          "tracking",
+          "route",
+          "hotel",
+          "café"
+        ],
+        "weight": 1,
+        "critical": false
+      },
+      {
+        "id": "heading",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Delivery tracking",
+        "weight": 1,
+        "critical": false,
+        "caseSensitive": true
+      },
+      {
+        "id": "selection",
+        "dimension": "visual_reasoning",
+        "section": null,
+        "kind": "all",
+        "values": [
+          "Courier",
+          "2 stops away"
+        ],
+        "weight": 3,
+        "critical": true
+      },
+      {
+        "id": "pin-count",
+        "dimension": "visual_reasoning",
+        "section": null,
+        "kind": "any",
+        "values": [
+          "4",
+          "four"
+        ],
+        "weight": 1,
+        "critical": false
+      }
+    ],
+    "successRubric": "Read the selected Courier card, its 2 stops away detail, and 4 pins."
+  },
+  "056": {
+    "schemaVersion": 1,
+    "id": "056",
+    "image": "images/056.png",
+    "threshold": 0.72,
+    "checks": [
+      {
+        "id": "purpose",
+        "dimension": "page_purpose",
+        "section": 1,
+        "kind": "any",
+        "values": [
+          "gallery",
+          "archive",
+          "collection",
+          "comparison"
+        ],
+        "weight": 1,
+        "critical": false
+      },
+      {
+        "id": "heading",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Night scenes",
+        "weight": 1,
+        "critical": false,
+        "caseSensitive": true
+      },
+      {
+        "id": "caption",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "After dusk",
+        "weight": 2,
+        "critical": true,
+        "caseSensitive": true
+      },
+      {
+        "id": "badge",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Etching",
+        "weight": 1,
+        "critical": false,
+        "caseSensitive": true
+      },
+      {
+        "id": "visual-content",
+        "dimension": "visual_reasoning",
+        "section": null,
+        "kind": "any",
+        "values": [
+          "night",
+          "dark",
+          "dusk"
+        ],
+        "weight": 2,
+        "critical": true
+      }
+    ],
+    "successRubric": "Combine the rendered image with its UI labels; do not infer a place or date beyond After dusk."
+  },
+  "057": {
+    "schemaVersion": 1,
+    "id": "057",
+    "image": "images/057.png",
+    "threshold": 0.72,
+    "checks": [
+      {
+        "id": "purpose",
+        "dimension": "page_purpose",
+        "section": 1,
+        "kind": "any",
+        "values": [
+          "sign",
+          "payment",
+          "order",
+          "security",
+          "login",
+          "checkout",
+          "settings"
+        ],
+        "weight": 1,
+        "critical": false
+      },
+      {
+        "id": "heading",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "お支払い",
+        "weight": 2,
+        "critical": true,
+        "caseSensitive": true
+      },
+      {
+        "id": "button",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "支払う",
+        "weight": 2,
+        "critical": true,
+        "caseSensitive": true
+      },
+      {
+        "id": "input",
+        "dimension": "inputs",
+        "section": 3,
+        "kind": "all",
+        "values": [
+          "カード番号",
+          "•••• 4242"
+        ],
+        "weight": 2,
+        "critical": true
+      },
+      {
+        "id": "status",
+        "dimension": "state_signals",
+        "section": 4,
+        "kind": "literal",
+        "value": "有効期限を確認してください",
+        "weight": 2,
+        "critical": true,
+        "caseSensitive": true
+      }
+    ],
+    "successRubric": "Preserve Unicode exactly: お支払い; カード番号; 支払う; 有効期限を確認してください."
+  },
+  "058": {
+    "schemaVersion": 1,
+    "id": "058",
+    "image": "images/058.png",
+    "threshold": 0.72,
+    "checks": [
+      {
+        "id": "purpose",
+        "dimension": "page_purpose",
+        "section": 1,
+        "kind": "any",
+        "values": [
+          "account",
+          "pricing",
+          "report",
+          "editor",
+          "trading"
+        ],
+        "weight": 1,
+        "critical": false
+      },
+      {
+        "id": "heading",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Report builder",
+        "weight": 1,
+        "critical": false,
+        "caseSensitive": true
+      },
+      {
+        "id": "target",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Export CSV",
+        "weight": 2,
+        "critical": true,
+        "caseSensitive": true
+      },
+      {
+        "id": "cover",
+        "dimension": "state_signals",
+        "section": 4,
+        "kind": "literal",
+        "value": "Beta",
+        "weight": 2,
+        "critical": true,
+        "caseSensitive": true
+      },
+      {
+        "id": "occlusion",
+        "dimension": "blockers",
+        "section": 5,
+        "kind": "any",
+        "values": [
+          "cover",
+          "overlap",
+          "overlay",
+          "obstruct",
+          "block"
+        ],
+        "weight": 2,
+        "critical": true
+      }
+    ],
+    "successRubric": "Detect the visual obstruction: Beta interferes with Export CSV."
+  },
+  "059": {
+    "schemaVersion": 1,
+    "id": "059",
+    "image": "images/059.png",
+    "threshold": 0.72,
+    "checks": [
+      {
+        "id": "purpose",
+        "dimension": "page_purpose",
+        "section": 1,
+        "kind": "any",
+        "values": [
+          "security",
+          "verification",
+          "captcha",
+          "challenge"
+        ],
+        "weight": 1,
+        "critical": true
+      },
+      {
+        "id": "heading",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Unusual activity detected",
+        "weight": 1,
+        "critical": false,
+        "caseSensitive": true
+      },
+      {
+        "id": "label",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Hold the button for 3 seconds",
+        "weight": 2,
+        "critical": true,
+        "caseSensitive": true
+      },
+      {
+        "id": "button",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Try again",
+        "weight": 1,
+        "critical": false,
+        "caseSensitive": true
+      },
+      {
+        "id": "captcha-signal",
+        "dimension": "state_signals",
+        "section": 4,
+        "kind": "any",
+        "values": [
+          "CAPTCHA",
+          "challenge",
+          "verification",
+          "Verification required"
+        ],
+        "weight": 2,
+        "critical": true
+      },
+      {
+        "id": "security-blocker",
+        "dimension": "blockers",
+        "section": 5,
+        "kind": "any",
+        "values": [
+          "verification",
+          "challenge",
+          "CAPTCHA",
+          "disabled"
+        ],
+        "weight": 2,
+        "critical": true
+      }
+    ],
+    "successRubric": "Identify the synthetic challenge and disabled state; do not solve or invent unreadable characters."
+  },
+  "060": {
+    "schemaVersion": 1,
+    "id": "060",
+    "image": "images/060.png",
+    "threshold": 0.74,
+    "checks": [
+      {
+        "id": "purpose",
+        "dimension": "page_purpose",
+        "section": 1,
+        "kind": "any",
+        "values": [
+          "account",
+          "label",
+          "receipt",
+          "contract",
+          "telemetry",
+          "document"
+        ],
+        "weight": 1,
+        "critical": false
+      },
+      {
+        "id": "heading",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Scanned receipt",
+        "weight": 1,
+        "critical": false,
+        "caseSensitive": true
+      },
+      {
+        "id": "visible-fragment",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "$4?.90",
+        "weight": 2,
+        "critical": true,
+        "caseSensitive": true
+      },
+      {
+        "id": "unknown",
+        "dimension": "unknowns",
+        "section": 6,
+        "kind": "any",
+        "values": [
+          "unknown",
+          "unreadable",
+          "blurred",
+          "smudged",
+          "redacted",
+          "cannot read"
+        ],
+        "weight": 3,
+        "critical": true
+      },
+      {
+        "id": "no-guess",
+        "dimension": "visual_reasoning",
+        "section": null,
+        "kind": "any",
+        "values": [
+          "$4?.90"
+        ],
+        "weight": 1,
+        "critical": false
+      }
+    ],
+    "successRubric": "Transcribe only $4?.90 and explicitly say one digit is smudged."
+  },
+  "061": {
+    "schemaVersion": 1,
+    "id": "061",
+    "image": "images/061.png",
+    "threshold": 0.72,
+    "checks": [
+      {
+        "id": "purpose",
+        "dimension": "page_purpose",
+        "section": 1,
+        "kind": "any",
+        "values": [
+          "sign in",
+          "login",
+          "identity verification",
+          "session expired"
+        ],
+        "weight": 1,
+        "critical": true
+      },
+      {
+        "id": "heading",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Verify your identity",
+        "weight": 2,
+        "critical": true,
+        "caseSensitive": true
+      },
+      {
+        "id": "button",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Verify",
+        "weight": 2,
+        "critical": true,
+        "caseSensitive": true
+      },
+      {
+        "id": "email-input",
+        "dimension": "inputs",
+        "section": 3,
+        "kind": "all",
+        "values": [
+          "Email",
+          "sara@example.com"
+        ],
+        "weight": 1,
+        "critical": false
+      },
+      {
+        "id": "blocker",
+        "dimension": "blockers",
+        "section": 5,
+        "kind": "any",
+        "values": [
+          "incomplete",
+          "verification",
+          "code"
+        ],
+        "weight": 2,
+        "critical": true
+      },
+      {
+        "id": "status",
+        "dimension": "state_signals",
+        "section": 4,
+        "kind": "literal",
+        "value": "Code expires in 01:42",
+        "weight": 2,
+        "critical": true,
+        "caseSensitive": true
+      },
+      {
+        "id": "disabled",
+        "dimension": "inputs",
+        "section": 3,
+        "kind": "any",
+        "values": [
+          "disabled",
+          "unavailable"
+        ],
+        "weight": 1,
+        "critical": false
+      }
+    ],
+    "successRubric": "Identify the Verify your identity authentication surface, quote Verify, and report incomplete verification code."
+  },
+  "062": {
+    "schemaVersion": 1,
+    "id": "062",
+    "image": "images/062.png",
+    "threshold": 0.72,
+    "checks": [
+      {
+        "id": "purpose",
+        "dimension": "page_purpose",
+        "section": 1,
+        "kind": "any",
+        "values": [
+          "search",
+          "results"
+        ],
+        "weight": 1,
+        "critical": true
+      },
+      {
+        "id": "heading",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Global search",
+        "weight": 1,
+        "critical": false,
+        "caseSensitive": true
+      },
+      {
+        "id": "tab",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Dosyalar",
+        "weight": 2,
+        "critical": true,
+        "caseSensitive": true
+      },
+      {
+        "id": "count",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "7 sonuç",
+        "weight": 2,
+        "critical": true,
+        "caseSensitive": true
+      },
+      {
+        "id": "query",
+        "dimension": "inputs",
+        "section": 3,
+        "kind": "all",
+        "values": [
+          "Search",
+          "fatura"
+        ],
+        "weight": 2,
+        "critical": true
+      },
+      {
+        "id": "chip",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Son 30 gün",
+        "weight": 1,
+        "critical": false,
+        "caseSensitive": true
+      },
+      {
+        "id": "notice",
+        "dimension": "state_signals",
+        "section": 4,
+        "kind": "literal",
+        "value": "2 filters active",
+        "weight": 1,
+        "critical": false,
+        "caseSensitive": true
+      }
+    ],
+    "successRubric": "Read the active query fatura, selected tab Dosyalar, and exact count 7 sonuç."
+  },
+  "063": {
+    "schemaVersion": 1,
+    "id": "063",
+    "image": "images/063.png",
+    "threshold": 0.72,
+    "checks": [
+      {
+        "id": "purpose",
+        "dimension": "page_purpose",
+        "section": 1,
+        "kind": "any",
+        "values": [
+          "checkout",
+          "cart",
+          "order",
+          "purchase"
+        ],
+        "weight": 1,
+        "critical": true
+      },
+      {
+        "id": "heading",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Confirm purchase",
+        "weight": 1,
+        "critical": false,
+        "caseSensitive": true
+      },
+      {
+        "id": "item",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Kulaklık",
+        "weight": 1,
+        "critical": false,
+        "caseSensitive": true
+      },
+      {
+        "id": "total",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "₺4.799,00",
+        "weight": 2,
+        "critical": true,
+        "caseSensitive": true
+      },
+      {
+        "id": "button",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Siparişi onayla",
+        "weight": 2,
+        "critical": true,
+        "caseSensitive": true
+      },
+      {
+        "id": "banner",
+        "dimension": "state_signals",
+        "section": 4,
+        "kind": "literal",
+        "value": "3D Secure verification required",
+        "weight": 2,
+        "critical": true,
+        "caseSensitive": true
+      }
+    ],
+    "successRubric": "Quote ₺4.799,00 and Siparişi onayla; correctly report whether the action is disabled and why."
+  },
+  "064": {
+    "schemaVersion": 1,
+    "id": "064",
+    "image": "images/064.png",
+    "threshold": 0.72,
+    "checks": [
+      {
+        "id": "purpose",
+        "dimension": "page_purpose",
+        "section": 1,
+        "kind": "any",
+        "values": [
+          "form",
+          "profile",
+          "shipping",
+          "invite",
+          "dataset",
+          "tax"
+        ],
+        "weight": 1,
+        "critical": false
+      },
+      {
+        "id": "heading",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Vergi bilgileri",
+        "weight": 1,
+        "critical": false,
+        "caseSensitive": true
+      },
+      {
+        "id": "button",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Kaydet",
+        "weight": 1,
+        "critical": false,
+        "caseSensitive": true
+      },
+      {
+        "id": "input",
+        "dimension": "inputs",
+        "section": 3,
+        "kind": "all",
+        "values": [
+          "Vergi kimlik no",
+          "348 91 2",
+          "10 hane"
+        ],
+        "weight": 2,
+        "critical": true
+      },
+      {
+        "id": "error",
+        "dimension": "state_signals",
+        "section": 4,
+        "kind": "literal",
+        "value": "3 hane eksik",
+        "weight": 2,
+        "critical": true,
+        "caseSensitive": true
+      },
+      {
+        "id": "blocker",
+        "dimension": "blockers",
+        "section": 5,
+        "kind": "any",
+        "values": [
+          "invalid",
+          "required",
+          "incomplete",
+          "missing",
+          "format"
+        ],
+        "weight": 1,
+        "critical": true
+      }
+    ],
+    "successRubric": "Name Vergi kimlik no, preserve its current value and placeholder, and quote 3 hane eksik."
+  },
+  "065": {
+    "schemaVersion": 1,
+    "id": "065",
+    "image": "images/065.png",
+    "threshold": 0.72,
+    "checks": [
+      {
+        "id": "purpose",
+        "dimension": "page_purpose",
+        "section": 1,
+        "kind": "any",
+        "values": [
+          "deployments",
+          "dialog",
+          "modal"
+        ],
+        "weight": 1,
+        "critical": false
+      },
+      {
+        "id": "title",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Production is locked",
+        "weight": 2,
+        "critical": true,
+        "caseSensitive": true
+      },
+      {
+        "id": "primary",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Request approval",
+        "weight": 2,
+        "critical": true,
+        "caseSensitive": true
+      },
+      {
+        "id": "secondary",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Close",
+        "weight": 1,
+        "critical": false,
+        "caseSensitive": true
+      },
+      {
+        "id": "modal-signal",
+        "dimension": "state_signals",
+        "section": 4,
+        "kind": "all",
+        "values": [
+          "modal",
+          "Approval from an owner is required."
+        ],
+        "weight": 2,
+        "critical": true
+      },
+      {
+        "id": "overlay-blocker",
+        "dimension": "blockers",
+        "section": 5,
+        "kind": "any",
+        "values": [
+          "modal",
+          "overlay",
+          "dialog"
+        ],
+        "weight": 1,
+        "critical": true
+      }
+    ],
+    "successRubric": "Recognize a blocking modal, quote Production is locked, Request approval, and Close."
+  },
+  "066": {
+    "schemaVersion": 1,
+    "id": "066",
+    "image": "images/066.png",
+    "threshold": 0.72,
+    "checks": [
+      {
+        "id": "purpose",
+        "dimension": "page_purpose",
+        "section": 1,
+        "kind": "any",
+        "values": [
+          "branch protection",
+          "settings",
+          "upload",
+          "export"
+        ],
+        "weight": 1,
+        "critical": false
+      },
+      {
+        "id": "heading",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Branch protection",
+        "weight": 1,
+        "critical": false,
+        "caseSensitive": true
+      },
+      {
+        "id": "button",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "View warnings",
+        "weight": 1,
+        "critical": false,
+        "caseSensitive": true
+      },
+      {
+        "id": "toast",
+        "dimension": "state_signals",
+        "section": 4,
+        "kind": "literal",
+        "value": "Rule saved with warnings",
+        "weight": 2,
+        "critical": true,
+        "caseSensitive": true
+      },
+      {
+        "id": "detail",
+        "dimension": "state_signals",
+        "section": 4,
+        "kind": "literal",
+        "value": "2 checks are missing",
+        "weight": 2,
+        "critical": true,
+        "caseSensitive": true
+      }
+    ],
+    "successRubric": "Quote Rule saved with warnings and 2 checks are missing, and classify the visible state."
+  },
+  "067": {
+    "schemaVersion": 1,
+    "id": "067",
+    "image": "images/067.png",
+    "threshold": 0.72,
+    "checks": [
+      {
+        "id": "purpose",
+        "dimension": "page_purpose",
+        "section": 1,
+        "kind": "any",
+        "values": [
+          "loading",
+          "processing",
+          "reconnecting",
+          "import"
+        ],
+        "weight": 1,
+        "critical": true
+      },
+      {
+        "id": "heading",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Reconnecting…",
+        "weight": 2,
+        "critical": true,
+        "caseSensitive": true
+      },
+      {
+        "id": "spinner",
+        "dimension": "state_signals",
+        "section": 4,
+        "kind": "any",
+        "values": [
+          "loading",
+          "spinner",
+          "processing",
+          "reconnecting",
+          "progress"
+        ],
+        "weight": 2,
+        "critical": true
+      },
+      {
+        "id": "wait-blocker",
+        "dimension": "blockers",
+        "section": 5,
+        "kind": "any",
+        "values": [
+          "loading",
+          "wait",
+          "processing",
+          "reconnecting",
+          "not ready"
+        ],
+        "weight": 1,
+        "critical": false
+      },
+      {
+        "id": "detail",
+        "dimension": "state_signals",
+        "section": 4,
+        "kind": "literal",
+        "value": "Attempt 3 of 5",
+        "weight": 1,
+        "critical": false,
+        "caseSensitive": true
+      }
+    ],
+    "successRubric": "Report the loading state and preserve Reconnecting… without inventing completion."
+  },
+  "068": {
+    "schemaVersion": 1,
+    "id": "068",
+    "image": "images/068.png",
+    "threshold": 0.72,
+    "checks": [
+      {
+        "id": "purpose",
+        "dimension": "page_purpose",
+        "section": 1,
+        "kind": "any",
+        "values": [
+          "privacy",
+          "cookie",
+          "consent",
+          "video"
+        ],
+        "weight": 1,
+        "critical": false
+      },
+      {
+        "id": "title",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Çerez tercihleri",
+        "weight": 2,
+        "critical": true,
+        "caseSensitive": true
+      },
+      {
+        "id": "choice-1",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Tümünü kabul et",
+        "weight": 1,
+        "critical": true,
+        "caseSensitive": true
+      },
+      {
+        "id": "choice-2",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Yalnızca gerekli",
+        "weight": 1,
+        "critical": false,
+        "caseSensitive": true
+      },
+      {
+        "id": "consent-signal",
+        "dimension": "state_signals",
+        "section": 4,
+        "kind": "any",
+        "values": [
+          "cookie",
+          "consent",
+          "privacy",
+          "overlay",
+          "banner"
+        ],
+        "weight": 2,
+        "critical": true
+      },
+      {
+        "id": "consent-blocker",
+        "dimension": "blockers",
+        "section": 5,
+        "kind": "any",
+        "values": [
+          "cookie",
+          "consent",
+          "overlay",
+          "blocked"
+        ],
+        "weight": 1,
+        "critical": false
+      }
+    ],
+    "successRubric": "Recognize the consent UI and quote Tümünü kabul et / Yalnızca gerekli."
+  },
+  "069": {
+    "schemaVersion": 1,
+    "id": "069",
+    "image": "images/069.png",
+    "threshold": 0.72,
+    "checks": [
+      {
+        "id": "purpose",
+        "dimension": "page_purpose",
+        "section": 1,
+        "kind": "any",
+        "values": [
+          "dashboard",
+          "overview",
+          "system health",
+          "incident"
+        ],
+        "weight": 1,
+        "critical": true
+      },
+      {
+        "id": "heading",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Bölgesel performans",
+        "weight": 1,
+        "critical": false,
+        "caseSensitive": true
+      },
+      {
+        "id": "target-metric",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "all",
+        "values": [
+          "İzmir",
+          "₺44,2K"
+        ],
+        "weight": 2,
+        "critical": true
+      },
+      {
+        "id": "alert",
+        "dimension": "state_signals",
+        "section": 4,
+        "kind": "literal",
+        "value": "İzmir hedefin %8 altında",
+        "weight": 2,
+        "critical": true,
+        "caseSensitive": true
+      }
+    ],
+    "successRubric": "Read İzmir = ₺44,2K and report the alert without guessing unknown values."
+  },
+  "070": {
+    "schemaVersion": 1,
+    "id": "070",
+    "image": "images/070.png",
+    "threshold": 0.72,
+    "checks": [
+      {
+        "id": "purpose",
+        "dimension": "page_purpose",
+        "section": 1,
+        "kind": "any",
+        "values": [
+          "chart",
+          "dashboard",
+          "dönüşüm hunisi"
+        ],
+        "weight": 1,
+        "critical": false
+      },
+      {
+        "id": "heading",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Dönüşüm hunisi",
+        "weight": 1,
+        "critical": false,
+        "caseSensitive": true
+      },
+      {
+        "id": "highest-label",
+        "dimension": "visual_reasoning",
+        "section": null,
+        "kind": "any",
+        "values": [
+          "Satın alma"
+        ],
+        "weight": 2,
+        "critical": true
+      },
+      {
+        "id": "highest-value",
+        "dimension": "visual_reasoning",
+        "section": null,
+        "kind": "any",
+        "values": [
+          "100",
+          "29%"
+        ],
+        "weight": 2,
+        "critical": true
+      }
+    ],
+    "successRubric": "Use the rendered bars, not source order: Satın alma is tallest and is labeled 29%."
+  },
+  "071": {
+    "schemaVersion": 1,
+    "id": "071",
+    "image": "images/071.png",
+    "threshold": 0.72,
+    "checks": [
+      {
+        "id": "purpose",
+        "dimension": "page_purpose",
+        "section": 1,
+        "kind": "any",
+        "values": [
+          "table",
+          "orders",
+          "members",
+          "deployment",
+          "invoice",
+          "audit"
+        ],
+        "weight": 1,
+        "critical": false
+      },
+      {
+        "id": "heading",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Fatura listesi",
+        "weight": 1,
+        "critical": false,
+        "caseSensitive": true
+      },
+      {
+        "id": "target-row",
+        "dimension": "visual_reasoning",
+        "section": null,
+        "kind": "all",
+        "values": [
+          "TR-8832",
+          "Gecikmiş"
+        ],
+        "weight": 3,
+        "critical": true
+      }
+    ],
+    "successRubric": "Keep row association intact: TR-8832 — Gecikmiş."
+  },
+  "072": {
+    "schemaVersion": 1,
+    "id": "072",
+    "image": "images/072.png",
+    "threshold": 0.72,
+    "checks": [
+      {
+        "id": "purpose",
+        "dimension": "page_purpose",
+        "section": 1,
+        "kind": "any",
+        "values": [
+          "email",
+          "compose",
+          "message"
+        ],
+        "weight": 1,
+        "critical": true
+      },
+      {
+        "id": "heading",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Yeni ileti",
+        "weight": 1,
+        "critical": false,
+        "caseSensitive": true
+      },
+      {
+        "id": "button",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Gönder",
+        "weight": 2,
+        "critical": true,
+        "caseSensitive": true
+      },
+      {
+        "id": "to-input",
+        "dimension": "inputs",
+        "section": 3,
+        "kind": "all",
+        "values": [
+          "To",
+          "ekip@example.com"
+        ],
+        "weight": 1,
+        "critical": false
+      },
+      {
+        "id": "subject-input",
+        "dimension": "inputs",
+        "section": 3,
+        "kind": "all",
+        "values": [
+          "Subject",
+          "Cuma toplantısı"
+        ],
+        "weight": 1,
+        "critical": false
+      },
+      {
+        "id": "status",
+        "dimension": "state_signals",
+        "section": 4,
+        "kind": "literal",
+        "value": "Çevrimdışı — taslak yerel kaydedildi",
+        "weight": 2,
+        "critical": true,
+        "caseSensitive": true
+      }
+    ],
+    "successRubric": "Report the compose fields exactly and surface Çevrimdışı — taslak yerel kaydedildi."
+  },
+  "073": {
+    "schemaVersion": 1,
+    "id": "073",
+    "image": "images/073.png",
+    "threshold": 0.72,
+    "checks": [
+      {
+        "id": "purpose",
+        "dimension": "page_purpose",
+        "section": 1,
+        "kind": "any",
+        "values": [
+          "board",
+          "kanban",
+          "project",
+          "sprint",
+          "incident"
+        ],
+        "weight": 1,
+        "critical": false
+      },
+      {
+        "id": "heading",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "İçerik takvimi",
+        "weight": 1,
+        "critical": false,
+        "caseSensitive": true
+      },
+      {
+        "id": "card-column",
+        "dimension": "visual_reasoning",
+        "section": null,
+        "kind": "all",
+        "values": [
+          "Model karşılaştırması",
+          "İncelemede"
+        ],
+        "weight": 3,
+        "critical": true
+      }
+    ],
+    "successRubric": "Preserve the spatial association: Model karşılaştırması is in İncelemede."
+  },
+  "074": {
+    "schemaVersion": 1,
+    "id": "074",
+    "image": "images/074.png",
+    "threshold": 0.72,
+    "checks": [
+      {
+        "id": "purpose",
+        "dimension": "page_purpose",
+        "section": 1,
+        "kind": "any",
+        "values": [
+          "calendar",
+          "schedule"
+        ],
+        "weight": 1,
+        "critical": false
+      },
+      {
+        "id": "heading",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Ağustos 2026",
+        "weight": 1,
+        "critical": false,
+        "caseSensitive": true
+      },
+      {
+        "id": "selected-event",
+        "dimension": "visual_reasoning",
+        "section": null,
+        "kind": "all",
+        "values": [
+          "29",
+          "Ürün demosu",
+          "09:45"
+        ],
+        "weight": 3,
+        "critical": true
+      }
+    ],
+    "successRubric": "Associate day 29 with Ürün demosu at 09:45."
+  },
+  "075": {
+    "schemaVersion": 1,
+    "id": "075",
+    "image": "images/075.png",
+    "threshold": 0.72,
+    "checks": [
+      {
+        "id": "purpose",
+        "dimension": "page_purpose",
+        "section": 1,
+        "kind": "any",
+        "values": [
+          "map",
+          "tracking",
+          "route",
+          "hotel",
+          "café"
+        ],
+        "weight": 1,
+        "critical": false
+      },
+      {
+        "id": "heading",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Tren rotası",
+        "weight": 1,
+        "critical": false,
+        "caseSensitive": true
+      },
+      {
+        "id": "selection",
+        "dimension": "visual_reasoning",
+        "section": null,
+        "kind": "all",
+        "values": [
+          "Ankara Garı",
+          "18:42 varış"
+        ],
+        "weight": 3,
+        "critical": true
+      },
+      {
+        "id": "pin-count",
+        "dimension": "visual_reasoning",
+        "section": null,
+        "kind": "any",
+        "values": [
+          "5",
+          "five"
+        ],
+        "weight": 1,
+        "critical": false
+      }
+    ],
+    "successRubric": "Read the selected Ankara Garı card, its 18:42 varış detail, and 5 pins."
+  },
+  "076": {
+    "schemaVersion": 1,
+    "id": "076",
+    "image": "images/076.png",
+    "threshold": 0.72,
+    "checks": [
+      {
+        "id": "purpose",
+        "dimension": "page_purpose",
+        "section": 1,
+        "kind": "any",
+        "values": [
+          "gallery",
+          "archive",
+          "collection",
+          "comparison"
+        ],
+        "weight": 1,
+        "critical": false
+      },
+      {
+        "id": "heading",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Sanat arşivi",
+        "weight": 1,
+        "critical": false,
+        "caseSensitive": true
+      },
+      {
+        "id": "caption",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Tangiers street scene",
+        "weight": 2,
+        "critical": true,
+        "caseSensitive": true
+      },
+      {
+        "id": "badge",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Oil painting",
+        "weight": 1,
+        "critical": false,
+        "caseSensitive": true
+      },
+      {
+        "id": "visual-content",
+        "dimension": "visual_reasoning",
+        "section": null,
+        "kind": "any",
+        "values": [
+          "Tangiers street scene"
+        ],
+        "weight": 2,
+        "critical": true
+      }
+    ],
+    "successRubric": "Combine the rendered image with its UI labels; do not infer a place or date beyond Tangiers street scene."
+  },
+  "077": {
+    "schemaVersion": 1,
+    "id": "077",
+    "image": "images/077.png",
+    "threshold": 0.72,
+    "checks": [
+      {
+        "id": "purpose",
+        "dimension": "page_purpose",
+        "section": 1,
+        "kind": "any",
+        "values": [
+          "sign",
+          "payment",
+          "order",
+          "security",
+          "login",
+          "checkout",
+          "settings"
+        ],
+        "weight": 1,
+        "critical": false
+      },
+      {
+        "id": "heading",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Sipariş ayrıntıları",
+        "weight": 2,
+        "critical": true,
+        "caseSensitive": true
+      },
+      {
+        "id": "button",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Güncelle",
+        "weight": 2,
+        "critical": true,
+        "caseSensitive": true
+      },
+      {
+        "id": "input",
+        "dimension": "inputs",
+        "section": 3,
+        "kind": "all",
+        "values": [
+          "Teslimat notu",
+          "Kapıya bırak"
+        ],
+        "weight": 2,
+        "critical": true
+      },
+      {
+        "id": "status",
+        "dimension": "state_signals",
+        "section": 4,
+        "kind": "literal",
+        "value": "Adres doğrulanamadı",
+        "weight": 2,
+        "critical": true,
+        "caseSensitive": true
+      }
+    ],
+    "successRubric": "Preserve Unicode exactly: Sipariş ayrıntıları; Teslimat notu; Güncelle; Adres doğrulanamadı."
+  },
+  "078": {
+    "schemaVersion": 1,
+    "id": "078",
+    "image": "images/078.png",
+    "threshold": 0.72,
+    "checks": [
+      {
+        "id": "purpose",
+        "dimension": "page_purpose",
+        "section": 1,
+        "kind": "any",
+        "values": [
+          "account",
+          "pricing",
+          "report",
+          "editor",
+          "trading"
+        ],
+        "weight": 1,
+        "critical": false
+      },
+      {
+        "id": "heading",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Canvas editor",
+        "weight": 1,
+        "critical": false,
+        "caseSensitive": true
+      },
+      {
+        "id": "target",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Publish",
+        "weight": 2,
+        "critical": true,
+        "caseSensitive": true
+      },
+      {
+        "id": "cover",
+        "dimension": "state_signals",
+        "section": 4,
+        "kind": "literal",
+        "value": "Connection lost",
+        "weight": 2,
+        "critical": true,
+        "caseSensitive": true
+      },
+      {
+        "id": "occlusion",
+        "dimension": "blockers",
+        "section": 5,
+        "kind": "any",
+        "values": [
+          "cover",
+          "overlap",
+          "overlay",
+          "obstruct",
+          "block"
+        ],
+        "weight": 2,
+        "critical": true
+      }
+    ],
+    "successRubric": "Detect the visual obstruction: Connection lost interferes with Publish."
+  },
+  "079": {
+    "schemaVersion": 1,
+    "id": "079",
+    "image": "images/079.png",
+    "threshold": 0.72,
+    "checks": [
+      {
+        "id": "purpose",
+        "dimension": "page_purpose",
+        "section": 1,
+        "kind": "any",
+        "values": [
+          "security",
+          "verification",
+          "captcha",
+          "challenge"
+        ],
+        "weight": 1,
+        "critical": true
+      },
+      {
+        "id": "heading",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Güvenlik doğrulaması",
+        "weight": 1,
+        "critical": false,
+        "caseSensitive": true
+      },
+      {
+        "id": "label",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Bulmacayı tamamlayın",
+        "weight": 2,
+        "critical": true,
+        "caseSensitive": true
+      },
+      {
+        "id": "button",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Doğrula",
+        "weight": 1,
+        "critical": false,
+        "caseSensitive": true
+      },
+      {
+        "id": "captcha-signal",
+        "dimension": "state_signals",
+        "section": 4,
+        "kind": "any",
+        "values": [
+          "CAPTCHA",
+          "challenge",
+          "verification",
+          "2 denemeden 1’i kaldı"
+        ],
+        "weight": 2,
+        "critical": true
+      },
+      {
+        "id": "security-blocker",
+        "dimension": "blockers",
+        "section": 5,
+        "kind": "any",
+        "values": [
+          "verification",
+          "challenge",
+          "CAPTCHA",
+          "disabled"
+        ],
+        "weight": 2,
+        "critical": true
+      }
+    ],
+    "successRubric": "Identify the synthetic challenge and disabled state; do not solve or invent unreadable characters."
+  },
+  "080": {
+    "schemaVersion": 1,
+    "id": "080",
+    "image": "images/080.png",
+    "threshold": 0.74,
+    "checks": [
+      {
+        "id": "purpose",
+        "dimension": "page_purpose",
+        "section": 1,
+        "kind": "any",
+        "values": [
+          "account",
+          "label",
+          "receipt",
+          "contract",
+          "telemetry",
+          "document"
+        ],
+        "weight": 1,
+        "critical": false
+      },
+      {
+        "id": "heading",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Redacted contract",
+        "weight": 1,
+        "critical": false,
+        "caseSensitive": true
+      },
+      {
+        "id": "visible-fragment",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Client: ███████",
+        "weight": 2,
+        "critical": true,
+        "caseSensitive": true
+      },
+      {
+        "id": "unknown",
+        "dimension": "unknowns",
+        "section": 6,
+        "kind": "any",
+        "values": [
+          "unknown",
+          "unreadable",
+          "blurred",
+          "smudged",
+          "redacted",
+          "cannot read"
+        ],
+        "weight": 3,
+        "critical": true
+      },
+      {
+        "id": "no-guess",
+        "dimension": "visual_reasoning",
+        "section": null,
+        "kind": "any",
+        "values": [
+          "Client: ███████"
+        ],
+        "weight": 1,
+        "critical": false
+      }
+    ],
+    "successRubric": "Transcribe only Client: ███████ and explicitly say client name is redacted."
+  },
+  "081": {
+    "schemaVersion": 1,
+    "id": "081",
+    "image": "images/081.png",
+    "threshold": 0.72,
+    "checks": [
+      {
+        "id": "purpose",
+        "dimension": "page_purpose",
+        "section": 1,
+        "kind": "any",
+        "values": [
+          "sign in",
+          "login",
+          "identity verification",
+          "session expired"
+        ],
+        "weight": 1,
+        "critical": true
+      },
+      {
+        "id": "heading",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Session expired",
+        "weight": 2,
+        "critical": true,
+        "caseSensitive": true
+      },
+      {
+        "id": "button",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Sign in again",
+        "weight": 2,
+        "critical": true,
+        "caseSensitive": true
+      },
+      {
+        "id": "email-input",
+        "dimension": "inputs",
+        "section": 3,
+        "kind": "all",
+        "values": [
+          "Email",
+          "nora@example.com"
+        ],
+        "weight": 1,
+        "critical": false
+      },
+      {
+        "id": "blocker",
+        "dimension": "blockers",
+        "section": 5,
+        "kind": "any",
+        "values": [
+          "rate",
+          "limit"
+        ],
+        "weight": 2,
+        "critical": true
+      },
+      {
+        "id": "status",
+        "dimension": "state_signals",
+        "section": 4,
+        "kind": "literal",
+        "value": "Too many attempts. Try again in 14:32",
+        "weight": 2,
+        "critical": true,
+        "caseSensitive": true
+      },
+      {
+        "id": "disabled",
+        "dimension": "inputs",
+        "section": 3,
+        "kind": "any",
+        "values": [
+          "disabled",
+          "unavailable"
+        ],
+        "weight": 1,
+        "critical": false
+      }
+    ],
+    "successRubric": "Identify the Session expired authentication surface, quote Sign in again, and report rate limit."
+  },
+  "082": {
+    "schemaVersion": 1,
+    "id": "082",
+    "image": "images/082.png",
+    "threshold": 0.72,
+    "checks": [
+      {
+        "id": "purpose",
+        "dimension": "page_purpose",
+        "section": 1,
+        "kind": "any",
+        "values": [
+          "search",
+          "results"
+        ],
+        "weight": 1,
+        "critical": true
+      },
+      {
+        "id": "heading",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Case-sensitive search",
+        "weight": 1,
+        "critical": false,
+        "caseSensitive": true
+      },
+      {
+        "id": "tab",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Exact match",
+        "weight": 2,
+        "critical": true,
+        "caseSensitive": true
+      },
+      {
+        "id": "count",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "0 results",
+        "weight": 2,
+        "critical": true,
+        "caseSensitive": true
+      },
+      {
+        "id": "query",
+        "dimension": "inputs",
+        "section": 3,
+        "kind": "all",
+        "values": [
+          "Search",
+          "Orion-7B"
+        ],
+        "weight": 2,
+        "critical": true
+      },
+      {
+        "id": "chip",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Archived",
+        "weight": 1,
+        "critical": false,
+        "caseSensitive": true
+      },
+      {
+        "id": "notice",
+        "dimension": "state_signals",
+        "section": 4,
+        "kind": "literal",
+        "value": "No matches for “Orion-7B”",
+        "weight": 1,
+        "critical": true,
+        "caseSensitive": true
+      }
+    ],
+    "successRubric": "Read the active query Orion-7B, selected tab Exact match, and exact count 0 results."
+  },
+  "083": {
+    "schemaVersion": 1,
+    "id": "083",
+    "image": "images/083.png",
+    "threshold": 0.72,
+    "checks": [
+      {
+        "id": "purpose",
+        "dimension": "page_purpose",
+        "section": 1,
+        "kind": "any",
+        "values": [
+          "checkout",
+          "cart",
+          "order",
+          "purchase"
+        ],
+        "weight": 1,
+        "critical": true
+      },
+      {
+        "id": "heading",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Order summary",
+        "weight": 1,
+        "critical": false,
+        "caseSensitive": true
+      },
+      {
+        "id": "item",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Studio monitor pair",
+        "weight": 1,
+        "critical": false,
+        "caseSensitive": true
+      },
+      {
+        "id": "total",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "$1,204.08",
+        "weight": 2,
+        "critical": true,
+        "caseSensitive": true
+      },
+      {
+        "id": "button",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Submit payment",
+        "weight": 2,
+        "critical": true,
+        "caseSensitive": true
+      },
+      {
+        "id": "banner",
+        "dimension": "state_signals",
+        "section": 4,
+        "kind": "literal",
+        "value": "Price changed from $1,199.00",
+        "weight": 2,
+        "critical": true,
+        "caseSensitive": true
+      },
+      {
+        "id": "blocked",
+        "dimension": "blockers",
+        "section": 5,
+        "kind": "any",
+        "values": [
+          "price",
+          "changed"
+        ],
+        "weight": 2,
+        "critical": true
+      }
+    ],
+    "successRubric": "Quote $1,204.08 and Submit payment; correctly report whether the action is disabled and why."
+  },
+  "084": {
+    "schemaVersion": 1,
+    "id": "084",
+    "image": "images/084.png",
+    "threshold": 0.72,
+    "checks": [
+      {
+        "id": "purpose",
+        "dimension": "page_purpose",
+        "section": 1,
+        "kind": "any",
+        "values": [
+          "form",
+          "profile",
+          "shipping",
+          "invite",
+          "dataset",
+          "tax"
+        ],
+        "weight": 1,
+        "critical": false
+      },
+      {
+        "id": "heading",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Publish dataset",
+        "weight": 1,
+        "critical": false,
+        "caseSensitive": true
+      },
+      {
+        "id": "button",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Publish",
+        "weight": 1,
+        "critical": false,
+        "caseSensitive": true
+      },
+      {
+        "id": "input",
+        "dimension": "inputs",
+        "section": 3,
+        "kind": "all",
+        "values": [
+          "Release tag",
+          "v2..1",
+          "v1.0.0"
+        ],
+        "weight": 2,
+        "critical": true
+      },
+      {
+        "id": "error",
+        "dimension": "state_signals",
+        "section": 4,
+        "kind": "literal",
+        "value": "Use semantic version format",
+        "weight": 2,
+        "critical": true,
+        "caseSensitive": true
+      },
+      {
+        "id": "blocker",
+        "dimension": "blockers",
+        "section": 5,
+        "kind": "any",
+        "values": [
+          "invalid",
+          "required",
+          "incomplete",
+          "missing",
+          "format"
+        ],
+        "weight": 1,
+        "critical": true
+      }
+    ],
+    "successRubric": "Name Release tag, preserve its current value and placeholder, and quote Use semantic version format."
+  },
+  "085": {
+    "schemaVersion": 1,
+    "id": "085",
+    "image": "images/085.png",
+    "threshold": 0.72,
+    "checks": [
+      {
+        "id": "purpose",
+        "dimension": "page_purpose",
+        "section": 1,
+        "kind": "any",
+        "values": [
+          "bank transfer",
+          "dialog",
+          "modal"
+        ],
+        "weight": 1,
+        "critical": false
+      },
+      {
+        "id": "title",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Confirm transfer of $8,740.00?",
+        "weight": 2,
+        "critical": true,
+        "caseSensitive": true
+      },
+      {
+        "id": "primary",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Confirm transfer",
+        "weight": 2,
+        "critical": true,
+        "caseSensitive": true
+      },
+      {
+        "id": "secondary",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Review details",
+        "weight": 1,
+        "critical": false,
+        "caseSensitive": true
+      },
+      {
+        "id": "modal-signal",
+        "dimension": "state_signals",
+        "section": 4,
+        "kind": "all",
+        "values": [
+          "modal",
+          "Recipient: NOVA SUPPLY •••• 8841"
+        ],
+        "weight": 2,
+        "critical": true
+      },
+      {
+        "id": "overlay-blocker",
+        "dimension": "blockers",
+        "section": 5,
+        "kind": "any",
+        "values": [
+          "modal",
+          "overlay",
+          "dialog"
+        ],
+        "weight": 1,
+        "critical": true
+      }
+    ],
+    "successRubric": "Recognize a blocking modal, quote Confirm transfer of $8,740.00?, Confirm transfer, and Review details."
+  },
+  "086": {
+    "schemaVersion": 1,
+    "id": "086",
+    "image": "images/086.png",
+    "threshold": 0.72,
+    "checks": [
+      {
+        "id": "purpose",
+        "dimension": "page_purpose",
+        "section": 1,
+        "kind": "any",
+        "values": [
+          "data export",
+          "settings",
+          "upload",
+          "export"
+        ],
+        "weight": 1,
+        "critical": false
+      },
+      {
+        "id": "heading",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Data export",
+        "weight": 1,
+        "critical": false,
+        "caseSensitive": true
+      },
+      {
+        "id": "button",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Cancel export",
+        "weight": 1,
+        "critical": false,
+        "caseSensitive": true
+      },
+      {
+        "id": "toast",
+        "dimension": "state_signals",
+        "section": 4,
+        "kind": "literal",
+        "value": "Export queued",
+        "weight": 2,
+        "critical": true,
+        "caseSensitive": true
+      },
+      {
+        "id": "detail",
+        "dimension": "state_signals",
+        "section": 4,
+        "kind": "literal",
+        "value": "Position 14 of 32",
+        "weight": 2,
+        "critical": true,
+        "caseSensitive": true
+      }
+    ],
+    "successRubric": "Quote Export queued and Position 14 of 32, and classify the visible state."
+  },
+  "087": {
+    "schemaVersion": 1,
+    "id": "087",
+    "image": "images/087.png",
+    "threshold": 0.72,
+    "checks": [
+      {
+        "id": "purpose",
+        "dimension": "page_purpose",
+        "section": 1,
+        "kind": "any",
+        "values": [
+          "loading",
+          "processing",
+          "reconnecting",
+          "import"
+        ],
+        "weight": 1,
+        "critical": true
+      },
+      {
+        "id": "heading",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Finalizing import",
+        "weight": 2,
+        "critical": true,
+        "caseSensitive": true
+      },
+      {
+        "id": "spinner",
+        "dimension": "state_signals",
+        "section": 4,
+        "kind": "any",
+        "values": [
+          "loading",
+          "spinner",
+          "processing",
+          "reconnecting",
+          "progress"
+        ],
+        "weight": 2,
+        "critical": true
+      },
+      {
+        "id": "wait-blocker",
+        "dimension": "blockers",
+        "section": 5,
+        "kind": "any",
+        "values": [
+          "loading",
+          "wait",
+          "processing",
+          "reconnecting",
+          "not ready"
+        ],
+        "weight": 1,
+        "critical": false
+      },
+      {
+        "id": "detail",
+        "dimension": "state_signals",
+        "section": 4,
+        "kind": "literal",
+        "value": "Do not close this tab",
+        "weight": 1,
+        "critical": false,
+        "caseSensitive": true
+      },
+      {
+        "id": "progress",
+        "dimension": "state_signals",
+        "section": 4,
+        "kind": "literal",
+        "value": "99%",
+        "weight": 2,
+        "critical": true,
+        "caseSensitive": true
+      }
+    ],
+    "successRubric": "Report the loading state and preserve 99% without inventing completion."
+  },
+  "088": {
+    "schemaVersion": 1,
+    "id": "088",
+    "image": "images/088.png",
+    "threshold": 0.72,
+    "checks": [
+      {
+        "id": "purpose",
+        "dimension": "page_purpose",
+        "section": 1,
+        "kind": "any",
+        "values": [
+          "privacy",
+          "cookie",
+          "consent",
+          "video"
+        ],
+        "weight": 1,
+        "critical": false
+      },
+      {
+        "id": "title",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Consent required",
+        "weight": 2,
+        "critical": true,
+        "caseSensitive": true
+      },
+      {
+        "id": "choice-1",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Allow media cookies",
+        "weight": 1,
+        "critical": true,
+        "caseSensitive": true
+      },
+      {
+        "id": "choice-2",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Keep blocked",
+        "weight": 1,
+        "critical": false,
+        "caseSensitive": true
+      },
+      {
+        "id": "consent-signal",
+        "dimension": "state_signals",
+        "section": 4,
+        "kind": "any",
+        "values": [
+          "cookie",
+          "consent",
+          "privacy",
+          "overlay",
+          "banner"
+        ],
+        "weight": 2,
+        "critical": true
+      },
+      {
+        "id": "consent-blocker",
+        "dimension": "blockers",
+        "section": 5,
+        "kind": "any",
+        "values": [
+          "cookie",
+          "consent",
+          "overlay",
+          "blocked"
+        ],
+        "weight": 1,
+        "critical": true
+      }
+    ],
+    "successRubric": "Recognize the consent UI and quote Allow media cookies / Keep blocked."
+  },
+  "089": {
+    "schemaVersion": 1,
+    "id": "089",
+    "image": "images/089.png",
+    "threshold": 0.72,
+    "checks": [
+      {
+        "id": "purpose",
+        "dimension": "page_purpose",
+        "section": 1,
+        "kind": "any",
+        "values": [
+          "dashboard",
+          "overview",
+          "system health",
+          "incident"
+        ],
+        "weight": 1,
+        "critical": true
+      },
+      {
+        "id": "heading",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Incident command",
+        "weight": 1,
+        "critical": false,
+        "caseSensitive": true
+      },
+      {
+        "id": "target-metric",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "all",
+        "values": [
+          "ETA",
+          "Unknown"
+        ],
+        "weight": 2,
+        "critical": true
+      },
+      {
+        "id": "alert",
+        "dimension": "state_signals",
+        "section": 4,
+        "kind": "literal",
+        "value": "Payments degraded in EU-West",
+        "weight": 2,
+        "critical": true,
+        "caseSensitive": true
+      },
+      {
+        "id": "unknown",
+        "dimension": "unknowns",
+        "section": 6,
+        "kind": "any",
+        "values": [
+          "ETA",
+          "unknown"
+        ],
+        "weight": 2,
+        "critical": true
+      }
+    ],
+    "successRubric": "Read ETA = Unknown and report the alert without guessing unknown values."
+  },
+  "090": {
+    "schemaVersion": 1,
+    "id": "090",
+    "image": "images/090.png",
+    "threshold": 0.72,
+    "checks": [
+      {
+        "id": "purpose",
+        "dimension": "page_purpose",
+        "section": 1,
+        "kind": "any",
+        "values": [
+          "chart",
+          "dashboard",
+          "forecast vs actual"
+        ],
+        "weight": 1,
+        "critical": false
+      },
+      {
+        "id": "heading",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Forecast vs actual",
+        "weight": 1,
+        "critical": false,
+        "caseSensitive": true
+      },
+      {
+        "id": "highest-label",
+        "dimension": "visual_reasoning",
+        "section": null,
+        "kind": "any",
+        "values": [
+          "May"
+        ],
+        "weight": 2,
+        "critical": true
+      },
+      {
+        "id": "highest-value",
+        "dimension": "visual_reasoning",
+        "section": null,
+        "kind": "any",
+        "values": [
+          "93",
+          "Actual 93; forecast 88"
+        ],
+        "weight": 2,
+        "critical": true
+      }
+    ],
+    "successRubric": "Use the rendered bars, not source order: May is tallest and is labeled Actual 93; forecast 88."
+  },
+  "091": {
+    "schemaVersion": 1,
+    "id": "091",
+    "image": "images/091.png",
+    "threshold": 0.72,
+    "checks": [
+      {
+        "id": "purpose",
+        "dimension": "page_purpose",
+        "section": 1,
+        "kind": "any",
+        "values": [
+          "table",
+          "orders",
+          "members",
+          "deployment",
+          "invoice",
+          "audit"
+        ],
+        "weight": 1,
+        "critical": false
+      },
+      {
+        "id": "heading",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Access audit",
+        "weight": 1,
+        "critical": false,
+        "caseSensitive": true
+      },
+      {
+        "id": "target-row",
+        "dimension": "visual_reasoning",
+        "section": null,
+        "kind": "all",
+        "values": [
+          "svc-legacy",
+          "org:admin",
+          "Critical"
+        ],
+        "weight": 3,
+        "critical": true
+      }
+    ],
+    "successRubric": "Keep row association intact: svc-legacy — org:admin — Critical."
+  },
+  "092": {
+    "schemaVersion": 1,
+    "id": "092",
+    "image": "images/092.png",
+    "threshold": 0.72,
+    "checks": [
+      {
+        "id": "purpose",
+        "dimension": "page_purpose",
+        "section": 1,
+        "kind": "any",
+        "values": [
+          "email",
+          "compose",
+          "message"
+        ],
+        "weight": 1,
+        "critical": true
+      },
+      {
+        "id": "heading",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Confidential message",
+        "weight": 1,
+        "critical": false,
+        "caseSensitive": true
+      },
+      {
+        "id": "button",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Send anyway",
+        "weight": 2,
+        "critical": true,
+        "caseSensitive": true
+      },
+      {
+        "id": "to-input",
+        "dimension": "inputs",
+        "section": 3,
+        "kind": "all",
+        "values": [
+          "To",
+          "outside@vendor.test"
+        ],
+        "weight": 1,
+        "critical": false
+      },
+      {
+        "id": "subject-input",
+        "dimension": "inputs",
+        "section": 3,
+        "kind": "all",
+        "values": [
+          "Subject",
+          "Q3 forecast"
+        ],
+        "weight": 1,
+        "critical": false
+      },
+      {
+        "id": "status",
+        "dimension": "state_signals",
+        "section": 4,
+        "kind": "literal",
+        "value": "External recipient warning",
+        "weight": 2,
+        "critical": true,
+        "caseSensitive": true
+      },
+      {
+        "id": "external-blocker",
+        "dimension": "blockers",
+        "section": 5,
+        "kind": "any",
+        "values": [
+          "external",
+          "warning",
+          "recipient"
+        ],
+        "weight": 2,
+        "critical": true
+      }
+    ],
+    "successRubric": "Report the compose fields exactly and surface External recipient warning."
+  },
+  "093": {
+    "schemaVersion": 1,
+    "id": "093",
+    "image": "images/093.png",
+    "threshold": 0.72,
+    "checks": [
+      {
+        "id": "purpose",
+        "dimension": "page_purpose",
+        "section": 1,
+        "kind": "any",
+        "values": [
+          "board",
+          "kanban",
+          "project",
+          "sprint",
+          "incident"
+        ],
+        "weight": 1,
+        "critical": false
+      },
+      {
+        "id": "heading",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Incident board",
+        "weight": 1,
+        "critical": false,
+        "caseSensitive": true
+      },
+      {
+        "id": "card-column",
+        "dimension": "visual_reasoning",
+        "section": null,
+        "kind": "all",
+        "values": [
+          "Retry storm",
+          "Mitigating"
+        ],
+        "weight": 3,
+        "critical": true
+      }
+    ],
+    "successRubric": "Preserve the spatial association: Retry storm is in Mitigating."
+  },
+  "094": {
+    "schemaVersion": 1,
+    "id": "094",
+    "image": "images/094.png",
+    "threshold": 0.72,
+    "checks": [
+      {
+        "id": "purpose",
+        "dimension": "page_purpose",
+        "section": 1,
+        "kind": "any",
+        "values": [
+          "calendar",
+          "schedule"
+        ],
+        "weight": 1,
+        "critical": false
+      },
+      {
+        "id": "heading",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Release calendar",
+        "weight": 1,
+        "critical": false,
+        "caseSensitive": true
+      },
+      {
+        "id": "selected-event",
+        "dimension": "visual_reasoning",
+        "section": null,
+        "kind": "all",
+        "values": [
+          "31",
+          "Production freeze",
+          "23:30 UTC"
+        ],
+        "weight": 3,
+        "critical": true
+      },
+      {
+        "id": "conflict",
+        "dimension": "state_signals",
+        "section": 4,
+        "kind": "literal",
+        "value": "Overlaps with Database migration",
+        "weight": 2,
+        "critical": true,
+        "caseSensitive": true
+      }
+    ],
+    "successRubric": "Associate day 31 with Production freeze at 23:30 UTC."
+  },
+  "095": {
+    "schemaVersion": 1,
+    "id": "095",
+    "image": "images/095.png",
+    "threshold": 0.72,
+    "checks": [
+      {
+        "id": "purpose",
+        "dimension": "page_purpose",
+        "section": 1,
+        "kind": "any",
+        "values": [
+          "map",
+          "tracking",
+          "route",
+          "hotel",
+          "café"
+        ],
+        "weight": 1,
+        "critical": false
+      },
+      {
+        "id": "heading",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Evacuation map",
+        "weight": 1,
+        "critical": false,
+        "caseSensitive": true
+      },
+      {
+        "id": "selection",
+        "dimension": "visual_reasoning",
+        "section": null,
+        "kind": "all",
+        "values": [
+          "Route B",
+          "Bridge closed"
+        ],
+        "weight": 3,
+        "critical": true
+      },
+      {
+        "id": "pin-count",
+        "dimension": "visual_reasoning",
+        "section": null,
+        "kind": "any",
+        "values": [
+          "6",
+          "six"
+        ],
+        "weight": 1,
+        "critical": false
+      },
+      {
+        "id": "route-alert",
+        "dimension": "state_signals",
+        "section": 4,
+        "kind": "literal",
+        "value": "Use Route C instead",
+        "weight": 2,
+        "critical": true,
+        "caseSensitive": true
+      }
+    ],
+    "successRubric": "Read the selected Route B card, its Bridge closed detail, and 6 pins."
+  },
+  "096": {
+    "schemaVersion": 1,
+    "id": "096",
+    "image": "images/096.png",
+    "threshold": 0.72,
+    "checks": [
+      {
+        "id": "purpose",
+        "dimension": "page_purpose",
+        "section": 1,
+        "kind": "any",
+        "values": [
+          "gallery",
+          "archive",
+          "collection",
+          "comparison"
+        ],
+        "weight": 1,
+        "critical": false
+      },
+      {
+        "id": "heading",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Visual comparison",
+        "weight": 1,
+        "critical": false,
+        "caseSensitive": true
+      },
+      {
+        "id": "caption",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Modern / Historic",
+        "weight": 2,
+        "critical": true,
+        "caseSensitive": true
+      },
+      {
+        "id": "badge",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Compare",
+        "weight": 1,
+        "critical": false,
+        "caseSensitive": true
+      },
+      {
+        "id": "visual-content",
+        "dimension": "visual_reasoning",
+        "section": null,
+        "kind": "any",
+        "values": [
+          "right",
+          "snow"
+        ],
+        "weight": 2,
+        "critical": true
+      }
+    ],
+    "successRubric": "Combine the rendered image with its UI labels; do not infer a place or date beyond Modern / Historic."
+  },
+  "097": {
+    "schemaVersion": 1,
+    "id": "097",
+    "image": "images/097.png",
+    "threshold": 0.72,
+    "checks": [
+      {
+        "id": "purpose",
+        "dimension": "page_purpose",
+        "section": 1,
+        "kind": "any",
+        "values": [
+          "sign",
+          "payment",
+          "order",
+          "security",
+          "login",
+          "checkout",
+          "settings"
+        ],
+        "weight": 1,
+        "critical": false
+      },
+      {
+        "id": "heading",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "إعدادات الأمان",
+        "weight": 2,
+        "critical": true,
+        "caseSensitive": true
+      },
+      {
+        "id": "button",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "تأكيد",
+        "weight": 2,
+        "critical": true,
+        "caseSensitive": true
+      },
+      {
+        "id": "input",
+        "dimension": "inputs",
+        "section": 3,
+        "kind": "all",
+        "values": [
+          "رمز التحقق",
+          "19_ 4_"
+        ],
+        "weight": 2,
+        "critical": true
+      },
+      {
+        "id": "status",
+        "dimension": "state_signals",
+        "section": 4,
+        "kind": "literal",
+        "value": "تنتهي صلاحية الرمز خلال ٣٨ ثانية",
+        "weight": 2,
+        "critical": true,
+        "caseSensitive": true
+      }
+    ],
+    "successRubric": "Preserve Unicode exactly: إعدادات الأمان; رمز التحقق; تأكيد; تنتهي صلاحية الرمز خلال ٣٨ ثانية."
+  },
+  "098": {
+    "schemaVersion": 1,
+    "id": "098",
+    "image": "images/098.png",
+    "threshold": 0.72,
+    "checks": [
+      {
+        "id": "purpose",
+        "dimension": "page_purpose",
+        "section": 1,
+        "kind": "any",
+        "values": [
+          "account",
+          "pricing",
+          "report",
+          "editor",
+          "trading"
+        ],
+        "weight": 1,
+        "critical": false
+      },
+      {
+        "id": "heading",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Trading panel",
+        "weight": 1,
+        "critical": false,
+        "caseSensitive": true
+      },
+      {
+        "id": "target",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Review order",
+        "weight": 2,
+        "critical": true,
+        "caseSensitive": true
+      },
+      {
+        "id": "cover",
+        "dimension": "state_signals",
+        "section": 4,
+        "kind": "literal",
+        "value": "Market closed",
+        "weight": 2,
+        "critical": true,
+        "caseSensitive": true
+      },
+      {
+        "id": "occlusion",
+        "dimension": "blockers",
+        "section": 5,
+        "kind": "any",
+        "values": [
+          "cover",
+          "overlap",
+          "overlay",
+          "obstruct",
+          "block"
+        ],
+        "weight": 2,
+        "critical": true
+      }
+    ],
+    "successRubric": "Detect the visual obstruction: Market closed interferes with Review order."
+  },
+  "099": {
+    "schemaVersion": 1,
+    "id": "099",
+    "image": "images/099.png",
+    "threshold": 0.72,
+    "checks": [
+      {
+        "id": "purpose",
+        "dimension": "page_purpose",
+        "section": 1,
+        "kind": "any",
+        "values": [
+          "security",
+          "verification",
+          "captcha",
+          "challenge"
+        ],
+        "weight": 1,
+        "critical": true
+      },
+      {
+        "id": "heading",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Additional verification",
+        "weight": 1,
+        "critical": false,
+        "caseSensitive": true
+      },
+      {
+        "id": "label",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Image challenge",
+        "weight": 2,
+        "critical": true,
+        "caseSensitive": true
+      },
+      {
+        "id": "button",
+        "dimension": "visible_text",
+        "section": 2,
+        "kind": "literal",
+        "value": "Submit",
+        "weight": 1,
+        "critical": false,
+        "caseSensitive": true
+      },
+      {
+        "id": "captcha-signal",
+        "dimension": "state_signals",
+        "section": 4,
+        "kind": "any",
+        "values": [
+          "CAPTCHA",
+          "challenge",
+          "verification",
+          "Characters are unreadable"
+        ],
+        "weight": 2,
+        "critical": true
+      },
+      {
+        "id": "security-blocker",
+        "dimension": "blockers",
+        "section": 5,
+        "kind": "any",
+        "values": [
+          "verification",
+          "challenge",
+          "CAPTCHA",
+          "disabled"
+        ],
+        "weight": 2,
+        "critical": true
+      },
+      {
+        "id": "unknown-code",
+        "dimension": "unknowns",
+        "section": 6,
+        "kind": "any",
+        "values": [
+          "unreadable",
+          "cannot read",
+          "unknown"
+        ],
+        "weight": 2,
+        "critical": true
+      }
+    ],
+    "successRubric": "Identify the synthetic challenge and disabled state; do not solve or invent unreadable characters."
+  }
+}

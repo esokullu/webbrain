@@ -85,7 +85,7 @@ It also shows why DeepSeek and HY3 cannot simply be declared the two best browse
 
 ## What we ran
 
-This was the **full-tier**, non-frozen planner suite as it existed at commit `7182c21f`: 100 Chrome first-action cases per model, 41 available WebBrain tools, native structured tool calls, and no saved request bodies.
+This was the **full-tier**, non-frozen planner suite as it existed at commit `7182c21f`: 100 Chrome first-action cases per model, 48 available Act tools, native structured tool calls, and no saved request bodies. The [October 6 Ling 3.1 replay audit](/blog/ling31-flash-vs-deepseek-hy3-glm52-laguna-xs) corrected the earlier tool count of 41; the pinned source exports 48 tools for these Act-mode cases.
 
 ```text
 cases per model:       100

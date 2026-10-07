@@ -7,12 +7,55 @@
 **Settings → Providers** selects the main model for conversation, planning and
 final replies. **Settings → Assistive Models** groups Vision (including screenshot
 limits and redaction), Speech to text, Generative Media (powering the
-`generate_image` agent tool), Jev (TypeSafe), and SafeSocial. Configuring an assistive
-model does not replace the active provider. Jev is outside the dynamic provider
-list; its verification, fast-classification and experimental browser switches
-are independent opt-ins. See [the settings guide](https://webbrain.one/docs/settings/#multimodal)
-and [data flow](privacy-and-data-flow.md#optional-jev-typesafe-scheduled-task-verification)
+`generate_image` agent tool), Decision models, and SafeSocial. Configuring an assistive
+model does not replace the active provider. Decision models share one provider/model
+selection with separate completion, watch, scheduled-check, classification and browser
+decision switches. See [the settings guide](https://webbrain.one/docs/settings/#multimodal)
+and [data flow](privacy-and-data-flow.md#decision-models-and-completion-verification)
 for setup and disclosure details. Existing `#multimodal` settings links still work.
+
+### Decision models
+
+Select OpenRouter (the default), TypeSafe directly, or a local/custom System One
+endpoint. OpenRouter's model list comes from its decision-model catalog and includes
+all publishers. The new default is `perplexity/pplx-decider-v1-27b`; existing
+TypeSafe keys, enabled features and scheduler thresholds stay on their original
+provider until changed. Provider keys are stored separately.
+
+Local [Kev](https://github.com/jaredpalmer/kev) defaults to
+`http://127.0.0.1:8009`, model `kev-latest`, using `/v1/systemone`. A key is optional
+and loopback requests work offline. Custom remote endpoints require HTTPS.
+Image support follows available model capabilities or the custom override. Test
+Connection checks typed answers and, when enabled, two independent image-only
+facts. A successful HTTP response alone does not establish image support.
+
+Verify completion (`done`) defaults on when outsourcing is configured, with a
+90% acceptance threshold separate from the scheduled-check threshold. Compass
+always uses its managed `/v1/decisions` route regardless of personal decision
+settings. The fallback chain is decision model, active LLM, then existing
+completion checks. These outsourcing toggles control the decision model only;
+with outsourcing disabled or unconfigured, completion still uses a dedicated
+call to the active LLM, subject to its normal cost allowance, followed by the
+existing checks. Strict Secret Mode disables these additional calls.
+
+| Active provider | First completion verifier | Fallback |
+| --- | --- | --- |
+| WebBrain Compass | Managed decision model | Active LLM, then existing checks |
+| Other provider, completion outsourcing enabled | Selected decision model | Active LLM, then existing checks |
+| Other provider, outsourcing disabled or unconfigured | Active LLM | Existing checks |
+
+Each judge prefers a fresh screenshot and tries AX if images
+are unavailable or inconclusive. Confident pending/failed results require
+recovery. Accepted fresh proof can establish generic publication evidence;
+explicit recipient, payment, download, authorization and workflow contracts
+remain required. Future votes and moderation outcomes are not certified.
+Freshness checks re-capture pixels or re-read the bounded AX observation used
+by the judge, with document/run identity checked separately. Text outside that
+observation does not invalidate an AX verdict; changed observed evidence does.
+Action history includes tool names without typed values or other arguments.
+
+Rollout is additive: deploy Cloud `/v1/decisions` before releasing the extension.
+An older Cloud deployment falls through to the active LLM and existing checks.
 
 ### Generative Media
 

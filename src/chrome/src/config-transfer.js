@@ -13,6 +13,7 @@ import {
 import { AUTO_GROUP_TABS_KEY } from './tab-group-preference.js';
 import { normalizeSettings as normalizeSafeSocialSettings, SETTINGS_KEY as SAFE_SOCIAL_SETTINGS_KEY } from './safesocial/config.js';
 import { normalizeUiScale, UI_SCALE_STORAGE_KEY } from './ui/ui-scale.js';
+import { resolveDecisionConfig } from './agent/decision-config.js';
 
 export const CONFIG_SCHEMA = 'webbrain-config/1';
 export const MAX_CONFIG_IMPORT_CHARS = 10_000_000;
@@ -106,6 +107,8 @@ export const DEFAULT_CONFIG_SETTINGS = Object.freeze({
   systemOneFastBrowser: false,
   systemOneWatchThreshold: 0.7,
   systemOneCompletionThreshold: 0.7,
+  decisionProvider: '', decisionModel: '', decisionApiKey: '', decisionLocalApiKey: '', decisionBaseUrl: '', decisionVisionMode: 'auto', decisionVisionSupported: false,
+  decisionInputRate: .04, decisionOutputRate: 0, systemOneDoneEnabled: true, systemOneDoneThreshold: .9,
   typesafeApiKey: '',
   [SAFE_SOCIAL_SETTINGS_KEY]: normalizeSafeSocialSettings(),
 });
@@ -151,6 +154,7 @@ const BOOLEAN_KEYS = new Set([
   'antiCaptchaEnabled',
   'nopechaEnabled',
   'nonecapEnabled',
+  'decisionVisionSupported', 'systemOneDoneEnabled',
   'systemOneEnabled',
   'systemOneWatchEnabled',
   'systemOneCompletionEnabled',
@@ -172,6 +176,7 @@ const NUMBER_KEYS = new Set([
   'costAllowanceSessionUsd',
   'costAllowanceTotalUsd',
   USER_MEMORY_MAX_PROMPT_CHARS_KEY,
+  'decisionInputRate', 'decisionOutputRate', 'systemOneDoneThreshold',
   'systemOneWatchThreshold',
   'systemOneCompletionThreshold',
 ]);
@@ -194,6 +199,7 @@ const STRING_KEYS = new Set([
   'antiCaptchaApiKey',
   'nopechaApiKey',
   'nonecapApiKey',
+  'decisionProvider', 'decisionModel', 'decisionBaseUrl', 'decisionApiKey', 'decisionLocalApiKey', 'decisionVisionMode',
   'typesafeApiKey',
 ]);
 const ARRAY_KEYS = new Set([
@@ -228,6 +234,13 @@ function sanitizeProviders(value, { strict = false } = {}) {
 }
 
 function validSettingValue(key, value) {
+  if (key === 'decisionProvider') return ['', 'openrouter', 'typesafe', 'local'].includes(value);
+  if (key === 'decisionVisionMode') return ['auto', 'on', 'off'].includes(value);
+  if (key === 'decisionBaseUrl') {
+    if (typeof value !== 'string') return false;
+    try { resolveDecisionConfig({ decisionProvider: 'local', decisionBaseUrl: value }); return true; }
+    catch { return false; }
+  }
   if (BOOLEAN_KEYS.has(key)) return typeof value === 'boolean';
   if (NUMBER_KEYS.has(key)) return typeof value === 'number' && Number.isFinite(value);
   if (STRING_KEYS.has(key)) return typeof value === 'string';
@@ -266,6 +279,10 @@ function normalizeSettings(source, { strict = false } = {}) {
     settings[key] = clone(value);
   }
   settings.providers = sanitizeProviders(settings.providers, { strict });
+  if (!Object.hasOwn(source, 'decisionInputRate')) {
+    settings.decisionInputRate = source.decisionProvider === 'typesafe' || (!source.decisionProvider && source.typesafeApiKey)
+      ? .042 : source.decisionProvider === 'local' ? 0 : .04;
+  }
   return settings;
 }
 

@@ -1,0 +1,86 @@
+{
+  "date": "2026-10-07",
+  "source": "test/llm/analysis/2026-10-05-ling30-flash-vl/comparison.json",
+  "sha256": "52d5d274ee15bb3d339f56ef55cde2059301cca7359e5a24db97a67aa05435c2",
+  "notes": [
+    "First response only, text inputs only, no browser tool execution. These scores are not task completion or vision quality.",
+    "All rows use the May 23 frozen system prompt and 41 tools, plus May 23 ideal goldens archived in the prior Nex report.",
+    "Exact ideal requires deep-equal arguments; ideal name ignores arguments. Neither credits terminal prose. Sonnet alignment measures tool-name agreement including no-tool agreement.",
+    "Historical MiniMax requests were not saved, so per-case message byte equality is unverified. New requests are checked against the payload builder; historical Nex requests retain the frozen system and tools.",
+    "Latency and usage.cost are measured on different dates and provider routes. Provider auto-routing is retained; advertised promotional prices do not guarantee every request uses that provider.",
+    "Nex mini remains unscored: its saved 100-case run and authenticated October 5 route recheck reject structured tools before inference.",
+    "Expired-key attempts were quarantined before the authenticated run and are excluded from these metrics."
+  ],
+  "rows": [
+    {
+      "label": "Ling 3.0 Flash VL",
+      "model": "inclusionai/ling-3.0-flash-vl",
+      "date": "2026-10-05",
+      "source": "test/llm/results/2026-10-05-openrouter-ling30-flash-vl_chrome_inclusionai_ling-3.0-flash-vl_frozen",
+      "cases": 100,
+      "errors": 0,
+      "responses": 100,
+      "nativeCalls": 90,
+      "exactIdeal": 22,
+      "idealToolName": 35,
+      "sonnetMatches": 72,
+      "medianLatencyMs": 1732.5,
+      "reportedCostUsd": 0.009769365200000003,
+      "malformedNativeArgumentJson": [
+        {
+          "id": "075",
+          "name": "scratchpad_write",
+          "arguments": "{\"replace\": , \"text\": \"Checking scratchpad for prior context\"}"
+        }
+      ]
+    },
+    {
+      "label": "Nex-N2.5-Pro",
+      "model": "nex-agi/nex-n2.5-pro",
+      "date": "2026-10-03",
+      "source": "test/llm/results/2026-10-03-openrouter-nex-n25-pro_chrome_nex-agi_nex-n2.5-pro_frozen",
+      "cases": 100,
+      "errors": 0,
+      "responses": 100,
+      "nativeCalls": 95,
+      "exactIdeal": 11,
+      "idealToolName": 27,
+      "sonnetMatches": 67,
+      "medianLatencyMs": 7225.5,
+      "reportedCostUsd": 0.1499900600000001,
+      "malformedNativeArgumentJson": null
+    },
+    {
+      "label": "Nex-N2.5-mini",
+      "model": "nex-agi/nex-n2.5-mini",
+      "date": "2026-10-03",
+      "source": "test/llm/results/2026-10-03-openrouter-nex-n25-mini_chrome_nex-agi_nex-n2.5-mini_frozen",
+      "cases": 100,
+      "errors": 100,
+      "responses": 0,
+      "nativeCalls": 0,
+      "exactIdeal": null,
+      "idealToolName": null,
+      "sonnetMatches": 0,
+      "medianLatencyMs": null,
+      "reportedCostUsd": null,
+      "malformedNativeArgumentJson": null
+    },
+    {
+      "label": "MiniMax M3",
+      "model": "minimax/minimax-m3",
+      "date": "2026-06-21",
+      "source": "test/llm/results/2026-06-21-openrouter-minimax-m3_chrome_minimax_minimax-m3_frozen",
+      "cases": 100,
+      "errors": 0,
+      "responses": 100,
+      "nativeCalls": 85,
+      "exactIdeal": 17,
+      "idealToolName": 32,
+      "sonnetMatches": 75,
+      "medianLatencyMs": 3101.5,
+      "reportedCostUsd": 1.0562093999999997,
+      "malformedNativeArgumentJson": null
+    }
+  ]
+}

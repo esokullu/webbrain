@@ -1,0 +1,1529 @@
+{
+  "date": "2026-10-06",
+  "sourceCommit": "7182c21f58a94689c2ac3b547a279b9c5e699283",
+  "browser": "chrome",
+  "tier": "full",
+  "casesPerModel": 100,
+  "models": 14,
+  "historicalModels": 13,
+  "freshModels": 1,
+  "freshRequests": 390,
+  "campaign": {
+    "firstPassResponses": 15,
+    "firstPassErrors": 85,
+    "recoveryCaseSelections": 94,
+    "uniqueRecoveryCases": 85,
+    "benchmarkRequests": 390,
+    "diagnosticRequests": 8,
+    "totalApiRequests": 398,
+    "http429Responses": 298,
+    "recoveryWallTimeMs": 2261877,
+    "firstPassWallTimeMs": 210401,
+    "recoveryPasses": 2,
+    "concurrency": 3,
+    "retryDelayMs": 30000,
+    "retryMax": 10,
+    "latencyNote": "Inference latency uses each successful final HTTP attempt, including network time but excluding failed attempts and backoff. Wall time is reported separately."
+  },
+  "status": "complete",
+  "consensusModels": 14,
+  "freshResponses": 100,
+  "freshErrors": 0,
+  "replayPath": "test/llm/freeze/full-replay-7182c21f.json",
+  "replaySha256": "3d27c43da02747496dbd050a366ef6188f14eaf99a5b41de35e5c55581669062",
+  "toolCounts": {
+    "act": 48
+  },
+  "method": "Leave-one-out exact action (recursive sorted keys only; all values preserved) and tool-name agreement. No-tool matches no-tool; errors never match. Each model has 13 peers and 1300 comparisons. Original 13-model scores reproduced before adding Ling.",
+  "caveat": "Historical bodies were omitted; Ling inputs are reconstructed from the pinned source. Provider conditions and test dates differ. Consensus is not ground truth and this is first-action-only text input.",
+  "results": [
+    {
+      "rank": 1,
+      "model": "deepseek/deepseek-v4-flash-0731",
+      "label": "DeepSeek V4 Flash 0731",
+      "date": "2026-08-02",
+      "source": "test/llm/results/2026-08-02-deepseek-v4-flash-full_chrome_deepseek_deepseek-v4-flash-0731",
+      "fresh": false,
+      "cases": 100,
+      "errors": 0,
+      "responses": 100,
+      "emittedToolCalls": 90,
+      "nativeToolCalls": 90,
+      "schemaValidToolCalls": 90,
+      "idealToolMatches": 39,
+      "exactIdealMatches": 18,
+      "promptTokens": 2365949,
+      "completionTokens": 13566,
+      "cachedPromptTokens": 2291072,
+      "reasoningTokens": 7494,
+      "costRecords": 100,
+      "usageCost": 0.050420106,
+      "lengthLimited": 0,
+      "contentFallbackCalls": 0,
+      "accessibilityTreeFirstCalls": 44,
+      "attempts": 100,
+      "providers": {},
+      "byTool": {
+        "navigate": 23,
+        "list_downloads": 2,
+        "new_tab": 3,
+        "get_accessibility_tree": 44,
+        "read_page": 6,
+        "extract_data": 2,
+        "download_files": 2,
+        "download_social_media": 2,
+        "scroll": 1,
+        "(no-tool)": 10,
+        "get_selection": 1,
+        "clarify": 1,
+        "progress_read": 1,
+        "fetch_url": 1,
+        "done": 1
+      },
+      "schemaErrors": [],
+      "medianLatencyMs": 1579.5,
+      "p95LatencyMs": 5241,
+      "cachedPromptSharePct": 96.83522341352244,
+      "exactActionMatches": 662,
+      "toolNameMatches": 1046,
+      "comparisons": 1300,
+      "exactActionConsensusPct": 50.9,
+      "toolNameConsensusPct": 80.5
+    },
+    {
+      "rank": 2,
+      "model": "tencent/hy3",
+      "label": "Tencent HY3",
+      "date": "2026-08-02",
+      "source": "test/llm/results/2026-08-02-tencent-hy3-full_chrome_tencent_hy3",
+      "fresh": false,
+      "cases": 100,
+      "errors": 0,
+      "responses": 100,
+      "emittedToolCalls": 90,
+      "nativeToolCalls": 90,
+      "schemaValidToolCalls": 90,
+      "idealToolMatches": 41,
+      "exactIdealMatches": 18,
+      "promptTokens": 2368947,
+      "completionTokens": 18328,
+      "cachedPromptTokens": 772096,
+      "reasoningTokens": 13365,
+      "costRecords": 100,
+      "usageCost": 0.24594068400000005,
+      "lengthLimited": 0,
+      "contentFallbackCalls": 0,
+      "accessibilityTreeFirstCalls": 42,
+      "attempts": 100,
+      "providers": {},
+      "byTool": {
+        "navigate": 23,
+        "list_downloads": 2,
+        "new_tab": 3,
+        "get_accessibility_tree": 42,
+        "read_page": 4,
+        "extract_data": 2,
+        "click": 1,
+        "download_files": 2,
+        "download_social_media": 1,
+        "scroll": 1,
+        "(no-tool)": 10,
+        "get_selection": 1,
+        "clarify": 6,
+        "scratchpad_write": 1,
+        "fetch_url": 1
+      },
+      "schemaErrors": [],
+      "medianLatencyMs": 5118,
+      "p95LatencyMs": 8982,
+      "cachedPromptSharePct": 32.592371209655596,
+      "exactActionMatches": 613,
+      "toolNameMatches": 1023,
+      "comparisons": 1300,
+      "exactActionConsensusPct": 47.2,
+      "toolNameConsensusPct": 78.7
+    },
+    {
+      "rank": 3,
+      "model": "anthropic/claude-sonnet-5",
+      "label": "anthropic/claude-sonnet-5",
+      "date": "2026-08-02",
+      "source": "test/llm/results/2026-08-02-claude-sonnet5-full_chrome_anthropic_claude-sonnet-5",
+      "fresh": false,
+      "cases": 100,
+      "errors": 0,
+      "responses": 100,
+      "emittedToolCalls": 98,
+      "nativeToolCalls": 98,
+      "schemaValidToolCalls": 98,
+      "idealToolMatches": 47,
+      "exactIdealMatches": 17,
+      "promptTokens": 3537629,
+      "completionTokens": 14671,
+      "cachedPromptTokens": 0,
+      "reasoningTokens": 3325,
+      "costRecords": 100,
+      "usageCost": 7.221967999999999,
+      "lengthLimited": 0,
+      "contentFallbackCalls": 0,
+      "accessibilityTreeFirstCalls": 42,
+      "attempts": 100,
+      "providers": {},
+      "byTool": {
+        "navigate": 25,
+        "list_downloads": 2,
+        "get_accessibility_tree": 42,
+        "read_page": 3,
+        "extract_data": 2,
+        "download_files": 1,
+        "download_social_media": 2,
+        "fetch_url": 2,
+        "scroll": 1,
+        "(no-tool)": 2,
+        "get_selection": 1,
+        "clarify": 8,
+        "progress_read": 1,
+        "done": 6,
+        "new_tab": 2
+      },
+      "schemaErrors": [],
+      "medianLatencyMs": 4062,
+      "p95LatencyMs": 8278,
+      "cachedPromptSharePct": 0,
+      "exactActionMatches": 562,
+      "toolNameMatches": 976,
+      "comparisons": 1300,
+      "exactActionConsensusPct": 43.2,
+      "toolNameConsensusPct": 75.1
+    },
+    {
+      "rank": 4,
+      "model": "z-ai/glm-5.2",
+      "label": "GLM-5.2",
+      "date": "2026-08-02",
+      "source": "test/llm/results/2026-08-02-glm52-full_chrome_z-ai_glm-5.2",
+      "fresh": false,
+      "cases": 100,
+      "errors": 0,
+      "responses": 100,
+      "emittedToolCalls": 89,
+      "nativeToolCalls": 89,
+      "schemaValidToolCalls": 86,
+      "idealToolMatches": 39,
+      "exactIdealMatches": 20,
+      "promptTokens": 2275921,
+      "completionTokens": 7496,
+      "cachedPromptTokens": 2070582,
+      "reasoningTokens": 4202,
+      "costRecords": 100,
+      "usageCost": 0.5452242279999999,
+      "lengthLimited": 0,
+      "contentFallbackCalls": 0,
+      "accessibilityTreeFirstCalls": 40,
+      "attempts": 100,
+      "providers": {},
+      "byTool": {
+        "navigate": 21,
+        "list_downloads": 2,
+        "new_tab": 3,
+        "(no-tool)": 11,
+        "get_accessibility_tree": 40,
+        "fetch_url": 3,
+        "read_page": 6,
+        "extract_data": 2,
+        "download_files": 1,
+        "download_social_media": 2,
+        "scroll": 1,
+        "get_selection": 1,
+        "clarify": 3,
+        "go_back": 1,
+        "progress_read": 1,
+        "done": 2
+      },
+      "schemaErrors": [
+        {
+          "id": "032",
+          "call": {
+            "name": "get_accessibility_tree",
+            "args": {
+              "filter": "visible\""
+            }
+          },
+          "errors": [
+            "$.filter: invalid enum"
+          ]
+        },
+        {
+          "id": "045",
+          "call": {
+            "name": "get_accessibility_tree",
+            "args": {
+              "filter": "visible\""
+            }
+          },
+          "errors": [
+            "$.filter: invalid enum"
+          ]
+        },
+        {
+          "id": "046",
+          "call": {
+            "name": "get_accessibility_tree",
+            "args": {
+              "filter": "visible\""
+            }
+          },
+          "errors": [
+            "$.filter: invalid enum"
+          ]
+        }
+      ],
+      "medianLatencyMs": 1732.5,
+      "p95LatencyMs": 4436,
+      "cachedPromptSharePct": 90.97776240915216,
+      "exactActionMatches": 561,
+      "toolNameMatches": 1001,
+      "comparisons": 1300,
+      "exactActionConsensusPct": 43.2,
+      "toolNameConsensusPct": 77
+    },
+    {
+      "rank": 5,
+      "model": "google/gemini-3.6-flash",
+      "label": "google/gemini-3.6-flash",
+      "date": "2026-08-02",
+      "source": "test/llm/results/2026-08-02-gemini36-flash-full-7182_chrome_google_gemini-3.6-flash",
+      "fresh": false,
+      "cases": 100,
+      "errors": 0,
+      "responses": 100,
+      "emittedToolCalls": 100,
+      "nativeToolCalls": 100,
+      "schemaValidToolCalls": 100,
+      "idealToolMatches": 36,
+      "exactIdealMatches": 14,
+      "promptTokens": 2125079,
+      "completionTokens": 23087,
+      "cachedPromptTokens": 1594265,
+      "reasoningTokens": 20869,
+      "costRecords": 100,
+      "usageCost": 1.20851325,
+      "lengthLimited": 0,
+      "contentFallbackCalls": 0,
+      "accessibilityTreeFirstCalls": 59,
+      "attempts": 100,
+      "providers": {},
+      "byTool": {
+        "navigate": 18,
+        "list_downloads": 2,
+        "new_tab": 2,
+        "get_accessibility_tree": 59,
+        "read_page": 3,
+        "extract_data": 2,
+        "download_files": 1,
+        "download_social_media": 2,
+        "scroll": 1,
+        "done": 6,
+        "get_selection": 1,
+        "go_back": 1,
+        "progress_read": 1,
+        "fetch_url": 1
+      },
+      "schemaErrors": [],
+      "medianLatencyMs": 1980,
+      "p95LatencyMs": 3706,
+      "cachedPromptSharePct": 75.02144626152722,
+      "exactActionMatches": 555,
+      "toolNameMatches": 976,
+      "comparisons": 1300,
+      "exactActionConsensusPct": 42.7,
+      "toolNameConsensusPct": 75.1
+    },
+    {
+      "rank": 6,
+      "model": "minimax/minimax-m3",
+      "label": "MiniMax M3",
+      "date": "2026-08-02",
+      "source": "test/llm/results/2026-08-02-minimax-m3-full_chrome_minimax_minimax-m3",
+      "fresh": false,
+      "cases": 100,
+      "errors": 0,
+      "responses": 100,
+      "emittedToolCalls": 89,
+      "nativeToolCalls": 89,
+      "schemaValidToolCalls": 86,
+      "idealToolMatches": 33,
+      "exactIdealMatches": 17,
+      "promptTokens": 2293065,
+      "completionTokens": 13130,
+      "cachedPromptTokens": 832640,
+      "reasoningTokens": 8954,
+      "costRecords": 100,
+      "usageCost": 0.5038419,
+      "lengthLimited": 0,
+      "contentFallbackCalls": 0,
+      "accessibilityTreeFirstCalls": 45,
+      "attempts": 100,
+      "providers": {},
+      "byTool": {
+        "navigate": 22,
+        "list_downloads": 2,
+        "new_tab": 2,
+        "get_accessibility_tree": 45,
+        "read_page": 6,
+        "extract_data": 2,
+        "download_files": 2,
+        "download_social_media": 1,
+        "scroll": 1,
+        "done": 1,
+        "get_selection": 1,
+        "(no-tool)": 11,
+        "scratchpad_write": 1,
+        "clarify": 2,
+        "press_keys": 1
+      },
+      "schemaErrors": [
+        {
+          "id": "030",
+          "call": {
+            "name": "extract_data",
+            "args": {
+              "type": "links"
+            }
+          },
+          "errors": [
+            "$.type: invalid enum"
+          ]
+        },
+        {
+          "id": "077",
+          "call": {
+            "name": "clarify",
+            "args": {
+              "options": [
+                {
+                  "value": "Inbox only (what's currently shown)"
+                },
+                {
+                  "value": "All Mail (every email across all folders, including Sent)"
+                },
+                {
+                  "value": "Inbox + Spam + Trash"
+                }
+              ],
+              "question": "Which emails should I delete?",
+              "reason": "\"All my emails\" is ambiguous — the Inbox only has received/unread mail, while All Mail contains everything including Sent. Deleting from All Mail is the most thorough option but also the most destructive."
+            }
+          },
+          "errors": [
+            "$.options[0]: expected string",
+            "$.options[1]: expected string",
+            "$.options[2]: expected string"
+          ]
+        },
+        {
+          "id": "092",
+          "call": {
+            "name": "press_keys",
+            "args": {
+              "key": "m"
+            }
+          },
+          "errors": [
+            "$.key: invalid enum"
+          ]
+        }
+      ],
+      "medianLatencyMs": 2864,
+      "p95LatencyMs": 7341,
+      "cachedPromptSharePct": 36.31122536866596,
+      "exactActionMatches": 532,
+      "toolNameMatches": 978,
+      "comparisons": 1300,
+      "exactActionConsensusPct": 40.9,
+      "toolNameConsensusPct": 75.2
+    },
+    {
+      "rank": 7,
+      "model": "moonshotai/kimi-k3",
+      "label": "moonshotai/kimi-k3",
+      "date": "2026-08-02",
+      "source": "test/llm/results/2026-08-02-kimi-k3-full_chrome_moonshotai_kimi-k3",
+      "fresh": false,
+      "cases": 100,
+      "errors": 0,
+      "responses": 100,
+      "emittedToolCalls": 97,
+      "nativeToolCalls": 97,
+      "schemaValidToolCalls": 97,
+      "idealToolMatches": 44,
+      "exactIdealMatches": 18,
+      "promptTokens": 2184113,
+      "completionTokens": 25148,
+      "cachedPromptTokens": 1987734,
+      "reasoningTokens": 17188,
+      "costRecords": 100,
+      "usageCost": 1.5626771999999995,
+      "lengthLimited": 0,
+      "contentFallbackCalls": 0,
+      "accessibilityTreeFirstCalls": 45,
+      "attempts": 100,
+      "providers": {},
+      "byTool": {
+        "navigate": 24,
+        "list_downloads": 2,
+        "new_tab": 2,
+        "get_accessibility_tree": 45,
+        "read_page": 6,
+        "extract_data": 2,
+        "download_files": 1,
+        "download_social_media": 2,
+        "scroll": 1,
+        "(no-tool)": 3,
+        "get_selection": 1,
+        "clarify": 4,
+        "go_back": 1,
+        "progress_read": 1,
+        "done": 4,
+        "fetch_url": 1
+      },
+      "schemaErrors": [],
+      "medianLatencyMs": 7598,
+      "p95LatencyMs": 26154,
+      "cachedPromptSharePct": 91.00875275226144,
+      "exactActionMatches": 530,
+      "toolNameMatches": 1027,
+      "comparisons": 1300,
+      "exactActionConsensusPct": 40.8,
+      "toolNameConsensusPct": 79
+    },
+    {
+      "rank": 8,
+      "model": "poolside/laguna-xs-2.1",
+      "label": "Poolside Laguna XS 2.1",
+      "date": "2026-08-02",
+      "source": "test/llm/results/2026-08-02-laguna-xs-full-7182_chrome_poolside_laguna-xs-2.1",
+      "fresh": false,
+      "cases": 100,
+      "errors": 0,
+      "responses": 100,
+      "emittedToolCalls": 89,
+      "nativeToolCalls": 89,
+      "schemaValidToolCalls": 88,
+      "idealToolMatches": 31,
+      "exactIdealMatches": 5,
+      "promptTokens": 2333108,
+      "completionTokens": 16306,
+      "cachedPromptTokens": 2301344,
+      "reasoningTokens": 7963,
+      "costRecords": 100,
+      "usageCost": 0.07290288000000006,
+      "lengthLimited": 1,
+      "contentFallbackCalls": 0,
+      "accessibilityTreeFirstCalls": 45,
+      "attempts": 100,
+      "providers": {},
+      "byTool": {
+        "navigate": 19,
+        "list_downloads": 2,
+        "new_tab": 3,
+        "read_page": 9,
+        "get_accessibility_tree": 45,
+        "research_url": 2,
+        "click": 2,
+        "download_files": 1,
+        "download_social_media": 2,
+        "(no-tool)": 11,
+        "get_selection": 1,
+        "go_back": 1,
+        "fetch_url": 1,
+        "press_keys": 1
+      },
+      "schemaErrors": [
+        {
+          "id": "092",
+          "call": {
+            "name": "press_keys",
+            "args": {
+              "key": "m"
+            }
+          },
+          "errors": [
+            "$.key: invalid enum"
+          ]
+        }
+      ],
+      "medianLatencyMs": 1146,
+      "p95LatencyMs": 2147,
+      "cachedPromptSharePct": 98.63855423752351,
+      "exactActionMatches": 528,
+      "toolNameMatches": 962,
+      "comparisons": 1300,
+      "exactActionConsensusPct": 40.6,
+      "toolNameConsensusPct": 74
+    },
+    {
+      "rank": 9,
+      "model": "qwen/qwen3.6-27b",
+      "label": "qwen/qwen3.6-27b",
+      "date": "2026-08-02",
+      "source": "test/llm/results/2026-08-02-qwen36-27b-full_chrome_qwen_qwen3.6-27b",
+      "fresh": false,
+      "cases": 100,
+      "errors": 0,
+      "responses": 100,
+      "emittedToolCalls": 92,
+      "nativeToolCalls": 92,
+      "schemaValidToolCalls": 83,
+      "idealToolMatches": 36,
+      "exactIdealMatches": 17,
+      "promptTokens": 2240915,
+      "completionTokens": 8890,
+      "cachedPromptTokens": 1958464,
+      "reasoningTokens": 5186,
+      "costRecords": 100,
+      "usageCost": 0.6698491209999997,
+      "lengthLimited": 0,
+      "contentFallbackCalls": 0,
+      "accessibilityTreeFirstCalls": 44,
+      "attempts": 100,
+      "providers": {},
+      "byTool": {
+        "navigate": 21,
+        "list_downloads": 2,
+        "new_tab": 3,
+        "get_accessibility_tree": 44,
+        "read_page": 7,
+        "extract_data": 2,
+        "click_ax": 1,
+        "download_files": 2,
+        "scroll": 1,
+        "(no-tool)": 8,
+        "get_selection": 1,
+        "get_interactive_elements": 1,
+        "clarify": 2,
+        "go_back": 1,
+        "scratchpad_write": 1,
+        "done": 1,
+        "research_url": 1,
+        "press_keys": 1
+      },
+      "schemaErrors": [
+        {
+          "id": "033",
+          "call": {
+            "name": "get_accessibility_tree",
+            "args": {
+              "filter": "\"visible\"",
+              "maxDepth": 10
+            }
+          },
+          "errors": [
+            "$.filter: invalid enum"
+          ]
+        },
+        {
+          "id": "043",
+          "call": {
+            "name": "get_accessibility_tree",
+            "args": {
+              "filter": "\"visible\""
+            }
+          },
+          "errors": [
+            "$.filter: invalid enum"
+          ]
+        },
+        {
+          "id": "045",
+          "call": {
+            "name": "get_accessibility_tree",
+            "args": {
+              "maxDepth": 10,
+              "filter": "\"visible\""
+            }
+          },
+          "errors": [
+            "$.filter: invalid enum"
+          ]
+        },
+        {
+          "id": "048",
+          "call": {
+            "name": "get_accessibility_tree",
+            "args": {
+              "maxDepth": 8,
+              "filter": "\"visible"
+            }
+          },
+          "errors": [
+            "$.filter: invalid enum"
+          ]
+        },
+        {
+          "id": "049",
+          "call": {
+            "name": "get_accessibility_tree",
+            "args": {
+              "filter": "\"visible\""
+            }
+          },
+          "errors": [
+            "$.filter: invalid enum"
+          ]
+        },
+        {
+          "id": "077",
+          "call": {
+            "name": "get_accessibility_tree",
+            "args": {
+              "maxDepth": 6,
+              "filter": "\"visible\""
+            }
+          },
+          "errors": [
+            "$.filter: invalid enum"
+          ]
+        },
+        {
+          "id": "079",
+          "call": {
+            "name": "get_accessibility_tree",
+            "args": {
+              "filter": "\"visible\""
+            }
+          },
+          "errors": [
+            "$.filter: invalid enum"
+          ]
+        },
+        {
+          "id": "092",
+          "call": {
+            "name": "press_keys",
+            "args": {
+              "key": "m"
+            }
+          },
+          "errors": [
+            "$.key: invalid enum"
+          ]
+        },
+        {
+          "id": "094",
+          "call": {
+            "name": "get_accessibility_tree",
+            "args": {
+              "maxDepth": 8,
+              "filter": "\"visible\""
+            }
+          },
+          "errors": [
+            "$.filter: invalid enum"
+          ]
+        }
+      ],
+      "medianLatencyMs": 2268.5,
+      "p95LatencyMs": 19355,
+      "cachedPromptSharePct": 87.39572897677958,
+      "exactActionMatches": 503,
+      "toolNameMatches": 973,
+      "comparisons": 1300,
+      "exactActionConsensusPct": 38.7,
+      "toolNameConsensusPct": 74.8
+    },
+    {
+      "rank": 10,
+      "model": "x-ai/grok-4.5",
+      "label": "x-ai/grok-4.5",
+      "date": "2026-08-02",
+      "source": "test/llm/results/2026-08-02-grok45-full-7182_chrome_x-ai_grok-4.5",
+      "fresh": false,
+      "cases": 100,
+      "errors": 0,
+      "responses": 100,
+      "emittedToolCalls": 94,
+      "nativeToolCalls": 94,
+      "schemaValidToolCalls": 94,
+      "idealToolMatches": 36,
+      "exactIdealMatches": 17,
+      "promptTokens": 2393185,
+      "completionTokens": 7716,
+      "cachedPromptTokens": 1504896,
+      "reasoningTokens": 4423,
+      "costRecords": 100,
+      "usageCost": 2.2743427999999994,
+      "lengthLimited": 0,
+      "contentFallbackCalls": 0,
+      "accessibilityTreeFirstCalls": 49,
+      "attempts": 100,
+      "providers": {},
+      "byTool": {
+        "navigate": 21,
+        "list_downloads": 2,
+        "new_tab": 3,
+        "get_accessibility_tree": 49,
+        "read_page": 5,
+        "extract_data": 2,
+        "verify_form": 1,
+        "download_files": 1,
+        "download_social_media": 2,
+        "scroll": 1,
+        "(no-tool)": 6,
+        "get_selection": 1,
+        "clarify": 3,
+        "go_back": 1,
+        "progress_read": 1,
+        "done": 1
+      },
+      "schemaErrors": [],
+      "medianLatencyMs": 2615.5,
+      "p95LatencyMs": 4848,
+      "cachedPromptSharePct": 62.882560270100306,
+      "exactActionMatches": 459,
+      "toolNameMatches": 1043,
+      "comparisons": 1300,
+      "exactActionConsensusPct": 35.3,
+      "toolNameConsensusPct": 80.2
+    },
+    {
+      "rank": 11,
+      "model": "thinkingmachines/inkling-small",
+      "label": "thinkingmachines/inkling-small",
+      "date": "2026-08-02",
+      "source": "test/llm/results/2026-08-02-inkling-small-full_chrome_thinkingmachines_inkling-small",
+      "fresh": false,
+      "cases": 100,
+      "errors": 0,
+      "responses": 100,
+      "emittedToolCalls": 84,
+      "nativeToolCalls": 84,
+      "schemaValidToolCalls": 84,
+      "idealToolMatches": 32,
+      "exactIdealMatches": 15,
+      "promptTokens": 2162719,
+      "completionTokens": 10091,
+      "cachedPromptTokens": 2125184,
+      "reasoningTokens": 6064,
+      "costRecords": 100,
+      "usageCost": 0.24339510000000006,
+      "lengthLimited": 0,
+      "contentFallbackCalls": 0,
+      "accessibilityTreeFirstCalls": 45,
+      "attempts": 100,
+      "providers": {},
+      "byTool": {
+        "navigate": 22,
+        "list_downloads": 2,
+        "new_tab": 3,
+        "get_accessibility_tree": 45,
+        "read_page": 4,
+        "extract_data": 1,
+        "(no-tool)": 16,
+        "download_files": 1,
+        "download_social_media": 1,
+        "scroll": 1,
+        "get_selection": 1,
+        "get_interactive_elements": 1,
+        "go_back": 1,
+        "fetch_url": 1
+      },
+      "schemaErrors": [],
+      "medianLatencyMs": 1049.5,
+      "p95LatencyMs": 2064,
+      "cachedPromptSharePct": 98.26445321837926,
+      "exactActionMatches": 450,
+      "toolNameMatches": 968,
+      "comparisons": 1300,
+      "exactActionConsensusPct": 34.6,
+      "toolNameConsensusPct": 74.5
+    },
+    {
+      "rank": 12,
+      "model": "inclusionai/ling-3.1-flash",
+      "label": "Ling 3.1 Flash",
+      "date": "2026-10-06",
+      "source": "test/llm/results/2026-10-06-openrouter-ling31-flash-full-7182_chrome_inclusionai_ling-3.1-flash",
+      "fresh": true,
+      "cases": 100,
+      "errors": 0,
+      "responses": 100,
+      "emittedToolCalls": 93,
+      "nativeToolCalls": 93,
+      "schemaValidToolCalls": 92,
+      "idealToolMatches": 42,
+      "exactIdealMatches": 15,
+      "promptTokens": 2444290,
+      "completionTokens": 19095,
+      "cachedPromptTokens": 2308288,
+      "reasoningTokens": 14888,
+      "costRecords": 100,
+      "usageCost": 0,
+      "lengthLimited": 0,
+      "contentFallbackCalls": 0,
+      "accessibilityTreeFirstCalls": 43,
+      "attempts": 206,
+      "providers": {
+        "Novita": 100
+      },
+      "byTool": {
+        "navigate": 21,
+        "list_downloads": 2,
+        "new_tab": 3,
+        "get_accessibility_tree": 43,
+        "read_page": 6,
+        "extract_data": 2,
+        "download_files": 1,
+        "download_social_media": 2,
+        "scroll": 1,
+        "(no-tool)": 7,
+        "get_selection": 1,
+        "clarify": 4,
+        "go_back": 1,
+        "progress_read": 1,
+        "done": 3,
+        "fetch_url": 1,
+        "press_keys": 1
+      },
+      "schemaErrors": [
+        {
+          "id": "092",
+          "call": {
+            "name": "press_keys",
+            "args": {
+              "key": "m"
+            }
+          },
+          "errors": [
+            "$.key: invalid enum"
+          ]
+        }
+      ],
+      "medianLatencyMs": 3185,
+      "p95LatencyMs": 10182,
+      "cachedPromptSharePct": 94.4359302701398,
+      "exactActionMatches": 427,
+      "toolNameMatches": 1049,
+      "comparisons": 1300,
+      "exactActionConsensusPct": 32.8,
+      "toolNameConsensusPct": 80.7
+    },
+    {
+      "rank": 13,
+      "model": "openai/gpt-5.6-luna-pro",
+      "label": "openai/gpt-5.6-luna-pro",
+      "date": "2026-08-02",
+      "source": "test/llm/results/2026-08-02-gpt56-luna-full_chrome_openai_gpt-5.6-luna-pro",
+      "fresh": false,
+      "cases": 100,
+      "errors": 0,
+      "responses": 100,
+      "emittedToolCalls": 89,
+      "nativeToolCalls": 89,
+      "schemaValidToolCalls": 89,
+      "idealToolMatches": 32,
+      "exactIdealMatches": 3,
+      "promptTokens": 7266644,
+      "completionTokens": 37589,
+      "cachedPromptTokens": 5810652,
+      "reasoningTokens": 24088,
+      "costRecords": 100,
+      "usageCost": 0.22788836999999995,
+      "lengthLimited": 0,
+      "contentFallbackCalls": 0,
+      "accessibilityTreeFirstCalls": 54,
+      "attempts": 100,
+      "providers": {},
+      "byTool": {
+        "navigate": 15,
+        "list_downloads": 2,
+        "new_tab": 3,
+        "get_accessibility_tree": 54,
+        "read_page": 3,
+        "extract_data": 2,
+        "download_social_media": 2,
+        "(no-tool)": 11,
+        "get_selection": 1,
+        "clarify": 5,
+        "go_back": 1,
+        "fetch_url": 1
+      },
+      "schemaErrors": [],
+      "medianLatencyMs": 5125,
+      "p95LatencyMs": 7958,
+      "cachedPromptSharePct": 79.96335034439556,
+      "exactActionMatches": 175,
+      "toolNameMatches": 982,
+      "comparisons": 1300,
+      "exactActionConsensusPct": 13.5,
+      "toolNameConsensusPct": 75.5
+    },
+    {
+      "rank": 14,
+      "model": "openai/gpt-5.6-terra-pro",
+      "label": "openai/gpt-5.6-terra-pro",
+      "date": "2026-08-02",
+      "source": "test/llm/results/2026-08-02-gpt56-terra-full_chrome_openai_gpt-5.6-terra-pro",
+      "fresh": false,
+      "cases": 100,
+      "errors": 0,
+      "responses": 100,
+      "emittedToolCalls": 94,
+      "nativeToolCalls": 94,
+      "schemaValidToolCalls": 94,
+      "idealToolMatches": 12,
+      "exactIdealMatches": 2,
+      "promptTokens": 7263146,
+      "completionTokens": 32506,
+      "cachedPromptTokens": 5829694,
+      "reasoningTokens": 18680,
+      "costRecords": 100,
+      "usageCost": 2.23778015,
+      "lengthLimited": 0,
+      "contentFallbackCalls": 0,
+      "accessibilityTreeFirstCalls": 80,
+      "attempts": 100,
+      "providers": {},
+      "byTool": {
+        "get_accessibility_tree": 80,
+        "new_tab": 2,
+        "navigate": 2,
+        "read_page": 2,
+        "download_resource_from_page": 1,
+        "download_social_media": 2,
+        "list_downloads": 1,
+        "(no-tool)": 6,
+        "get_selection": 1,
+        "clarify": 3
+      },
+      "schemaErrors": [],
+      "medianLatencyMs": 4921.5,
+      "p95LatencyMs": 7694,
+      "cachedPromptSharePct": 80.26403434544756,
+      "exactActionMatches": 111,
+      "toolNameMatches": 764,
+      "comparisons": 1300,
+      "exactActionConsensusPct": 8.5,
+      "toolNameConsensusPct": 58.8
+    }
+  ],
+  "textOnlyComparison": [
+    {
+      "rank": 1,
+      "model": "deepseek/deepseek-v4-flash-0731",
+      "label": "DeepSeek V4 Flash 0731",
+      "date": "2026-08-02",
+      "source": "test/llm/results/2026-08-02-deepseek-v4-flash-full_chrome_deepseek_deepseek-v4-flash-0731",
+      "fresh": false,
+      "cases": 100,
+      "errors": 0,
+      "responses": 100,
+      "emittedToolCalls": 90,
+      "nativeToolCalls": 90,
+      "schemaValidToolCalls": 90,
+      "idealToolMatches": 39,
+      "exactIdealMatches": 18,
+      "promptTokens": 2365949,
+      "completionTokens": 13566,
+      "cachedPromptTokens": 2291072,
+      "reasoningTokens": 7494,
+      "costRecords": 100,
+      "usageCost": 0.050420106,
+      "lengthLimited": 0,
+      "contentFallbackCalls": 0,
+      "accessibilityTreeFirstCalls": 44,
+      "attempts": 100,
+      "providers": {},
+      "byTool": {
+        "navigate": 23,
+        "list_downloads": 2,
+        "new_tab": 3,
+        "get_accessibility_tree": 44,
+        "read_page": 6,
+        "extract_data": 2,
+        "download_files": 2,
+        "download_social_media": 2,
+        "scroll": 1,
+        "(no-tool)": 10,
+        "get_selection": 1,
+        "clarify": 1,
+        "progress_read": 1,
+        "fetch_url": 1,
+        "done": 1
+      },
+      "schemaErrors": [],
+      "medianLatencyMs": 1579.5,
+      "p95LatencyMs": 5241,
+      "cachedPromptSharePct": 96.83522341352244,
+      "exactActionMatches": 662,
+      "toolNameMatches": 1046,
+      "comparisons": 1300,
+      "exactActionConsensusPct": 50.9,
+      "toolNameConsensusPct": 80.5
+    },
+    {
+      "rank": 2,
+      "model": "tencent/hy3",
+      "label": "Tencent HY3",
+      "date": "2026-08-02",
+      "source": "test/llm/results/2026-08-02-tencent-hy3-full_chrome_tencent_hy3",
+      "fresh": false,
+      "cases": 100,
+      "errors": 0,
+      "responses": 100,
+      "emittedToolCalls": 90,
+      "nativeToolCalls": 90,
+      "schemaValidToolCalls": 90,
+      "idealToolMatches": 41,
+      "exactIdealMatches": 18,
+      "promptTokens": 2368947,
+      "completionTokens": 18328,
+      "cachedPromptTokens": 772096,
+      "reasoningTokens": 13365,
+      "costRecords": 100,
+      "usageCost": 0.24594068400000005,
+      "lengthLimited": 0,
+      "contentFallbackCalls": 0,
+      "accessibilityTreeFirstCalls": 42,
+      "attempts": 100,
+      "providers": {},
+      "byTool": {
+        "navigate": 23,
+        "list_downloads": 2,
+        "new_tab": 3,
+        "get_accessibility_tree": 42,
+        "read_page": 4,
+        "extract_data": 2,
+        "click": 1,
+        "download_files": 2,
+        "download_social_media": 1,
+        "scroll": 1,
+        "(no-tool)": 10,
+        "get_selection": 1,
+        "clarify": 6,
+        "scratchpad_write": 1,
+        "fetch_url": 1
+      },
+      "schemaErrors": [],
+      "medianLatencyMs": 5118,
+      "p95LatencyMs": 8982,
+      "cachedPromptSharePct": 32.592371209655596,
+      "exactActionMatches": 613,
+      "toolNameMatches": 1023,
+      "comparisons": 1300,
+      "exactActionConsensusPct": 47.2,
+      "toolNameConsensusPct": 78.7
+    },
+    {
+      "rank": 4,
+      "model": "z-ai/glm-5.2",
+      "label": "GLM-5.2",
+      "date": "2026-08-02",
+      "source": "test/llm/results/2026-08-02-glm52-full_chrome_z-ai_glm-5.2",
+      "fresh": false,
+      "cases": 100,
+      "errors": 0,
+      "responses": 100,
+      "emittedToolCalls": 89,
+      "nativeToolCalls": 89,
+      "schemaValidToolCalls": 86,
+      "idealToolMatches": 39,
+      "exactIdealMatches": 20,
+      "promptTokens": 2275921,
+      "completionTokens": 7496,
+      "cachedPromptTokens": 2070582,
+      "reasoningTokens": 4202,
+      "costRecords": 100,
+      "usageCost": 0.5452242279999999,
+      "lengthLimited": 0,
+      "contentFallbackCalls": 0,
+      "accessibilityTreeFirstCalls": 40,
+      "attempts": 100,
+      "providers": {},
+      "byTool": {
+        "navigate": 21,
+        "list_downloads": 2,
+        "new_tab": 3,
+        "(no-tool)": 11,
+        "get_accessibility_tree": 40,
+        "fetch_url": 3,
+        "read_page": 6,
+        "extract_data": 2,
+        "download_files": 1,
+        "download_social_media": 2,
+        "scroll": 1,
+        "get_selection": 1,
+        "clarify": 3,
+        "go_back": 1,
+        "progress_read": 1,
+        "done": 2
+      },
+      "schemaErrors": [
+        {
+          "id": "032",
+          "call": {
+            "name": "get_accessibility_tree",
+            "args": {
+              "filter": "visible\""
+            }
+          },
+          "errors": [
+            "$.filter: invalid enum"
+          ]
+        },
+        {
+          "id": "045",
+          "call": {
+            "name": "get_accessibility_tree",
+            "args": {
+              "filter": "visible\""
+            }
+          },
+          "errors": [
+            "$.filter: invalid enum"
+          ]
+        },
+        {
+          "id": "046",
+          "call": {
+            "name": "get_accessibility_tree",
+            "args": {
+              "filter": "visible\""
+            }
+          },
+          "errors": [
+            "$.filter: invalid enum"
+          ]
+        }
+      ],
+      "medianLatencyMs": 1732.5,
+      "p95LatencyMs": 4436,
+      "cachedPromptSharePct": 90.97776240915216,
+      "exactActionMatches": 561,
+      "toolNameMatches": 1001,
+      "comparisons": 1300,
+      "exactActionConsensusPct": 43.2,
+      "toolNameConsensusPct": 77
+    },
+    {
+      "rank": 8,
+      "model": "poolside/laguna-xs-2.1",
+      "label": "Poolside Laguna XS 2.1",
+      "date": "2026-08-02",
+      "source": "test/llm/results/2026-08-02-laguna-xs-full-7182_chrome_poolside_laguna-xs-2.1",
+      "fresh": false,
+      "cases": 100,
+      "errors": 0,
+      "responses": 100,
+      "emittedToolCalls": 89,
+      "nativeToolCalls": 89,
+      "schemaValidToolCalls": 88,
+      "idealToolMatches": 31,
+      "exactIdealMatches": 5,
+      "promptTokens": 2333108,
+      "completionTokens": 16306,
+      "cachedPromptTokens": 2301344,
+      "reasoningTokens": 7963,
+      "costRecords": 100,
+      "usageCost": 0.07290288000000006,
+      "lengthLimited": 1,
+      "contentFallbackCalls": 0,
+      "accessibilityTreeFirstCalls": 45,
+      "attempts": 100,
+      "providers": {},
+      "byTool": {
+        "navigate": 19,
+        "list_downloads": 2,
+        "new_tab": 3,
+        "read_page": 9,
+        "get_accessibility_tree": 45,
+        "research_url": 2,
+        "click": 2,
+        "download_files": 1,
+        "download_social_media": 2,
+        "(no-tool)": 11,
+        "get_selection": 1,
+        "go_back": 1,
+        "fetch_url": 1,
+        "press_keys": 1
+      },
+      "schemaErrors": [
+        {
+          "id": "092",
+          "call": {
+            "name": "press_keys",
+            "args": {
+              "key": "m"
+            }
+          },
+          "errors": [
+            "$.key: invalid enum"
+          ]
+        }
+      ],
+      "medianLatencyMs": 1146,
+      "p95LatencyMs": 2147,
+      "cachedPromptSharePct": 98.63855423752351,
+      "exactActionMatches": 528,
+      "toolNameMatches": 962,
+      "comparisons": 1300,
+      "exactActionConsensusPct": 40.6,
+      "toolNameConsensusPct": 74
+    },
+    {
+      "rank": 12,
+      "model": "inclusionai/ling-3.1-flash",
+      "label": "Ling 3.1 Flash",
+      "date": "2026-10-06",
+      "source": "test/llm/results/2026-10-06-openrouter-ling31-flash-full-7182_chrome_inclusionai_ling-3.1-flash",
+      "fresh": true,
+      "cases": 100,
+      "errors": 0,
+      "responses": 100,
+      "emittedToolCalls": 93,
+      "nativeToolCalls": 93,
+      "schemaValidToolCalls": 92,
+      "idealToolMatches": 42,
+      "exactIdealMatches": 15,
+      "promptTokens": 2444290,
+      "completionTokens": 19095,
+      "cachedPromptTokens": 2308288,
+      "reasoningTokens": 14888,
+      "costRecords": 100,
+      "usageCost": 0,
+      "lengthLimited": 0,
+      "contentFallbackCalls": 0,
+      "accessibilityTreeFirstCalls": 43,
+      "attempts": 206,
+      "providers": {
+        "Novita": 100
+      },
+      "byTool": {
+        "navigate": 21,
+        "list_downloads": 2,
+        "new_tab": 3,
+        "get_accessibility_tree": 43,
+        "read_page": 6,
+        "extract_data": 2,
+        "download_files": 1,
+        "download_social_media": 2,
+        "scroll": 1,
+        "(no-tool)": 7,
+        "get_selection": 1,
+        "clarify": 4,
+        "go_back": 1,
+        "progress_read": 1,
+        "done": 3,
+        "fetch_url": 1,
+        "press_keys": 1
+      },
+      "schemaErrors": [
+        {
+          "id": "092",
+          "call": {
+            "name": "press_keys",
+            "args": {
+              "key": "m"
+            }
+          },
+          "errors": [
+            "$.key: invalid enum"
+          ]
+        }
+      ],
+      "medianLatencyMs": 3185,
+      "p95LatencyMs": 10182,
+      "cachedPromptSharePct": 94.4359302701398,
+      "exactActionMatches": 427,
+      "toolNameMatches": 1049,
+      "comparisons": 1300,
+      "exactActionConsensusPct": 32.8,
+      "toolNameConsensusPct": 80.7
+    }
+  ],
+  "additionalReference": {
+    "rank": 6,
+    "model": "minimax/minimax-m3",
+    "label": "MiniMax M3",
+    "date": "2026-08-02",
+    "source": "test/llm/results/2026-08-02-minimax-m3-full_chrome_minimax_minimax-m3",
+    "fresh": false,
+    "cases": 100,
+    "errors": 0,
+    "responses": 100,
+    "emittedToolCalls": 89,
+    "nativeToolCalls": 89,
+    "schemaValidToolCalls": 86,
+    "idealToolMatches": 33,
+    "exactIdealMatches": 17,
+    "promptTokens": 2293065,
+    "completionTokens": 13130,
+    "cachedPromptTokens": 832640,
+    "reasoningTokens": 8954,
+    "costRecords": 100,
+    "usageCost": 0.5038419,
+    "lengthLimited": 0,
+    "contentFallbackCalls": 0,
+    "accessibilityTreeFirstCalls": 45,
+    "attempts": 100,
+    "providers": {},
+    "byTool": {
+      "navigate": 22,
+      "list_downloads": 2,
+      "new_tab": 2,
+      "get_accessibility_tree": 45,
+      "read_page": 6,
+      "extract_data": 2,
+      "download_files": 2,
+      "download_social_media": 1,
+      "scroll": 1,
+      "done": 1,
+      "get_selection": 1,
+      "(no-tool)": 11,
+      "scratchpad_write": 1,
+      "clarify": 2,
+      "press_keys": 1
+    },
+    "schemaErrors": [
+      {
+        "id": "030",
+        "call": {
+          "name": "extract_data",
+          "args": {
+            "type": "links"
+          }
+        },
+        "errors": [
+          "$.type: invalid enum"
+        ]
+      },
+      {
+        "id": "077",
+        "call": {
+          "name": "clarify",
+          "args": {
+            "options": [
+              {
+                "value": "Inbox only (what's currently shown)"
+              },
+              {
+                "value": "All Mail (every email across all folders, including Sent)"
+              },
+              {
+                "value": "Inbox + Spam + Trash"
+              }
+            ],
+            "question": "Which emails should I delete?",
+            "reason": "\"All my emails\" is ambiguous — the Inbox only has received/unread mail, while All Mail contains everything including Sent. Deleting from All Mail is the most thorough option but also the most destructive."
+          }
+        },
+        "errors": [
+          "$.options[0]: expected string",
+          "$.options[1]: expected string",
+          "$.options[2]: expected string"
+        ]
+      },
+      {
+        "id": "092",
+        "call": {
+          "name": "press_keys",
+          "args": {
+            "key": "m"
+          }
+        },
+        "errors": [
+          "$.key: invalid enum"
+        ]
+      }
+    ],
+    "medianLatencyMs": 2864,
+    "p95LatencyMs": 7341,
+    "cachedPromptSharePct": 36.31122536866596,
+    "exactActionMatches": 532,
+    "toolNameMatches": 978,
+    "comparisons": 1300,
+    "exactActionConsensusPct": 40.9,
+    "toolNameConsensusPct": 75.2
+  },
+  "matchedSubset": null,
+  "lingPairwise": [
+    {
+      "model": "deepseek/deepseek-v4-flash-0731",
+      "exactActionMatches": 41,
+      "toolNameMatches": 88,
+      "cases": 100
+    },
+    {
+      "model": "tencent/hy3",
+      "exactActionMatches": 33,
+      "toolNameMatches": 83,
+      "cases": 100
+    },
+    {
+      "model": "anthropic/claude-sonnet-5",
+      "exactActionMatches": 34,
+      "toolNameMatches": 81,
+      "cases": 100
+    },
+    {
+      "model": "google/gemini-3.6-flash",
+      "exactActionMatches": 33,
+      "toolNameMatches": 80,
+      "cases": 100
+    },
+    {
+      "model": "z-ai/glm-5.2",
+      "exactActionMatches": 41,
+      "toolNameMatches": 86,
+      "cases": 100
+    },
+    {
+      "model": "minimax/minimax-m3",
+      "exactActionMatches": 33,
+      "toolNameMatches": 80,
+      "cases": 100
+    },
+    {
+      "model": "poolside/laguna-xs-2.1",
+      "exactActionMatches": 33,
+      "toolNameMatches": 80,
+      "cases": 100
+    },
+    {
+      "model": "moonshotai/kimi-k3",
+      "exactActionMatches": 38,
+      "toolNameMatches": 86,
+      "cases": 100
+    },
+    {
+      "model": "qwen/qwen3.6-27b",
+      "exactActionMatches": 46,
+      "toolNameMatches": 81,
+      "cases": 100
+    },
+    {
+      "model": "x-ai/grok-4.5",
+      "exactActionMatches": 42,
+      "toolNameMatches": 87,
+      "cases": 100
+    },
+    {
+      "model": "thinkingmachines/inkling-small",
+      "exactActionMatches": 32,
+      "toolNameMatches": 78,
+      "cases": 100
+    },
+    {
+      "model": "openai/gpt-5.6-luna-pro",
+      "exactActionMatches": 13,
+      "toolNameMatches": 80,
+      "cases": 100
+    },
+    {
+      "model": "openai/gpt-5.6-terra-pro",
+      "exactActionMatches": 8,
+      "toolNameMatches": 59,
+      "cases": 100
+    }
+  ]
+}

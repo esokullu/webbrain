@@ -1,0 +1,32 @@
+{
+  "diagnosticOnly": true,
+  "note": "Minimal availability probe, not a benchmark case.",
+  "retrievedAt": "2026-10-06T19:49:04.332Z",
+  "status": 429,
+  "latencyMs": 309,
+  "retryAfter": null,
+  "request": {
+    "model": "inclusionai/ling-3.1-flash",
+    "messages": [
+      {
+        "role": "user",
+        "content": "Reply with ready."
+      }
+    ],
+    "max_tokens": 16
+  },
+  "response": {
+    "error": {
+      "message": "Provider returned error",
+      "code": 429,
+      "metadata": {
+        "raw": "inclusionai/ling-3.1-flash is temporarily rate-limited upstream. Please retry shortly, or add your own key to accumulate your rate limits: https://openrouter.ai/settings/integrations",
+        "provider_name": "Novita",
+        "is_byok": false,
+        "limit_source": "upstream_provider_shared_pool",
+        "remedy_hint": "Retry shortly, add your own provider key (https://openrouter.ai/settings/integrations), or route to another provider with provider routing: https://openrouter.ai/docs/features/provider-routing"
+      }
+    },
+    "user_id": "user_3AbNCAJijEuArTpJ0g3wyO8p3KK"
+  }
+}

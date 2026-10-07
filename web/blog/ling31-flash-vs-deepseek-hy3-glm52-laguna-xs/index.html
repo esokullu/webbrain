@@ -1,0 +1,639 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Ling 3.1 Flash planner benchmark vs DeepSeek, HY3, GLM, and Laguna XS - WebBrain Blog</title>
+  <meta name="description" content="Ling 3.1 Flash completes 100 pinned planner cases with 80.7% tool-family consensus, 32.8% exact consensus, 92 valid calls, and zero reported cost, after extensive Novita rate-limit recovery.">
+  <meta name="keywords" content="Ling 3.1 Flash, inclusionAI, DeepSeek V4 Flash, Tencent HY3, GLM-5.2, Poolside Laguna XS 2.1, Ling 3.0 Flash VL, Nex-N2.5-Pro, Nex-N2.5-mini, MiniMax M3, OpenRouter, browser agent benchmark, tool calling">
+  <meta property="og:title" content="Ling 3.1 Flash in WebBrain&#39;s text-only planner benchmark">
+  <meta property="og:description" content="A pinned full-tier tool-calling test against DeepSeek V4 Flash, Tencent HY3, GLM-5.2, and Laguna XS 2.1, with measured coverage, latency, and cost.">
+  <meta property="og:type" content="article">
+  <meta property="og:url" content="https://webbrain.one/blog/ling31-flash-vs-deepseek-hy3-glm52-laguna-xs">
+  <meta property="og:image" content="https://webbrain.one/og-image.png">
+  <meta property="og:image:secure_url" content="https://webbrain.one/og-image.png">
+  <meta property="og:image:type" content="image/png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="WebBrain — Open-source AI browser agent">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Ling 3.1 Flash vs four text-only browser planners">
+  <meta name="twitter:description" content="Same pinned planner inputs, historical peers, and raw OpenRouter evidence. First-action agreement and argument validity are measured separately.">
+  <meta name="twitter:image" content="https://webbrain.one/twitter-image.png">
+  <meta name="twitter:image:alt" content="WebBrain — Open-source AI browser agent">
+  <link rel="icon" type="image/png" href="/favicon.png">
+  <link rel="canonical" href="https://webbrain.one/blog/ling31-flash-vs-deepseek-hy3-glm52-laguna-xs">
+  <!-- Blog is English-only; alternates point to locale homepages. -->
+  <link rel="alternate" hreflang="en" href="https://webbrain.one/">
+  <link rel="alternate" hreflang="es" href="https://webbrain.one/es/">
+  <link rel="alternate" hreflang="fr" href="https://webbrain.one/fr/">
+  <link rel="alternate" hreflang="tr" href="https://webbrain.one/tr/">
+  <link rel="alternate" hreflang="zh" href="https://webbrain.one/zh/">
+  <link rel="alternate" hreflang="ru" href="https://webbrain.one/ru/">
+  <link rel="alternate" hreflang="uk" href="https://webbrain.one/uk/">
+  <link rel="alternate" hreflang="ar" href="https://webbrain.one/ar/">
+  <link rel="alternate" hreflang="ja" href="https://webbrain.one/ja/">
+  <link rel="alternate" hreflang="ko" href="https://webbrain.one/ko/">
+  <link rel="alternate" hreflang="id" href="https://webbrain.one/id/">
+  <link rel="alternate" hreflang="th" href="https://webbrain.one/th/">
+  <link rel="alternate" hreflang="ms" href="https://webbrain.one/ms/">
+  <link rel="alternate" hreflang="tl" href="https://webbrain.one/tl/">
+  <link rel="alternate" hreflang="he" href="https://webbrain.one/he/">
+  <link rel="alternate" hreflang="x-default" href="https://webbrain.one/">
+  <style>
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+    :root {
+      --bg: #0b0e17;
+      --bg-card: #111827;
+      --bg-card-hover: #1a2233;
+      --surface: #161d2e;
+      --border: rgba(255,255,255,0.07);
+      --text: #e4e4ec;
+      --text-dim: #8b8fa4;
+      --accent: #6c63ff;
+      --accent-glow: rgba(108,99,255,0.25);
+      --accent2: #a78bfa;
+      --success: #34d399;
+      --warning: #fbbf24;
+      --danger: #f87171;
+      --tint-soft: rgba(255,255,255,0.05);
+      --tint-soft-2: rgba(255,255,255,0.04);
+      --tint-medium: rgba(255,255,255,0.08);
+      --nav-bg: rgba(11,14,23,0.85);
+      --code-bg: #0a0e17;
+      --inline-code-bg: rgba(255,255,255,0.06);
+      --shadow-strong: rgba(0,0,0,0.40);
+      --radius: 12px;
+      --radius-lg: 16px;
+      --max-w: 760px;
+      color-scheme: dark;
+    }
+    :root[data-theme="light"] {
+      --bg: #f7f1e6;
+      --bg-card: #fffdf8;
+      --bg-card-hover: #f2e9d4;
+      --surface: #ede2cb;
+      --border: rgba(89,55,25,0.15);
+      --text: #2c1810;
+      --text-dim: #6b5b47;
+      --accent: #5b52e8;
+      --accent-glow: rgba(91,82,232,0.20);
+      --accent2: #7c6ce6;
+      --success: #2d8866;
+      --warning: #9a6500;
+      --danger: #b74747;
+      --tint-soft: rgba(89,55,25,0.05);
+      --tint-soft-2: rgba(89,55,25,0.07);
+      --tint-medium: rgba(89,55,25,0.10);
+      --nav-bg: rgba(247,241,230,0.85);
+      --code-bg: #fff7e6;
+      --inline-code-bg: rgba(89,55,25,0.08);
+      --shadow-strong: rgba(89,55,25,0.18);
+      color-scheme: light;
+    }
+    html { scroll-behavior: smooth; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Inter, Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.75;
+      font-size: 17px;
+      overflow-x: hidden;
+    }
+    a { color: var(--accent2); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    .glow-bg {
+      position: fixed;
+      inset: 0;
+      z-index: -1;
+      pointer-events: none;
+      overflow: hidden;
+    }
+    .glow-bg::before,
+    .glow-bg::after {
+      content: '';
+      position: absolute;
+      border-radius: 50%;
+      filter: blur(120px);
+      opacity: 0.26;
+    }
+    .glow-bg::before {
+      width: 500px;
+      height: 500px;
+      background: var(--accent);
+      top: -220px;
+      left: -160px;
+    }
+    .glow-bg::after {
+      width: 500px;
+      height: 500px;
+      background: var(--accent2);
+      right: -180px;
+      bottom: -230px;
+      opacity: 0.18;
+    }
+    nav {
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      background: var(--nav-bg);
+      backdrop-filter: saturate(160%) blur(12px);
+      -webkit-backdrop-filter: saturate(160%) blur(12px);
+      border-bottom: 1px solid var(--border);
+    }
+    .nav-inner {
+      max-width: var(--max-w);
+      margin: 0 auto;
+      padding: 14px 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 20px;
+    }
+    .nav-brand {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      flex-shrink: 0;
+      color: var(--text);
+      font-size: 18px;
+      font-weight: 700;
+      text-decoration: none;
+    }
+    .nav-brand:hover { text-decoration: none; }
+    .nav-brand .brand-logo { width: 26px; height: 26px; border-radius: 7px; flex: 0 0 auto; }
+    .nav-brand .domain { opacity: 0.5; font-weight: 400; }
+    .nav-links {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 16px;
+      min-width: 0;
+    }
+    .nav-links a {
+      position: relative;
+      color: var(--text-dim);
+      font-size: 14px;
+      font-weight: 500;
+      white-space: nowrap;
+    }
+    .nav-links a:hover { color: var(--text); text-decoration: none; }
+    .nav-links a[aria-current="page"] { color: var(--text); }
+    .nav-links a[aria-current="page"]::after {
+      content: '';
+      position: absolute;
+      left: 1px;
+      right: 1px;
+      bottom: -7px;
+      height: 3px;
+      border-radius: 999px;
+      background: linear-gradient(90deg, var(--accent2), var(--accent));
+      box-shadow: 0 2px 12px var(--accent-glow);
+    }
+    .lang-dropdown {
+      background: var(--tint-soft);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 6px 10px;
+      font-size: 13px;
+      max-width: 120px;
+    }
+    .lang-dropdown:focus { outline: 2px solid var(--accent-glow); outline-offset: 1px; }
+    .lang-dropdown option { background-color: var(--bg-card-hover); color: var(--text); }
+    .theme-toggle {
+      appearance: none;
+      -webkit-appearance: none;
+      background: var(--tint-soft-2);
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      width: 30px;
+      height: 30px;
+      padding: 0;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      cursor: pointer;
+      color: var(--text-dim);
+      transition: background 0.2s, color 0.2s, border-color 0.2s, transform 0.1s;
+    }
+    .theme-toggle:hover {
+      background: var(--tint-medium);
+      border-color: var(--accent);
+      color: var(--text);
+      transform: translateY(-1px);
+    }
+    .theme-toggle:focus-visible {
+      outline: 2px solid var(--accent2);
+      outline-offset: 2px;
+    }
+    .theme-toggle svg { width: 16px; height: 16px; display: block; }
+    .theme-toggle .icon-sun { display: block; }
+    .theme-toggle .icon-moon { display: none; }
+    :root[data-theme="light"] .theme-toggle .icon-sun { display: none; }
+    :root[data-theme="light"] .theme-toggle .icon-moon { display: block; }
+    main,
+    article {
+      max-width: var(--max-w);
+      margin: 0 auto;
+      padding: 64px 24px 80px;
+    }
+    .sr-only {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+      border: 0;
+    }
+    h1 {
+      font-size: 38px;
+      line-height: 1.2;
+      font-weight: 700;
+      letter-spacing: 0;
+      margin-bottom: 16px;
+    }
+    .lede {
+      color: var(--text-dim);
+      line-height: 1.6;
+    }
+    .lede {
+      font-size: 19px;
+      margin-bottom: 40px;
+    }
+    .meta {
+      font-size: 13px;
+      color: var(--text-dim);
+      margin-bottom: 12px;
+      letter-spacing: 0;
+    }
+    h2 {
+      font-size: 24px;
+      font-weight: 700;
+      margin-top: 48px;
+      margin-bottom: 14px;
+      letter-spacing: 0;
+    }
+    h3 {
+      font-size: 18px;
+      font-weight: 600;
+      margin-top: 32px;
+      margin-bottom: 10px;
+      color: var(--text);
+    }
+    h4, h5, h6 {
+      color: var(--text);
+      margin-top: 28px;
+      margin-bottom: 10px;
+      line-height: 1.35;
+    }
+    p { margin-bottom: 16px; }
+    ul, ol { margin: 0 0 16px 20px; }
+    li { margin-bottom: 6px; }
+    code {
+      font-family: 'SF Mono', 'Menlo', 'Consolas', monospace;
+      font-size: 0.88em;
+      background: var(--inline-code-bg);
+      padding: 2px 6px;
+      border-radius: 4px;
+      color: color-mix(in srgb, var(--accent2) 80%, var(--text));
+    }
+    pre {
+      background: var(--code-bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 18px 20px;
+      overflow-x: auto;
+      margin: 20px 0;
+      font-size: 14px;
+      line-height: 1.55;
+      box-shadow: 0 18px 60px var(--shadow-strong);
+    }
+    pre code {
+      background: transparent;
+      padding: 0;
+      color: inherit;
+      font-size: inherit;
+    }
+    blockquote {
+      border-left: 3px solid var(--accent);
+      padding: 4px 0 4px 18px;
+      margin: 20px 0;
+      color: var(--text-dim);
+      font-style: italic;
+    }
+    blockquote p:last-child { margin-bottom: 0; }
+    hr {
+      border: 0;
+      border-top: 1px solid var(--border);
+      margin: 36px 0;
+    }
+    article img {
+      max-width: 100%;
+      height: auto;
+      display: block;
+      border-radius: var(--radius);
+      border: 1px solid var(--border);
+      margin: 24px 0;
+    }
+    .table-wrap { overflow-x: auto; margin: 24px 0; }
+    table {
+      width: 100%;
+      min-width: 560px;
+      border-collapse: collapse;
+      font-size: 14px;
+    }
+    th, td {
+      text-align: left;
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--border);
+      vertical-align: top;
+    }
+    th {
+      color: var(--text-dim);
+      font-weight: 600;
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0;
+      background: var(--tint-soft-2);
+    }
+    td code { font-size: 12px; }
+    .win { color: var(--success); font-weight: 600; }
+    .lose { color: var(--danger); }
+    .meh { color: var(--warning); }
+    .callout {
+      background: color-mix(in srgb, var(--accent) 10%, transparent);
+      border: 1px solid color-mix(in srgb, var(--accent) 24%, transparent);
+      border-radius: var(--radius);
+      padding: 16px 20px;
+      margin: 24px 0;
+      font-size: 15px;
+      line-height: 1.65;
+      color: var(--text-dim);
+    }
+    .callout strong { color: var(--text); }
+    .author-box {
+      margin-top: 64px;
+      padding-top: 32px;
+      border-top: 1px solid var(--border);
+      color: var(--text-dim);
+      font-size: 14px;
+    }
+    .post-list { display: flex; flex-direction: column; gap: 18px; }
+    .post-card {
+      display: block;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      padding: 24px 26px;
+      transition: background 0.18s, border-color 0.18s, transform 0.18s;
+    }
+    .post-card:hover {
+      background: var(--bg-card-hover);
+      border-color: color-mix(in srgb, var(--accent) 30%, transparent);
+      transform: translateY(-1px);
+      text-decoration: none;
+    }
+    .post-meta {
+      font-size: 12px;
+      color: var(--text-dim);
+      letter-spacing: 0;
+      margin-bottom: 8px;
+    }
+    .post-title {
+      font-size: 21px;
+      font-weight: 600;
+      color: var(--text);
+      margin-bottom: 6px;
+      letter-spacing: 0;
+      line-height: 1.35;
+    }
+    .post-excerpt {
+      color: var(--text-dim);
+      font-size: 15px;
+      line-height: 1.6;
+    }
+    footer {
+      max-width: var(--max-w);
+      margin: 0 auto;
+      padding: 40px 24px;
+      border-top: 1px solid var(--border);
+      display: flex;
+      justify-content: space-between;
+      gap: 24px;
+      color: var(--text-dim);
+      font-size: 13px;
+    }
+    footer a { color: var(--text-dim); }
+    footer a:hover { color: var(--text); }
+    @media (max-width: 700px) {
+      body { font-size: 16px; }
+      .nav-inner { padding: 14px 20px; align-items: flex-start; }
+      .nav-links { gap: 12px; flex-wrap: wrap; }
+      .lang-dropdown { display: none; }
+      h1 { font-size: 28px; }
+      .lede { font-size: 16px; }
+      main, article { padding: 48px 20px 64px; }
+      h2 { font-size: 20px; margin-top: 36px; }
+      .post-card { padding: 20px; }
+      .post-title { font-size: 19px; }
+      footer { flex-direction: column; padding: 32px 20px; }
+    }
+    @media (max-width: 420px) {
+      .nav-inner { gap: 12px; }
+      .nav-links a[href="https://github.com/webbrain-one/webbrain"] { display: none; }
+      .theme-toggle { width: 28px; height: 28px; }
+    }
+  </style>
+  <script>
+    (function () {
+      try {
+        var saved = localStorage.getItem('webbrain-theme');
+        var theme = (saved === 'light' || saved === 'dark')
+          ? saved
+          : (window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
+        document.documentElement.setAttribute('data-theme', theme);
+      } catch (_) {
+        document.documentElement.setAttribute('data-theme', 'dark');
+      }
+    })();
+  </script>
+  <!-- Plausible analytics: start -->
+  <!-- Privacy-friendly analytics by Plausible -->
+  <script async src="https://157.230.3.9.sslip.io/js/pa-omp0F7DsOXM4sGKR50l7S.js"></script>
+  <script>
+    window.plausible=window.plausible||function(){(plausible.q=plausible.q||[]).push(arguments)},plausible.init=plausible.init||function(i){plausible.o=i||{}};
+    plausible.init()
+  </script>
+  <!-- Plausible analytics: end -->
+  <script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "BlogPosting",
+  "headline": "Ling 3.1 Flash vs DeepSeek, HY3, GLM-5.2, and Laguna XS: free inference, costly retries",
+  "description": "Ling 3.1 Flash completes 100 pinned planner cases with 80.7% tool-family consensus, 32.8% exact consensus, 92 valid calls, and zero reported cost, after extensive Novita rate-limit recovery.",
+  "author": {
+    "@type": "Person",
+    "name": "Emre Sokullu",
+    "url": "https://emresokullu.com"
+  },
+  "datePublished": "2026-10-06",
+  "image": "https://webbrain.one/og-image.png",
+  "publisher": {
+    "@type": "Organization",
+    "name": "WebBrain",
+    "logo": {
+      "@type": "ImageObject",
+      "url": "https://webbrain.one/logo-github.png"
+    }
+  },
+  "mainEntityOfPage": {
+    "@type": "WebPage",
+    "@id": "https://webbrain.one/blog/ling31-flash-vs-deepseek-hy3-glm52-laguna-xs"
+  }
+}
+  </script>
+</head>
+<body>
+  <div class="glow-bg"></div>
+  <nav>
+    <div class="nav-inner">
+      <a href="/" class="nav-brand"><img class="brand-logo" src="/logo-github.png" alt="" aria-hidden="true"> WebBrain<span class="domain">.one</span></a>
+      <div class="nav-links">
+        <a href="/">Home</a>
+        <a href="/docs/">Docs</a>
+        <a href="/blog" aria-current="page">Blog</a>
+        <select class="lang-dropdown" id="lang-dropdown" aria-label="Select language" data-current="en"><option value="en">English</option><option value="es">Español</option><option value="fr">Français</option><option value="tr">Türkçe</option><option value="zh">中文</option><option value="ru">Русский</option><option value="uk">Українська</option><option value="ar">العربية</option><option value="ja">日本語</option><option value="ko">한국어</option><option value="id">Bahasa Indonesia</option><option value="th">ไทย</option><option value="ms">Bahasa Melayu</option><option value="tl">Filipino</option><option value="he">עברית</option></select>
+        <button class="theme-toggle" type="button" id="theme-toggle" aria-label="Toggle light / dark theme" title="Toggle light / dark theme">
+          <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <circle cx="12" cy="12" r="4"/>
+            <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/>
+          </svg>
+          <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+          </svg>
+        </button>
+        <a href="https://github.com/webbrain-one/webbrain" target="_blank" rel="noopener">GitHub</a>
+      </div>
+    </div>
+  </nav>
+
+  <article>
+    <div class="meta">October 6, 2026 &middot; 8 min read &middot; <a href="/blog">&larr; All posts</a></div>
+    <h1>Ling 3.1 Flash vs DeepSeek, HY3, GLM-5.2, and Laguna XS: free inference, costly retries</h1>
+    <p class="lede"><strong>Ling 3.1 Flash completed all 100 planner cases with zero reported inference cost, but getting those responses was difficult.</strong> It leads the expanded fourteen-model pool on <strong>tool-family consensus at 80.7%</strong>, produces <strong>92 schema-valid calls</strong>, and chooses <strong>42 ideal tools</strong>. Its <strong>32.8% exact-action consensus</strong> trails all four text-only references, and its successful requests have a <strong>3.19-second median</strong>. The first pass returned only 15 responses; extensive retries were needed to finish. This is a useful text planner result with a serious serving limitation on the tested free route.</p>
+<h2 id="a-new-textonly-route">A new text-only route</h2>
+<p><a href="https://openrouter.ai/inclusionai/ling-3.1-flash" target="_blank" rel="noopener">OpenRouter lists Ling 3.1 Flash</a> as inclusionAI&#39;s <strong>560B-total / 25B-active hybrid reasoning MoE</strong>, released October 2. The route accepts text and returns text, with <strong>262,144 tokens of context</strong> and native function calling. Its captured October 6 Novita endpoint lists <strong>zero input and output token prices</strong>. It supports <code>tools</code> and <code>tool_choice</code>, but not <code>response_format</code>.</p>
+<p>That makes it an interesting candidate for a browser planner working from accessibility trees and extracted text. This route cannot accept screenshots. The 25B active count describes per-token compute; the full 560B model still needs substantial storage and memory.</p>
+<p>Our comparison focuses on the four text-only routes in the <a href="/blog/american-chinese-open-model-frontier-gap-benchmark">American and Chinese open-model benchmark</a>: <strong>DeepSeek V4 Flash 0731, Tencent HY3, GLM-5.2, and Poolside Laguna XS 2.1</strong>. MiniMax M3 remains a useful additional reference for a broader agent, although its tested route also accepts visual input. Every request in this planner suite contains text; no model receives a screenshot or video.</p>
+<h2 id="reconstructing-the-matching-test">Reconstructing the matching test</h2>
+<p>The main ranking uses the <strong>August full-tier checkout <code>7182c21f</code></strong>. We also include the models from our <a href="/blog/ling30-flash-vl-vs-nex-n25-minimax-m3">Ling 3.0 Flash VL comparison</a> in a separate historical table below. That test uses the May frozen interface, so its percentages do not enter the August ranking or fourteen-model consensus pool.</p>
+<p>The August runs omitted request bodies. We reconstructed all 100 messages and their tool schemas from the exact pinned payload builder, site adapters, tool definitions, and questions, then saved a replay snapshot. We also archived the ideal-action rubrics from that checkout. Ling&#39;s new raw case files preserve both its request and the API response. The historical requests&#39; full byte equality cannot be proven because those bodies were never stored.</p>
+<p><strong>Only Ling is a new October 6 run.</strong> The comparison models retain their August 2 results. These are matching reconstructed inputs across different serving dates, with potentially different infrastructure, cache state, and prices.</p>
+<p>The source audit found <strong>48 Act tools</strong>, correcting the older article&#39;s count of 41. All 100 questions are Act-mode cases, so every new request uses <strong>temperature 0.15</strong> and a <strong>4,096-token output budget</strong>. We send native structured tools through OpenRouter Chat Completions, without a reasoning-effort override or a compatibility prompt. The per-request timeout is 180 seconds.</p>
+<p>The test captures one response and executes no tools. A model can choose a sensible observation before acting and still miss the rubric&#39;s canonical first step. This is a first-action planner comparison, not a measure of completed browser tasks, visual reasoning, or recovery over a long session.</p>
+<h2 id="what-each-score-means">What each score means</h2>
+<p><strong>Exact-action consensus</strong> compares the first tool name and arguments with the other models on the same case. Normalization sorts object keys recursively; it preserves argument values, array order, extra arguments, and explicit defaults. Two no-tool responses agree with one another. A request failure supplies no model action.</p>
+<p><strong>Tool-name consensus</strong> drops the arguments and compares only the opening tool family. <strong>Ideal tool</strong> and <strong>exact ideal</strong> use the archived deterministic rubric, independently of the peer pool. Prose responses receive no ideal-tool credit. <strong>Schema-valid / emitted</strong> checks whether the tool exists and its arguments satisfy the archived JSON Schema; dispatching a call alone does not establish validity.</p>
+<p>Before introducing Ling, we reproduced all thirteen original models&#39; exact-action and tool-name consensus percentages and their emitted, valid, ideal-name, and exact-ideal counts from the 1,300 saved case files. Consensus measures agreement rather than correctness: a widely shared habit can still be a weak first step.</p>
+<h2 id="the-comparison-strong-tool-selection-weaker-exact-agreement">The comparison: strong tool selection, weaker exact agreement</h2>
+<p>We added Ling to the original thirteen-model peer pool and recomputed every row. Each model now has <strong>thirteen other peers and 1,300 comparisons</strong>, rather than the original twelve peers and 1,200. All fourteen models remain peers, including those outside the text-only table. These updated consensus percentages therefore differ from the older post. Medians are also recalculated consistently as the average of the two middle observations; p95 uses the nearest-rank method.</p>
+<div class="table-wrap"><table><thead><tr><th>Model</th><th>Exact consensus</th><th>Tool consensus</th><th>Valid / emitted</th><th>Ideal tool</th><th>Exact ideal</th><th>Median</th><th>p95</th><th>Reported cost</th></tr></thead><tbody><tr><td><strong>Ling 3.1 Flash, new</strong></td><td>32.8%</td><td><strong>80.7%</strong></td><td><strong>92 / 93</strong></td><td><strong>42</strong></td><td>15</td><td>3.19s</td><td>10.18s</td><td><strong>$0.000</strong></td></tr><tr><td>DeepSeek V4 Flash 0731</td><td><strong>50.9%</strong></td><td>80.5%</td><td>90 / 90</td><td>39</td><td>18</td><td>1.58s</td><td>5.24s</td><td>$0.050</td></tr><tr><td>Tencent HY3</td><td>47.2%</td><td>78.7%</td><td>90 / 90</td><td>41</td><td>18</td><td>5.12s</td><td>8.98s</td><td>$0.246</td></tr><tr><td>GLM-5.2</td><td>43.2%</td><td>77.0%</td><td>86 / 89</td><td>39</td><td><strong>20</strong></td><td>1.73s</td><td>4.44s</td><td>$0.545</td></tr><tr><td>Poolside Laguna XS 2.1</td><td>40.6%</td><td>74.0%</td><td>88 / 89</td><td>31</td><td>5</td><td><strong>1.15s</strong></td><td><strong>2.15s</strong></td><td>$0.073</td></tr><tr><td>MiniMax M3, multimodal reference</td><td>40.9%</td><td>75.2%</td><td>86 / 89</td><td>33</td><td>17</td><td>2.86s</td><td>7.34s</td><td>$0.504</td></tr></tbody></table></div>
+<p>Each row has 100 inference responses. Ling&#39;s 93 emitted calls are all native; seven responses contain no parsed tool call. None reaches the output-token limit. Cost sums the saved response-level <code>usage.cost</code> fields; Ling has a cost record for every response. MiniMax is shown as an additional reference, rather than one of the four text-only routes.</p>
+<p><strong>Ling ranks twelfth of fourteen by exact consensus, while leading tool-family consensus.</strong> Those results can coexist. It usually chooses the action family its peers choose, then supplies different arguments. It also has the highest ideal-tool count among these five text-only routes, although a one-case lead over HY3 is too small to support a broad capability claim. GLM retains the stronger exact-ideal result at 20 versus Ling&#39;s 15.</p>
+<p>The pairwise results make the distinction easier to see:</p>
+<div class="table-wrap"><table><thead><tr><th>Ling compared with</th><th>Same tool family, /100</th><th>Same exact action, /100</th></tr></thead><tbody><tr><td>DeepSeek V4 Flash</td><td><strong>88</strong></td><td>41</td></tr><tr><td>Tencent HY3</td><td>83</td><td>33</td></tr><tr><td>GLM-5.2</td><td>86</td><td>41</td></tr><tr><td>Poolside Laguna XS 2.1</td><td>80</td><td>33</td></tr><tr><td>MiniMax M3</td><td>80</td><td>33</td></tr></tbody></table></div>
+<p>An important source of disagreement is accessibility-tree depth. Ling opens with <code>get_accessibility_tree</code> on 43 cases. It uses only <code>filter: &quot;visible&quot;</code> on eight of those calls, while nineteen also specify <code>maxDepth: 10</code> and others choose different depths or filters. Extra valid arguments can reduce exact agreement without making a call unsafe. The score measures the entire proposed action, including these choices.</p>
+<p>There is one actual schema defect: <strong>case 092 emits <code>press_keys({key: &quot;m&quot;})</code></strong>, but <code>m</code> is outside the key enum in the sent tool definition. We retain the raw response and mark that call invalid. The other 92 emitted calls satisfy the archived schema. This supports argument validation in an agent even when native dispatch coverage is high.</p>
+<h2 id="availability-100-responses-took-398-recorded-requests">Availability: 100 responses took 398 recorded requests</h2>
+<p>The new key authenticated successfully. OpenRouter&#39;s errors identified Novita&#39;s <strong>upstream shared pool</strong> as temporarily rate-limited. A minimal text probe and a fresh-connection check also returned HTTP 429, so the problem extended beyond a particular browser question.</p>
+<p>The first suite pass used concurrency three and the runner&#39;s nominal 10-second post-case delay option. We archived all 100 results, then resumed failed cases with <strong>30-second backoffs and up to ten retries per case</strong>. The first recovery round brought coverage to 91 cases. A final pass recovered the remaining nine. Each case keeps its first successful inference; retries target rejected requests.</p>
+<div class="table-wrap"><table><thead><tr><th>Campaign stage</th><th>HTTP requests</th><th>Inference responses</th><th>HTTP 429 responses</th></tr></thead><tbody><tr><td>First suite pass</td><td>100</td><td><strong>15</strong></td><td><strong>85</strong></td></tr><tr><td>Entire benchmark plus availability diagnostics</td><td><strong>398</strong></td><td><strong>100</strong></td><td><strong>298</strong></td></tr></tbody></table></div>
+<p>Of the 398 recorded requests, <strong>390 belong to the benchmark passes and eight to availability diagnostics</strong>. The three timed benchmark passes total <strong>41.2 minutes</strong>, including runner delays and retry backoffs, but excluding setup, diagnostics, and gaps between processes. The table&#39;s 3.19-second median measures successful final HTTP attempts only, including network and generation time. It does not describe how long a caller waits through repeated failures.</p>
+<p>This is the largest practical limitation in the result. A free token price helps a batch experiment, but a browser agent still needs timely responses. The historical comparison runs completed without API errors or retries on their test date. That is an observation across different dates and infrastructure, rather than a permanent reliability ranking of the models.</p>
+<h2 id="zero-cost-still-needs-serving-and-cache-context">Zero cost still needs serving and cache context</h2>
+<p>Ling&#39;s 100 responses report <strong>2,444,290 prompt tokens</strong>, <strong>19,095 completion tokens</strong>, and <strong>14,888 reasoning tokens</strong> within completion usage. The API reports <strong>2,308,288 cached prompt tokens</strong>, or <strong>94.4%</strong> of the prompt total. All responses identify Novita as the provider, and their summed <code>usage.cost</code> is <strong>$0</strong>.</p>
+<p>The captured route lists zero prompt and completion rates on October 6. The free-price result therefore comes from the offered endpoint rates, while the large reported cache share remains relevant to latency. It does not establish an uncached speed measurement or a future price guarantee. Historical bills in the comparison also reflect their own cache conditions and August prices.</p>
+<p>Among the references, DeepSeek remains inexpensive at five cents for its saved 100-response replay and has stronger exact consensus with a lower median. Laguna XS is the fastest at 1.15 seconds and costs seven cents in its saved run. Ling chooses more ideal tools and emits more schema-valid calls than either, but its exact-action agreement is lower and its tested route requires substantial retry recovery. HY3 is slower at the median, while GLM produces more exact ideal actions.</p>
+<p>The result gives Ling a clear reason to be tested further: <strong>good tool-family selection and broad native dispatch at a zero observed token bill</strong>. It also gives a clear deployment question: whether a route with steadier capacity preserves that behavior. This free shared-pool run supplies encouraging planner evidence, but its first-pass availability is too weak to recommend it as the sole synchronous browser-agent endpoint.</p>
+<h2 id="ling-3-0-flash-vl-nex-and-the-earlier-minimax-run">Ling 3.0 Flash VL, Nex, and the earlier MiniMax run</h2>
+<p><strong>Updated October 7:</strong> these are the saved results from the earlier Ling/Nex comparison, added here for readers evaluating both generations. They use <strong>100 text-only planner cases, the May 23 frozen prompt, 41 tools, and archived May ideal-action rubrics</strong>. No screenshots were sent, including to Ling 3.0 Flash VL. Their reference-agreement column compares tool names with <strong>one model, Claude Sonnet 4.6</strong>, rather than the fourteen-model pairwise consensus above.</p>
+<div class="table-wrap"><table><thead><tr><th>Model</th><th>Run date</th><th>Native calls / 100</th><th>Exact ideal / 100</th><th>Ideal tool / 100</th><th>Sonnet tool-name alignment</th><th>Median</th><th>Reported cost / 100</th></tr></thead><tbody><tr><td>Ling 3.0 Flash VL</td><td>Oct 5</td><td>90</td><td><strong>22</strong></td><td><strong>35</strong></td><td>72%</td><td><strong>1.73s</strong></td><td><strong>$0.0098</strong></td></tr><tr><td>Nex-N2.5-Pro</td><td>Oct 3</td><td><strong>95</strong></td><td>11</td><td>27</td><td>67%</td><td>7.23s</td><td>$0.1500</td></tr><tr><td>Nex-N2.5-mini</td><td>Oct 3</td><td>N/A</td><td>N/A</td><td>N/A</td><td>N/A</td><td>N/A</td><td>N/A</td></tr><tr><td>MiniMax M3, May-frozen run</td><td>Jun 21</td><td>85</td><td>17</td><td>32</td><td><strong>75%</strong></td><td>3.10s</td><td>$1.0562</td></tr></tbody></table></div>
+<p>Within this May protocol, Ling 3.0 VL gives more exact ideal actions and ideal tool names than Nex Pro or MiniMax, with the lowest observed median and bill. Nex Pro emits more native calls, while MiniMax aligns more often with Sonnet&#39;s tool selection. Ling&#39;s bill includes substantial prompt caching and Novita&#39;s promotional rates; it is not an uncached price comparison.</p>
+<p>Nex mini&#39;s route rejected <strong>all 100 requests with HTTP 404 before inference</strong> because it could not accept the structured tools. An authenticated October 5 check reproduced the rejection. Its quality, inference latency, and bill remain <strong>unscored</strong>, rather than counting those routing errors as incorrect model answers.</p>
+<p>Native-call counts in this older table are dispatch coverage, not the schema-valid counts in the August table: Ling 3.0 has one saved malformed argument JSON in its 90 native calls. The two MiniMax rows represent different dated runs and different interfaces. Comparing Ling 3.1&#39;s 15 exact ideal actions directly with Ling 3.0&#39;s 22 would therefore not establish a regression between model generations.</p>
+<p>The <a href="https://github.com/webbrain-one/webbrain/blob/main/test/llm/analysis/2026-10-05-ling30-flash-vl/comparison.json" target="_blank" rel="noopener">May comparison report and raw-run provenance</a> reproduce this table. The full protocol discussion remains in the <a href="/blog/ling30-flash-vl-vs-nex-n25-minimax-m3">Ling 3.0, Nex, and MiniMax article</a>.</p>
+<h2 id="evidence-and-reproduction">Evidence and reproduction</h2>
+<p>The <a href="https://github.com/webbrain-one/webbrain/tree/main/test/llm/results/2026-10-06-openrouter-ling31-flash-full-7182_chrome_inclusionai_ling-3.1-flash" target="_blank" rel="noopener">raw Ling cases</a> and <a href="https://github.com/webbrain-one/webbrain/tree/main/test/llm/analysis/2026-10-06-ling31-flash" target="_blank" rel="noopener">analysis artifacts</a> accompany this post. The complete inputs are saved in <code>test/llm/freeze/full-replay-7182c21f.json</code>. The preparation script reconstructs them from the pinned Git revision and records SHA-256 hashes for the source files, questions, and rubrics.</p>
+<pre><code class="language-powershell">node test/llm/prepare-frontier-replay.mjs
+node test/llm/report-ling31-comparison.mjs --historical-only</code></pre>
+<p>After setting <code>OPENROUTER_API_KEY</code> in the process environment, the runner can replay those inputs. The analysis README records the live run&#39;s pacing and retry configuration. API credentials are absent from saved requests and reports.</p>
+<pre><code class="language-text">Raw Ling cases and summary:
+test/llm/results/2026-10-06-openrouter-ling31-flash-full-7182_chrome_inclusionai_ling-3.1-flash/
+
+Comparison, provenance, rubrics, endpoint metadata, and availability evidence:
+test/llm/analysis/2026-10-06-ling31-flash/
+
+Offline report generator:
+test/llm/report-ling31-comparison.mjs</code></pre>
+<pre><code class="language-powershell">node test/llm/report-ling31-comparison.mjs
+node scripts/build-blog.mjs</code></pre>
+<p>Tags: #Ling31Flash #Ling30FlashVL #NexN25 #inclusionAI #DeepSeekV4 #TencentHY3 #GLM52 #Poolside #LagunaXS #MiniMaxM3 #OpenRouter #ToolCalling #BrowserAgent #WebBrain</p>
+
+    <div class="author-box">
+      Written by <a href="https://emresokullu.com" target="_blank" rel="noopener">Emre Sokullu</a>. WebBrain 33.0.0 and later is GPL-3.0-or-later and open on <a href="https://github.com/webbrain-one/webbrain" target="_blank" rel="noopener">GitHub</a>.
+    </div>
+  </article>
+
+  <footer>
+    <div>&copy; 2026 WebBrain &middot; <a href="/privacy">Privacy</a></div>
+    <div><a href="https://github.com/webbrain-one/webbrain" target="_blank" rel="noopener">GitHub</a></div>
+  </footer>
+  <script>
+    (function () {
+      const btn = document.getElementById('theme-toggle');
+      if (!btn) return;
+      const root = document.documentElement;
+
+      function setTheme(theme, persist) {
+        root.setAttribute('data-theme', theme);
+        if (persist) {
+          try { localStorage.setItem('webbrain-theme', theme); } catch (_) {}
+        }
+      }
+
+      btn.addEventListener('click', function () {
+        const next = root.getAttribute('data-theme') === 'light' ? 'dark' : 'light';
+        setTheme(next, true);
+      });
+
+      const mq = window.matchMedia('(prefers-color-scheme: light)');
+      function onMQ(e) {
+        try {
+          if (localStorage.getItem('webbrain-theme')) return;
+        } catch (_) {}
+        setTheme(e.matches ? 'light' : 'dark', false);
+      }
+      if (typeof mq.addEventListener === 'function') mq.addEventListener('change', onMQ);
+      else if (typeof mq.addListener === 'function') mq.addListener(onMQ);
+    })();
+  </script>
+  <script>
+    (function () {
+      const LOCALES = ["en","es","fr","tr","zh","ru","uk","ar","ja","ko","id","th","ms","tl","he"];
+      const sel = document.getElementById('lang-dropdown');
+      if (!sel) return;
+      sel.value = sel.dataset.current || 'en';
+      sel.addEventListener('change', function () {
+        const target = sel.value;
+        if (!LOCALES.includes(target)) return;
+        window.location.href = target === 'en' ? '/' : '/' + target + '/';
+      });
+    })();
+  </script>
+</body>
+</html>

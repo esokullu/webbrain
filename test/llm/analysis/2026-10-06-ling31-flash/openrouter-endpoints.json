@@ -1,0 +1,75 @@
+{
+  "retrievedAt": "2026-10-06T19:42:00.496Z",
+  "url": "https://openrouter.ai/api/v1/models/inclusionai/ling-3.1-flash/endpoints",
+  "data": {
+    "data": {
+      "id": "inclusionai/ling-3.1-flash",
+      "name": "inclusionAI: Ling 3.1 Flash",
+      "created": 1790950024,
+      "description": "Ling 3.1 Flash is a hybrid reasoning mixture-of-experts model from inclusionAI, with 25B active parameters out of 560B total.",
+      "architecture": {
+        "tokenizer": "Other",
+        "instruct_type": null,
+        "modality": "text->text",
+        "input_modalities": [
+          "text"
+        ],
+        "output_modalities": [
+          "text"
+        ]
+      },
+      "endpoints": [
+        {
+          "name": "Novita | inclusionai/ling-3.1-flash-20261002",
+          "model_id": "inclusionai/ling-3.1-flash",
+          "model_name": "inclusionAI: Ling 3.1 Flash",
+          "context_length": 262144,
+          "pricing": {
+            "prompt": "0",
+            "completion": "0",
+            "discount": 0
+          },
+          "provider_name": "Novita",
+          "tag": "novita",
+          "quantization": "unknown",
+          "max_completion_tokens": 32768,
+          "max_prompt_tokens": null,
+          "supported_parameters": [
+            "reasoning",
+            "include_reasoning",
+            "max_tokens",
+            "temperature",
+            "top_p",
+            "stop",
+            "frequency_penalty",
+            "presence_penalty",
+            "seed",
+            "top_k",
+            "repetition_penalty",
+            "tools",
+            "tool_choice",
+            "logprobs",
+            "top_logprobs"
+          ],
+          "supports_tool_choice": {
+            "none": true,
+            "auto": true,
+            "required": false,
+            "function": true
+          },
+          "status": 0,
+          "uptime_last_30m": 100,
+          "uptime_last_5m": 100,
+          "uptime_last_1d": 99.98848807282116,
+          "supports_implicit_caching": false,
+          "native_tools": {},
+          "supports_voice_cloning": false,
+          "supports_multiple_audio_references": false,
+          "supports_image_reference": false,
+          "latency_last_30m": null,
+          "throughput_last_30m": null
+        }
+      ]
+    }
+  }
+}

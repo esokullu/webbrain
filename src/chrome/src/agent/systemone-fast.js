@@ -1,4 +1,4 @@
-import { redactSystemOneText, wrapSystemOneData } from './systemone-evidence.js';
+import { redactSystemOneText, wrapSystemOneData, boundedSystemOneText, systemOneStateBytes } from './systemone-evidence.js';
 export const JEV_CLASSIFIER_THRESHOLD = .85;
 export const JEV_BROWSER_THRESHOLD = .90;
 export const JEV_FAST_KEYS = ['systemOneEnabled', 'typesafeApiKey', 'systemOneFastClassifications', 'systemOneFastBrowser'];
@@ -96,12 +96,12 @@ export function buildJevBrowserRequest(task, snapshot, values = []) {
   boundedValues.forEach((_v, i) => {
     questions[`value_${i}`] = question(`Map state.values[${i}] to its intended independent field. Choose none for uncertain matches, already correct fields, or dependent fields that need a new observation. Never invent a value.`, { ...NONE, ...fillTargets });
   });
-  const state = { task: redactSystemOneText(task).slice(0, 4000),
+  const state = { task: boundedSystemOneText(redactSystemOneText(task), 4000),
     controls: wrapSystemOneData(redactSystemOneText(JSON.stringify(controls))),
     options: wrapSystemOneData(redactSystemOneText(JSON.stringify(options))),
-    values: boundedValues.map(v => ({ purpose: redactSystemOneText(v.purpose).slice(0, 160), text: redactSystemOneText(v.text) })),
+    values: boundedValues.map(v => ({ purpose: boundedSystemOneText(redactSystemOneText(v.purpose), 160), text: redactSystemOneText(v.text) })),
   };
-  if (JSON.stringify(state).length > 16000) return null;
+  if (systemOneStateBytes(state) > 16000) return null;
   return { state, questions, controls, options, values: boundedValues };
 }
 export function decideJevBrowser(request, answers, snapshot) {

@@ -1,3 +1,5 @@
+import { resolveDecisionConfig, listDecisionModels } from './agent/decision-config.js';
+import { probeDecisionVision } from './agent/decision-vision-probe.js';
 import { installSafeSocialBackground } from './safesocial/background.js';
 import { createSafeSocialHost } from './safesocial/host.js';
 import { firefoxBidi } from './bidi/client.js';
@@ -3598,14 +3600,32 @@ async function handleMessage(msg, sender) {
       return await testImageGenProvider();
     }
 
+    case 'list_decision_models': {
+      await strictSecretModeReady;
+      try {
+        if (agent.strictSecretMode) throw new Error('Decision requests are disabled in Strict Secret Mode.');
+        const models = await listDecisionModels(resolveDecisionConfig(msg.settings || {}));
+        return { success: true, models };
+      } catch (error) { return { success: false, error: error.message }; }
+    }
     case 'test_system_one': {
       await strictSecretModeReady;
       try {
-        const result = await agent.evaluateSystemOne(null, createSystemOneJudge({ maxRetries: 0 }), {
-          apiKey: msg.apiKey, state: { color: 'blue' },
-          questions: { test: { type: 'noul', instructions: 'Is the color blue?' } },
-        });
-        return { success: true, model: result.model };
+        if (agent.strictSecretMode) throw new Error('Decision requests are disabled in Strict Secret Mode.');
+        let config = msg.settings ? resolveDecisionConfig(msg.settings) : undefined;
+        if (config?.provider === 'openrouter' && (!msg.settings.decisionVisionMode || msg.settings.decisionVisionMode === 'auto')) {
+          try { const card = (await listDecisionModels(config)).find(m => m.id === config.model); if (card) config = { ...config, supportsVision: card.supportsVision }; } catch {}
+        }
+        const client = createSystemOneJudge({ maxRetries: 0 });
+        const evaluate = args => agent.evaluateSystemOne(null, client, { ...args, config, apiKey: msg.apiKey });
+        const result = await evaluate({ state: { color: 'blue' }, questions: { test: { type: 'noul', instructions: 'Is the color blue?' } } });
+        if (result.answers.test.noul < .9) throw new Error('Decision connection test was inconclusive.');
+        let visionVerified = false;
+        if (config?.supportsVision) try {
+          if (config.provider === 'openrouter') await new Promise(resolve => setTimeout(resolve, 1100));
+          visionVerified = await probeDecisionVision(config, args => agent.evaluateSystemOne(null, client, args));
+        } catch {}
+        return { success: true, model: result.model, visionTested: config?.supportsVision === true, visionVerified };
       } catch (error) { return { success: false, error: error.message }; }
     }
 

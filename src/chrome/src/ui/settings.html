@@ -2248,9 +2248,29 @@
               </label>
             </div>
 
+            <div class="field"><label for="decision-provider" data-i18n="st.decision.provider"></label>
+              <select id="decision-provider"><option value="openrouter">OpenRouter</option><option value="typesafe">TypeSafe</option><option value="local" data-i18n="st.decision.local"></option></select>
+            </div>
+            <div class="field"><label for="decision-model" data-i18n="st.decision.model"></label>
+              <input id="decision-model" list="decision-models" autocomplete="off"><datalist id="decision-models"></datalist>
+              <button class="btn-secondary" id="btn-decision-models" data-i18n="st.decision.refresh"></button>
+            </div>
+            <div class="field" id="decision-endpoint-field"><label for="decision-endpoint" data-i18n="st.decision.endpoint"></label>
+              <input id="decision-endpoint" type="url" placeholder="http://127.0.0.1:8009">
+            </div>
+            <div class="field"><label for="decision-vision" data-i18n="st.decision.vision"></label>
+              <select id="decision-vision"><option value="auto" data-i18n="st.decision.auto"></option><option value="on" data-i18n="st.decision.on"></option><option value="off" data-i18n="st.decision.off"></option></select>
+            </div>
+            <div class="setting-row"><div class="setting-info"><div class="setting-label" data-i18n="st.decision.done"></div><div class="setting-desc" data-i18n="st.decision.done_desc"></div></div>
+              <label class="toggle"><input type="checkbox" id="toggle-decision-done" checked><span class="toggle-slider"></span></label>
+            </div>
+            <div class="field"><label for="decision-done-threshold" data-i18n="st.decision.threshold"></label>
+              <input id="decision-done-threshold" type="number" min="50" max="99" step="1" value="90">
+            </div>
+            <p class="settings-description" data-i18n="st.decision.compass"></p>
             <div class="field">
               <label for="system-one-api-key" data-i18n="st.system_one.api_key.label"></label>
-              <input type="password" id="system-one-api-key" placeholder="ts_…" autocomplete="off" spellcheck="false">
+              <input type="password" id="system-one-api-key" placeholder="API key" autocomplete="off" spellcheck="false">
             </div>
 
             <div class="setting-row">

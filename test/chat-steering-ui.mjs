@@ -12,6 +12,7 @@ function extract(source, name) {
 }
 
 for (const [build, engine] of [['chrome', chromium], ['firefox', firefox]]) {
+  const { DECISION_SETTINGS_KEYS } = await import(`../src/${build}/src/agent/decision-config.js`);
   test(`${build}: native composer honors delivery settings, explicitly steers, and preserves drafts across races`, async () => {
     const browser = await engine.launch({ headless: true });
     try {
@@ -73,6 +74,7 @@ for (const [build, engine] of [['chrome', chromium], ['firefox', firefox]]) {
         } };
         var browser = chrome;
         var AUTO_GROUP_TABS_KEY = 'autoGroupTabs';
+        var DECISION_SETTINGS_KEYS = ${JSON.stringify(DECISION_SETTINGS_KEYS)};
         var DOWNLOAD_DIRECTORY_STORAGE_KEY = 'downloadDirectory';
         var CLOUD_BRIDGE_ENABLED_KEY = 'cloudBridgeEnabled', CLOUD_BRIDGE_URL_KEY = 'cloudBridgeUrl';
         var composerDeliveryModeSelect = document.getElementById('select-composer-delivery-mode');

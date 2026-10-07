@@ -1399,7 +1399,7 @@ function sourceBetween(source, startMarker, endMarker) {
 // ────────────────────────────────────────────────────────────────────────
 
 const tests = [];
-function test(name, fn) { tests.push({ name, fn }); }
+function test(name, fn) { if (!process.env.WEBBRAIN_TEST_FILTER || new RegExp(process.env.WEBBRAIN_TEST_FILTER, 'i').test(name)) tests.push({ name, fn }); }
 
 console.log('\nselection quote');
 
@@ -20667,6 +20667,7 @@ test('image budget helpers: auto-screenshot counter + failed capture does not bu
     const agent = new AgentClass({});
     const tabId = 42;
     agent.maxScreenshotsPerTurn = 1;
+    assert.equal(agent._canTakeAutoScreenshot(tabId, 2), false, `${AgentClass.name}: vision verification must reserve its refresh slot`);
 
     assert.equal(agent._canTakeAutoScreenshot(tabId), true);
     agent._recordAutoScreenshot(tabId);
@@ -28718,8 +28719,13 @@ test('completion invariant run tokens isolate overlapping and cleared runs', () 
     const agent = new AgentClass({});
     const tabId = 6049;
     agent.conversationModes.set(tabId, 'act');
+    agent.conversations.set(tabId, [
+      { role: 'assistant', tool_calls: [{ id: 'old-rules-read', function: { name: 'read_page' } }] },
+      { role: 'tool', tool_call_id: 'old-rules-read', content: 'Rules from the previous task' },
+    ]);
 
     const oldToken = agent._beginCompletionInvariant(tabId);
+    assert.deepEqual([...agent.completionInvariants.get(tabId).historyToolCallIdsBeforeRun], ['old-rules-read']);
     agent._recordCompletionToolResult(tabId, 'click_ax', { ref_id: 'ref_1' }, { success: true });
     assert.equal(agent.completionInvariants.get(tabId)?.verificationDebt, true);
 
@@ -90535,6 +90541,169 @@ test('blocked completion skips stale calls that follow in the same batch', async
     assert.match(String(staleResult?.content || ''), /fresh verification turn/, `${AgentClass.name}: stale skip reason was not explicit`);
 
     agent._clearCompletionInvariant(tabId, token);
+  }
+});
+
+test('decision completion recognizes published Reddit content while preserving validation and workflow contracts', async () => {
+  const previousChrome = globalThis.chrome, previousBrowser = globalThis.browser;
+  const previousEvaluate = cdpClientCh.evaluate;
+  const previousAttach = cdpClientCh.attach, previousCommand = cdpClientCh.sendCommand;
+  try {
+    cdpClientCh.attach = async () => {};
+    cdpClientCh.sendCommand = async () => ({});
+    for (const [index, AgentClass] of [AgentCh, AgentFx].entries()) {
+      const tabId = 24950 + index;
+      const url = 'https://old.reddit.com/r/opencodeCLI/comments/new/webbrain';
+      const page = { url, title: 'Published WebBrain post', openDialogCount: 0, relevantFormCount: 1, visibleFormCount: 1, successMessages: [] };
+      const storage = { get: async () => ({ decisionProvider: 'local', systemOneEnabled: true, decisionVisionMode: 'off' }) };
+      globalThis.chrome = { ...previousChrome, storage: { ...previousChrome?.storage, local: storage } };
+      globalThis.browser = { ...previousBrowser, storage: { ...previousBrowser?.storage, local: storage }, tabs: { ...previousBrowser?.tabs, get: async () => ({ id: tabId, url }), executeScript: async () => [page] } };
+      cdpClientCh.evaluate = async () => ({ result: { value: page } });
+      const provider = { model: 'test-model', supportsVision: false, config: { category: 'local' } };
+      const agent = new AgentClass({ getActive: () => provider, getVisionProvider: async () => null });
+      agent.conversationModes.set(tabId, 'act');
+      agent.autoScreenshot = 'off';
+      agent._persist = () => {};
+      agent.systemOneContext = () => ({ isCurrent: () => true });
+      agent._latestTaskText = () => 'Read rules and publish a WebBrain post that will get upvotes and won\'t get deleted';
+      agent._completionDocumentStamp = async () => 'current-document';
+      agent._captureViewportProbe = async () => page;
+      let outcome = 'succeeded';
+      agent.evaluateSystemOne = async () => ({ model: 'kev-latest', answers: { task_outcome: {
+        type: 'choice', choice: outcome, confidence: .99,
+        probabilities: Object.fromEntries(['succeeded', 'pending', 'failed', 'uncertain'].map(key => [key, key === outcome ? .97 : .01])),
+      } } });
+      const execute = agent.executeTool.bind(agent);
+      agent.executeTool = (tab, name, args) => name === 'get_accessibility_tree'
+        ? Promise.resolve({ success: true, pageContent: 'Published WebBrain post by expected author; unrelated comment form.' })
+        : execute(tab, name, args);
+      const guard = { enabled: true, requiresSubmission: true, requiresStateChange: true };
+      const submit = { dispatched: true, observedAfterSubmit: true, currentUrl: url, documentChanged: true };
+      agent._planExecutionGuards.set(tabId, guard);
+      agent._completionSubmitStates.set(tabId, submit);
+      const result = await agent.executeTool(tabId, 'done', { summary: 'Published the WebBrain post.', outcome: 'success' });
+      assert.equal(result.done, true, `${AgentClass.name}: published post was blocked by its comment form`);
+      assert.equal(result.verification.decision.outcome, 'succeeded');
+      assert.equal(guard.semanticSubmissionVerified, true);
+      assert.match(result.summary, /Future upvotes and moderation outcomes remain unverified/);
+
+      submit.formValidationFailed = true;
+      const invalid = await agent.executeTool(tabId, 'done', { summary: 'Published.', outcome: 'success' });
+      assert.equal(invalid.blockedDone, true, `${AgentClass.name}: semantic acceptance bypassed form validation`);
+      submit.formValidationFailed = false;
+      guard.siteWorkflow = { job: { requiresSubmission: true, id: 'reddit.publish' } };
+      guard.semanticSubmissionVerified = false; guard.verifiedSubmissionEvidence = false;
+      agent._completionVerdicts.clear();
+      await agent.executeTool(tabId, 'done', { summary: 'Published.', outcome: 'success' });
+      assert.equal(guard.semanticSubmissionVerified, false, `${AgentClass.name}: semantic proof bypassed an explicit workflow contract`);
+      delete guard.siteWorkflow;
+      agent._completionVerdicts.clear();
+      outcome = 'failed';
+      const wrong = await agent.executeTool(tabId, 'done', { summary: 'Published.', outcome: 'success' });
+      assert.equal(wrong.blockedDone, true); assert.equal(wrong.completionDecision.outcome, 'failed');
+      agent.cloudRunContexts.set(tabId, { outputSchema: { type: 'string' } });
+      const wrongJson = await agent.executeTool(tabId, 'done_json', { summary: 'Published.', result: 'post-id' });
+      assert.equal(wrongJson.blockedDone, true, 'action-mode done_json must use the same verifier');
+      outcome = 'succeeded'; agent._completionVerdicts.clear();
+      const publishedJson = await agent.executeTool(tabId, 'done_json', { summary: 'Published.', result: 'post-id' });
+      assert.equal(publishedJson.doneJson, true); assert.equal(publishedJson.cloudResult, 'post-id');
+      assert.match(publishedJson.summary, /Future upvotes and moderation outcomes remain unverified/);
+    }
+  } finally {
+    globalThis.chrome = previousChrome; globalThis.browser = previousBrowser;
+    cdpClientCh.evaluate = previousEvaluate;
+    cdpClientCh.attach = previousAttach; cdpClientCh.sendCommand = previousCommand;
+  }
+});
+
+test('decision completion releases forced done into read-only recovery and then normal tools in both run modes', async () => {
+  for (const AgentClass of [AgentCh, AgentFx]) for (const streaming of [false, true]) {
+    const call = (name, args, id) => ({ content: null, toolCalls: [{ id, function: { name, arguments: JSON.stringify(args) } }] });
+    const responses = [
+      call('click_ax', { ref_id: 'publish' }, 'publish'), call('read_page', {}, 'observe'),
+      { content: 'Published.', toolCalls: [] },
+      call('done', { summary: 'Published.', outcome: 'success' }, 'rejected'),
+      call('read_page', {}, 'inspect_existing_submission'),
+      call('done', { summary: 'Could not confirm publication.', outcome: 'failed' }, 'failure'),
+    ];
+    const requests = [];
+    const provider = { supportsTools: true, supportsVision: false, promptTier: 'full', contextWindow: 128000, model: 'test-model', name: 'test-provider' };
+    const next = options => { requests.push(options); const response = responses.shift(); assert.ok(response, 'unexpected extra recovery turn'); return response; };
+    if (streaming) provider.chatStream = async function* (_messages, options) {
+      const response = next(options);
+      if (response.content) yield { type: 'text', content: response.content };
+      if (response.toolCalls.length) yield { type: 'tool_call', content: response.toolCalls.map((call, index) => ({ index, id: call.id, function: call.function })) };
+      yield { type: 'done' };
+    };
+    else provider.chat = async (_messages, options) => next(options);
+    const agent = new AgentClass({ getActive: () => provider, getVisionProvider: async () => null });
+    const tabId = 24960 + (streaming ? 1 : 0);
+    agent.planBeforeAct = false;
+    agent._maybeRunPlannerGate = async () => ({ proceed: true, requestKind: 'execute', requiresStateChange: true });
+    agent.maxSteps = 10; agent.autoScreenshot = 'off'; agent._skipPermissionGate = true;
+    agent._manageContext = async () => {}; agent._maybeReinjectAdapter = async () => {};
+    agent._enrichUserMessageWithCurrentPage = async (_tab, _messages, content) => ({ role: 'user', content });
+    agent._ensureProgressSessionForCurrentTask = async () => ({ mode: 'inactive' });
+    agent._persist = () => {};
+    let mutations = 0;
+    agent.executeTool = async (_tab, name, args) => {
+      if (name === 'click_ax') { mutations++; return { success: true, verified: true }; }
+      if (name === 'read_page') return { success: true, content: 'Inspecting the already-dispatched submission.' };
+      if (name === 'done' && args.outcome === 'success') return { success: false, blockedDone: true, completionDecision: { outcome: 'pending', engine: 'local' }, error: 'Inspect the existing submission.' };
+      if (name === 'done') return { done: true, summary: args.summary, outcome: args.outcome };
+      throw new Error(`unexpected tool ${name}`);
+    };
+    const run = streaming ? agent.processMessageStream.bind(agent) : agent.processMessage.bind(agent);
+    await run(tabId, 'publish a post', () => {}, 'act');
+    assert.deepEqual(requests[3].tools.map(t => t.function.name), ['done'], 'test must reproduce the forced-done latch');
+    assert.equal(requests[4].tools.some(t => t.function.name === 'read_page'), true, 'rejected completion must expose observations');
+    assert.equal(requests[4].tools.some(t => t.function.name === 'click_ax'), false, 'submission must be inspected before mutations');
+    assert.equal(requests[5].tools.some(t => t.function.name === 'click_ax'), true, 'fresh observation must release the forced-done latch');
+    assert.equal(mutations, 1, 'completion recovery must not automatically resubmit');
+    assert.equal(responses.length, 0);
+  }
+});
+
+test('completion decision quota errors stop interactive runs and reject scheduled runs without another model call', async () => {
+  for (const AgentClass of [AgentCh, AgentFx]) for (const streaming of [false, true]) for (const scheduledRun of [false, true]) {
+    let calls = 0, status;
+    const tool = { id: 'quota_done', function: { name: 'done', arguments: '{"outcome":"success","summary":"Read the page."}' } };
+    const provider = { supportsTools: true, supportsVision: false, promptTier: 'full', contextWindow: 128000, model: 'test-model', name: 'test-provider' };
+    if (streaming) provider.chatStream = async function* () {
+      calls++; yield { type: 'tool_call', content: [{ index: 0, ...tool }] }; yield { type: 'done' };
+    };
+    else provider.chat = async () => { calls++; return { content: null, toolCalls: [tool] }; };
+    const agent = new AgentClass({ getActive: () => provider, getVisionProvider: async () => null });
+    agent.planBeforeAct = false; agent.autoScreenshot = 'off'; agent._skipPermissionGate = true;
+    agent._maybeRunPlannerGate = async () => ({ proceed: true, requestKind: 'execute', requiresStateChange: false });
+    agent._manageContext = async () => {}; agent._maybeReinjectAdapter = async () => {};
+    agent._enrichUserMessageWithCurrentPage = async (_tab, _messages, content) => ({ role: 'user', content });
+    agent._ensureProgressSessionForCurrentTask = async () => ({ mode: 'inactive' }); agent._persist = () => {};
+    agent.executeTool = async () => { throw Object.assign(new Error('Decision quota exhausted.'), { code: 'WB_COST_ALLOWANCE', status: 402, quota: { code: 'webbrain_cloud_free_tier_exceeded' } }); };
+    const updates = [];
+    const run = streaming ? agent.processMessageStream.bind(agent) : agent.processMessage.bind(agent);
+    const options = { scheduledRun, onRunFinished: value => { status = value; } };
+    const operation = run(24970, 'Read the page', (type, data) => updates.push({ type, data }), 'act', ...(streaming ? [options] : [[], options]));
+    if (scheduledRun) await assert.rejects(operation, error => error.code === 'WB_COST_ALLOWANCE' && error.status === 402, `${AgentClass.name}/${streaming}: a scheduled cost stop must reject`);
+    else assert.match(await operation, /quota exhausted/);
+    assert.equal(calls, 1, 'quota stops must not call another model');
+    assert.equal(status, 'cost_limit');
+    assert.equal(updates.filter(update => update.type === 'quota').length, 1);
+    if (scheduledRun) for (const schedule of [{ type: 'once', after_seconds: 0 }, { type: 'recurring', after_seconds: 0, interval_minutes: 5 }]) {
+      const h = makeSchedulerHarness(AgentClass === AgentCh ? SchedulerCh : SchedulerFx, {
+        processMessage: (...args) => run(args[0], args[1], args[2], args[3], ...(streaming ? [args[5]] : [args[4], args[5]])),
+      });
+      const created = await h.manager.createTaskJob({
+        tabId: 77, conversationId: 'quota-job', currentUrl: 'https://example.com/', currentTitle: 'Example',
+        args: { title: 'Quota stop', prompt: 'Read the page', schedule, target: { type: 'current_tab' } },
+      });
+      const before = calls;
+      await h.manager.handleAlarm(h.alarmName(created.jobId));
+      const stopped = h.jobs().find(job => job.id === created.jobId);
+      assert.equal(stopped.status, 'failed', 'cost-limited jobs must not complete or silently reschedule');
+      assert.match(stopped.lastError, /quota exhausted/);
+      assert.equal(stopped.lastOutcome, null); assert.equal(calls, before + 1);
+    }
   }
 });
 

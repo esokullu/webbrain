@@ -139,6 +139,8 @@ async function requestVision(body) {
   let reasoning = '';
   let usage = {};
   let timings = null;
+  let provider = null;
+  let finishReason = null;
   if (raw.includes('data: ')) {
     for (const line of raw.split(/\r?\n/)) {
       if (!line.startsWith('data: ')) continue;
@@ -146,6 +148,9 @@ async function requestVision(body) {
       if (!data || data === '[DONE]') continue;
       let event;
       try { event = JSON.parse(data); } catch { continue; }
+      if (event.error) throw new Error(`Stream error: ${JSON.stringify(event.error)}`);
+      provider = event.provider || provider;
+      finishReason = event?.choices?.[0]?.finish_reason || finishReason;
       const delta = event?.choices?.[0]?.delta || {};
       content += delta.content || '';
       reasoning += delta.reasoning_content || '';
@@ -154,12 +159,15 @@ async function requestVision(body) {
     }
   } else {
     const json = JSON.parse(raw);
+    if (json.error) throw new Error(`Response error: ${JSON.stringify(json.error)}`);
+    provider = json.provider || null;
+    finishReason = json?.choices?.[0]?.finish_reason || null;
     content = json?.choices?.[0]?.message?.content || '';
     reasoning = json?.choices?.[0]?.message?.reasoning_content || '';
     usage = json?.usage || {};
     timings = json?.choices?.[0]?.timings || null;
   }
-  return { content, reasoning, usage, timings, latencyMs: { headers: headerMs, total: Date.now() - startedAt }, status: res.statusCode };
+  return { content, reasoning, usage, timings, provider, finishReason, raw, latencyMs: { headers: headerMs, total: Date.now() - startedAt }, status: res.statusCode };
 }
 
 async function runCase(entry) {
@@ -181,7 +189,7 @@ async function runCase(entry) {
       question: entry.question,
       image: { path: entry.question.image, bytes: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex') },
       request: { systemPrompt: VISION_SYSTEM_PROMPT, userText, foldSystem, temperature: body.temperature, maxTokens: body.max_tokens, chatTemplateKwargs: body.chat_template_kwargs },
-      response: { status: response.status, content: response.content, reasoningChars: response.reasoning.length, usage: response.usage, timings: response.timings },
+      response: { status: response.status, content: response.content, reasoningChars: response.reasoning.length, usage: response.usage, timings: response.timings, provider: response.provider, finishReason: response.finishReason, raw: response.raw },
       latencyMs: response.latencyMs,
       score,
       error: null,

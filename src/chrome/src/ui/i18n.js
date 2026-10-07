@@ -1,3 +1,4 @@
+import { decisionEnglish, decisionTranslations } from './locales/decision-copy.mjs';
 // Minimal i18n for WebBrain extension pages (sidepanel, settings, traces).
 // Sync reads from localStorage so translations apply before first paint.
 // Works identically in Chrome MV3 and Firefox MV2.
@@ -46,6 +47,8 @@ const DICTS = Object.fromEntries(Object.entries({ en, es, fr, tr, zh, ru, uk, ar
     ...pdfViewerEnglish,
     ...safeSocialEnglish,
     ...captchaEnglish,
+    ...decisionEnglish,
+    ...(decisionTranslations[code] || {}),
     ...(captchaTranslations[code] || {}),
     ...(safeSocialTranslations[code] || {}),
     ...(providerGuideTranslations[code] || {}),

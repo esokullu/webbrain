@@ -1,0 +1,132 @@
+{
+  "retrievedAt": "2026-10-07T00:18:39.126Z",
+  "url": "https://openrouter.ai/api/v1/models/inclusionai/ling-3.0-flash-vl/endpoints",
+  "status": 200,
+  "data": {
+    "data": {
+      "id": "inclusionai/ling-3.0-flash-vl",
+      "name": "inclusionAI: Ling 3.0 Flash VL",
+      "created": 1789056114,
+      "description": "Ling 3.0 Flash VL builds on Ling 3.0 Flash (124B total / 5.5B active MoE from InclusionAI), further strengthening its language capabilities while adding native visual perception and advanced visual...",
+      "architecture": {
+        "tokenizer": "Other",
+        "instruct_type": null,
+        "modality": "text+image+video->text",
+        "input_modalities": [
+          "text",
+          "image",
+          "video"
+        ],
+        "output_modalities": [
+          "text"
+        ]
+      },
+      "endpoints": [
+        {
+          "name": "Novita | inclusionai/ling-3.0-flash-vl-20260910",
+          "model_id": "inclusionai/ling-3.0-flash-vl",
+          "model_name": "inclusionAI: Ling 3.0 Flash VL",
+          "context_length": 262144,
+          "pricing": {
+            "prompt": "0.000000021",
+            "completion": "0.0000000616",
+            "input_cache_read": "0.0000000042",
+            "discount": 0.72
+          },
+          "provider_name": "Novita",
+          "tag": "novita/bf16",
+          "quantization": "bf16",
+          "max_completion_tokens": 32768,
+          "max_prompt_tokens": null,
+          "supported_parameters": [
+            "reasoning",
+            "include_reasoning",
+            "max_tokens",
+            "temperature",
+            "top_p",
+            "stop",
+            "frequency_penalty",
+            "presence_penalty",
+            "seed",
+            "top_k",
+            "repetition_penalty",
+            "tools",
+            "tool_choice",
+            "logprobs",
+            "top_logprobs"
+          ],
+          "supports_tool_choice": {
+            "none": true,
+            "auto": true,
+            "required": true,
+            "function": true
+          },
+          "status": 0,
+          "uptime_last_30m": 99.92563476043769,
+          "uptime_last_5m": 99.87740089906008,
+          "uptime_last_1d": 99.65869803990948,
+          "supports_implicit_caching": false,
+          "native_tools": {},
+          "supports_voice_cloning": false,
+          "supports_multiple_audio_references": false,
+          "supports_image_reference": false,
+          "latency_last_30m": null,
+          "throughput_last_30m": null
+        },
+        {
+          "name": "DeepInfra | inclusionai/ling-3.0-flash-vl-20260910",
+          "model_id": "inclusionai/ling-3.0-flash-vl",
+          "model_name": "inclusionAI: Ling 3.0 Flash VL",
+          "context_length": 131072,
+          "pricing": {
+            "prompt": "0.00000006",
+            "completion": "0.00000018",
+            "input_cache_read": "0.000000012",
+            "discount": 0
+          },
+          "provider_name": "DeepInfra",
+          "tag": "deepinfra/fp16",
+          "quantization": "fp16",
+          "max_completion_tokens": 32768,
+          "max_prompt_tokens": null,
+          "supported_parameters": [
+            "reasoning",
+            "include_reasoning",
+            "max_tokens",
+            "temperature",
+            "top_p",
+            "stop",
+            "frequency_penalty",
+            "presence_penalty",
+            "repetition_penalty",
+            "top_k",
+            "seed",
+            "min_p",
+            "logit_bias",
+            "tools",
+            "tool_choice",
+            "structured_outputs",
+            "response_format"
+          ],
+          "supports_tool_choice": {
+            "none": true,
+            "auto": true,
+            "required": true,
+            "function": true
+          },
+          "status": 0,
+          "uptime_last_30m": 100,
+          "uptime_last_5m": 100,
+          "uptime_last_1d": 99.84113590735838,
+          "supports_implicit_caching": false,
+          "native_tools": {},
+          "supports_voice_cloning": false,
+          "supports_multiple_audio_references": false,
+          "supports_image_reference": false,
+          "latency_last_30m": null,
+          "throughput_last_30m": null
+        }
+      ]
+    }
+  }
+}

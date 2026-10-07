@@ -1,0 +1,33 @@
+export const decisionEnglish = {
+  'st.system_one.title': 'Decision models',
+  'st.system_one.desc_html': 'Outsource selected decisions to OpenRouter, TypeSafe, or a local model.',
+  'st.system_one.enabled.label': 'Enable decision outsourcing',
+  'st.system_one.api_key.label': 'API key (optional for local models)',
+  'st.system_one.need_key': 'Enter an API key for the selected provider.',
+  'st.system_one.security_html': 'Sends bounded task and page evidence to the selected endpoint. Keys are stored locally. Cloud usage may cost money. Strict Secret Mode disables decision outsourcing.',
+  'st.decision.provider': 'Provider', 'st.decision.model': 'Decision model',
+  'st.decision.local': 'Local / custom System One endpoint',
+  'st.decision.endpoint': 'Server base URL', 'st.decision.refresh': 'Load available models',
+  'st.decision.models_loaded': '{count} decision models loaded',
+  'st.decision.vision': 'Image support', 'st.decision.auto': 'Auto (model capabilities)',
+  'st.decision.on': 'On (custom override)', 'st.decision.off': 'Off (AX only)',
+  'st.decision.done': 'Verify completion (done)', 'st.decision.threshold': 'Completion probability threshold (%)',
+  'st.decision.done_desc': 'Use the selected decision model for completion checks. When outsourcing is off or unconfigured, the active LLM still verifies completion before existing checks; its usual cost limits apply.',
+  'st.decision.vision_unverified': 'Image support was not verified. Auto mode will use AX.',
+  'st.decision.compass': 'Compass verifies completion through its managed decision model automatically. Test checks image-only facts when image support is enabled; unsupported images use AX.',
+};
+export const decisionTranslations = {
+  tr: {
+    'st.system_one.title': 'Karar modelleri', 'st.system_one.desc_html': 'Seçilen kararları OpenRouter, TypeSafe veya yerel bir modele devredin.',
+    'st.system_one.enabled.label': 'Karar devretmeyi etkinleştir', 'st.system_one.api_key.label': 'API anahtarı (yerel modellerde isteğe bağlı)',
+    'st.system_one.need_key': 'Seçilen sağlayıcı için bir API anahtarı girin.',
+    'st.system_one.security_html': 'Sınırlı görev ve sayfa kanıtı seçilen adrese gönderilir. Anahtarlar yerel olarak saklanır. Bulut kullanımı ücretli olabilir. Kesin Gizlilik Modu karar devretmeyi kapatır.',
+    'st.decision.provider': 'Sağlayıcı', 'st.decision.model': 'Karar modeli', 'st.decision.local': 'Yerel / özel System One adresi',
+    'st.decision.endpoint': 'Sunucu temel adresi', 'st.decision.refresh': 'Mevcut modelleri yükle', 'st.decision.models_loaded': '{count} karar modeli yüklendi',
+    'st.decision.vision': 'Görsel desteği', 'st.decision.auto': 'Otomatik (model özellikleri)', 'st.decision.on': 'Açık (özel ayar)', 'st.decision.off': 'Kapalı (yalnızca AX)',
+    'st.decision.done': 'Tamamlanmayı doğrula (done)', 'st.decision.threshold': 'Tamamlanma olasılığı eşiği (%)',
+    'st.decision.done_desc': 'Tamamlanma kontrollerinde seçilen karar modelini kullanır. Devretme kapalıysa veya yapılandırılmamışsa, etkin dil modeli mevcut kontrollerden önce tamamlanmayı yine doğrular; normal maliyet sınırları geçerlidir.',
+    'st.decision.vision_unverified': 'Görsel desteği doğrulanmadı. Otomatik mod AX kullanacak.',
+    'st.decision.compass': 'Compass tamamlanmayı yönetilen karar modeliyle otomatik doğrular. Görsel desteği açıksa test yalnızca görselde bulunan bilgileri kontrol eder; desteklenmeyen görsellerde AX kullanılır.',
+  },
+};

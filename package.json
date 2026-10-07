@@ -59,7 +59,7 @@
     "test:rich-text-dom": "node test/ui-content-lifecycle.mjs --dom",
     "test:firefox-bidi": "node --test test/firefox-bidi.mjs test/firefox-full-page-screenshot.mjs",
     "test:firefox-bidi:e2e": "node test/firefox-bidi-e2e.mjs",
-    "test:systemone": "node --test test/systemone.mjs",
+    "test:systemone": "node --test test/systemone.mjs test/completion-verifier.mjs test/completion-document.mjs",
     "test:systemone:ui": "node test/systemone-ui.mjs",
     "test:systemone:fast": "node --test test/systemone-fast.mjs && node test/systemone-fast-dom.mjs && node --test test/jev/fixtures.test.mjs",
     "benchmark:jev": "node test/jev/benchmark.mjs",

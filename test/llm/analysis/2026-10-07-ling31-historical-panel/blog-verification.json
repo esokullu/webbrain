@@ -1,0 +1,46 @@
+{
+  "date": "2026-10-07",
+  "tableRows": [
+    6,
+    5,
+    2,
+    4
+  ],
+  "comparisonMatchesReport": true,
+  "pairwiseMatchesReport": true,
+  "availabilityMatchesReport": true,
+  "tokenCountsMatchReport": true,
+  "canonical": "https://webbrain.one/blog/ling31-flash-vs-deepseek-hy3-glm52-laguna-xs",
+  "jsonLdParsed": 1,
+  "internalLinksChecked": 4,
+  "mobile": {
+    "viewport": 390,
+    "page": 390,
+    "body": 390,
+    "tables": [
+      {
+        "width": 350,
+        "content": 686,
+        "overflow": "auto"
+      },
+      {
+        "width": 350,
+        "content": 560,
+        "overflow": "auto"
+      },
+      {
+        "width": 350,
+        "content": 560,
+        "overflow": "auto"
+      },
+      {
+        "width": 350,
+        "content": 560,
+        "overflow": "auto"
+      }
+    ]
+  },
+  "indexCardCount": 1,
+  "indexSearchPassed": true,
+  "pageErrors": []
+}

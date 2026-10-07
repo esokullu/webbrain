@@ -107,12 +107,12 @@ function requestSignal(parentSignal, timeoutMs) {
   };
 }
 
-function validateState(state) {
+function validateState(state, multimodal = false) {
   const valid = typeof state === 'string' || Array.isArray(state) || isRecord(state);
   if (!valid) throw new Error('TypeSafe System One state must be a string, object, or array.');
   let serialized;
   try { serialized = JSON.stringify(state); } catch { throw new Error('TypeSafe System One state is not serializable.'); }
-  if (serialized.length > 16_000) throw new Error('TypeSafe System One state is too large.');
+  if (new TextEncoder().encode(serialized).length > (multimodal ? 8 * 1024 * 1024 : 16_000)) throw new Error('TypeSafe System One state is too large.');
 }
 
 function validateQuestions(questions) {
@@ -270,10 +270,11 @@ export function createSystemOneJudge({
 } = {}) {
   if (typeof fetchImpl !== 'function') throw new Error('TypeSafe System One fetch is unavailable.');
   return {
-    async evaluate({ apiKey, state, questions, signal, beforeRequest, onUsage } = {}) {
-      const key = normalizeTypesafeApiKey(apiKey);
-      if (!key) throw new Error('TypeSafe System One API key is not configured.');
-      validateState(state);
+    async evaluate({ apiKey, state, questions, signal, beforeRequest, onUsage, config, headers = {}, metadata = {} } = {}) {
+      const key = normalizeTypesafeApiKey(config?.apiKey ?? apiKey);
+      if (!key && config?.provider !== 'local' && config?.provider !== 'compass') throw new Error('Decision API key is not configured.');
+      const model = config?.model || SYSTEM_ONE_MODEL;
+      validateState(state, config?.supportsVision === true);
       validateQuestions(questions);
       const started = now();
       const request = requestSignal(signal, Math.max(1, Math.min(5000, Number(timeoutMs) || 5000)));
@@ -283,11 +284,11 @@ export function createSystemOneJudge({
           throwIfAborted(request.signal);
           if (beforeRequest) await abortable(beforeRequest(), request.signal);
           throwIfAborted(request.signal);
-          const response = await abortable(fetchImpl(SYSTEM_ONE_API_URL, {
+          const response = await abortable(fetchImpl(config?.url || SYSTEM_ONE_API_URL, {
             method: 'POST',
-            credentials: 'omit',
-            headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
-            body: JSON.stringify({ state, model: SYSTEM_ONE_MODEL, questions }),
+            credentials: 'omit', redirect: 'error',
+            headers: { ...(key ? { Authorization: `Bearer ${key}` } : {}), 'Content-Type': 'application/json', ...headers },
+            body: JSON.stringify({ ...metadata, state, model, questions }),
             signal: request.signal,
           }), request.signal);
           if (!response?.ok) {
@@ -296,7 +297,22 @@ export function createSystemOneJudge({
               await abortable(sleep(SYSTEM_ONE_RETRY_BASE_MS * (2 ** attempt)), request.signal);
               continue;
             }
-            throw requestError(status);
+            const error = requestError(status);
+            if (status === 402) {
+              error.code = 'WB_COST_ALLOWANCE';
+              error.message = 'Decision provider quota exhausted (HTTP 402).';
+            }
+            if (status === 402 && config?.provider === 'compass') {
+              try {
+                const body = await abortable(response.json(), request.signal);
+                error.quota = { code: body.error?.code || 'webbrain_cloud_quota_exceeded', usage: body.usage || {}, subscribe_url: body.subscribe_url, upgrade_url: body.upgrade_url, manage_billing_url: body.manage_billing_url };
+                error.message = String(body.error?.message || 'WebBrain Compass allowance used.');
+                const action = body.manage_billing_url || body.upgrade_url || body.subscribe_url;
+                const label = body.manage_billing_url ? 'Update payment method' : body.upgrade_url ? 'Upgrade to WebBrain Plus' : 'Subscribe for more usage';
+                if (typeof action === 'string' && /^https:\/\//i.test(action)) error.message += `\n${label}: ${action}`;
+              } catch {}
+            }
+            throw error;
           }
           let result;
           try {
@@ -308,18 +324,18 @@ export function createSystemOneJudge({
           const usage = result?.usage;
           if (!isRecord(usage) || !Number.isInteger(usage.input_tokens) || usage.input_tokens < 0
             || !Number.isInteger(usage.output_tokens) || usage.output_tokens < 0) throw systemOneError('JEV_INVALID_USAGE', 'Invalid Jev usage.');
-          const metadata = {
-            model: SYSTEM_ONE_MODEL,
-            usage: { input_tokens: usage.input_tokens, output_tokens: usage.output_tokens },
+          const usageMetadata = {
+            model: result.model, provider: result.provider || config?.provider || 'typesafe',
+            usage: { input_tokens: usage.input_tokens, output_tokens: usage.output_tokens, ...(Number.isFinite(usage.cost) && usage.cost >= 0 ? { cost: usage.cost } : {}) },
             latencyMs: Math.max(0, now() - started),
-            estimatedCostUsd: usage.input_tokens * SYSTEM_ONE_INPUT_COST_PER_MILLION_USD / 1_000_000,
+            estimatedCostUsd: Number.isFinite(usage.cost) && usage.cost >= 0 ? usage.cost : (usage.input_tokens * (config?.config?.inputCostPerMillionUsd ?? SYSTEM_ONE_INPUT_COST_PER_MILLION_USD) + usage.output_tokens * (config?.config?.outputCostPerMillionUsd || 0)) / 1_000_000,
           };
           // Account for billable responses even when the answer contract is invalid.
-          if (onUsage) await abortable(onUsage(metadata), request.signal);
+          if (onUsage) await abortable(onUsage(usageMetadata), request.signal);
           throwIfAborted(request.signal);
-          if (result.model !== SYSTEM_ONE_MODEL) throw systemOneError('JEV_UNEXPECTED_MODEL', 'Unexpected Jev model version.');
+          if (result.model !== model && !(config && typeof result.model === 'string' && result.model.startsWith(model + '-') && /^\d{8}$/.test(result.model.slice(model.length + 1)))) throw systemOneError('JEV_UNEXPECTED_MODEL', 'Unexpected Jev model version.');
           validateSystemOneAnswers(result.answers, questions);
-          return { ...metadata, answers: result.answers };
+          return { ...usageMetadata, answers: result.answers };
         }
       } finally {
         request.dispose();

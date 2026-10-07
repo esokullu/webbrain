@@ -1,3 +1,4 @@
+import { DECISION_SETTINGS_KEYS, DEFAULT_DECISION_MODEL, resolveDecisionConfig } from '../agent/decision-config.js';
 /**
  * WebBrain Settings Page — provider configuration + display settings.
  */
@@ -222,6 +223,17 @@ const memcodeRecallToggle = document.getElementById('toggle-memcode-recall');
 const memcodeConnectButton = document.getElementById('btn-memcode-connect');
 const memcodeDisconnectButton = document.getElementById('btn-memcode-disconnect');
 const memcodeRecallResult = document.getElementById('test-memcode-recall');
+const decisionProviderInput = document.getElementById('decision-provider');
+const decisionModelInput = document.getElementById('decision-model');
+const decisionEndpointInput = document.getElementById('decision-endpoint');
+const decisionVisionInput = document.getElementById('decision-vision');
+const decisionDoneToggle = document.getElementById('toggle-decision-done');
+const decisionThresholdInput = document.getElementById('decision-done-threshold');
+let decisionModels = [];
+let decisionVisionSupported = false;
+const decisionKeyDrafts = new Map();
+let previousDecisionProvider = 'openrouter';
+
 const systemOneApiKeyInput = document.getElementById('system-one-api-key');
 const systemOneEnabledToggle = document.getElementById('toggle-system-one');
 const systemOneWatchToggle = document.getElementById('toggle-system-one-watch');
@@ -612,7 +624,7 @@ async function init() {
   chrome.storage.local.remove(['authToken', 'authEmail', 'authDefaultModel']).catch(() => {});
 
   // Load display settings
-  const stored = await chrome.storage.local.get(['verboseMode', 'composerDeliveryMode', 'selectionShortcutEnabled', 'pdfViewerEnabled', AUTO_GROUP_TABS_KEY, 'helpImproveWebBrain', 'screenshotFallback', 'maxAgentSteps', 'autoScreenshot', 'useSiteAdapters', 'researchEscalationEnabled', 'researchEscalationEngine', 'voiceInputEnabled', 'alwaysAllowApiMutations', 'apiMutationObserverEnabled', 'webMcpEnabled', 'openaiAskStreamingEnabled', 'planBeforeActMode', 'planBeforeAct', 'planReviewMode', 'planReviewConfidenceThreshold', DOWNLOAD_DIRECTORY_STORAGE_KEY, 'notifySound', 'completionConfetti', 'completionFlashTab', 'tracingEnabled', 'losslessTrace', 'strictSecretMode', 'agentAllowLocalNetwork', 'scheduledTasksEnabled', 'scheduledRequireConsequentialConfirmation', 'systemOneEnabled', 'systemOneWatchEnabled', 'systemOneCompletionEnabled', 'systemOneFastClassifications', 'systemOneFastBrowser', 'systemOneWatchThreshold', 'systemOneCompletionThreshold', 'typesafeApiKey', 'providerFilter', 'requestTimeoutMs', 'clarifyTimeoutSec', 'clarifyTimeoutSemanticsV2', 'costAllowanceSessionUsd', 'costAllowanceTotalUsd', 'meteredProviderCostSpentUsd', 'screenshotRedaction', 'imageDetail', 'maxScreenshotsPerTurn', 'maxImageDimension']);
+  const stored = await chrome.storage.local.get([...DECISION_SETTINGS_KEYS, 'verboseMode', 'composerDeliveryMode', 'selectionShortcutEnabled', 'pdfViewerEnabled', AUTO_GROUP_TABS_KEY, 'helpImproveWebBrain', 'screenshotFallback', 'maxAgentSteps', 'autoScreenshot', 'useSiteAdapters', 'researchEscalationEnabled', 'researchEscalationEngine', 'voiceInputEnabled', 'alwaysAllowApiMutations', 'apiMutationObserverEnabled', 'webMcpEnabled', 'openaiAskStreamingEnabled', 'planBeforeActMode', 'planBeforeAct', 'planReviewMode', 'planReviewConfidenceThreshold', DOWNLOAD_DIRECTORY_STORAGE_KEY, 'notifySound', 'completionConfetti', 'completionFlashTab', 'tracingEnabled', 'losslessTrace', 'strictSecretMode', 'agentAllowLocalNetwork', 'scheduledTasksEnabled', 'scheduledRequireConsequentialConfirmation', 'systemOneEnabled', 'systemOneWatchEnabled', 'systemOneCompletionEnabled', 'systemOneFastClassifications', 'systemOneFastBrowser', 'systemOneWatchThreshold', 'systemOneCompletionThreshold', 'typesafeApiKey', 'providerFilter', 'requestTimeoutMs', 'clarifyTimeoutSec', 'clarifyTimeoutSemanticsV2', 'costAllowanceSessionUsd', 'costAllowanceTotalUsd', 'meteredProviderCostSpentUsd', 'screenshotRedaction', 'imageDetail', 'maxScreenshotsPerTurn', 'maxImageDimension']);
   if (typeof stored.providerFilter === 'string' && ['all','active','local','cloud','router'].includes(stored.providerFilter)) {
     providerFilter = stored.providerFilter;
   }
@@ -713,12 +725,24 @@ async function init() {
   if (scheduledConfirmToggle) {
     scheduledConfirmToggle.checked = stored.scheduledRequireConsequentialConfirmation !== false; // on by default
   }
+  const decisionConfig = resolveDecisionConfig(stored);
+  decisionProviderInput.value = previousDecisionProvider = decisionConfig.provider;
+  decisionModelInput.value = decisionConfig.model;
+  decisionEndpointInput.value = stored.decisionBaseUrl || 'http://127.0.0.1:8009';
+  decisionVisionInput.value = stored.decisionVisionMode || 'auto';
+  decisionVisionSupported = stored.decisionVisionSupported === true;
+  decisionDoneToggle.checked = decisionConfig.doneEnabled;
+  decisionThresholdInput.value = String(decisionConfig.threshold * 100);
+  decisionKeyDrafts.set('typesafe', stored.typesafeApiKey || '');
+  decisionKeyDrafts.set('openrouter', stored.decisionApiKey || '');
+  decisionKeyDrafts.set('local', stored.decisionLocalApiKey || '');
+  document.getElementById('decision-endpoint-field').hidden = decisionConfig.provider !== 'local';
   if (systemOneEnabledToggle) systemOneEnabledToggle.checked = stored.systemOneEnabled === true;
   if (systemOneWatchToggle) systemOneWatchToggle.checked = stored.systemOneWatchEnabled === true;
   if (systemOneClassificationsToggle) systemOneClassificationsToggle.checked = stored.systemOneFastClassifications === true;
   if (systemOneBrowserToggle) systemOneBrowserToggle.checked = stored.systemOneFastBrowser === true;
   if (systemOneCompletionToggle) systemOneCompletionToggle.checked = stored.systemOneCompletionEnabled === true;
-  if (systemOneApiKeyInput) systemOneApiKeyInput.value = normalizeTypesafeApiKey(stored.typesafeApiKey);
+  if (systemOneApiKeyInput) systemOneApiKeyInput.value = decisionConfig.apiKey;
   if (systemOneWatchThresholdRange) systemOneWatchThresholdRange.value = String(normalizeSystemOneThreshold(stored.systemOneWatchThreshold) * 100);
   if (systemOneCompletionThresholdRange) systemOneCompletionThresholdRange.value = String(normalizeSystemOneThreshold(stored.systemOneCompletionThreshold) * 100);
   updateSystemOneThresholdLabels();
@@ -1536,14 +1560,17 @@ if (btnSaveSystemOne) {
   btnSaveSystemOne.addEventListener('click', async () => {
     const key = normalizeTypesafeApiKey(systemOneApiKeyInput?.value);
     const enabled = systemOneEnabledToggle?.checked === true;
-    if (enabled && !isValidTypesafeApiKey(key)) {
+    if (enabled && decisionProviderInput.value !== 'local' && !isValidTypesafeApiKey(key)) {
       showSystemOneResult('fail', t('st.system_one.need_key'));
       return;
     }
     if (systemOneApiKeyInput) systemOneApiKeyInput.value = key;
+    let selection;
+    try { selection = decisionSettingsDraft(); resolveDecisionConfig(selection); if (!(selection.systemOneDoneThreshold >= .5 && selection.systemOneDoneThreshold <= .99)) throw new Error('Completion threshold must be 50–99%.'); } catch (error) { showSystemOneResult('fail', error.message); return; }
     await chrome.storage.local.set({
-      typesafeApiKey: key,
-      systemOneEnabled: enabled && isValidTypesafeApiKey(key),
+      ...selection,
+      ...(decisionProviderInput.value === 'typesafe' ? { typesafeApiKey: key } : { [decisionProviderInput.value === 'local' ? 'decisionLocalApiKey' : 'decisionApiKey']: key }),
+      systemOneEnabled: enabled && (decisionProviderInput.value === 'local' || isValidTypesafeApiKey(key)),
       systemOneWatchEnabled: systemOneWatchToggle?.checked === true,
       systemOneCompletionEnabled: systemOneCompletionToggle?.checked === true,
       systemOneFastClassifications: systemOneClassificationsToggle?.checked === true,
@@ -1560,10 +1587,17 @@ if (btnClearSystemOne) {
     if (systemOneClassificationsToggle) systemOneClassificationsToggle.checked = false;
     if (systemOneBrowserToggle) systemOneBrowserToggle.checked = false;
     if (systemOneApiKeyInput) systemOneApiKeyInput.value = '';
+    decisionKeyDrafts.clear();
+    decisionProviderInput.value = previousDecisionProvider = 'openrouter';
+    decisionModelInput.value = DEFAULT_DECISION_MODEL;
+    decisionDoneToggle.checked = true;
+    decisionVisionSupported = false;
+    document.getElementById('decision-endpoint-field').hidden = true;
     if (systemOneEnabledToggle) systemOneEnabledToggle.checked = false;
     if (systemOneWatchToggle) systemOneWatchToggle.checked = false;
     if (systemOneCompletionToggle) systemOneCompletionToggle.checked = false;
     await chrome.storage.local.remove([
+      ...DECISION_SETTINGS_KEYS,
       'typesafeApiKey',
       'systemOneEnabled',
       'systemOneWatchEnabled',
@@ -1578,15 +1612,50 @@ if (btnClearSystemOne) {
   });
 }
 
+function decisionSettingsDraft() {
+  const card = decisionModels.find(m => m.id === decisionModelInput.value);
+  return { decisionProvider: decisionProviderInput.value, decisionModel: decisionModelInput.value.trim(),
+    decisionBaseUrl: decisionEndpointInput.value.trim(), decisionVisionMode: decisionVisionInput.value,
+    decisionVisionSupported, ...(decisionProviderInput.value === 'typesafe' ? { typesafeApiKey: systemOneApiKeyInput.value.trim() } : { [decisionProviderInput.value === 'local' ? 'decisionLocalApiKey' : 'decisionApiKey']: systemOneApiKeyInput.value.trim() }),
+    systemOneDoneEnabled: decisionDoneToggle.checked, systemOneDoneThreshold: Number(decisionThresholdInput.value) / 100,
+    decisionInputRate: card?.inputRate ?? (decisionProviderInput.value === 'typesafe' ? .042 : decisionProviderInput.value === 'local' ? 0 : .04), decisionOutputRate: card?.outputRate ?? 0 };
+}
+
+decisionProviderInput?.addEventListener('change', () => {
+  decisionKeyDrafts.set(previousDecisionProvider, systemOneApiKeyInput.value);
+  previousDecisionProvider = decisionProviderInput.value;
+  systemOneApiKeyInput.value = decisionKeyDrafts.get(previousDecisionProvider) || '';
+  decisionModelInput.value = previousDecisionProvider === 'typesafe' ? 'jev-1.13.0' : previousDecisionProvider === 'local' ? 'kev-latest' : DEFAULT_DECISION_MODEL;
+  decisionModels = []; decisionVisionSupported = false;
+  document.getElementById('decision-models').replaceChildren();
+  document.getElementById('decision-endpoint-field').hidden = previousDecisionProvider !== 'local';
+});
+decisionModelInput?.addEventListener('input', () => {
+  decisionVisionSupported = decisionModels.find(m => m.id === decisionModelInput.value)?.supportsVision === true;
+});
+document.getElementById('btn-decision-models')?.addEventListener('click', async () => {
+  const button = document.getElementById('btn-decision-models'); button.disabled = true;
+  try {
+    const result = await sendToBackground('list_decision_models', { settings: decisionSettingsDraft() });
+    if (!result.success) throw new Error(result.error || 'Model discovery unavailable');
+    decisionModels = result.models;
+    const list = document.getElementById('decision-models'); list.replaceChildren();
+    for (const model of decisionModels) { const option = document.createElement('option'); option.value = model.id; option.label = model.name; list.append(option); }
+    decisionVisionSupported = decisionModels.find(m => m.id === decisionModelInput.value)?.supportsVision === true;
+    showSystemOneResult('ok', t('st.decision.models_loaded', { count: decisionModels.length }));
+  } catch (error) { showSystemOneResult('fail', error.message); } finally { button.disabled = false; }
+});
+
 btnTestSystemOne?.addEventListener('click', async () => {
   const apiKey = normalizeTypesafeApiKey(systemOneApiKeyInput?.value);
-  if (!apiKey) { showSystemOneResult('fail', t('st.system_one.need_key')); return; }
+  if (!apiKey && decisionProviderInput.value !== 'local') { showSystemOneResult('fail', t('st.system_one.need_key')); return; }
   btnTestSystemOne.disabled = true;
   showSystemOneResult('', t('st.providers.testing'));
   try {
-    const result = await sendToBackground('test_system_one', { apiKey });
+    const result = await sendToBackground('test_system_one', { apiKey, settings: decisionSettingsDraft() });
+    if (result?.visionTested || result?.visionVerified) decisionVisionSupported = result.visionVerified === true;
     showSystemOneResult(result?.success ? 'ok' : 'fail', result?.success
-      ? t('st.providers.connected', { model: result.model })
+      ? t('st.providers.connected', { model: result.model }) + (result.visionTested && !result.visionVerified ? ' ' + t('st.decision.vision_unverified') : '')
       : t('st.providers.failed', { error: result?.error || 'Jev unavailable' }));
   } catch (error) {
     showSystemOneResult('fail', t('st.providers.failed', { error: error.message }));

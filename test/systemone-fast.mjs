@@ -120,6 +120,30 @@ for (const build of ['chrome', 'firefox']) {
     assert.equal(calls, 0);
     assert.equal(session.fallbackCount, 1);
   });
+  test(`${build}: multilingual fast classifications reach the service within its byte budget`, async () => {
+    const provider = { name: 'test', model: 'active-model', config: {} };
+    const agent = new Agent({ getActive: () => provider });
+    Object.assign(storage, { systemOneEnabled: true, systemOneFastClassifications: true, typesafeApiKey: 'synthetic' });
+    agent._checkCostAllowance = async () => null;
+    agent._recordCostUsage = async () => null;
+    const original = globalThis.fetch;
+    let calls = 0;
+    globalThis.fetch = async (_url, options) => {
+      calls++;
+      const request = JSON.parse(options.body);
+      assert.ok(Buffer.byteLength(JSON.stringify(request.state)) <= 16000);
+      assert.match(request.state.context, /<untrusted_page_content.*[\s\S]*<\/untrusted_page_content/);
+      return { ok: true, json: async () => ({ model: 'jev-1.13.0', usage: { input_tokens: 1, output_tokens: 1 }, answers: {
+        classification: { type: 'choice', choice: 'yes', confidence: .95, probabilities: { yes: .95, no: .05 } },
+      } }) };
+    };
+    try {
+      for (const sample of ['作業は完了しました。', '😀確認\n"\\\u0000']) {
+        assert.equal(await agent._jevClassify(1, 'Classify the request', { yes: 'yes', no: 'no' }, { task: sample.repeat(2000) }), 'yes');
+      }
+      assert.equal(calls, 2);
+    } finally { globalThis.fetch = original; }
+  });
   test(`${build}: completion candidate returns to active LLM, never dispatches done`, async () => {
     const provider = { name: 'test', model: 'active-model' }; const agent = new Agent({ getActive: () => provider });
     Object.assign(storage, { systemOneEnabled: true, systemOneFastBrowser: true, typesafeApiKey: 'synthetic' });

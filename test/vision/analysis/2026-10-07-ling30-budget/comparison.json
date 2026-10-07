@@ -1,0 +1,6252 @@
+{
+  "date": "2026-10-07",
+  "protocol": "production screenshot description, temperature 0, max_tokens 800, unchanged August scorer",
+  "regression": {
+    "verifiedHistoricalModels": 6,
+    "verifiedHistoricalResponses": 600,
+    "sourceRevision": "d25be94f4981c2fe5ff1d220f8b698ee72e88296",
+    "promptImageAndQuestionMatches": true,
+    "savedScoresExactlyReproduced": true
+  },
+  "rows": [
+    {
+      "model": "qwen/qwen3-vl-30b-a3b-instruct",
+      "source": "test/vision/results/2026-08-22-openrouter-full_qwen_qwen3-vl-30b-a3b-instruct_production",
+      "date": "2026-08-22",
+      "cases": 100,
+      "errors": 0,
+      "passes": 68,
+      "meanScore": 0.9129671439671436,
+      "meanLatencyMs": 2225.78,
+      "medianLatencyMs": 2193,
+      "p95LatencyMs": 2866,
+      "costRecords": 100,
+      "costUsd": 0.024314160000000005,
+      "promptTokens": 118600,
+      "completionTokens": 17108,
+      "cachedTokens": 0,
+      "reasoningTokens": 0,
+      "sixSections": 100,
+      "emptyOutputs": 0,
+      "lengthLimited": 0,
+      "providers": {
+        "not recorded": {
+          "cases": 100,
+          "passes": 68,
+          "meanScore": 0.9129671439671436
+        }
+      },
+      "byDifficulty": {
+        "easy": {
+          "cases": 20,
+          "passes": 14,
+          "meanScore": 0.9141161616161618
+        },
+        "basic": {
+          "cases": 20,
+          "passes": 16,
+          "meanScore": 0.9477272727272729
+        },
+        "intermediate": {
+          "cases": 20,
+          "passes": 14,
+          "meanScore": 0.9231060606060606
+        },
+        "advanced": {
+          "cases": 20,
+          "passes": 12,
+          "meanScore": 0.8767840492840493
+        },
+        "challenging": {
+          "cases": 20,
+          "passes": 12,
+          "meanScore": 0.9031021756021756
+        }
+      },
+      "byCategory": {
+        "authentication": {
+          "cases": 5,
+          "passes": 2,
+          "meanScore": 0.8295104895104896
+        },
+        "search-results": {
+          "cases": 5,
+          "passes": 4,
+          "meanScore": 0.95
+        },
+        "checkout": {
+          "cases": 5,
+          "passes": 4,
+          "meanScore": 0.9384615384615385
+        },
+        "form-validation": {
+          "cases": 5,
+          "passes": 1,
+          "meanScore": 0.8400000000000001
+        },
+        "modal-overlay": {
+          "cases": 5,
+          "passes": 0,
+          "meanScore": 0.8181818181818181
+        },
+        "toast-notification": {
+          "cases": 5,
+          "passes": 5,
+          "meanScore": 1
+        },
+        "loading-state": {
+          "cases": 5,
+          "passes": 3,
+          "meanScore": 0.8469696969696969
+        },
+        "consent-banner": {
+          "cases": 5,
+          "passes": 5,
+          "meanScore": 0.96
+        },
+        "dashboard": {
+          "cases": 5,
+          "passes": 5,
+          "meanScore": 1
+        },
+        "chart-reading": {
+          "cases": 5,
+          "passes": 5,
+          "meanScore": 1
+        },
+        "data-table": {
+          "cases": 5,
+          "passes": 5,
+          "meanScore": 1
+        },
+        "email-compose": {
+          "cases": 5,
+          "passes": 2,
+          "meanScore": 0.8866666666666665
+        },
+        "kanban-board": {
+          "cases": 5,
+          "passes": 4,
+          "meanScore": 0.9142857142857143
+        },
+        "calendar": {
+          "cases": 5,
+          "passes": 5,
+          "meanScore": 0.9714285714285715
+        },
+        "map-and-travel": {
+          "cases": 5,
+          "passes": 5,
+          "meanScore": 1
+        },
+        "photo-understanding": {
+          "cases": 5,
+          "passes": 4,
+          "meanScore": 0.9555555555555555
+        },
+        "multilingual-ocr": {
+          "cases": 5,
+          "passes": 0,
+          "meanScore": 0.7191919191919192
+        },
+        "occlusion-and-contrast": {
+          "cases": 5,
+          "passes": 2,
+          "meanScore": 0.8400000000000001
+        },
+        "security-challenge": {
+          "cases": 5,
+          "passes": 4,
+          "meanScore": 0.909090909090909
+        },
+        "uncertainty-calibration": {
+          "cases": 5,
+          "passes": 3,
+          "meanScore": 0.8800000000000001
+        }
+      }
+    },
+    {
+      "model": "qwen/qwen3-vl-30b-a3b-thinking",
+      "source": "test/vision/results/2026-08-22-openrouter-full_qwen_qwen3-vl-30b-a3b-thinking_production",
+      "date": "2026-08-22",
+      "cases": 100,
+      "errors": 0,
+      "passes": 62,
+      "meanScore": 0.8891347818847817,
+      "meanLatencyMs": 6333.01,
+      "medianLatencyMs": 5620.5,
+      "p95LatencyMs": 13548,
+      "costRecords": 100,
+      "costUsd": 0.18816959999999996,
+      "promptTokens": 118800,
+      "completionTokens": 68504,
+      "cachedTokens": 0,
+      "reasoningTokens": 54984,
+      "sixSections": 100,
+      "emptyOutputs": 0,
+      "lengthLimited": 0,
+      "providers": {
+        "not recorded": {
+          "cases": 100,
+          "passes": 62,
+          "meanScore": 0.8891347818847817
+        }
+      },
+      "byDifficulty": {
+        "easy": {
+          "cases": 20,
+          "passes": 13,
+          "meanScore": 0.8957070707070708
+        },
+        "basic": {
+          "cases": 20,
+          "passes": 16,
+          "meanScore": 0.9441258741258742
+        },
+        "intermediate": {
+          "cases": 20,
+          "passes": 13,
+          "meanScore": 0.9062229437229437
+        },
+        "advanced": {
+          "cases": 20,
+          "passes": 10,
+          "meanScore": 0.8051871739371739
+        },
+        "challenging": {
+          "cases": 20,
+          "passes": 10,
+          "meanScore": 0.8944308469308468
+        }
+      },
+      "byCategory": {
+        "authentication": {
+          "cases": 5,
+          "passes": 2,
+          "meanScore": 0.814125874125874
+        },
+        "search-results": {
+          "cases": 5,
+          "passes": 4,
+          "meanScore": 0.95
+        },
+        "checkout": {
+          "cases": 5,
+          "passes": 3,
+          "meanScore": 0.9384615384615385
+        },
+        "form-validation": {
+          "cases": 5,
+          "passes": 0,
+          "meanScore": 0.78
+        },
+        "modal-overlay": {
+          "cases": 5,
+          "passes": 1,
+          "meanScore": 0.8545454545454545
+        },
+        "toast-notification": {
+          "cases": 5,
+          "passes": 5,
+          "meanScore": 1
+        },
+        "loading-state": {
+          "cases": 5,
+          "passes": 3,
+          "meanScore": 0.8429292929292929
+        },
+        "consent-banner": {
+          "cases": 5,
+          "passes": 5,
+          "meanScore": 0.8800000000000001
+        },
+        "dashboard": {
+          "cases": 5,
+          "passes": 4,
+          "meanScore": 0.96
+        },
+        "chart-reading": {
+          "cases": 5,
+          "passes": 4,
+          "meanScore": 0.95
+        },
+        "data-table": {
+          "cases": 5,
+          "passes": 5,
+          "meanScore": 0.9714285714285715
+        },
+        "email-compose": {
+          "cases": 5,
+          "passes": 2,
+          "meanScore": 0.8166666666666667
+        },
+        "kanban-board": {
+          "cases": 5,
+          "passes": 4,
+          "meanScore": 0.9142857142857143
+        },
+        "calendar": {
+          "cases": 5,
+          "passes": 3,
+          "meanScore": 0.7999999999999999
+        },
+        "map-and-travel": {
+          "cases": 5,
+          "passes": 4,
+          "meanScore": 0.925
+        },
+        "photo-understanding": {
+          "cases": 5,
+          "passes": 4,
+          "meanScore": 0.9333333333333333
+        },
+        "multilingual-ocr": {
+          "cases": 5,
+          "passes": 2,
+          "meanScore": 0.8828282828282829
+        },
+        "occlusion-and-contrast": {
+          "cases": 5,
+          "passes": 2,
+          "meanScore": 0.8400000000000001
+        },
+        "security-challenge": {
+          "cases": 5,
+          "passes": 3,
+          "meanScore": 0.9090909090909092
+        },
+        "uncertainty-calibration": {
+          "cases": 5,
+          "passes": 2,
+          "meanScore": 0.8200000000000001
+        }
+      }
+    },
+    {
+      "model": "qwen/qwen3-vl-32b-instruct",
+      "source": "test/vision/results/2026-08-22-openrouter-full_qwen_qwen3-vl-32b-instruct_production",
+      "date": "2026-08-22",
+      "cases": 100,
+      "errors": 0,
+      "passes": 69,
+      "meanScore": 0.9192472804972802,
+      "meanLatencyMs": 4605,
+      "medianLatencyMs": 4240.5,
+      "p95LatencyMs": 7075,
+      "costRecords": 100,
+      "costUsd": 0.021568352000000002,
+      "promptTokens": 118600,
+      "completionTokens": 22197,
+      "cachedTokens": 0,
+      "reasoningTokens": 0,
+      "sixSections": 100,
+      "emptyOutputs": 0,
+      "lengthLimited": 0,
+      "providers": {
+        "not recorded": {
+          "cases": 100,
+          "passes": 69,
+          "meanScore": 0.9192472804972802
+        }
+      },
+      "byDifficulty": {
+        "easy": {
+          "cases": 20,
+          "passes": 14,
+          "meanScore": 0.9332070707070708
+        },
+        "basic": {
+          "cases": 20,
+          "passes": 15,
+          "meanScore": 0.935034965034965
+        },
+        "intermediate": {
+          "cases": 20,
+          "passes": 16,
+          "meanScore": 0.9481060606060605
+        },
+        "advanced": {
+          "cases": 20,
+          "passes": 13,
+          "meanScore": 0.8841792929292931
+        },
+        "challenging": {
+          "cases": 20,
+          "passes": 11,
+          "meanScore": 0.8957090132090133
+        }
+      },
+      "byCategory": {
+        "authentication": {
+          "cases": 5,
+          "passes": 3,
+          "meanScore": 0.9282517482517483
+        },
+        "search-results": {
+          "cases": 5,
+          "passes": 4,
+          "meanScore": 0.95
+        },
+        "checkout": {
+          "cases": 5,
+          "passes": 3,
+          "meanScore": 0.9384615384615385
+        },
+        "form-validation": {
+          "cases": 5,
+          "passes": 0,
+          "meanScore": 0.74
+        },
+        "modal-overlay": {
+          "cases": 5,
+          "passes": 0,
+          "meanScore": 0.8181818181818181
+        },
+        "toast-notification": {
+          "cases": 5,
+          "passes": 5,
+          "meanScore": 1
+        },
+        "loading-state": {
+          "cases": 5,
+          "passes": 3,
+          "meanScore": 0.7883838383838384
+        },
+        "consent-banner": {
+          "cases": 5,
+          "passes": 5,
+          "meanScore": 0.9399999999999998
+        },
+        "dashboard": {
+          "cases": 5,
+          "passes": 3,
+          "meanScore": 0.9099999999999999
+        },
+        "chart-reading": {
+          "cases": 5,
+          "passes": 5,
+          "meanScore": 1
+        },
+        "data-table": {
+          "cases": 5,
+          "passes": 5,
+          "meanScore": 1
+        },
+        "email-compose": {
+          "cases": 5,
+          "passes": 4,
+          "meanScore": 0.96
+        },
+        "kanban-board": {
+          "cases": 5,
+          "passes": 5,
+          "meanScore": 1
+        },
+        "calendar": {
+          "cases": 5,
+          "passes": 4,
+          "meanScore": 0.9555555555555555
+        },
+        "map-and-travel": {
+          "cases": 5,
+          "passes": 3,
+          "meanScore": 0.885
+        },
+        "photo-understanding": {
+          "cases": 5,
+          "passes": 4,
+          "meanScore": 0.9555555555555555
+        },
+        "multilingual-ocr": {
+          "cases": 5,
+          "passes": 1,
+          "meanScore": 0.8101010101010102
+        },
+        "occlusion-and-contrast": {
+          "cases": 5,
+          "passes": 5,
+          "meanScore": 0.9800000000000001
+        },
+        "security-challenge": {
+          "cases": 5,
+          "passes": 4,
+          "meanScore": 0.9454545454545455
+        },
+        "uncertainty-calibration": {
+          "cases": 5,
+          "passes": 3,
+          "meanScore": 0.8800000000000001
+        }
+      }
+    },
+    {
+      "model": "qwen/qwen3-vl-8b-instruct",
+      "source": "test/vision/results/2026-08-22-openrouter-full_qwen_qwen3-vl-8b-instruct_production",
+      "date": "2026-08-22",
+      "cases": 100,
+      "errors": 0,
+      "passes": 48,
+      "meanScore": 0.839557997557997,
+      "meanLatencyMs": 2118.3,
+      "medianLatencyMs": 1990.5,
+      "p95LatencyMs": 3215,
+      "costRecords": 100,
+      "costUsd": 0.020646599999999998,
+      "promptTokens": 118600,
+      "completionTokens": 14880,
+      "cachedTokens": 0,
+      "reasoningTokens": 0,
+      "sixSections": 100,
+      "emptyOutputs": 0,
+      "lengthLimited": 0,
+      "providers": {
+        "not recorded": {
+          "cases": 100,
+          "passes": 48,
+          "meanScore": 0.839557997557997
+        }
+      },
+      "byDifficulty": {
+        "easy": {
+          "cases": 20,
+          "passes": 12,
+          "meanScore": 0.8539375901875902
+        },
+        "basic": {
+          "cases": 20,
+          "passes": 13,
+          "meanScore": 0.8845154845154847
+        },
+        "intermediate": {
+          "cases": 20,
+          "passes": 10,
+          "meanScore": 0.858595571095571
+        },
+        "advanced": {
+          "cases": 20,
+          "passes": 7,
+          "meanScore": 0.784263098013098
+        },
+        "challenging": {
+          "cases": 20,
+          "passes": 6,
+          "meanScore": 0.8164782439782442
+        }
+      },
+      "byCategory": {
+        "authentication": {
+          "cases": 5,
+          "passes": 3,
+          "meanScore": 0.8741258741258742
+        },
+        "search-results": {
+          "cases": 5,
+          "passes": 4,
+          "meanScore": 0.95
+        },
+        "checkout": {
+          "cases": 5,
+          "passes": 1,
+          "meanScore": 0.8405594405594407
+        },
+        "form-validation": {
+          "cases": 5,
+          "passes": 0,
+          "meanScore": 0.6
+        },
+        "modal-overlay": {
+          "cases": 5,
+          "passes": 0,
+          "meanScore": 0.8181818181818181
+        },
+        "toast-notification": {
+          "cases": 5,
+          "passes": 5,
+          "meanScore": 1
+        },
+        "loading-state": {
+          "cases": 5,
+          "passes": 2,
+          "meanScore": 0.6684343434343434
+        },
+        "consent-banner": {
+          "cases": 5,
+          "passes": 0,
+          "meanScore": 0.68
+        },
+        "dashboard": {
+          "cases": 5,
+          "passes": 3,
+          "meanScore": 0.9099999999999999
+        },
+        "chart-reading": {
+          "cases": 5,
+          "passes": 5,
+          "meanScore": 1
+        },
+        "data-table": {
+          "cases": 5,
+          "passes": 5,
+          "meanScore": 1
+        },
+        "email-compose": {
+          "cases": 5,
+          "passes": 3,
+          "meanScore": 0.8766666666666666
+        },
+        "kanban-board": {
+          "cases": 5,
+          "passes": 4,
+          "meanScore": 0.9142857142857143
+        },
+        "calendar": {
+          "cases": 5,
+          "passes": 1,
+          "meanScore": 0.6317460317460318
+        },
+        "map-and-travel": {
+          "cases": 5,
+          "passes": 3,
+          "meanScore": 0.885
+        },
+        "photo-understanding": {
+          "cases": 5,
+          "passes": 4,
+          "meanScore": 0.9555555555555555
+        },
+        "multilingual-ocr": {
+          "cases": 5,
+          "passes": 0,
+          "meanScore": 0.7373737373737373
+        },
+        "occlusion-and-contrast": {
+          "cases": 5,
+          "passes": 1,
+          "meanScore": 0.8
+        },
+        "security-challenge": {
+          "cases": 5,
+          "passes": 1,
+          "meanScore": 0.7692307692307693
+        },
+        "uncertainty-calibration": {
+          "cases": 5,
+          "passes": 3,
+          "meanScore": 0.8800000000000001
+        }
+      }
+    },
+    {
+      "model": "qwen/qwen3-vl-8b-thinking",
+      "source": "test/vision/results/2026-08-22-openrouter-full_qwen_qwen3-vl-8b-thinking_production",
+      "date": "2026-08-22",
+      "cases": 100,
+      "errors": 0,
+      "passes": 61,
+      "meanScore": 0.8670892163392158,
+      "meanLatencyMs": 6368.96,
+      "medianLatencyMs": 5292.5,
+      "p95LatencyMs": 12937,
+      "costRecords": 100,
+      "costUsd": 0.17994239999999997,
+      "promptTokens": 118800,
+      "completionTokens": 75504,
+      "cachedTokens": 0,
+      "reasoningTokens": 62237,
+      "sixSections": 99,
+      "emptyOutputs": 0,
+      "lengthLimited": 0,
+      "providers": {
+        "not recorded": {
+          "cases": 100,
+          "passes": 61,
+          "meanScore": 0.8670892163392158
+        }
+      },
+      "byDifficulty": {
+        "easy": {
+          "cases": 20,
+          "passes": 13,
+          "meanScore": 0.8190512265512264
+        },
+        "basic": {
+          "cases": 20,
+          "passes": 14,
+          "meanScore": 0.9213986013986014
+        },
+        "intermediate": {
+          "cases": 20,
+          "passes": 13,
+          "meanScore": 0.8771320346320346
+        },
+        "advanced": {
+          "cases": 20,
+          "passes": 11,
+          "meanScore": 0.8320697358197359
+        },
+        "challenging": {
+          "cases": 20,
+          "passes": 10,
+          "meanScore": 0.8857944832944835
+        }
+      },
+      "byCategory": {
+        "authentication": {
+          "cases": 5,
+          "passes": 2,
+          "meanScore": 0.8205594405594405
+        },
+        "search-results": {
+          "cases": 5,
+          "passes": 4,
+          "meanScore": 0.9666666666666666
+        },
+        "checkout": {
+          "cases": 5,
+          "passes": 2,
+          "meanScore": 0.9020979020979022
+        },
+        "form-validation": {
+          "cases": 5,
+          "passes": 0,
+          "meanScore": 0.8
+        },
+        "modal-overlay": {
+          "cases": 5,
+          "passes": 1,
+          "meanScore": 0.8181818181818181
+        },
+        "toast-notification": {
+          "cases": 5,
+          "passes": 5,
+          "meanScore": 1
+        },
+        "loading-state": {
+          "cases": 5,
+          "passes": 3,
+          "meanScore": 0.6202020202020202
+        },
+        "consent-banner": {
+          "cases": 5,
+          "passes": 5,
+          "meanScore": 0.8200000000000001
+        },
+        "dashboard": {
+          "cases": 5,
+          "passes": 3,
+          "meanScore": 0.9099999999999999
+        },
+        "chart-reading": {
+          "cases": 5,
+          "passes": 5,
+          "meanScore": 1
+        },
+        "data-table": {
+          "cases": 5,
+          "passes": 5,
+          "meanScore": 1
+        },
+        "email-compose": {
+          "cases": 5,
+          "passes": 3,
+          "meanScore": 0.8766666666666666
+        },
+        "kanban-board": {
+          "cases": 5,
+          "passes": 4,
+          "meanScore": 0.9142857142857143
+        },
+        "calendar": {
+          "cases": 5,
+          "passes": 2,
+          "meanScore": 0.7142857142857142
+        },
+        "map-and-travel": {
+          "cases": 5,
+          "passes": 4,
+          "meanScore": 0.9349999999999999
+        },
+        "photo-understanding": {
+          "cases": 5,
+          "passes": 4,
+          "meanScore": 0.9555555555555555
+        },
+        "multilingual-ocr": {
+          "cases": 5,
+          "passes": 0,
+          "meanScore": 0.7555555555555556
+        },
+        "occlusion-and-contrast": {
+          "cases": 5,
+          "passes": 2,
+          "meanScore": 0.8400000000000001
+        },
+        "security-challenge": {
+          "cases": 5,
+          "passes": 4,
+          "meanScore": 0.8727272727272727
+        },
+        "uncertainty-calibration": {
+          "cases": 5,
+          "passes": 3,
+          "meanScore": 0.82
+        }
+      }
+    },
+    {
+      "model": "qwen/qwen3.5-35b-a3b",
+      "source": "test/vision/results/2026-08-22-openrouter-full_qwen_qwen3.5-35b-a3b_production",
+      "date": "2026-08-22",
+      "cases": 100,
+      "errors": 0,
+      "passes": 67,
+      "meanScore": 0.9075665630665627,
+      "meanLatencyMs": 5212.18,
+      "medianLatencyMs": 5119.5,
+      "p95LatencyMs": 6964,
+      "costRecords": 100,
+      "costUsd": 0.07214,
+      "promptTokens": 119700,
+      "completionTokens": 55382,
+      "cachedTokens": 0,
+      "reasoningTokens": 36857,
+      "sixSections": 93,
+      "emptyOutputs": 0,
+      "lengthLimited": 0,
+      "providers": {
+        "not recorded": {
+          "cases": 100,
+          "passes": 67,
+          "meanScore": 0.9075665630665627
+        }
+      },
+      "byDifficulty": {
+        "easy": {
+          "cases": 20,
+          "passes": 16,
+          "meanScore": 0.9263744588744588
+        },
+        "basic": {
+          "cases": 20,
+          "passes": 14,
+          "meanScore": 0.9099483849483849
+        },
+        "intermediate": {
+          "cases": 20,
+          "passes": 12,
+          "meanScore": 0.8942521367521369
+        },
+        "advanced": {
+          "cases": 20,
+          "passes": 14,
+          "meanScore": 0.9121484071484071
+        },
+        "challenging": {
+          "cases": 20,
+          "passes": 11,
+          "meanScore": 0.8951094276094276
+        }
+      },
+      "byCategory": {
+        "authentication": {
+          "cases": 5,
+          "passes": 1,
+          "meanScore": 0.8241491841491841
+        },
+        "search-results": {
+          "cases": 5,
+          "passes": 3,
+          "meanScore": 0.9111111111111111
+        },
+        "checkout": {
+          "cases": 5,
+          "passes": 2,
+          "meanScore": 0.9076923076923077
+        },
+        "form-validation": {
+          "cases": 5,
+          "passes": 1,
+          "meanScore": 0.8
+        },
+        "modal-overlay": {
+          "cases": 5,
+          "passes": 0,
+          "meanScore": 0.8181818181818181
+        },
+        "toast-notification": {
+          "cases": 5,
+          "passes": 5,
+          "meanScore": 1
+        },
+        "loading-state": {
+          "cases": 5,
+          "passes": 3,
+          "meanScore": 0.7156565656565658
+        },
+        "consent-banner": {
+          "cases": 5,
+          "passes": 5,
+          "meanScore": 0.96
+        },
+        "dashboard": {
+          "cases": 5,
+          "passes": 5,
+          "meanScore": 1
+        },
+        "chart-reading": {
+          "cases": 5,
+          "passes": 5,
+          "meanScore": 1
+        },
+        "data-table": {
+          "cases": 5,
+          "passes": 5,
+          "meanScore": 0.9714285714285715
+        },
+        "email-compose": {
+          "cases": 5,
+          "passes": 2,
+          "meanScore": 0.8799999999999999
+        },
+        "kanban-board": {
+          "cases": 5,
+          "passes": 5,
+          "meanScore": 1
+        },
+        "calendar": {
+          "cases": 5,
+          "passes": 5,
+          "meanScore": 0.9470899470899472
+        },
+        "map-and-travel": {
+          "cases": 5,
+          "passes": 4,
+          "meanScore": 0.96
+        },
+        "photo-understanding": {
+          "cases": 5,
+          "passes": 4,
+          "meanScore": 0.9555555555555555
+        },
+        "multilingual-ocr": {
+          "cases": 5,
+          "passes": 2,
+          "meanScore": 0.8363636363636363
+        },
+        "occlusion-and-contrast": {
+          "cases": 5,
+          "passes": 4,
+          "meanScore": 0.96
+        },
+        "security-challenge": {
+          "cases": 5,
+          "passes": 2,
+          "meanScore": 0.764102564102564
+        },
+        "uncertainty-calibration": {
+          "cases": 5,
+          "passes": 4,
+          "meanScore": 0.9400000000000001
+        }
+      }
+    }
+  ],
+  "casesByModel": {
+    "qwen/qwen3-vl-30b-a3b-instruct": [
+      {
+        "id": "001",
+        "category": "authentication",
+        "difficulty": "easy",
+        "pass": false,
+        "ratio": 0.7,
+        "criticalFailures": []
+      },
+      {
+        "id": "002",
+        "category": "search-results",
+        "difficulty": "easy",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "003",
+        "category": "checkout",
+        "difficulty": "easy",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "004",
+        "category": "form-validation",
+        "difficulty": "easy",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "005",
+        "category": "modal-overlay",
+        "difficulty": "easy",
+        "pass": false,
+        "ratio": 0.8181818181818182,
+        "criticalFailures": [
+          "modal-signal"
+        ]
+      },
+      {
+        "id": "006",
+        "category": "toast-notification",
+        "difficulty": "easy",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "007",
+        "category": "loading-state",
+        "difficulty": "easy",
+        "pass": false,
+        "ratio": 0.75,
+        "criticalFailures": [
+          "heading"
+        ]
+      },
+      {
+        "id": "008",
+        "category": "consent-banner",
+        "difficulty": "easy",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "009",
+        "category": "dashboard",
+        "difficulty": "easy",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "010",
+        "category": "chart-reading",
+        "difficulty": "easy",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "011",
+        "category": "data-table",
+        "difficulty": "easy",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "012",
+        "category": "email-compose",
+        "difficulty": "easy",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "013",
+        "category": "kanban-board",
+        "difficulty": "easy",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "014",
+        "category": "calendar",
+        "difficulty": "easy",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "015",
+        "category": "map-and-travel",
+        "difficulty": "easy",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "016",
+        "category": "photo-understanding",
+        "difficulty": "easy",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "017",
+        "category": "multilingual-ocr",
+        "difficulty": "easy",
+        "pass": false,
+        "ratio": 0.7777777777777778,
+        "criticalFailures": [
+          "input"
+        ]
+      },
+      {
+        "id": "018",
+        "category": "occlusion-and-contrast",
+        "difficulty": "easy",
+        "pass": false,
+        "ratio": 0.6,
+        "criticalFailures": [
+          "target",
+          "cover"
+        ]
+      },
+      {
+        "id": "019",
+        "category": "security-challenge",
+        "difficulty": "easy",
+        "pass": false,
+        "ratio": 0.6363636363636364,
+        "criticalFailures": [
+          "label",
+          "captcha-signal"
+        ]
+      },
+      {
+        "id": "020",
+        "category": "uncertainty-calibration",
+        "difficulty": "easy",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "021",
+        "category": "authentication",
+        "difficulty": "basic",
+        "pass": true,
+        "ratio": 0.9090909090909091,
+        "criticalFailures": []
+      },
+      {
+        "id": "022",
+        "category": "search-results",
+        "difficulty": "basic",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "023",
+        "category": "checkout",
+        "difficulty": "basic",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "024",
+        "category": "form-validation",
+        "difficulty": "basic",
+        "pass": false,
+        "ratio": 0.8,
+        "criticalFailures": [
+          "input"
+        ]
+      },
+      {
+        "id": "025",
+        "category": "modal-overlay",
+        "difficulty": "basic",
+        "pass": false,
+        "ratio": 0.8181818181818182,
+        "criticalFailures": [
+          "modal-signal"
+        ]
+      },
+      {
+        "id": "026",
+        "category": "toast-notification",
+        "difficulty": "basic",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "027",
+        "category": "loading-state",
+        "difficulty": "basic",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "028",
+        "category": "consent-banner",
+        "difficulty": "basic",
+        "pass": true,
+        "ratio": 0.9,
+        "criticalFailures": []
+      },
+      {
+        "id": "029",
+        "category": "dashboard",
+        "difficulty": "basic",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "030",
+        "category": "chart-reading",
+        "difficulty": "basic",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "031",
+        "category": "data-table",
+        "difficulty": "basic",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "032",
+        "category": "email-compose",
+        "difficulty": "basic",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "033",
+        "category": "kanban-board",
+        "difficulty": "basic",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "034",
+        "category": "calendar",
+        "difficulty": "basic",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "035",
+        "category": "map-and-travel",
+        "difficulty": "basic",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "036",
+        "category": "photo-understanding",
+        "difficulty": "basic",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "037",
+        "category": "multilingual-ocr",
+        "difficulty": "basic",
+        "pass": false,
+        "ratio": 0.8181818181818182,
+        "criticalFailures": [
+          "input"
+        ]
+      },
+      {
+        "id": "038",
+        "category": "occlusion-and-contrast",
+        "difficulty": "basic",
+        "pass": false,
+        "ratio": 0.8,
+        "criticalFailures": [
+          "cover"
+        ]
+      },
+      {
+        "id": "039",
+        "category": "security-challenge",
+        "difficulty": "basic",
+        "pass": true,
+        "ratio": 0.9090909090909091,
+        "criticalFailures": []
+      },
+      {
+        "id": "040",
+        "category": "uncertainty-calibration",
+        "difficulty": "basic",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "041",
+        "category": "authentication",
+        "difficulty": "intermediate",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "042",
+        "category": "search-results",
+        "difficulty": "intermediate",
+        "pass": true,
+        "ratio": 0.9166666666666666,
+        "criticalFailures": []
+      },
+      {
+        "id": "043",
+        "category": "checkout",
+        "difficulty": "intermediate",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "044",
+        "category": "form-validation",
+        "difficulty": "intermediate",
+        "pass": false,
+        "ratio": 0.8,
+        "criticalFailures": [
+          "input"
+        ]
+      },
+      {
+        "id": "045",
+        "category": "modal-overlay",
+        "difficulty": "intermediate",
+        "pass": false,
+        "ratio": 0.8181818181818182,
+        "criticalFailures": [
+          "modal-signal"
+        ]
+      },
+      {
+        "id": "046",
+        "category": "toast-notification",
+        "difficulty": "intermediate",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "047",
+        "category": "loading-state",
+        "difficulty": "intermediate",
+        "pass": true,
+        "ratio": 0.9090909090909091,
+        "criticalFailures": []
+      },
+      {
+        "id": "048",
+        "category": "consent-banner",
+        "difficulty": "intermediate",
+        "pass": true,
+        "ratio": 0.9,
+        "criticalFailures": []
+      },
+      {
+        "id": "049",
+        "category": "dashboard",
+        "difficulty": "intermediate",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "050",
+        "category": "chart-reading",
+        "difficulty": "intermediate",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "051",
+        "category": "data-table",
+        "difficulty": "intermediate",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "052",
+        "category": "email-compose",
+        "difficulty": "intermediate",
+        "pass": false,
+        "ratio": 0.8,
+        "criticalFailures": [
+          "status"
+        ]
+      },
+      {
+        "id": "053",
+        "category": "kanban-board",
+        "difficulty": "intermediate",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "054",
+        "category": "calendar",
+        "difficulty": "intermediate",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "055",
+        "category": "map-and-travel",
+        "difficulty": "intermediate",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "056",
+        "category": "photo-understanding",
+        "difficulty": "intermediate",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "057",
+        "category": "multilingual-ocr",
+        "difficulty": "intermediate",
+        "pass": false,
+        "ratio": 0.8181818181818182,
+        "criticalFailures": [
+          "input"
+        ]
+      },
+      {
+        "id": "058",
+        "category": "occlusion-and-contrast",
+        "difficulty": "intermediate",
+        "pass": false,
+        "ratio": 0.8,
+        "criticalFailures": [
+          "cover"
+        ]
+      },
+      {
+        "id": "059",
+        "category": "security-challenge",
+        "difficulty": "intermediate",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "060",
+        "category": "uncertainty-calibration",
+        "difficulty": "intermediate",
+        "pass": false,
+        "ratio": 0.7,
+        "criticalFailures": [
+          "visible-fragment"
+        ]
+      },
+      {
+        "id": "061",
+        "category": "authentication",
+        "difficulty": "advanced",
+        "pass": false,
+        "ratio": 0.7692307692307693,
+        "criticalFailures": [
+          "blocker"
+        ]
+      },
+      {
+        "id": "062",
+        "category": "search-results",
+        "difficulty": "advanced",
+        "pass": true,
+        "ratio": 0.9166666666666666,
+        "criticalFailures": []
+      },
+      {
+        "id": "063",
+        "category": "checkout",
+        "difficulty": "advanced",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "064",
+        "category": "form-validation",
+        "difficulty": "advanced",
+        "pass": false,
+        "ratio": 0.8,
+        "criticalFailures": [
+          "input"
+        ]
+      },
+      {
+        "id": "065",
+        "category": "modal-overlay",
+        "difficulty": "advanced",
+        "pass": false,
+        "ratio": 0.8181818181818182,
+        "criticalFailures": [
+          "modal-signal"
+        ]
+      },
+      {
+        "id": "066",
+        "category": "toast-notification",
+        "difficulty": "advanced",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "067",
+        "category": "loading-state",
+        "difficulty": "advanced",
+        "pass": false,
+        "ratio": 0.6666666666666666,
+        "criticalFailures": [
+          "heading"
+        ]
+      },
+      {
+        "id": "068",
+        "category": "consent-banner",
+        "difficulty": "advanced",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "069",
+        "category": "dashboard",
+        "difficulty": "advanced",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "070",
+        "category": "chart-reading",
+        "difficulty": "advanced",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "071",
+        "category": "data-table",
+        "difficulty": "advanced",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "072",
+        "category": "email-compose",
+        "difficulty": "advanced",
+        "pass": false,
+        "ratio": 0.8,
+        "criticalFailures": [
+          "status"
+        ]
+      },
+      {
+        "id": "073",
+        "category": "kanban-board",
+        "difficulty": "advanced",
+        "pass": false,
+        "ratio": 0.5714285714285714,
+        "criticalFailures": [
+          "card-column"
+        ]
+      },
+      {
+        "id": "074",
+        "category": "calendar",
+        "difficulty": "advanced",
+        "pass": true,
+        "ratio": 0.8571428571428571,
+        "criticalFailures": []
+      },
+      {
+        "id": "075",
+        "category": "map-and-travel",
+        "difficulty": "advanced",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "076",
+        "category": "photo-understanding",
+        "difficulty": "advanced",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "077",
+        "category": "multilingual-ocr",
+        "difficulty": "advanced",
+        "pass": false,
+        "ratio": 0.6363636363636364,
+        "criticalFailures": [
+          "input",
+          "status"
+        ]
+      },
+      {
+        "id": "078",
+        "category": "occlusion-and-contrast",
+        "difficulty": "advanced",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "079",
+        "category": "security-challenge",
+        "difficulty": "advanced",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "080",
+        "category": "uncertainty-calibration",
+        "difficulty": "advanced",
+        "pass": false,
+        "ratio": 0.7,
+        "criticalFailures": [
+          "visible-fragment"
+        ]
+      },
+      {
+        "id": "081",
+        "category": "authentication",
+        "difficulty": "challenging",
+        "pass": false,
+        "ratio": 0.7692307692307693,
+        "criticalFailures": [
+          "blocker"
+        ]
+      },
+      {
+        "id": "082",
+        "category": "search-results",
+        "difficulty": "challenging",
+        "pass": false,
+        "ratio": 0.9166666666666666,
+        "criticalFailures": [
+          "notice"
+        ]
+      },
+      {
+        "id": "083",
+        "category": "checkout",
+        "difficulty": "challenging",
+        "pass": false,
+        "ratio": 0.6923076923076923,
+        "criticalFailures": [
+          "banner",
+          "blocked"
+        ]
+      },
+      {
+        "id": "084",
+        "category": "form-validation",
+        "difficulty": "challenging",
+        "pass": false,
+        "ratio": 0.8,
+        "criticalFailures": [
+          "input"
+        ]
+      },
+      {
+        "id": "085",
+        "category": "modal-overlay",
+        "difficulty": "challenging",
+        "pass": false,
+        "ratio": 0.8181818181818182,
+        "criticalFailures": [
+          "modal-signal"
+        ]
+      },
+      {
+        "id": "086",
+        "category": "toast-notification",
+        "difficulty": "challenging",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "087",
+        "category": "loading-state",
+        "difficulty": "challenging",
+        "pass": true,
+        "ratio": 0.9090909090909091,
+        "criticalFailures": []
+      },
+      {
+        "id": "088",
+        "category": "consent-banner",
+        "difficulty": "challenging",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "089",
+        "category": "dashboard",
+        "difficulty": "challenging",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "090",
+        "category": "chart-reading",
+        "difficulty": "challenging",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "091",
+        "category": "data-table",
+        "difficulty": "challenging",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "092",
+        "category": "email-compose",
+        "difficulty": "challenging",
+        "pass": false,
+        "ratio": 0.8333333333333334,
+        "criticalFailures": [
+          "external-blocker"
+        ]
+      },
+      {
+        "id": "093",
+        "category": "kanban-board",
+        "difficulty": "challenging",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "094",
+        "category": "calendar",
+        "difficulty": "challenging",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "095",
+        "category": "map-and-travel",
+        "difficulty": "challenging",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "096",
+        "category": "photo-understanding",
+        "difficulty": "challenging",
+        "pass": false,
+        "ratio": 0.7777777777777778,
+        "criticalFailures": [
+          "visual-content"
+        ]
+      },
+      {
+        "id": "097",
+        "category": "multilingual-ocr",
+        "difficulty": "challenging",
+        "pass": false,
+        "ratio": 0.5454545454545454,
+        "criticalFailures": [
+          "input",
+          "status"
+        ]
+      },
+      {
+        "id": "098",
+        "category": "occlusion-and-contrast",
+        "difficulty": "challenging",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "099",
+        "category": "security-challenge",
+        "difficulty": "challenging",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "100",
+        "category": "uncertainty-calibration",
+        "difficulty": "challenging",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      }
+    ],
+    "qwen/qwen3-vl-30b-a3b-thinking": [
+      {
+        "id": "001",
+        "category": "authentication",
+        "difficulty": "easy",
+        "pass": false,
+        "ratio": 0.7,
+        "criticalFailures": []
+      },
+      {
+        "id": "002",
+        "category": "search-results",
+        "difficulty": "easy",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "003",
+        "category": "checkout",
+        "difficulty": "easy",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "004",
+        "category": "form-validation",
+        "difficulty": "easy",
+        "pass": false,
+        "ratio": 0.8,
+        "criticalFailures": [
+          "input"
+        ]
+      },
+      {
+        "id": "005",
+        "category": "modal-overlay",
+        "difficulty": "easy",
+        "pass": false,
+        "ratio": 0.8181818181818182,
+        "criticalFailures": [
+          "modal-signal"
+        ]
+      },
+      {
+        "id": "006",
+        "category": "toast-notification",
+        "difficulty": "easy",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "007",
+        "category": "loading-state",
+        "difficulty": "easy",
+        "pass": false,
+        "ratio": 0.75,
+        "criticalFailures": [
+          "heading"
+        ]
+      },
+      {
+        "id": "008",
+        "category": "consent-banner",
+        "difficulty": "easy",
+        "pass": true,
+        "ratio": 0.9,
+        "criticalFailures": []
+      },
+      {
+        "id": "009",
+        "category": "dashboard",
+        "difficulty": "easy",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "010",
+        "category": "chart-reading",
+        "difficulty": "easy",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "011",
+        "category": "data-table",
+        "difficulty": "easy",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "012",
+        "category": "email-compose",
+        "difficulty": "easy",
+        "pass": true,
+        "ratio": 0.75,
+        "criticalFailures": []
+      },
+      {
+        "id": "013",
+        "category": "kanban-board",
+        "difficulty": "easy",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "014",
+        "category": "calendar",
+        "difficulty": "easy",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "015",
+        "category": "map-and-travel",
+        "difficulty": "easy",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "016",
+        "category": "photo-understanding",
+        "difficulty": "easy",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "017",
+        "category": "multilingual-ocr",
+        "difficulty": "easy",
+        "pass": false,
+        "ratio": 0.7777777777777778,
+        "criticalFailures": [
+          "input"
+        ]
+      },
+      {
+        "id": "018",
+        "category": "occlusion-and-contrast",
+        "difficulty": "easy",
+        "pass": false,
+        "ratio": 0.6,
+        "criticalFailures": [
+          "target",
+          "cover"
+        ]
+      },
+      {
+        "id": "019",
+        "category": "security-challenge",
+        "difficulty": "easy",
+        "pass": false,
+        "ratio": 0.8181818181818182,
+        "criticalFailures": [
+          "label"
+        ]
+      },
+      {
+        "id": "020",
+        "category": "uncertainty-calibration",
+        "difficulty": "easy",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "021",
+        "category": "authentication",
+        "difficulty": "basic",
+        "pass": true,
+        "ratio": 0.9090909090909091,
+        "criticalFailures": []
+      },
+      {
+        "id": "022",
+        "category": "search-results",
+        "difficulty": "basic",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "023",
+        "category": "checkout",
+        "difficulty": "basic",
+        "pass": false,
+        "ratio": 0.8461538461538461,
+        "criticalFailures": [
+          "banner"
+        ]
+      },
+      {
+        "id": "024",
+        "category": "form-validation",
+        "difficulty": "basic",
+        "pass": false,
+        "ratio": 0.8,
+        "criticalFailures": [
+          "input"
+        ]
+      },
+      {
+        "id": "025",
+        "category": "modal-overlay",
+        "difficulty": "basic",
+        "pass": false,
+        "ratio": 0.8181818181818182,
+        "criticalFailures": [
+          "modal-signal"
+        ]
+      },
+      {
+        "id": "026",
+        "category": "toast-notification",
+        "difficulty": "basic",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "027",
+        "category": "loading-state",
+        "difficulty": "basic",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "028",
+        "category": "consent-banner",
+        "difficulty": "basic",
+        "pass": true,
+        "ratio": 0.8,
+        "criticalFailures": []
+      },
+      {
+        "id": "029",
+        "category": "dashboard",
+        "difficulty": "basic",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "030",
+        "category": "chart-reading",
+        "difficulty": "basic",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "031",
+        "category": "data-table",
+        "difficulty": "basic",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "032",
+        "category": "email-compose",
+        "difficulty": "basic",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "033",
+        "category": "kanban-board",
+        "difficulty": "basic",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "034",
+        "category": "calendar",
+        "difficulty": "basic",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "035",
+        "category": "map-and-travel",
+        "difficulty": "basic",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "036",
+        "category": "photo-understanding",
+        "difficulty": "basic",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "037",
+        "category": "multilingual-ocr",
+        "difficulty": "basic",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "038",
+        "category": "occlusion-and-contrast",
+        "difficulty": "basic",
+        "pass": false,
+        "ratio": 0.8,
+        "criticalFailures": [
+          "target"
+        ]
+      },
+      {
+        "id": "039",
+        "category": "security-challenge",
+        "difficulty": "basic",
+        "pass": true,
+        "ratio": 0.9090909090909091,
+        "criticalFailures": []
+      },
+      {
+        "id": "040",
+        "category": "uncertainty-calibration",
+        "difficulty": "basic",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "041",
+        "category": "authentication",
+        "difficulty": "intermediate",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "042",
+        "category": "search-results",
+        "difficulty": "intermediate",
+        "pass": true,
+        "ratio": 0.9166666666666666,
+        "criticalFailures": []
+      },
+      {
+        "id": "043",
+        "category": "checkout",
+        "difficulty": "intermediate",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "044",
+        "category": "form-validation",
+        "difficulty": "intermediate",
+        "pass": false,
+        "ratio": 0.8,
+        "criticalFailures": [
+          "input"
+        ]
+      },
+      {
+        "id": "045",
+        "category": "modal-overlay",
+        "difficulty": "intermediate",
+        "pass": false,
+        "ratio": 0.8181818181818182,
+        "criticalFailures": [
+          "modal-signal"
+        ]
+      },
+      {
+        "id": "046",
+        "category": "toast-notification",
+        "difficulty": "intermediate",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "047",
+        "category": "loading-state",
+        "difficulty": "intermediate",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "048",
+        "category": "consent-banner",
+        "difficulty": "intermediate",
+        "pass": true,
+        "ratio": 0.9,
+        "criticalFailures": []
+      },
+      {
+        "id": "049",
+        "category": "dashboard",
+        "difficulty": "intermediate",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "050",
+        "category": "chart-reading",
+        "difficulty": "intermediate",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "051",
+        "category": "data-table",
+        "difficulty": "intermediate",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "052",
+        "category": "email-compose",
+        "difficulty": "intermediate",
+        "pass": false,
+        "ratio": 0.8,
+        "criticalFailures": [
+          "status"
+        ]
+      },
+      {
+        "id": "053",
+        "category": "kanban-board",
+        "difficulty": "intermediate",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "054",
+        "category": "calendar",
+        "difficulty": "intermediate",
+        "pass": false,
+        "ratio": 0.5714285714285714,
+        "criticalFailures": [
+          "selected-event"
+        ]
+      },
+      {
+        "id": "055",
+        "category": "map-and-travel",
+        "difficulty": "intermediate",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "056",
+        "category": "photo-understanding",
+        "difficulty": "intermediate",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "057",
+        "category": "multilingual-ocr",
+        "difficulty": "intermediate",
+        "pass": false,
+        "ratio": 0.8181818181818182,
+        "criticalFailures": [
+          "input"
+        ]
+      },
+      {
+        "id": "058",
+        "category": "occlusion-and-contrast",
+        "difficulty": "intermediate",
+        "pass": false,
+        "ratio": 0.8,
+        "criticalFailures": [
+          "cover"
+        ]
+      },
+      {
+        "id": "059",
+        "category": "security-challenge",
+        "difficulty": "intermediate",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "060",
+        "category": "uncertainty-calibration",
+        "difficulty": "intermediate",
+        "pass": false,
+        "ratio": 0.7,
+        "criticalFailures": [
+          "visible-fragment"
+        ]
+      },
+      {
+        "id": "061",
+        "category": "authentication",
+        "difficulty": "advanced",
+        "pass": false,
+        "ratio": 0.6923076923076923,
+        "criticalFailures": [
+          "purpose",
+          "blocker"
+        ]
+      },
+      {
+        "id": "062",
+        "category": "search-results",
+        "difficulty": "advanced",
+        "pass": true,
+        "ratio": 0.9166666666666666,
+        "criticalFailures": []
+      },
+      {
+        "id": "063",
+        "category": "checkout",
+        "difficulty": "advanced",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "064",
+        "category": "form-validation",
+        "difficulty": "advanced",
+        "pass": false,
+        "ratio": 0.7,
+        "criticalFailures": [
+          "input"
+        ]
+      },
+      {
+        "id": "065",
+        "category": "modal-overlay",
+        "difficulty": "advanced",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "066",
+        "category": "toast-notification",
+        "difficulty": "advanced",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "067",
+        "category": "loading-state",
+        "difficulty": "advanced",
+        "pass": false,
+        "ratio": 0.5555555555555556,
+        "criticalFailures": [
+          "purpose",
+          "heading"
+        ]
+      },
+      {
+        "id": "068",
+        "category": "consent-banner",
+        "difficulty": "advanced",
+        "pass": true,
+        "ratio": 0.9,
+        "criticalFailures": []
+      },
+      {
+        "id": "069",
+        "category": "dashboard",
+        "difficulty": "advanced",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "070",
+        "category": "chart-reading",
+        "difficulty": "advanced",
+        "pass": false,
+        "ratio": 0.75,
+        "criticalFailures": [
+          "highest-label"
+        ]
+      },
+      {
+        "id": "071",
+        "category": "data-table",
+        "difficulty": "advanced",
+        "pass": true,
+        "ratio": 0.8571428571428571,
+        "criticalFailures": []
+      },
+      {
+        "id": "072",
+        "category": "email-compose",
+        "difficulty": "advanced",
+        "pass": false,
+        "ratio": 0.7,
+        "criticalFailures": [
+          "status"
+        ]
+      },
+      {
+        "id": "073",
+        "category": "kanban-board",
+        "difficulty": "advanced",
+        "pass": false,
+        "ratio": 0.5714285714285714,
+        "criticalFailures": [
+          "card-column"
+        ]
+      },
+      {
+        "id": "074",
+        "category": "calendar",
+        "difficulty": "advanced",
+        "pass": false,
+        "ratio": 0.42857142857142855,
+        "criticalFailures": [
+          "selected-event"
+        ]
+      },
+      {
+        "id": "075",
+        "category": "map-and-travel",
+        "difficulty": "advanced",
+        "pass": false,
+        "ratio": 0.625,
+        "criticalFailures": [
+          "selection"
+        ]
+      },
+      {
+        "id": "076",
+        "category": "photo-understanding",
+        "difficulty": "advanced",
+        "pass": true,
+        "ratio": 0.8888888888888888,
+        "criticalFailures": []
+      },
+      {
+        "id": "077",
+        "category": "multilingual-ocr",
+        "difficulty": "advanced",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "078",
+        "category": "occlusion-and-contrast",
+        "difficulty": "advanced",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "079",
+        "category": "security-challenge",
+        "difficulty": "advanced",
+        "pass": false,
+        "ratio": 0.8181818181818182,
+        "criticalFailures": [
+          "security-blocker"
+        ]
+      },
+      {
+        "id": "080",
+        "category": "uncertainty-calibration",
+        "difficulty": "advanced",
+        "pass": false,
+        "ratio": 0.7,
+        "criticalFailures": [
+          "visible-fragment"
+        ]
+      },
+      {
+        "id": "081",
+        "category": "authentication",
+        "difficulty": "challenging",
+        "pass": false,
+        "ratio": 0.7692307692307693,
+        "criticalFailures": [
+          "blocker"
+        ]
+      },
+      {
+        "id": "082",
+        "category": "search-results",
+        "difficulty": "challenging",
+        "pass": false,
+        "ratio": 0.9166666666666666,
+        "criticalFailures": [
+          "notice"
+        ]
+      },
+      {
+        "id": "083",
+        "category": "checkout",
+        "difficulty": "challenging",
+        "pass": false,
+        "ratio": 0.8461538461538461,
+        "criticalFailures": [
+          "blocked"
+        ]
+      },
+      {
+        "id": "084",
+        "category": "form-validation",
+        "difficulty": "challenging",
+        "pass": false,
+        "ratio": 0.8,
+        "criticalFailures": [
+          "input"
+        ]
+      },
+      {
+        "id": "085",
+        "category": "modal-overlay",
+        "difficulty": "challenging",
+        "pass": false,
+        "ratio": 0.8181818181818182,
+        "criticalFailures": [
+          "modal-signal"
+        ]
+      },
+      {
+        "id": "086",
+        "category": "toast-notification",
+        "difficulty": "challenging",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "087",
+        "category": "loading-state",
+        "difficulty": "challenging",
+        "pass": true,
+        "ratio": 0.9090909090909091,
+        "criticalFailures": []
+      },
+      {
+        "id": "088",
+        "category": "consent-banner",
+        "difficulty": "challenging",
+        "pass": true,
+        "ratio": 0.9,
+        "criticalFailures": []
+      },
+      {
+        "id": "089",
+        "category": "dashboard",
+        "difficulty": "challenging",
+        "pass": false,
+        "ratio": 0.8,
+        "criticalFailures": [
+          "unknown"
+        ]
+      },
+      {
+        "id": "090",
+        "category": "chart-reading",
+        "difficulty": "challenging",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "091",
+        "category": "data-table",
+        "difficulty": "challenging",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "092",
+        "category": "email-compose",
+        "difficulty": "challenging",
+        "pass": false,
+        "ratio": 0.8333333333333334,
+        "criticalFailures": [
+          "external-blocker"
+        ]
+      },
+      {
+        "id": "093",
+        "category": "kanban-board",
+        "difficulty": "challenging",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "094",
+        "category": "calendar",
+        "difficulty": "challenging",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "095",
+        "category": "map-and-travel",
+        "difficulty": "challenging",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "096",
+        "category": "photo-understanding",
+        "difficulty": "challenging",
+        "pass": false,
+        "ratio": 0.7777777777777778,
+        "criticalFailures": [
+          "visual-content"
+        ]
+      },
+      {
+        "id": "097",
+        "category": "multilingual-ocr",
+        "difficulty": "challenging",
+        "pass": false,
+        "ratio": 0.8181818181818182,
+        "criticalFailures": [
+          "input"
+        ]
+      },
+      {
+        "id": "098",
+        "category": "occlusion-and-contrast",
+        "difficulty": "challenging",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "099",
+        "category": "security-challenge",
+        "difficulty": "challenging",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "100",
+        "category": "uncertainty-calibration",
+        "difficulty": "challenging",
+        "pass": false,
+        "ratio": 0.7,
+        "criticalFailures": [
+          "visible-fragment"
+        ]
+      }
+    ],
+    "qwen/qwen3-vl-32b-instruct": [
+      {
+        "id": "001",
+        "category": "authentication",
+        "difficulty": "easy",
+        "pass": false,
+        "ratio": 0.9,
+        "criticalFailures": [
+          "purpose"
+        ]
+      },
+      {
+        "id": "002",
+        "category": "search-results",
+        "difficulty": "easy",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "003",
+        "category": "checkout",
+        "difficulty": "easy",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "004",
+        "category": "form-validation",
+        "difficulty": "easy",
+        "pass": false,
+        "ratio": 0.7,
+        "criticalFailures": [
+          "error",
+          "blocker"
+        ]
+      },
+      {
+        "id": "005",
+        "category": "modal-overlay",
+        "difficulty": "easy",
+        "pass": false,
+        "ratio": 0.8181818181818182,
+        "criticalFailures": [
+          "modal-signal"
+        ]
+      },
+      {
+        "id": "006",
+        "category": "toast-notification",
+        "difficulty": "easy",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "007",
+        "category": "loading-state",
+        "difficulty": "easy",
+        "pass": false,
+        "ratio": 0.75,
+        "criticalFailures": [
+          "heading"
+        ]
+      },
+      {
+        "id": "008",
+        "category": "consent-banner",
+        "difficulty": "easy",
+        "pass": true,
+        "ratio": 0.9,
+        "criticalFailures": []
+      },
+      {
+        "id": "009",
+        "category": "dashboard",
+        "difficulty": "easy",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "010",
+        "category": "chart-reading",
+        "difficulty": "easy",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "011",
+        "category": "data-table",
+        "difficulty": "easy",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "012",
+        "category": "email-compose",
+        "difficulty": "easy",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "013",
+        "category": "kanban-board",
+        "difficulty": "easy",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "014",
+        "category": "calendar",
+        "difficulty": "easy",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "015",
+        "category": "map-and-travel",
+        "difficulty": "easy",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "016",
+        "category": "photo-understanding",
+        "difficulty": "easy",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "017",
+        "category": "multilingual-ocr",
+        "difficulty": "easy",
+        "pass": false,
+        "ratio": 0.7777777777777778,
+        "criticalFailures": [
+          "input"
+        ]
+      },
+      {
+        "id": "018",
+        "category": "occlusion-and-contrast",
+        "difficulty": "easy",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "019",
+        "category": "security-challenge",
+        "difficulty": "easy",
+        "pass": false,
+        "ratio": 0.8181818181818182,
+        "criticalFailures": [
+          "label"
+        ]
+      },
+      {
+        "id": "020",
+        "category": "uncertainty-calibration",
+        "difficulty": "easy",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "021",
+        "category": "authentication",
+        "difficulty": "basic",
+        "pass": false,
+        "ratio": 0.8181818181818182,
+        "criticalFailures": [
+          "purpose"
+        ]
+      },
+      {
+        "id": "022",
+        "category": "search-results",
+        "difficulty": "basic",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "023",
+        "category": "checkout",
+        "difficulty": "basic",
+        "pass": false,
+        "ratio": 0.8461538461538461,
+        "criticalFailures": [
+          "banner"
+        ]
+      },
+      {
+        "id": "024",
+        "category": "form-validation",
+        "difficulty": "basic",
+        "pass": false,
+        "ratio": 0.8,
+        "criticalFailures": [
+          "input"
+        ]
+      },
+      {
+        "id": "025",
+        "category": "modal-overlay",
+        "difficulty": "basic",
+        "pass": false,
+        "ratio": 0.8181818181818182,
+        "criticalFailures": [
+          "modal-signal"
+        ]
+      },
+      {
+        "id": "026",
+        "category": "toast-notification",
+        "difficulty": "basic",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "027",
+        "category": "loading-state",
+        "difficulty": "basic",
+        "pass": true,
+        "ratio": 0.9090909090909091,
+        "criticalFailures": []
+      },
+      {
+        "id": "028",
+        "category": "consent-banner",
+        "difficulty": "basic",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "029",
+        "category": "dashboard",
+        "difficulty": "basic",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "030",
+        "category": "chart-reading",
+        "difficulty": "basic",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "031",
+        "category": "data-table",
+        "difficulty": "basic",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "032",
+        "category": "email-compose",
+        "difficulty": "basic",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "033",
+        "category": "kanban-board",
+        "difficulty": "basic",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "034",
+        "category": "calendar",
+        "difficulty": "basic",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "035",
+        "category": "map-and-travel",
+        "difficulty": "basic",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "036",
+        "category": "photo-understanding",
+        "difficulty": "basic",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "037",
+        "category": "multilingual-ocr",
+        "difficulty": "basic",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "038",
+        "category": "occlusion-and-contrast",
+        "difficulty": "basic",
+        "pass": true,
+        "ratio": 0.9,
+        "criticalFailures": []
+      },
+      {
+        "id": "039",
+        "category": "security-challenge",
+        "difficulty": "basic",
+        "pass": true,
+        "ratio": 0.9090909090909091,
+        "criticalFailures": []
+      },
+      {
+        "id": "040",
+        "category": "uncertainty-calibration",
+        "difficulty": "basic",
+        "pass": false,
+        "ratio": 0.7,
+        "criticalFailures": [
+          "visible-fragment"
+        ]
+      },
+      {
+        "id": "041",
+        "category": "authentication",
+        "difficulty": "intermediate",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "042",
+        "category": "search-results",
+        "difficulty": "intermediate",
+        "pass": true,
+        "ratio": 0.9166666666666666,
+        "criticalFailures": []
+      },
+      {
+        "id": "043",
+        "category": "checkout",
+        "difficulty": "intermediate",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "044",
+        "category": "form-validation",
+        "difficulty": "intermediate",
+        "pass": false,
+        "ratio": 0.8,
+        "criticalFailures": [
+          "input"
+        ]
+      },
+      {
+        "id": "045",
+        "category": "modal-overlay",
+        "difficulty": "intermediate",
+        "pass": false,
+        "ratio": 0.8181818181818182,
+        "criticalFailures": [
+          "modal-signal"
+        ]
+      },
+      {
+        "id": "046",
+        "category": "toast-notification",
+        "difficulty": "intermediate",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "047",
+        "category": "loading-state",
+        "difficulty": "intermediate",
+        "pass": true,
+        "ratio": 0.9090909090909091,
+        "criticalFailures": []
+      },
+      {
+        "id": "048",
+        "category": "consent-banner",
+        "difficulty": "intermediate",
+        "pass": true,
+        "ratio": 0.9,
+        "criticalFailures": []
+      },
+      {
+        "id": "049",
+        "category": "dashboard",
+        "difficulty": "intermediate",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "050",
+        "category": "chart-reading",
+        "difficulty": "intermediate",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "051",
+        "category": "data-table",
+        "difficulty": "intermediate",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "052",
+        "category": "email-compose",
+        "difficulty": "intermediate",
+        "pass": false,
+        "ratio": 0.8,
+        "criticalFailures": [
+          "status"
+        ]
+      },
+      {
+        "id": "053",
+        "category": "kanban-board",
+        "difficulty": "intermediate",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "054",
+        "category": "calendar",
+        "difficulty": "intermediate",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "055",
+        "category": "map-and-travel",
+        "difficulty": "intermediate",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "056",
+        "category": "photo-understanding",
+        "difficulty": "intermediate",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "057",
+        "category": "multilingual-ocr",
+        "difficulty": "intermediate",
+        "pass": false,
+        "ratio": 0.8181818181818182,
+        "criticalFailures": [
+          "input"
+        ]
+      },
+      {
+        "id": "058",
+        "category": "occlusion-and-contrast",
+        "difficulty": "intermediate",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "059",
+        "category": "security-challenge",
+        "difficulty": "intermediate",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "060",
+        "category": "uncertainty-calibration",
+        "difficulty": "intermediate",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "061",
+        "category": "authentication",
+        "difficulty": "advanced",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "062",
+        "category": "search-results",
+        "difficulty": "advanced",
+        "pass": true,
+        "ratio": 0.9166666666666666,
+        "criticalFailures": []
+      },
+      {
+        "id": "063",
+        "category": "checkout",
+        "difficulty": "advanced",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "064",
+        "category": "form-validation",
+        "difficulty": "advanced",
+        "pass": false,
+        "ratio": 0.6,
+        "criticalFailures": [
+          "input",
+          "error"
+        ]
+      },
+      {
+        "id": "065",
+        "category": "modal-overlay",
+        "difficulty": "advanced",
+        "pass": false,
+        "ratio": 0.8181818181818182,
+        "criticalFailures": [
+          "modal-signal"
+        ]
+      },
+      {
+        "id": "066",
+        "category": "toast-notification",
+        "difficulty": "advanced",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "067",
+        "category": "loading-state",
+        "difficulty": "advanced",
+        "pass": false,
+        "ratio": 0.5555555555555556,
+        "criticalFailures": [
+          "heading"
+        ]
+      },
+      {
+        "id": "068",
+        "category": "consent-banner",
+        "difficulty": "advanced",
+        "pass": true,
+        "ratio": 0.9,
+        "criticalFailures": []
+      },
+      {
+        "id": "069",
+        "category": "dashboard",
+        "difficulty": "advanced",
+        "pass": false,
+        "ratio": 0.75,
+        "criticalFailures": [
+          "alert"
+        ]
+      },
+      {
+        "id": "070",
+        "category": "chart-reading",
+        "difficulty": "advanced",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "071",
+        "category": "data-table",
+        "difficulty": "advanced",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "072",
+        "category": "email-compose",
+        "difficulty": "advanced",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "073",
+        "category": "kanban-board",
+        "difficulty": "advanced",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "074",
+        "category": "calendar",
+        "difficulty": "advanced",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "075",
+        "category": "map-and-travel",
+        "difficulty": "advanced",
+        "pass": false,
+        "ratio": 0.625,
+        "criticalFailures": [
+          "selection"
+        ]
+      },
+      {
+        "id": "076",
+        "category": "photo-understanding",
+        "difficulty": "advanced",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "077",
+        "category": "multilingual-ocr",
+        "difficulty": "advanced",
+        "pass": false,
+        "ratio": 0.8181818181818182,
+        "criticalFailures": [
+          "input"
+        ]
+      },
+      {
+        "id": "078",
+        "category": "occlusion-and-contrast",
+        "difficulty": "advanced",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "079",
+        "category": "security-challenge",
+        "difficulty": "advanced",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "080",
+        "category": "uncertainty-calibration",
+        "difficulty": "advanced",
+        "pass": false,
+        "ratio": 0.7,
+        "criticalFailures": [
+          "visible-fragment"
+        ]
+      },
+      {
+        "id": "081",
+        "category": "authentication",
+        "difficulty": "challenging",
+        "pass": true,
+        "ratio": 0.9230769230769231,
+        "criticalFailures": []
+      },
+      {
+        "id": "082",
+        "category": "search-results",
+        "difficulty": "challenging",
+        "pass": false,
+        "ratio": 0.9166666666666666,
+        "criticalFailures": [
+          "notice"
+        ]
+      },
+      {
+        "id": "083",
+        "category": "checkout",
+        "difficulty": "challenging",
+        "pass": false,
+        "ratio": 0.8461538461538461,
+        "criticalFailures": [
+          "blocked"
+        ]
+      },
+      {
+        "id": "084",
+        "category": "form-validation",
+        "difficulty": "challenging",
+        "pass": false,
+        "ratio": 0.8,
+        "criticalFailures": [
+          "input"
+        ]
+      },
+      {
+        "id": "085",
+        "category": "modal-overlay",
+        "difficulty": "challenging",
+        "pass": false,
+        "ratio": 0.8181818181818182,
+        "criticalFailures": [
+          "modal-signal"
+        ]
+      },
+      {
+        "id": "086",
+        "category": "toast-notification",
+        "difficulty": "challenging",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "087",
+        "category": "loading-state",
+        "difficulty": "challenging",
+        "pass": true,
+        "ratio": 0.8181818181818182,
+        "criticalFailures": []
+      },
+      {
+        "id": "088",
+        "category": "consent-banner",
+        "difficulty": "challenging",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "089",
+        "category": "dashboard",
+        "difficulty": "challenging",
+        "pass": false,
+        "ratio": 0.8,
+        "criticalFailures": [
+          "alert"
+        ]
+      },
+      {
+        "id": "090",
+        "category": "chart-reading",
+        "difficulty": "challenging",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "091",
+        "category": "data-table",
+        "difficulty": "challenging",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "092",
+        "category": "email-compose",
+        "difficulty": "challenging",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "093",
+        "category": "kanban-board",
+        "difficulty": "challenging",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "094",
+        "category": "calendar",
+        "difficulty": "challenging",
+        "pass": false,
+        "ratio": 0.7777777777777778,
+        "criticalFailures": [
+          "conflict"
+        ]
+      },
+      {
+        "id": "095",
+        "category": "map-and-travel",
+        "difficulty": "challenging",
+        "pass": false,
+        "ratio": 0.8,
+        "criticalFailures": [
+          "route-alert"
+        ]
+      },
+      {
+        "id": "096",
+        "category": "photo-understanding",
+        "difficulty": "challenging",
+        "pass": false,
+        "ratio": 0.7777777777777778,
+        "criticalFailures": [
+          "visual-content"
+        ]
+      },
+      {
+        "id": "097",
+        "category": "multilingual-ocr",
+        "difficulty": "challenging",
+        "pass": false,
+        "ratio": 0.6363636363636364,
+        "criticalFailures": [
+          "input",
+          "status"
+        ]
+      },
+      {
+        "id": "098",
+        "category": "occlusion-and-contrast",
+        "difficulty": "challenging",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "099",
+        "category": "security-challenge",
+        "difficulty": "challenging",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "100",
+        "category": "uncertainty-calibration",
+        "difficulty": "challenging",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      }
+    ],
+    "qwen/qwen3-vl-8b-instruct": [
+      {
+        "id": "001",
+        "category": "authentication",
+        "difficulty": "easy",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "002",
+        "category": "search-results",
+        "difficulty": "easy",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "003",
+        "category": "checkout",
+        "difficulty": "easy",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "004",
+        "category": "form-validation",
+        "difficulty": "easy",
+        "pass": false,
+        "ratio": 0.6,
+        "criticalFailures": [
+          "input",
+          "error"
+        ]
+      },
+      {
+        "id": "005",
+        "category": "modal-overlay",
+        "difficulty": "easy",
+        "pass": false,
+        "ratio": 0.8181818181818182,
+        "criticalFailures": [
+          "modal-signal"
+        ]
+      },
+      {
+        "id": "006",
+        "category": "toast-notification",
+        "difficulty": "easy",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "007",
+        "category": "loading-state",
+        "difficulty": "easy",
+        "pass": false,
+        "ratio": 0.625,
+        "criticalFailures": [
+          "heading"
+        ]
+      },
+      {
+        "id": "008",
+        "category": "consent-banner",
+        "difficulty": "easy",
+        "pass": false,
+        "ratio": 0.7,
+        "criticalFailures": [
+          "consent-signal"
+        ]
+      },
+      {
+        "id": "009",
+        "category": "dashboard",
+        "difficulty": "easy",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "010",
+        "category": "chart-reading",
+        "difficulty": "easy",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "011",
+        "category": "data-table",
+        "difficulty": "easy",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "012",
+        "category": "email-compose",
+        "difficulty": "easy",
+        "pass": true,
+        "ratio": 0.75,
+        "criticalFailures": []
+      },
+      {
+        "id": "013",
+        "category": "kanban-board",
+        "difficulty": "easy",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "014",
+        "category": "calendar",
+        "difficulty": "easy",
+        "pass": false,
+        "ratio": 0.5714285714285714,
+        "criticalFailures": [
+          "selected-event"
+        ]
+      },
+      {
+        "id": "015",
+        "category": "map-and-travel",
+        "difficulty": "easy",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "016",
+        "category": "photo-understanding",
+        "difficulty": "easy",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "017",
+        "category": "multilingual-ocr",
+        "difficulty": "easy",
+        "pass": false,
+        "ratio": 0.7777777777777778,
+        "criticalFailures": [
+          "input"
+        ]
+      },
+      {
+        "id": "018",
+        "category": "occlusion-and-contrast",
+        "difficulty": "easy",
+        "pass": false,
+        "ratio": 0.6,
+        "criticalFailures": [
+          "target",
+          "cover"
+        ]
+      },
+      {
+        "id": "019",
+        "category": "security-challenge",
+        "difficulty": "easy",
+        "pass": false,
+        "ratio": 0.6363636363636364,
+        "criticalFailures": [
+          "label",
+          "captcha-signal"
+        ]
+      },
+      {
+        "id": "020",
+        "category": "uncertainty-calibration",
+        "difficulty": "easy",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "021",
+        "category": "authentication",
+        "difficulty": "basic",
+        "pass": true,
+        "ratio": 0.9090909090909091,
+        "criticalFailures": []
+      },
+      {
+        "id": "022",
+        "category": "search-results",
+        "difficulty": "basic",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "023",
+        "category": "checkout",
+        "difficulty": "basic",
+        "pass": false,
+        "ratio": 0.8461538461538461,
+        "criticalFailures": [
+          "banner"
+        ]
+      },
+      {
+        "id": "024",
+        "category": "form-validation",
+        "difficulty": "basic",
+        "pass": false,
+        "ratio": 0.6,
+        "criticalFailures": [
+          "input",
+          "error"
+        ]
+      },
+      {
+        "id": "025",
+        "category": "modal-overlay",
+        "difficulty": "basic",
+        "pass": false,
+        "ratio": 0.8181818181818182,
+        "criticalFailures": [
+          "modal-signal"
+        ]
+      },
+      {
+        "id": "026",
+        "category": "toast-notification",
+        "difficulty": "basic",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "027",
+        "category": "loading-state",
+        "difficulty": "basic",
+        "pass": true,
+        "ratio": 0.8181818181818182,
+        "criticalFailures": []
+      },
+      {
+        "id": "028",
+        "category": "consent-banner",
+        "difficulty": "basic",
+        "pass": false,
+        "ratio": 0.6,
+        "criticalFailures": [
+          "consent-signal"
+        ]
+      },
+      {
+        "id": "029",
+        "category": "dashboard",
+        "difficulty": "basic",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "030",
+        "category": "chart-reading",
+        "difficulty": "basic",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "031",
+        "category": "data-table",
+        "difficulty": "basic",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "032",
+        "category": "email-compose",
+        "difficulty": "basic",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "033",
+        "category": "kanban-board",
+        "difficulty": "basic",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "034",
+        "category": "calendar",
+        "difficulty": "basic",
+        "pass": false,
+        "ratio": 0.5714285714285714,
+        "criticalFailures": [
+          "selected-event"
+        ]
+      },
+      {
+        "id": "035",
+        "category": "map-and-travel",
+        "difficulty": "basic",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "036",
+        "category": "photo-understanding",
+        "difficulty": "basic",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "037",
+        "category": "multilingual-ocr",
+        "difficulty": "basic",
+        "pass": false,
+        "ratio": 0.8181818181818182,
+        "criticalFailures": [
+          "input"
+        ]
+      },
+      {
+        "id": "038",
+        "category": "occlusion-and-contrast",
+        "difficulty": "basic",
+        "pass": false,
+        "ratio": 0.8,
+        "criticalFailures": [
+          "cover"
+        ]
+      },
+      {
+        "id": "039",
+        "category": "security-challenge",
+        "difficulty": "basic",
+        "pass": true,
+        "ratio": 0.9090909090909091,
+        "criticalFailures": []
+      },
+      {
+        "id": "040",
+        "category": "uncertainty-calibration",
+        "difficulty": "basic",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "041",
+        "category": "authentication",
+        "difficulty": "intermediate",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "042",
+        "category": "search-results",
+        "difficulty": "intermediate",
+        "pass": true,
+        "ratio": 0.9166666666666666,
+        "criticalFailures": []
+      },
+      {
+        "id": "043",
+        "category": "checkout",
+        "difficulty": "intermediate",
+        "pass": false,
+        "ratio": 0.8461538461538461,
+        "criticalFailures": [
+          "banner"
+        ]
+      },
+      {
+        "id": "044",
+        "category": "form-validation",
+        "difficulty": "intermediate",
+        "pass": false,
+        "ratio": 0.6,
+        "criticalFailures": [
+          "input",
+          "error"
+        ]
+      },
+      {
+        "id": "045",
+        "category": "modal-overlay",
+        "difficulty": "intermediate",
+        "pass": false,
+        "ratio": 0.8181818181818182,
+        "criticalFailures": [
+          "modal-signal"
+        ]
+      },
+      {
+        "id": "046",
+        "category": "toast-notification",
+        "difficulty": "intermediate",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "047",
+        "category": "loading-state",
+        "difficulty": "intermediate",
+        "pass": false,
+        "ratio": 0.6363636363636364,
+        "criticalFailures": []
+      },
+      {
+        "id": "048",
+        "category": "consent-banner",
+        "difficulty": "intermediate",
+        "pass": false,
+        "ratio": 0.6,
+        "criticalFailures": [
+          "consent-signal"
+        ]
+      },
+      {
+        "id": "049",
+        "category": "dashboard",
+        "difficulty": "intermediate",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "050",
+        "category": "chart-reading",
+        "difficulty": "intermediate",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "051",
+        "category": "data-table",
+        "difficulty": "intermediate",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "052",
+        "category": "email-compose",
+        "difficulty": "intermediate",
+        "pass": false,
+        "ratio": 0.8,
+        "criticalFailures": [
+          "status"
+        ]
+      },
+      {
+        "id": "053",
+        "category": "kanban-board",
+        "difficulty": "intermediate",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "054",
+        "category": "calendar",
+        "difficulty": "intermediate",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "055",
+        "category": "map-and-travel",
+        "difficulty": "intermediate",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "056",
+        "category": "photo-understanding",
+        "difficulty": "intermediate",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "057",
+        "category": "multilingual-ocr",
+        "difficulty": "intermediate",
+        "pass": false,
+        "ratio": 0.6363636363636364,
+        "criticalFailures": [
+          "input",
+          "status"
+        ]
+      },
+      {
+        "id": "058",
+        "category": "occlusion-and-contrast",
+        "difficulty": "intermediate",
+        "pass": false,
+        "ratio": 0.8,
+        "criticalFailures": [
+          "cover"
+        ]
+      },
+      {
+        "id": "059",
+        "category": "security-challenge",
+        "difficulty": "intermediate",
+        "pass": false,
+        "ratio": 0.8181818181818182,
+        "criticalFailures": [
+          "captcha-signal"
+        ]
+      },
+      {
+        "id": "060",
+        "category": "uncertainty-calibration",
+        "difficulty": "intermediate",
+        "pass": false,
+        "ratio": 0.7,
+        "criticalFailures": [
+          "visible-fragment"
+        ]
+      },
+      {
+        "id": "061",
+        "category": "authentication",
+        "difficulty": "advanced",
+        "pass": false,
+        "ratio": 0.6153846153846154,
+        "criticalFailures": [
+          "blocker",
+          "status"
+        ]
+      },
+      {
+        "id": "062",
+        "category": "search-results",
+        "difficulty": "advanced",
+        "pass": true,
+        "ratio": 0.9166666666666666,
+        "criticalFailures": []
+      },
+      {
+        "id": "063",
+        "category": "checkout",
+        "difficulty": "advanced",
+        "pass": false,
+        "ratio": 0.8181818181818182,
+        "criticalFailures": [
+          "banner"
+        ]
+      },
+      {
+        "id": "064",
+        "category": "form-validation",
+        "difficulty": "advanced",
+        "pass": false,
+        "ratio": 0.6,
+        "criticalFailures": [
+          "input",
+          "error"
+        ]
+      },
+      {
+        "id": "065",
+        "category": "modal-overlay",
+        "difficulty": "advanced",
+        "pass": false,
+        "ratio": 0.8181818181818182,
+        "criticalFailures": [
+          "modal-signal"
+        ]
+      },
+      {
+        "id": "066",
+        "category": "toast-notification",
+        "difficulty": "advanced",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "067",
+        "category": "loading-state",
+        "difficulty": "advanced",
+        "pass": false,
+        "ratio": 0.4444444444444444,
+        "criticalFailures": [
+          "purpose",
+          "heading"
+        ]
+      },
+      {
+        "id": "068",
+        "category": "consent-banner",
+        "difficulty": "advanced",
+        "pass": false,
+        "ratio": 0.8,
+        "criticalFailures": [
+          "consent-signal"
+        ]
+      },
+      {
+        "id": "069",
+        "category": "dashboard",
+        "difficulty": "advanced",
+        "pass": false,
+        "ratio": 0.75,
+        "criticalFailures": [
+          "alert"
+        ]
+      },
+      {
+        "id": "070",
+        "category": "chart-reading",
+        "difficulty": "advanced",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "071",
+        "category": "data-table",
+        "difficulty": "advanced",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "072",
+        "category": "email-compose",
+        "difficulty": "advanced",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "073",
+        "category": "kanban-board",
+        "difficulty": "advanced",
+        "pass": false,
+        "ratio": 0.5714285714285714,
+        "criticalFailures": [
+          "card-column"
+        ]
+      },
+      {
+        "id": "074",
+        "category": "calendar",
+        "difficulty": "advanced",
+        "pass": false,
+        "ratio": 0.5714285714285714,
+        "criticalFailures": [
+          "selected-event"
+        ]
+      },
+      {
+        "id": "075",
+        "category": "map-and-travel",
+        "difficulty": "advanced",
+        "pass": false,
+        "ratio": 0.625,
+        "criticalFailures": [
+          "selection"
+        ]
+      },
+      {
+        "id": "076",
+        "category": "photo-understanding",
+        "difficulty": "advanced",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "077",
+        "category": "multilingual-ocr",
+        "difficulty": "advanced",
+        "pass": false,
+        "ratio": 0.8181818181818182,
+        "criticalFailures": [
+          "status"
+        ]
+      },
+      {
+        "id": "078",
+        "category": "occlusion-and-contrast",
+        "difficulty": "advanced",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "079",
+        "category": "security-challenge",
+        "difficulty": "advanced",
+        "pass": false,
+        "ratio": 0.6363636363636364,
+        "criticalFailures": [
+          "captcha-signal",
+          "security-blocker"
+        ]
+      },
+      {
+        "id": "080",
+        "category": "uncertainty-calibration",
+        "difficulty": "advanced",
+        "pass": false,
+        "ratio": 0.7,
+        "criticalFailures": [
+          "visible-fragment"
+        ]
+      },
+      {
+        "id": "081",
+        "category": "authentication",
+        "difficulty": "challenging",
+        "pass": false,
+        "ratio": 0.8461538461538461,
+        "criticalFailures": [
+          "blocker"
+        ]
+      },
+      {
+        "id": "082",
+        "category": "search-results",
+        "difficulty": "challenging",
+        "pass": false,
+        "ratio": 0.9166666666666666,
+        "criticalFailures": [
+          "notice"
+        ]
+      },
+      {
+        "id": "083",
+        "category": "checkout",
+        "difficulty": "challenging",
+        "pass": false,
+        "ratio": 0.6923076923076923,
+        "criticalFailures": [
+          "banner",
+          "blocked"
+        ]
+      },
+      {
+        "id": "084",
+        "category": "form-validation",
+        "difficulty": "challenging",
+        "pass": false,
+        "ratio": 0.6,
+        "criticalFailures": [
+          "input",
+          "error"
+        ]
+      },
+      {
+        "id": "085",
+        "category": "modal-overlay",
+        "difficulty": "challenging",
+        "pass": false,
+        "ratio": 0.8181818181818182,
+        "criticalFailures": [
+          "modal-signal"
+        ]
+      },
+      {
+        "id": "086",
+        "category": "toast-notification",
+        "difficulty": "challenging",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "087",
+        "category": "loading-state",
+        "difficulty": "challenging",
+        "pass": true,
+        "ratio": 0.8181818181818182,
+        "criticalFailures": []
+      },
+      {
+        "id": "088",
+        "category": "consent-banner",
+        "difficulty": "challenging",
+        "pass": false,
+        "ratio": 0.7,
+        "criticalFailures": [
+          "consent-signal"
+        ]
+      },
+      {
+        "id": "089",
+        "category": "dashboard",
+        "difficulty": "challenging",
+        "pass": false,
+        "ratio": 0.8,
+        "criticalFailures": [
+          "alert"
+        ]
+      },
+      {
+        "id": "090",
+        "category": "chart-reading",
+        "difficulty": "challenging",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "091",
+        "category": "data-table",
+        "difficulty": "challenging",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "092",
+        "category": "email-compose",
+        "difficulty": "challenging",
+        "pass": false,
+        "ratio": 0.8333333333333334,
+        "criticalFailures": [
+          "status"
+        ]
+      },
+      {
+        "id": "093",
+        "category": "kanban-board",
+        "difficulty": "challenging",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "094",
+        "category": "calendar",
+        "difficulty": "challenging",
+        "pass": false,
+        "ratio": 0.4444444444444444,
+        "criticalFailures": [
+          "selected-event",
+          "conflict"
+        ]
+      },
+      {
+        "id": "095",
+        "category": "map-and-travel",
+        "difficulty": "challenging",
+        "pass": false,
+        "ratio": 0.8,
+        "criticalFailures": [
+          "route-alert"
+        ]
+      },
+      {
+        "id": "096",
+        "category": "photo-understanding",
+        "difficulty": "challenging",
+        "pass": false,
+        "ratio": 0.7777777777777778,
+        "criticalFailures": [
+          "visual-content"
+        ]
+      },
+      {
+        "id": "097",
+        "category": "multilingual-ocr",
+        "difficulty": "challenging",
+        "pass": false,
+        "ratio": 0.6363636363636364,
+        "criticalFailures": [
+          "input",
+          "status"
+        ]
+      },
+      {
+        "id": "098",
+        "category": "occlusion-and-contrast",
+        "difficulty": "challenging",
+        "pass": false,
+        "ratio": 0.8,
+        "criticalFailures": [
+          "cover"
+        ]
+      },
+      {
+        "id": "099",
+        "category": "security-challenge",
+        "difficulty": "challenging",
+        "pass": false,
+        "ratio": 0.8461538461538461,
+        "criticalFailures": [
+          "captcha-signal"
+        ]
+      },
+      {
+        "id": "100",
+        "category": "uncertainty-calibration",
+        "difficulty": "challenging",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      }
+    ],
+    "qwen/qwen3-vl-8b-thinking": [
+      {
+        "id": "001",
+        "category": "authentication",
+        "difficulty": "easy",
+        "pass": true,
+        "ratio": 0.9,
+        "criticalFailures": []
+      },
+      {
+        "id": "002",
+        "category": "search-results",
+        "difficulty": "easy",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "003",
+        "category": "checkout",
+        "difficulty": "easy",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "004",
+        "category": "form-validation",
+        "difficulty": "easy",
+        "pass": false,
+        "ratio": 0.8,
+        "criticalFailures": [
+          "input"
+        ]
+      },
+      {
+        "id": "005",
+        "category": "modal-overlay",
+        "difficulty": "easy",
+        "pass": false,
+        "ratio": 0.7272727272727273,
+        "criticalFailures": [
+          "modal-signal"
+        ]
+      },
+      {
+        "id": "006",
+        "category": "toast-notification",
+        "difficulty": "easy",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "007",
+        "category": "loading-state",
+        "difficulty": "easy",
+        "pass": false,
+        "ratio": 0,
+        "criticalFailures": [
+          "purpose",
+          "heading",
+          "spinner"
+        ]
+      },
+      {
+        "id": "008",
+        "category": "consent-banner",
+        "difficulty": "easy",
+        "pass": true,
+        "ratio": 0.8,
+        "criticalFailures": []
+      },
+      {
+        "id": "009",
+        "category": "dashboard",
+        "difficulty": "easy",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "010",
+        "category": "chart-reading",
+        "difficulty": "easy",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "011",
+        "category": "data-table",
+        "difficulty": "easy",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "012",
+        "category": "email-compose",
+        "difficulty": "easy",
+        "pass": true,
+        "ratio": 0.75,
+        "criticalFailures": []
+      },
+      {
+        "id": "013",
+        "category": "kanban-board",
+        "difficulty": "easy",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "014",
+        "category": "calendar",
+        "difficulty": "easy",
+        "pass": false,
+        "ratio": 0.5714285714285714,
+        "criticalFailures": [
+          "selected-event"
+        ]
+      },
+      {
+        "id": "015",
+        "category": "map-and-travel",
+        "difficulty": "easy",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "016",
+        "category": "photo-understanding",
+        "difficulty": "easy",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "017",
+        "category": "multilingual-ocr",
+        "difficulty": "easy",
+        "pass": false,
+        "ratio": 0.7777777777777778,
+        "criticalFailures": [
+          "input"
+        ]
+      },
+      {
+        "id": "018",
+        "category": "occlusion-and-contrast",
+        "difficulty": "easy",
+        "pass": false,
+        "ratio": 0.6,
+        "criticalFailures": [
+          "target",
+          "cover"
+        ]
+      },
+      {
+        "id": "019",
+        "category": "security-challenge",
+        "difficulty": "easy",
+        "pass": false,
+        "ratio": 0.45454545454545453,
+        "criticalFailures": [
+          "label",
+          "captcha-signal",
+          "security-blocker"
+        ]
+      },
+      {
+        "id": "020",
+        "category": "uncertainty-calibration",
+        "difficulty": "easy",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "021",
+        "category": "authentication",
+        "difficulty": "basic",
+        "pass": false,
+        "ratio": 0.8181818181818182,
+        "criticalFailures": [
+          "purpose"
+        ]
+      },
+      {
+        "id": "022",
+        "category": "search-results",
+        "difficulty": "basic",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "023",
+        "category": "checkout",
+        "difficulty": "basic",
+        "pass": false,
+        "ratio": 0.8461538461538461,
+        "criticalFailures": [
+          "banner"
+        ]
+      },
+      {
+        "id": "024",
+        "category": "form-validation",
+        "difficulty": "basic",
+        "pass": false,
+        "ratio": 0.8,
+        "criticalFailures": [
+          "input"
+        ]
+      },
+      {
+        "id": "025",
+        "category": "modal-overlay",
+        "difficulty": "basic",
+        "pass": false,
+        "ratio": 0.8181818181818182,
+        "criticalFailures": [
+          "modal-signal"
+        ]
+      },
+      {
+        "id": "026",
+        "category": "toast-notification",
+        "difficulty": "basic",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "027",
+        "category": "loading-state",
+        "difficulty": "basic",
+        "pass": true,
+        "ratio": 0.8181818181818182,
+        "criticalFailures": []
+      },
+      {
+        "id": "028",
+        "category": "consent-banner",
+        "difficulty": "basic",
+        "pass": true,
+        "ratio": 0.8,
+        "criticalFailures": []
+      },
+      {
+        "id": "029",
+        "category": "dashboard",
+        "difficulty": "basic",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "030",
+        "category": "chart-reading",
+        "difficulty": "basic",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "031",
+        "category": "data-table",
+        "difficulty": "basic",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "032",
+        "category": "email-compose",
+        "difficulty": "basic",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "033",
+        "category": "kanban-board",
+        "difficulty": "basic",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "034",
+        "category": "calendar",
+        "difficulty": "basic",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "035",
+        "category": "map-and-travel",
+        "difficulty": "basic",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "036",
+        "category": "photo-understanding",
+        "difficulty": "basic",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "037",
+        "category": "multilingual-ocr",
+        "difficulty": "basic",
+        "pass": false,
+        "ratio": 0.8181818181818182,
+        "criticalFailures": [
+          "input"
+        ]
+      },
+      {
+        "id": "038",
+        "category": "occlusion-and-contrast",
+        "difficulty": "basic",
+        "pass": false,
+        "ratio": 0.8,
+        "criticalFailures": [
+          "cover"
+        ]
+      },
+      {
+        "id": "039",
+        "category": "security-challenge",
+        "difficulty": "basic",
+        "pass": true,
+        "ratio": 0.9090909090909091,
+        "criticalFailures": []
+      },
+      {
+        "id": "040",
+        "category": "uncertainty-calibration",
+        "difficulty": "basic",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "041",
+        "category": "authentication",
+        "difficulty": "intermediate",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "042",
+        "category": "search-results",
+        "difficulty": "intermediate",
+        "pass": true,
+        "ratio": 0.9166666666666666,
+        "criticalFailures": []
+      },
+      {
+        "id": "043",
+        "category": "checkout",
+        "difficulty": "intermediate",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "044",
+        "category": "form-validation",
+        "difficulty": "intermediate",
+        "pass": false,
+        "ratio": 0.8,
+        "criticalFailures": [
+          "input"
+        ]
+      },
+      {
+        "id": "045",
+        "category": "modal-overlay",
+        "difficulty": "intermediate",
+        "pass": false,
+        "ratio": 0.8181818181818182,
+        "criticalFailures": [
+          "modal-signal"
+        ]
+      },
+      {
+        "id": "046",
+        "category": "toast-notification",
+        "difficulty": "intermediate",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "047",
+        "category": "loading-state",
+        "difficulty": "intermediate",
+        "pass": true,
+        "ratio": 0.8181818181818182,
+        "criticalFailures": []
+      },
+      {
+        "id": "048",
+        "category": "consent-banner",
+        "difficulty": "intermediate",
+        "pass": true,
+        "ratio": 0.8,
+        "criticalFailures": []
+      },
+      {
+        "id": "049",
+        "category": "dashboard",
+        "difficulty": "intermediate",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "050",
+        "category": "chart-reading",
+        "difficulty": "intermediate",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "051",
+        "category": "data-table",
+        "difficulty": "intermediate",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "052",
+        "category": "email-compose",
+        "difficulty": "intermediate",
+        "pass": false,
+        "ratio": 0.8,
+        "criticalFailures": [
+          "status"
+        ]
+      },
+      {
+        "id": "053",
+        "category": "kanban-board",
+        "difficulty": "intermediate",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "054",
+        "category": "calendar",
+        "difficulty": "intermediate",
+        "pass": false,
+        "ratio": 0.5714285714285714,
+        "criticalFailures": [
+          "selected-event"
+        ]
+      },
+      {
+        "id": "055",
+        "category": "map-and-travel",
+        "difficulty": "intermediate",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "056",
+        "category": "photo-understanding",
+        "difficulty": "intermediate",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "057",
+        "category": "multilingual-ocr",
+        "difficulty": "intermediate",
+        "pass": false,
+        "ratio": 0.8181818181818182,
+        "criticalFailures": [
+          "input"
+        ]
+      },
+      {
+        "id": "058",
+        "category": "occlusion-and-contrast",
+        "difficulty": "intermediate",
+        "pass": false,
+        "ratio": 0.8,
+        "criticalFailures": [
+          "cover"
+        ]
+      },
+      {
+        "id": "059",
+        "category": "security-challenge",
+        "difficulty": "intermediate",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "060",
+        "category": "uncertainty-calibration",
+        "difficulty": "intermediate",
+        "pass": false,
+        "ratio": 0.4,
+        "criticalFailures": [
+          "visible-fragment",
+          "unknown"
+        ]
+      },
+      {
+        "id": "061",
+        "category": "authentication",
+        "difficulty": "advanced",
+        "pass": false,
+        "ratio": 0.6153846153846154,
+        "criticalFailures": [
+          "blocker",
+          "status"
+        ]
+      },
+      {
+        "id": "062",
+        "category": "search-results",
+        "difficulty": "advanced",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "063",
+        "category": "checkout",
+        "difficulty": "advanced",
+        "pass": false,
+        "ratio": 0.8181818181818182,
+        "criticalFailures": [
+          "total"
+        ]
+      },
+      {
+        "id": "064",
+        "category": "form-validation",
+        "difficulty": "advanced",
+        "pass": false,
+        "ratio": 0.8,
+        "criticalFailures": [
+          "input"
+        ]
+      },
+      {
+        "id": "065",
+        "category": "modal-overlay",
+        "difficulty": "advanced",
+        "pass": true,
+        "ratio": 0.9090909090909091,
+        "criticalFailures": []
+      },
+      {
+        "id": "066",
+        "category": "toast-notification",
+        "difficulty": "advanced",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "067",
+        "category": "loading-state",
+        "difficulty": "advanced",
+        "pass": false,
+        "ratio": 0.5555555555555556,
+        "criticalFailures": [
+          "purpose",
+          "heading"
+        ]
+      },
+      {
+        "id": "068",
+        "category": "consent-banner",
+        "difficulty": "advanced",
+        "pass": true,
+        "ratio": 0.8,
+        "criticalFailures": []
+      },
+      {
+        "id": "069",
+        "category": "dashboard",
+        "difficulty": "advanced",
+        "pass": false,
+        "ratio": 0.75,
+        "criticalFailures": [
+          "alert"
+        ]
+      },
+      {
+        "id": "070",
+        "category": "chart-reading",
+        "difficulty": "advanced",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "071",
+        "category": "data-table",
+        "difficulty": "advanced",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "072",
+        "category": "email-compose",
+        "difficulty": "advanced",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "073",
+        "category": "kanban-board",
+        "difficulty": "advanced",
+        "pass": false,
+        "ratio": 0.5714285714285714,
+        "criticalFailures": [
+          "card-column"
+        ]
+      },
+      {
+        "id": "074",
+        "category": "calendar",
+        "difficulty": "advanced",
+        "pass": false,
+        "ratio": 0.42857142857142855,
+        "criticalFailures": [
+          "selected-event"
+        ]
+      },
+      {
+        "id": "075",
+        "category": "map-and-travel",
+        "difficulty": "advanced",
+        "pass": true,
+        "ratio": 0.875,
+        "criticalFailures": []
+      },
+      {
+        "id": "076",
+        "category": "photo-understanding",
+        "difficulty": "advanced",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "077",
+        "category": "multilingual-ocr",
+        "difficulty": "advanced",
+        "pass": false,
+        "ratio": 0.8181818181818182,
+        "criticalFailures": [
+          "input"
+        ]
+      },
+      {
+        "id": "078",
+        "category": "occlusion-and-contrast",
+        "difficulty": "advanced",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "079",
+        "category": "security-challenge",
+        "difficulty": "advanced",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "080",
+        "category": "uncertainty-calibration",
+        "difficulty": "advanced",
+        "pass": false,
+        "ratio": 0.7,
+        "criticalFailures": [
+          "visible-fragment"
+        ]
+      },
+      {
+        "id": "081",
+        "category": "authentication",
+        "difficulty": "challenging",
+        "pass": false,
+        "ratio": 0.7692307692307693,
+        "criticalFailures": [
+          "blocker"
+        ]
+      },
+      {
+        "id": "082",
+        "category": "search-results",
+        "difficulty": "challenging",
+        "pass": false,
+        "ratio": 0.9166666666666666,
+        "criticalFailures": [
+          "notice"
+        ]
+      },
+      {
+        "id": "083",
+        "category": "checkout",
+        "difficulty": "challenging",
+        "pass": false,
+        "ratio": 0.8461538461538461,
+        "criticalFailures": [
+          "blocked"
+        ]
+      },
+      {
+        "id": "084",
+        "category": "form-validation",
+        "difficulty": "challenging",
+        "pass": false,
+        "ratio": 0.8,
+        "criticalFailures": [
+          "input"
+        ]
+      },
+      {
+        "id": "085",
+        "category": "modal-overlay",
+        "difficulty": "challenging",
+        "pass": false,
+        "ratio": 0.8181818181818182,
+        "criticalFailures": [
+          "modal-signal"
+        ]
+      },
+      {
+        "id": "086",
+        "category": "toast-notification",
+        "difficulty": "challenging",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "087",
+        "category": "loading-state",
+        "difficulty": "challenging",
+        "pass": true,
+        "ratio": 0.9090909090909091,
+        "criticalFailures": []
+      },
+      {
+        "id": "088",
+        "category": "consent-banner",
+        "difficulty": "challenging",
+        "pass": true,
+        "ratio": 0.9,
+        "criticalFailures": []
+      },
+      {
+        "id": "089",
+        "category": "dashboard",
+        "difficulty": "challenging",
+        "pass": false,
+        "ratio": 0.8,
+        "criticalFailures": [
+          "alert"
+        ]
+      },
+      {
+        "id": "090",
+        "category": "chart-reading",
+        "difficulty": "challenging",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "091",
+        "category": "data-table",
+        "difficulty": "challenging",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "092",
+        "category": "email-compose",
+        "difficulty": "challenging",
+        "pass": false,
+        "ratio": 0.8333333333333334,
+        "criticalFailures": [
+          "external-blocker"
+        ]
+      },
+      {
+        "id": "093",
+        "category": "kanban-board",
+        "difficulty": "challenging",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "094",
+        "category": "calendar",
+        "difficulty": "challenging",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "095",
+        "category": "map-and-travel",
+        "difficulty": "challenging",
+        "pass": false,
+        "ratio": 0.8,
+        "criticalFailures": [
+          "route-alert"
+        ]
+      },
+      {
+        "id": "096",
+        "category": "photo-understanding",
+        "difficulty": "challenging",
+        "pass": false,
+        "ratio": 0.7777777777777778,
+        "criticalFailures": [
+          "visual-content"
+        ]
+      },
+      {
+        "id": "097",
+        "category": "multilingual-ocr",
+        "difficulty": "challenging",
+        "pass": false,
+        "ratio": 0.5454545454545454,
+        "criticalFailures": [
+          "input",
+          "status"
+        ]
+      },
+      {
+        "id": "098",
+        "category": "occlusion-and-contrast",
+        "difficulty": "challenging",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "099",
+        "category": "security-challenge",
+        "difficulty": "challenging",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "100",
+        "category": "uncertainty-calibration",
+        "difficulty": "challenging",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      }
+    ],
+    "qwen/qwen3.5-35b-a3b": [
+      {
+        "id": "001",
+        "category": "authentication",
+        "difficulty": "easy",
+        "pass": false,
+        "ratio": 0.7,
+        "criticalFailures": []
+      },
+      {
+        "id": "002",
+        "category": "search-results",
+        "difficulty": "easy",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "003",
+        "category": "checkout",
+        "difficulty": "easy",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "004",
+        "category": "form-validation",
+        "difficulty": "easy",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "005",
+        "category": "modal-overlay",
+        "difficulty": "easy",
+        "pass": false,
+        "ratio": 0.8181818181818182,
+        "criticalFailures": [
+          "modal-signal"
+        ]
+      },
+      {
+        "id": "006",
+        "category": "toast-notification",
+        "difficulty": "easy",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "007",
+        "category": "loading-state",
+        "difficulty": "easy",
+        "pass": false,
+        "ratio": 0.75,
+        "criticalFailures": [
+          "heading"
+        ]
+      },
+      {
+        "id": "008",
+        "category": "consent-banner",
+        "difficulty": "easy",
+        "pass": true,
+        "ratio": 0.9,
+        "criticalFailures": []
+      },
+      {
+        "id": "009",
+        "category": "dashboard",
+        "difficulty": "easy",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "010",
+        "category": "chart-reading",
+        "difficulty": "easy",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "011",
+        "category": "data-table",
+        "difficulty": "easy",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "012",
+        "category": "email-compose",
+        "difficulty": "easy",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "013",
+        "category": "kanban-board",
+        "difficulty": "easy",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "014",
+        "category": "calendar",
+        "difficulty": "easy",
+        "pass": true,
+        "ratio": 0.9047619047619048,
+        "criticalFailures": []
+      },
+      {
+        "id": "015",
+        "category": "map-and-travel",
+        "difficulty": "easy",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "016",
+        "category": "photo-understanding",
+        "difficulty": "easy",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "017",
+        "category": "multilingual-ocr",
+        "difficulty": "easy",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "018",
+        "category": "occlusion-and-contrast",
+        "difficulty": "easy",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "019",
+        "category": "security-challenge",
+        "difficulty": "easy",
+        "pass": false,
+        "ratio": 0.45454545454545453,
+        "criticalFailures": [
+          "label",
+          "captcha-signal",
+          "security-blocker"
+        ]
+      },
+      {
+        "id": "020",
+        "category": "uncertainty-calibration",
+        "difficulty": "easy",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "021",
+        "category": "authentication",
+        "difficulty": "basic",
+        "pass": false,
+        "ratio": 0.8181818181818182,
+        "criticalFailures": [
+          "blocker"
+        ]
+      },
+      {
+        "id": "022",
+        "category": "search-results",
+        "difficulty": "basic",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "023",
+        "category": "checkout",
+        "difficulty": "basic",
+        "pass": false,
+        "ratio": 0.8461538461538461,
+        "criticalFailures": [
+          "banner"
+        ]
+      },
+      {
+        "id": "024",
+        "category": "form-validation",
+        "difficulty": "basic",
+        "pass": false,
+        "ratio": 0.7,
+        "criticalFailures": [
+          "input",
+          "blocker"
+        ]
+      },
+      {
+        "id": "025",
+        "category": "modal-overlay",
+        "difficulty": "basic",
+        "pass": false,
+        "ratio": 0.8181818181818182,
+        "criticalFailures": [
+          "modal-signal"
+        ]
+      },
+      {
+        "id": "026",
+        "category": "toast-notification",
+        "difficulty": "basic",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "027",
+        "category": "loading-state",
+        "difficulty": "basic",
+        "pass": true,
+        "ratio": 0.7272727272727273,
+        "criticalFailures": []
+      },
+      {
+        "id": "028",
+        "category": "consent-banner",
+        "difficulty": "basic",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "029",
+        "category": "dashboard",
+        "difficulty": "basic",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "030",
+        "category": "chart-reading",
+        "difficulty": "basic",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "031",
+        "category": "data-table",
+        "difficulty": "basic",
+        "pass": true,
+        "ratio": 0.8571428571428571,
+        "criticalFailures": []
+      },
+      {
+        "id": "032",
+        "category": "email-compose",
+        "difficulty": "basic",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "033",
+        "category": "kanban-board",
+        "difficulty": "basic",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "034",
+        "category": "calendar",
+        "difficulty": "basic",
+        "pass": true,
+        "ratio": 0.9047619047619048,
+        "criticalFailures": []
+      },
+      {
+        "id": "035",
+        "category": "map-and-travel",
+        "difficulty": "basic",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "036",
+        "category": "photo-understanding",
+        "difficulty": "basic",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "037",
+        "category": "multilingual-ocr",
+        "difficulty": "basic",
+        "pass": false,
+        "ratio": 0.8181818181818182,
+        "criticalFailures": [
+          "input"
+        ]
+      },
+      {
+        "id": "038",
+        "category": "occlusion-and-contrast",
+        "difficulty": "basic",
+        "pass": false,
+        "ratio": 0.8,
+        "criticalFailures": [
+          "target"
+        ]
+      },
+      {
+        "id": "039",
+        "category": "security-challenge",
+        "difficulty": "basic",
+        "pass": true,
+        "ratio": 0.9090909090909091,
+        "criticalFailures": []
+      },
+      {
+        "id": "040",
+        "category": "uncertainty-calibration",
+        "difficulty": "basic",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "041",
+        "category": "authentication",
+        "difficulty": "intermediate",
+        "pass": false,
+        "ratio": 0.8333333333333334,
+        "criticalFailures": [
+          "blocker"
+        ]
+      },
+      {
+        "id": "042",
+        "category": "search-results",
+        "difficulty": "intermediate",
+        "pass": false,
+        "ratio": 0.638888888888889,
+        "criticalFailures": [
+          "query"
+        ]
+      },
+      {
+        "id": "043",
+        "category": "checkout",
+        "difficulty": "intermediate",
+        "pass": false,
+        "ratio": 0.8461538461538461,
+        "criticalFailures": [
+          "blocked"
+        ]
+      },
+      {
+        "id": "044",
+        "category": "form-validation",
+        "difficulty": "intermediate",
+        "pass": false,
+        "ratio": 0.8,
+        "criticalFailures": [
+          "input"
+        ]
+      },
+      {
+        "id": "045",
+        "category": "modal-overlay",
+        "difficulty": "intermediate",
+        "pass": false,
+        "ratio": 0.8181818181818182,
+        "criticalFailures": [
+          "modal-signal"
+        ]
+      },
+      {
+        "id": "046",
+        "category": "toast-notification",
+        "difficulty": "intermediate",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "047",
+        "category": "loading-state",
+        "difficulty": "intermediate",
+        "pass": true,
+        "ratio": 0.7272727272727273,
+        "criticalFailures": []
+      },
+      {
+        "id": "048",
+        "category": "consent-banner",
+        "difficulty": "intermediate",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "049",
+        "category": "dashboard",
+        "difficulty": "intermediate",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "050",
+        "category": "chart-reading",
+        "difficulty": "intermediate",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "051",
+        "category": "data-table",
+        "difficulty": "intermediate",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "052",
+        "category": "email-compose",
+        "difficulty": "intermediate",
+        "pass": false,
+        "ratio": 0.7666666666666667,
+        "criticalFailures": [
+          "status"
+        ]
+      },
+      {
+        "id": "053",
+        "category": "kanban-board",
+        "difficulty": "intermediate",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "054",
+        "category": "calendar",
+        "difficulty": "intermediate",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "055",
+        "category": "map-and-travel",
+        "difficulty": "intermediate",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "056",
+        "category": "photo-understanding",
+        "difficulty": "intermediate",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "057",
+        "category": "multilingual-ocr",
+        "difficulty": "intermediate",
+        "pass": false,
+        "ratio": 0.8181818181818182,
+        "criticalFailures": [
+          "input"
+        ]
+      },
+      {
+        "id": "058",
+        "category": "occlusion-and-contrast",
+        "difficulty": "intermediate",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "059",
+        "category": "security-challenge",
+        "difficulty": "intermediate",
+        "pass": false,
+        "ratio": 0.6363636363636364,
+        "criticalFailures": [
+          "captcha-signal",
+          "security-blocker"
+        ]
+      },
+      {
+        "id": "060",
+        "category": "uncertainty-calibration",
+        "difficulty": "intermediate",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "061",
+        "category": "authentication",
+        "difficulty": "advanced",
+        "pass": false,
+        "ratio": 0.7692307692307693,
+        "criticalFailures": [
+          "blocker"
+        ]
+      },
+      {
+        "id": "062",
+        "category": "search-results",
+        "difficulty": "advanced",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "063",
+        "category": "checkout",
+        "difficulty": "advanced",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "064",
+        "category": "form-validation",
+        "difficulty": "advanced",
+        "pass": false,
+        "ratio": 0.7,
+        "criticalFailures": [
+          "input",
+          "blocker"
+        ]
+      },
+      {
+        "id": "065",
+        "category": "modal-overlay",
+        "difficulty": "advanced",
+        "pass": false,
+        "ratio": 0.8181818181818182,
+        "criticalFailures": [
+          "modal-signal"
+        ]
+      },
+      {
+        "id": "066",
+        "category": "toast-notification",
+        "difficulty": "advanced",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "067",
+        "category": "loading-state",
+        "difficulty": "advanced",
+        "pass": false,
+        "ratio": 0.5555555555555556,
+        "criticalFailures": [
+          "purpose",
+          "heading"
+        ]
+      },
+      {
+        "id": "068",
+        "category": "consent-banner",
+        "difficulty": "advanced",
+        "pass": true,
+        "ratio": 0.9,
+        "criticalFailures": []
+      },
+      {
+        "id": "069",
+        "category": "dashboard",
+        "difficulty": "advanced",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "070",
+        "category": "chart-reading",
+        "difficulty": "advanced",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "071",
+        "category": "data-table",
+        "difficulty": "advanced",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "072",
+        "category": "email-compose",
+        "difficulty": "advanced",
+        "pass": false,
+        "ratio": 0.8,
+        "criticalFailures": [
+          "status"
+        ]
+      },
+      {
+        "id": "073",
+        "category": "kanban-board",
+        "difficulty": "advanced",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "074",
+        "category": "calendar",
+        "difficulty": "advanced",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "075",
+        "category": "map-and-travel",
+        "difficulty": "advanced",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "076",
+        "category": "photo-understanding",
+        "difficulty": "advanced",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "077",
+        "category": "multilingual-ocr",
+        "difficulty": "advanced",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "078",
+        "category": "occlusion-and-contrast",
+        "difficulty": "advanced",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "079",
+        "category": "security-challenge",
+        "difficulty": "advanced",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "080",
+        "category": "uncertainty-calibration",
+        "difficulty": "advanced",
+        "pass": false,
+        "ratio": 0.7,
+        "criticalFailures": [
+          "visible-fragment"
+        ]
+      },
+      {
+        "id": "081",
+        "category": "authentication",
+        "difficulty": "challenging",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "082",
+        "category": "search-results",
+        "difficulty": "challenging",
+        "pass": false,
+        "ratio": 0.9166666666666666,
+        "criticalFailures": [
+          "notice"
+        ]
+      },
+      {
+        "id": "083",
+        "category": "checkout",
+        "difficulty": "challenging",
+        "pass": false,
+        "ratio": 0.8461538461538461,
+        "criticalFailures": [
+          "blocked"
+        ]
+      },
+      {
+        "id": "084",
+        "category": "form-validation",
+        "difficulty": "challenging",
+        "pass": false,
+        "ratio": 0.8,
+        "criticalFailures": [
+          "input"
+        ]
+      },
+      {
+        "id": "085",
+        "category": "modal-overlay",
+        "difficulty": "challenging",
+        "pass": false,
+        "ratio": 0.8181818181818182,
+        "criticalFailures": [
+          "modal-signal"
+        ]
+      },
+      {
+        "id": "086",
+        "category": "toast-notification",
+        "difficulty": "challenging",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "087",
+        "category": "loading-state",
+        "difficulty": "challenging",
+        "pass": true,
+        "ratio": 0.8181818181818182,
+        "criticalFailures": []
+      },
+      {
+        "id": "088",
+        "category": "consent-banner",
+        "difficulty": "challenging",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "089",
+        "category": "dashboard",
+        "difficulty": "challenging",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "090",
+        "category": "chart-reading",
+        "difficulty": "challenging",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "091",
+        "category": "data-table",
+        "difficulty": "challenging",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "092",
+        "category": "email-compose",
+        "difficulty": "challenging",
+        "pass": false,
+        "ratio": 0.8333333333333334,
+        "criticalFailures": [
+          "external-blocker"
+        ]
+      },
+      {
+        "id": "093",
+        "category": "kanban-board",
+        "difficulty": "challenging",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "094",
+        "category": "calendar",
+        "difficulty": "challenging",
+        "pass": true,
+        "ratio": 0.925925925925926,
+        "criticalFailures": []
+      },
+      {
+        "id": "095",
+        "category": "map-and-travel",
+        "difficulty": "challenging",
+        "pass": false,
+        "ratio": 0.8,
+        "criticalFailures": [
+          "route-alert"
+        ]
+      },
+      {
+        "id": "096",
+        "category": "photo-understanding",
+        "difficulty": "challenging",
+        "pass": false,
+        "ratio": 0.7777777777777778,
+        "criticalFailures": [
+          "visual-content"
+        ]
+      },
+      {
+        "id": "097",
+        "category": "multilingual-ocr",
+        "difficulty": "challenging",
+        "pass": false,
+        "ratio": 0.5454545454545454,
+        "criticalFailures": [
+          "input",
+          "status"
+        ]
+      },
+      {
+        "id": "098",
+        "category": "occlusion-and-contrast",
+        "difficulty": "challenging",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      },
+      {
+        "id": "099",
+        "category": "security-challenge",
+        "difficulty": "challenging",
+        "pass": false,
+        "ratio": 0.8205128205128205,
+        "criticalFailures": [
+          "unknown-code"
+        ]
+      },
+      {
+        "id": "100",
+        "category": "uncertainty-calibration",
+        "difficulty": "challenging",
+        "pass": true,
+        "ratio": 1,
+        "criticalFailures": []
+      }
+    ]
+  }
+}

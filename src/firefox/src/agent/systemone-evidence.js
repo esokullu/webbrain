@@ -10,6 +10,24 @@ const READS = new Map([
 const READ_NAVIGATION = new Set(['navigate', 'go_back', 'go_forward', 'scroll', 'hover', 'highlight_element', 'inspect_event_listeners', 'delegate_research', 'gmail_count_results']);
 const SIDE_EFFECTS = new Set([...BROWSER_MUTATION_TOOLS, 'download_files', 'download_file', 'chrome_web_store_publish']);
 
+export function systemOneStateBytes(value) {
+  return new TextEncoder().encode(JSON.stringify(value)).length;
+}
+
+// Include JSON escaping in the UTF-8 budget and never split a code point.
+export function boundedSystemOneText(value, limit) {
+  const text = String(value ?? '');
+  if (systemOneStateBytes(text) <= limit) return text;
+  const characters = Array.from(text);
+  let low = 0, high = characters.length;
+  while (low < high) {
+    const middle = Math.ceil((low + high) / 2);
+    if (systemOneStateBytes(characters.slice(0, middle).join('')) <= limit) low = middle;
+    else high = middle - 1;
+  }
+  return characters.slice(0, low).join('');
+}
+
 export function redactSystemOneText(value) {
   return String(value ?? '').replace(/https?:\/\/[^\s"<>]+/gi, raw => {
     try { const url = new URL(raw); return `${url.origin}${url.pathname}`; } catch { return '[url]'; }
@@ -45,7 +63,7 @@ export function createSystemOneEvidence(wrap = (_name, text) => wrapSystemOneDat
       const fields = {};
       for (const key of READS.get(name)) {
         // Nested data is excluded; explicit scalar readback fields are allowed.
-        if (typeof result[key] === 'string') fields[key] = redactSystemOneText(result[key]).slice(0, 2500);
+        if (typeof result[key] === 'string') fields[key] = boundedSystemOneText(redactSystemOneText(result[key]), 2500);
         if (typeof result[key] === 'boolean') fields[key] = result[key];
       }
       if (!Object.values(fields).some(v => typeof v === 'string' && v.trim())) return;
@@ -59,12 +77,12 @@ export function createSystemOneEvidence(wrap = (_name, text) => wrapSystemOneDat
 export function systemOneEvidenceState(task, evidence, baseline = null) {
   if (!evidence?.observations?.length) return null;
   const state = {
-    task: redactSystemOneText(task).slice(0, 4000),
+    task: boundedSystemOneText(redactSystemOneText(task), 4000),
     latest_observation: evidence.observations,
-    baseline: Array.isArray(baseline) ? baseline.slice(-1).filter(v => READS.has(v?.tool) && typeof v.data === 'string').map(v => ({ tool: v.tool, data: wrapSystemOneData(redactSystemOneText(v.data).slice(0, 3000)) })) : null,
+    baseline: Array.isArray(baseline) ? baseline.slice(-1).filter(v => READS.has(v?.tool) && typeof v.data === 'string').map(v => ({ tool: v.tool, data: wrapSystemOneData(boundedSystemOneText(redactSystemOneText(v.data), 3000)) })) : null,
   };
-  if (JSON.stringify(state).length > 16000) state.baseline = null;
-  if (JSON.stringify(state).length > 16000) state.latest_observation = evidence.observations.slice(-1);
-  if (JSON.stringify(state).length > 16000) return null;
+  if (systemOneStateBytes(state) > 16000) state.baseline = null;
+  if (systemOneStateBytes(state) > 16000) state.latest_observation = evidence.observations.slice(-1);
+  if (systemOneStateBytes(state) > 16000) return null;
   return state;
 }

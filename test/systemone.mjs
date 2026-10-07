@@ -101,6 +101,33 @@ for (const build of ['chrome', 'firefox']) {
     assert.equal(created.success, true);
     return { ...h, id: created.jobId, calls: () => calls, run: () => h.manager.handleAlarm(h.alarmName(created.jobId)) };
   }
+  test(`${build}: multilingual watch and scheduled evidence reaches the judge within its byte budget`, async () => {
+    for (const source of ['watch', 'scheduled']) for (const sample of ['公開された投稿を確認してください。', '😀公開\n"\\\u0000']) {
+      const text = sample.repeat(1500);
+      const collector = evidence.createSystemOneEvidence();
+      collector.observe('tool_result', { name: 'read_page', result: { text, content: text, pageContent: text } });
+      collector.observe('tool_result', { name: 'get_accessibility_tree', result: { pageContent: text } });
+      let calls = 0;
+      const judge = mod.createSystemOneJudge({ fetchImpl: async (_url, options) => {
+        calls++;
+        const request = JSON.parse(options.body);
+        assert.ok(Buffer.byteLength(JSON.stringify(request.state)) <= 16000);
+        assert.ok(request.state.latest_observation.length > 0);
+        assert.match(request.state.latest_observation.at(-1).data, /<untrusted_page_content.*[\s\S]*<\/untrusted_page_content/);
+        const result = answers();
+        return { ok: true, json: async () => ({ model: mod.SYSTEM_ONE_MODEL, usage: { input_tokens: 1, output_tokens: 1 }, answers: {
+          [source === 'watch' ? 'condition_met' : 'task_complete']: result.p,
+          task_completeness: { ...result.s, legend: Object.fromEntries(request.questions.task_completeness.criteria.map((label, i) => [i, label])) },
+        } }) };
+      } });
+      const h = makeSchedulerHarness(scheduler, { systemOneJudge: judge });
+      const verdict = await h.manager._evaluateSystemOne({ source, prompt: text, tabId: 77, watch: { systemOneBaseline: collector.snapshot().observations } }, '', 'success', {
+        settings: { typesafeApiKey: 'test', systemOneEnabled: true, systemOneWatchEnabled: true, systemOneCompletionEnabled: true }, evidence: collector.snapshot(),
+      });
+      assert.equal(calls, 1, 'multibyte or escaped evidence must not silently skip verification');
+      assert.equal(verdict.decision, 'keep');
+    }
+  });
   test(`${build}: no evidence skips Jev; read-only downgraded watch keeps polling`, async () => {
     const missing = await setup({ noEvidence: true }); await missing.run();
     assert.equal(missing.calls(), 0); assert.equal(missing.jobs()[0].systemOneVerdict, undefined);
