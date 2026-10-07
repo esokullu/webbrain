@@ -65,9 +65,9 @@ function setup(Agent, implementation = {}) {
   return agent;
 }
 
-function bind(agent, tabId, frameId = 0, documentId = 'document-1', docToken = 'content-1') {
+function bind(agent, tabId, frameId = 0, documentId = 'document-1', docToken = 'content-1', frameName = '') {
   const from = sender(tabId, frameId, documentId);
-  const state = agent.pageMonitorState(from, docToken);
+  const state = agent.pageMonitorState(from, docToken, frameName);
   assert.equal(state.active, true);
   let seq = 0;
   return { state, from, send: value => agent.observePageFeedback(from, {
@@ -228,7 +228,11 @@ for (const build of ['chrome', 'firefox']) {
     const agent = setup(Agent), tab = nextTab++, entered = deferred(), release = deferred();
     const states = new Map([[0, false], [2, false]]);
     const previousNavigation = api.webNavigation, previousMessage = api.tabs.sendMessage;
-    api.webNavigation = { getAllFrames: async () => [{ frameId: 0 }, { frameId: 2 }, { frameId: 9 }] };
+    api.webNavigation = { getAllFrames: async () => [
+      { frameId: 0, documentId: 'top-doc', parentFrameId: -1, url: 'https://example.com/' },
+      { frameId: 2, documentId: 'child-doc', parentFrameId: 0, url: 'https://example.com/frame' },
+      { frameId: 9, parentFrameId: 0 },
+    ] };
     const sendFrame = async (frameId, message) => {
       if (frameId === 9) throw new Error('Restricted frame');
       if (message.action !== 'page_monitor_state') return {};
@@ -245,6 +249,8 @@ for (const build of ['chrome', 'firefox']) {
       await entered.promise;
       await new Promise(resolve => setImmediate(resolve));
       assert.equal(complete, false, 'A top-frame response must not bypass a delayed child acknowledgement');
+      assert.equal(agent._pageFeedbackRuns.get(tab).documents.get(2)?.parentFrameId, 0,
+        'Frame startup records parent IDs so later _parent navigation can be correlated');
       release.resolve(); await starting;
       assert.deepEqual([...states.values()], [true, true]);
       agent._releaseRunEntry(tab);
@@ -406,7 +412,13 @@ for (const build of ['chrome', 'firefox']) {
     const agent = setup(Agent), tab = nextTab++;
     await agent._claimRunEntry(tab, 'interactive');
     try {
-      const child = bind(agent, tab, 2, 'child', 'child-token');
+      const child = bind(agent, tab, 2, 'child', 'child-token', 'ChildFrame');
+      const parent = bind(agent, tab, 1, 'parent', 'parent-token', 'ParentFrame');
+      bind(agent, tab, 3, 'sibling', 'sibling-token', 'SiblingTarget');
+      const run = agent._pageFeedbackRuns.get(tab);
+      run.documents.set(2, { id: 'child', parentFrameId: 1 });
+      run.documents.set(1, { id: 'parent', parentFrameId: 0 });
+      run.documents.set(3, { id: 'sibling', parentFrameId: 1 });
       child.send({ kind: 'activity', source: 'agent', operation: 'click' });
       for (const frameId of [0, 3, 2]) agent.observePageNavigation({ tabId: tab, frameId,
         url: `https://example.com/frame-${frameId}`, transitionType: 'link' }, 'history');
@@ -424,11 +436,25 @@ for (const build of ['chrome', 'firefox']) {
       agent.observePageNavigation({ tabId: tab, frameId: 2, url: 'https://example.com/unrelated', transitionType: 'link' }, 'history');
       assert.equal(agent._hasPendingPageFeedback(tab), true, 'A same-frame navigation to a different URL remains visible');
       agent._pageFeedbackRuns.get(tab).events.clear();
+      child.send({ kind: 'activity', source: 'agent', operation: 'click', navigationTarget: '_parent',
+        navigationUrl: 'https://example.com/parent' });
+      agent.observePageNavigation({ tabId: tab, frameId: 1, url: 'https://example.com/parent', transitionType: 'link' }, 'history');
+      assert.equal(agent._hasPendingPageFeedback(tab), false, 'A nested frame _parent click correlates to its actual parent');
+      agent._pageFeedbackRuns.get(tab).events.clear();
+      child.send({ kind: 'activity', source: 'agent', operation: 'click', navigationTargetName: 'SiblingTarget',
+        navigationUrl: 'https://example.com/sibling' });
+      agent.observePageNavigation({ tabId: tab, frameId: 3, url: 'https://example.com/sibling', transitionType: 'link' }, 'history');
+      assert.equal(agent._hasPendingPageFeedback(tab), false, 'A named target click correlates to the uniquely named sibling frame');
+      agent._pageFeedbackRuns.get(tab).events.clear();
+      parent.send({ kind: 'activity', source: 'agent', operation: 'click', navigationTargetName: 'missing-frame',
+        navigationUrl: 'https://example.com/ambiguous' });
+      agent.observePageNavigation({ tabId: tab, frameId: 3, url: 'https://example.com/ambiguous', transitionType: 'link' }, 'history');
+      assert.equal(agent._hasPendingPageFeedback(tab), true, 'An unresolved named target cannot suppress another frame navigation');
+      agent._pageFeedbackRuns.get(tab).events.clear();
       child.send({ kind: 'activity', source: 'agent', operation: 'click', navigationUrl: 'https://example.com/expected' });
-      agent.observePageNavigation({ tabId: tab, frameId: 2, documentId: 'child-redirect',
+      agent.observePageNavigation({ tabId: tab, frameId: 2, parentFrameId: 1, documentId: 'child-redirect',
         url: 'https://example.com/unrelated-redirect', transitionType: 'link', transitionQualifiers: ['server_redirect'] }, 'committed');
       assert.equal(agent._hasPendingPageFeedback(tab), false, 'The first same-frame redirect may commit at a URL different from the armed destination');
-      agent._pageFeedbackRuns.get(tab).events.clear();
       child.send({ kind: 'activity', source: 'agent', operation: 'click', navigationTarget: '_top', navigationUrl: 'javascript:alert(1)' });
       agent.observePageNavigation({ tabId: tab, frameId: 0, url: 'https://example.com/safe', transitionType: 'link' }, 'history');
       assert.equal(agent._hasPendingPageFeedback(tab), true, 'Non-web click targets cannot correlate browser navigation');

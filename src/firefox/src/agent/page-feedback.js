@@ -6,7 +6,7 @@ const clean = (value, limit = 240) => String(value ?? '').replace(/[\u0000-\u001
 const token = () => globalThis.crypto.randomUUID();
 const apiFor = () => globalThis.browser || globalThis.chrome;
 
-async function notifyPageMonitorFrames(api, tabId, message, knownFrames = []) {
+async function notifyPageMonitorFrames(api, tabId, message, knownFrames = [], onFrame = null) {
   if (!api?.tabs?.sendMessage) return;
   const frameIds = new Set([0, ...knownFrames]);
   let enumerated = false;
@@ -14,7 +14,10 @@ async function notifyPageMonitorFrames(api, tabId, message, knownFrames = []) {
     const frames = await api.webNavigation?.getAllFrames?.({ tabId });
     if (Array.isArray(frames)) {
       enumerated = true;
-      for (const frame of frames) if (Number.isSafeInteger(frame.frameId) && frame.frameId >= 0) frameIds.add(frame.frameId);
+      for (const frame of frames) if (Number.isSafeInteger(frame.frameId) && frame.frameId >= 0) {
+        frameIds.add(frame.frameId);
+        onFrame?.(frame);
+      }
     }
   } catch { /* Restricted documents may not expose their frame tree. */ }
   // A broadcast reaches every frame but resolves on the first response. Address
@@ -136,7 +139,10 @@ export const pageFeedbackMethods = {
       } });
     const api = apiFor();
     try { run.url = (await api.tabs.get(tabId)).url || ''; } catch {}
-    await notifyPageMonitorFrames(api, tabId, { target: 'content', action: 'page_monitor_state', active: true }, run.frames.keys());
+    await notifyPageMonitorFrames(api, tabId, { target: 'content', action: 'page_monitor_state', active: true }, run.frames.keys(), frame => {
+      run.documents.set(frame.frameId, { id: frame.documentId || '', url: frame.url || '',
+        parentFrameId: Number.isSafeInteger(frame.parentFrameId) ? frame.parentFrameId : undefined });
+    });
   },
 
   _finishPageFeedbackRun(tabId) {
@@ -153,7 +159,7 @@ export const pageFeedbackMethods = {
       active: false, runToken: run.token }, run.frames.keys()).catch(() => {});
   },
 
-  pageMonitorState(sender, documentToken) {
+  pageMonitorState(sender, documentToken, frameName = '') {
     const tabId = sender?.tab?.id;
     const run = this._pageFeedbackRuns?.get(tabId);
     if (!run || !this.isRunning(tabId) || this._checkAbort(tabId) || typeof documentToken !== 'string'
@@ -165,8 +171,9 @@ export const pageFeedbackMethods = {
     const previous = run.frames.get(frameId);
     if (previous && previous.token !== documentToken) run.gestures.delete(frameId);
     if (!previous || previous.token !== documentToken) {
-      run.frames.set(frameId, { token: documentToken, id: sender.documentId || '', seq: 0 });
-    }
+      run.frames.set(frameId, { token: documentToken, id: sender.documentId || '', seq: 0,
+        name: clean(frameName, 256) });
+    } else previous.name = clean(frameName, 256);
     return { active: true, runToken: run.token, documentToken };
   },
 
@@ -194,8 +201,23 @@ export const pageFeedbackMethods = {
             url = destination.href;
           }
         } catch { /* Clicks without a safe, concrete destination cannot correlate navigation. */ }
-        run.navigation = url ? { at: Date.now(), url, kind: 'click',
-          frameId: feedback.navigationTarget === '_top' ? 0 : frameId,
+        const target = String(feedback.navigationTarget || '').toLowerCase();
+        let destinationFrameId;
+        if (target === '_blank') destinationFrameId = undefined;
+        else if (target === '_top') destinationFrameId = 0;
+        else if (target === '_parent') {
+          const parentFrameId = run.documents.get(frameId)?.parentFrameId;
+          destinationFrameId = frameId === 0 ? 0 : Number.isSafeInteger(parentFrameId) && parentFrameId >= 0 ? parentFrameId : undefined;
+        } else if (target === '_self') destinationFrameId = frameId;
+        else {
+          const requestedName = clean(feedback.navigationTargetName, 256);
+          if (requestedName) {
+            const matches = [...run.frames].filter(([, entry]) => entry.name === requestedName);
+            if (matches.length === 1) destinationFrameId = matches[0][0];
+          } else if (!target) destinationFrameId = frameId;
+        }
+        run.navigation = url && Number.isSafeInteger(destinationFrameId) ? { at: Date.now(), url, kind: 'click',
+          frameId: destinationFrameId,
           ...(feedback.navigationFormGet === true ? { formGet: true } : {}),
           operationId: dispatchOwners.get(tabId)?.operationId || '' } : null;
       }
@@ -227,10 +249,11 @@ export const pageFeedbackMethods = {
     if (type === 'committed') {
       run.frames.delete(frameId);
       run.gestures.delete(frameId);
-      run.documents.set(frameId, { id: details.documentId || '', url: details.url || '' });
+      run.documents.set(frameId, { id: details.documentId || '', url: details.url || '',
+        parentFrameId: Number.isSafeInteger(details.parentFrameId) ? details.parentFrameId : undefined });
       if (frameId === 0) {
         run.frames.clear(); run.gestures.clear(); run.documents.clear();
-        run.documents.set(0, { id: details.documentId || '', url: details.url || '' });
+        run.documents.set(0, { id: details.documentId || '', url: details.url || '', parentFrameId: -1 });
       }
     }
     const before = frameId === 0 ? run.url : '';

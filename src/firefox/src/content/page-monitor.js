@@ -27,6 +27,7 @@
   let active = false, disposed = false, runToken = '', seq = 0, revision = 0;
   let observer = null, layoutObserver = null, domTimer = null, scrollTimer = null, controlTimer = null, lastUserAt = 0;
   let pointerHeld = false, composing = false, localOperation = null, controlIterator = null;
+  let preparedOperationCursor = 0;
   let requestGeneration = 0, unreported = 0, pendingDOM = null;
   let lastViewport = '';
   let lastFeedbackDelivery = Promise.resolve();
@@ -385,7 +386,7 @@
       el.getAttribute('id'), el.getAttribute('for'), el.getAttribute('form'), el.getAttribute('name'), el.getAttribute('placeholder'), el.getAttribute('title'), el.getAttribute('alt'),
       el.getAttribute('aria-labelledby'), el.getAttribute('aria-required'), el.getAttribute('aria-readonly'),
       el.getAttribute('contenteditable'), el.getAttribute('tabindex'), el.getAttribute('onclick'), el.getAttribute('required'),
-      el.getAttribute('aria-expanded'), el.getAttribute('aria-selected'), el.getAttribute('aria-checked'),
+      el.getAttribute('aria-expanded'), el.getAttribute('aria-selected'), el.getAttribute('aria-checked'), el.getAttribute('data-selected'),
       el.getAttribute('aria-valuenow'), el.getAttribute('aria-valuetext'),
       el.getAttribute('aria-pressed'),
       el.getAttribute('type'),
@@ -434,10 +435,32 @@
     }
     if (records.length) onMutations(records);
   }
-  function flushPendingMutations() {
+  function samplePreparedTargets(onlyOperation) {
+    if (!active) return;
+    const now = Date.now();
+    const candidates = onlyOperation ? [onlyOperation] : [...operations.values()]
+      .filter(op => !op.dispatched && op.target && op.preparedTargetSignature !== undefined && op.until >= now);
+    if (!onlyOperation && candidates.length > 128) {
+      const start = preparedOperationCursor % candidates.length;
+      const batch = Array.from({ length: 128 }, (_, index) => candidates[(start + index) % candidates.length]);
+      preparedOperationCursor = (start + batch.length) % candidates.length;
+      candidates.splice(0, candidates.length, ...batch);
+    }
+    const changedTargets = new Set();
+    for (const op of candidates) {
+      if (!op || op.dispatched || !op.target || op.preparedTargetSignature === undefined) continue;
+      const current = signature(op.target);
+      if (current === op.preparedTargetSignature) continue;
+      op.preparedTargetSignature = current;
+      changedTargets.add(op.target);
+    }
+    if (changedTargets.size) onMutations([...changedTargets].map(target => ({ type: 'prepared-style', target })));
+  }
+  function flushPendingMutations(onlyOperation) {
     if (!active || !observer) return;
     const records = observer.takeRecords();
     if (records.length) onMutations(records);
+    samplePreparedTargets(onlyOperation);
   }
   function sampleDescendants(root, limit = 100) {
     const nodes = [];
@@ -465,7 +488,7 @@
     if (!root || roots.has(root) || !observer) return;
     roots.add(root);
     observer.observe(root, { childList: true, subtree: true, characterData: true, attributes: true, attributeOldValue: true,
-      attributeFilter: ['role', 'aria-label', 'id', 'for', 'form', 'name', 'placeholder', 'title', 'alt', 'aria-labelledby', 'rel', 'media',
+      attributeFilter: ['role', 'aria-label', 'id', 'for', 'form', 'name', 'placeholder', 'title', 'alt', 'aria-labelledby', 'rel', 'media', 'data-selected',
         'aria-required', 'aria-readonly', 'contenteditable', 'tabindex', 'onclick', 'required',
         'aria-expanded', 'aria-selected', 'aria-checked', 'aria-pressed', 'aria-disabled',
         'type', 'href', 'target', 'download', 'action', 'method', 'formaction', 'formmethod', 'formtarget',
@@ -625,7 +648,8 @@
     };
     const changes = [...records];
     for (const record of records) {
-      if (record.type !== 'popover' && (record.type !== 'attributes' || !['class', 'style', 'hidden', 'aria-hidden', 'open', 'inert', 'selected'].includes(record.attributeName))) continue;
+      if (record.type !== 'popover' && record.type !== 'prepared-style'
+          && (record.type !== 'attributes' || !['class', 'style', 'hidden', 'aria-hidden', 'open', 'inert', 'selected'].includes(record.attributeName))) continue;
       if (ignored(record.target)) continue;
       if (deferAnimationCheck(record, record.target)) continue;
       if (record.type === 'attributes' && record.attributeName === 'selected'
@@ -660,6 +684,11 @@
       const editableTextMutation = editable(el) && (record.type === 'characterData'
         || (record.type === 'childList' && [...record.addedNodes, ...record.removedNodes].some(node => node.nodeType === 3)));
       if (ignored(el)) continue;
+      if (record.type === 'attributes' && record.attributeName === 'data-selected'
+          && record.oldValue !== el.getAttribute('data-selected')) {
+        const listbox = el.closest?.('[role="listbox"]');
+        if (listbox && !ignored(listbox)) noteChange(listbox, record.agentUserAt);
+      }
       // Native input already reports user edits, and agent input's synchronous
       // DOM writes are attributed to its dispatch. Keep those paths deduplicated
       // while observing independent page-script changes to editable text.
@@ -691,6 +720,7 @@
           || ((accessibleNameContentMutation || nativeLabelAssociationMutation)
             && hasVisibleNativeLabelConsumer(el, nativeLabelAssociationMutation ? record.oldValue : '')));
       let identityChanged = (record.type === 'popover' && record.stateChanged)
+        || record.type === 'prepared-style'
         || (record.type === 'layout' && record.layoutChanged)
         || editableTextMutation || hiddenAccessibleNameChanged
         || (record.type === 'shadow' && (visible(el) || signatures.get(el)?.startsWith('[true')));
@@ -713,6 +743,10 @@
       noteChange(el, record.agentUserAt);
     }
     if (!changed) return;
+    // Keep prepared-target baselines aligned with changes already reported by
+    // the DOM observer; the CSSOM sampler should only report unseen changes.
+    for (const op of operations.values())
+      if (!op.dispatched && op.target && op.until >= Date.now()) op.preparedTargetSignature = signature(op.target);
     revision++; publishRevision();
     clearTimeout(domTimer);
     pendingDOM = { kind: 'dom', source, target };
@@ -754,7 +788,7 @@
     active = true; runToken = state.runToken; seq = 0; revision = 0; publishRevision();
     observer = new MutationObserver(onMutations);
     observeRoot(document);
-    controlTimer = setInterval(sampleFormControls, 250);
+    controlTimer = setInterval(() => { sampleFormControls(); samplePreparedTargets(); }, 250);
     observeLayoutShifts();
     listen(document, 'webbrain-shadow-root-attached', event => {
       const path = event.composedPath();
@@ -775,7 +809,7 @@
           ? op?.domDispatchConsumed === true
           : op?.domDispatchConsumed === true || op?.domDispatchPhases?.has(phase) === true;
         event.stopImmediatePropagation();
-        flushPendingMutations();
+        flushPendingMutations(op);
         sampleFormControls(op?.target);
         if (!active || guard.runToken !== runToken || guard.documentToken !== documentToken || guard.revision !== revision
             || !op || phaseAlreadyConsumed || op.kind !== phaseKind
@@ -819,8 +853,10 @@
         const form = submitter?.form;
         const formMethod = submitter?.hasAttribute('formmethod') ? submitter.formMethod : form?.method;
         const navigationFormGet = !link && !!form && String(formMethod || 'get').toLowerCase() === 'get';
-        const navigationTarget = (link?.getAttribute('target') || el?.form?.getAttribute('target')
-          || (link && document.querySelector('base[target]')?.getAttribute('target')) || '').toLowerCase();
+        const formTarget = submitter?.getAttribute('formtarget') || form?.getAttribute('target');
+        const baseTarget = document.querySelector('base[target]')?.getAttribute('target') || '';
+        const navigationTarget = String((link ? link.getAttribute('target') : formTarget) || baseTarget || '');
+        const normalizedTarget = navigationTarget.toLowerCase();
         let navigationUrl = '';
         try {
           const rawUrl = link?.href || (form ? (submitter.hasAttribute('formaction') ? submitter.formAction : form.action) : '');
@@ -832,8 +868,9 @@
         send({ kind: 'activity', source: 'agent', operation: 'click',
           ...(navigationUrl ? { navigationUrl } : {}),
           ...(navigationUrl && navigationFormGet ? { navigationFormGet: true } : {}),
-          ...(navigationTarget === '_top' || (navigationTarget === '_parent' && window.parent === window.top)
-            ? { navigationTarget: '_top' } : {}) });
+          ...(['_top', '_parent', '_self', '_blank'].includes(normalizedTarget)
+            ? { navigationTarget: normalizedTarget }
+            : navigationTarget ? { navigationTargetName: compact(navigationTarget, 256) } : {}) });
       }
       // Native listeners have microtask checkpoints between callbacks. Keep this
       // exact input's attribution through its page handlers, until the next task.
@@ -958,7 +995,7 @@
   }
   function stop() {
     active = false; runToken = ''; activePointers.clear(); pointerHeld = false; composing = false;
-    lastUserAt = 0; lastViewport = ''; userTurn = null; lastUserTarget = null; matchedEvents = new WeakMap(); controlIterator = null;
+    lastUserAt = 0; lastViewport = ''; userTurn = null; lastUserTarget = null; matchedEvents = new WeakMap(); controlIterator = null; preparedOperationCursor = 0;
     document.documentElement?.removeAttribute(fenceAttribute);
     for (const el of nativeTargets) {
       el.removeAttribute?.('data-webbrain-native-action');
@@ -977,12 +1014,14 @@
   async function requestState() {
     const generation = ++requestGeneration;
     try {
-      const state = await api.runtime.sendMessage({ target: 'background', action: 'get_page_monitor_state', documentToken });
+      const state = await api.runtime.sendMessage({ target: 'background', action: 'get_page_monitor_state', documentToken,
+        frameName: compact(window.name.slice(0, 256), 256) });
       if (generation === requestGeneration && !disposed) start(state);
     } catch { stop(); }
   }
   function prepare(params) {
     if (!active || params.runToken !== runToken) return;
+    flushPendingMutations();
     prune();
     const target = resolveTarget(params);
     const focusEligible = kindFor(params.tool) === 'input';
@@ -994,7 +1033,8 @@
     const operationTarget = target || focusTarget;
     const controlStateAtPrepare = operationTarget && /^(INPUT|TEXTAREA|SELECT|OPTION)$/.test(operationTarget.tagName)
       ? controlState(operationTarget) : undefined;
-    operations.set(params.operationId, { ...params, target: operationTarget, focusTarget, focusEligible, controlStateAtPrepare, kinds: new Set(),
+    operations.set(params.operationId, { ...params, target: operationTarget, focusTarget, focusEligible, controlStateAtPrepare,
+      preparedTargetSignature: operationTarget ? signature(operationTarget) : undefined, kinds: new Set(),
       coordinateSensitive, coordinateTarget, coordinateHit, coordinateTargetAtPoint,
       coordinatePoint: coordinateSensitive ? { x: params.x, y: params.y } : null,
       coordinateRect: rectFor(coordinateTarget),
@@ -1031,7 +1071,7 @@
   }
   function activatePreparedDispatch(params = {}) {
     const op = operations.get(params.operationId);
-    flushPendingMutations();
+    flushPendingMutations(op);
     sampleFormControls(op?.target);
     const layoutChanged = coordinatePreparationShifted(op);
     if (!active || !op || layoutChanged || domTimer || unreported
@@ -1049,7 +1089,7 @@
   }
   function validateNativeDispatch(params = {}) {
     const op = operations.get(params.operationId);
-    flushPendingMutations();
+    flushPendingMutations(op);
     sampleFormControls(op?.target);
     const shifted = coordinatePreparationShifted(op);
     if (!active || params.runToken !== runToken || params.documentToken !== documentToken || !op || shifted
@@ -1098,8 +1138,9 @@
   }
   function beforeLocalDispatch({ preparation = false, kind, target } = {}) {
     if (!active || !localOperation) return;
-    flushPendingMutations();
-    sampleFormControls(operations.get(localOperation.operationId)?.target);
+    const operation = operations.get(localOperation.operationId);
+    flushPendingMutations(operation);
+    sampleFormControls(operation?.target);
     const layoutChanged = coordinatePreparationShifted(operations.get(localOperation.operationId));
     if (layoutChanged || domTimer || unreported || lastUserAt > localOperation.userAt || revision !== localOperation.revision) {
       const error = new Error('Browser changed during action preparation. Re-observe before acting.');
@@ -1138,7 +1179,7 @@
     else if (msg.action === 'page_monitor_dispatch') {
       const params = msg.params || {};
       const prepared = operations.get(params.operationId);
-      if (!params.release) { flushPendingMutations(); sampleFormControls(prepared?.target); }
+      if (!params.release) { flushPendingMutations(prepared); sampleFormControls(prepared?.target); }
       const layoutChanged = !params.release && active && coordinatePreparationShifted(prepared);
       if (!params.release && active && (layoutChanged || domTimer || unreported || (prepared && prepared.preparedRevision !== revision)
           || (params.documentToken && (params.documentToken !== documentToken || params.documentRevision !== revision)))) {

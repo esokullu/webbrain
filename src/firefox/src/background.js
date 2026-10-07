@@ -2483,7 +2483,7 @@ browser.runtime.onMessage.addListener((msg, sender) => {
 });
 
 async function handleMessage(msg, sender) {
-  if (msg.action === 'get_page_monitor_state') return agent.pageMonitorState(sender, msg.documentToken);
+  if (msg.action === 'get_page_monitor_state') return agent.pageMonitorState(sender, msg.documentToken, msg.frameName);
   if (msg.action === 'page_feedback') return agent.observePageFeedback(sender, msg.feedback);
 
   if (msg.action === 'chat_steer') {

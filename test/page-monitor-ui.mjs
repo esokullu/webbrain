@@ -42,12 +42,16 @@ async function fixture(engine, build, { runToken = 'test-run', siteIsolation = f
   await context.addInitScript(() => {
     window.monitorEnabled = true;
     window.feedback = [];
+    window.pageMonitorStateRequests = [];
     window.messageListeners = [];
     const runtime = { onMessage: {
       addListener: fn => messageListeners.push(fn),
       removeListener: fn => { messageListeners = messageListeners.filter(item => item !== fn); },
     }, async sendMessage(msg) {
-      if (msg.action === 'get_page_monitor_state') return { active: monitorEnabled, runToken: monitorRunToken, documentToken: msg.documentToken };
+      if (msg.action === 'get_page_monitor_state') {
+        pageMonitorStateRequests.push(msg.frameName);
+        return { active: monitorEnabled, runToken: monitorRunToken, documentToken: msg.documentToken };
+      }
       if (msg.action === 'page_feedback') { feedback.push(msg.feedback); return { accepted: true }; }
       return {};
     } };
@@ -721,6 +725,57 @@ for (const [build, engine] of [['chrome', chromium], ['firefox', firefox]]) {
       assert.deepEqual(localResult, { code: 'page_feedback_pending', dispatched: false },
         'The local content-action path must reject a moved coordinate before dispatch');
       await page.waitForFunction(() => feedback.some(event => event.kind === 'dom' && event.source === 'page'), null, { timeout: 1000 });
+    } finally { await browser.close(); }
+  });
+
+  test(`${build}: CSSOM visibility changes fence prepared target clicks`, async () => {
+    const { browser, page } = await fixture(engine, build);
+    try {
+      await page.evaluate(() => {
+        feedback = [];
+        deliver('page_monitor_prepare', { operationId: 'cssom-hidden-target', tool: 'click', selector: '#agent' });
+        deliver('page_monitor_dispatch', { operationId: 'cssom-hidden-target', kind: 'click', selector: '#agent', fenceOnly: true });
+        document.styleSheets[0].insertRule('#agent { opacity: 0 !important; }', document.styleSheets[0].cssRules.length);
+      });
+      await page.waitForFunction(() => feedback.some(event => event.kind === 'dom' && event.source === 'page'), null, { timeout: 1500 });
+      const blocked = await page.evaluate(() => {
+        try {
+          __wbPageMonitor.activatePreparedDispatch({ operationId: 'cssom-hidden-target', kind: 'click',
+            element: document.getElementById('agent') });
+          return null;
+        } catch (error) { return error.code; }
+      });
+      assert.equal(blocked, 'page_feedback_pending', 'A CSSOM-only visibility change must invalidate the prepared target');
+    } finally { await browser.close(); }
+  });
+
+  test(`${build}: data-selected changes report the custom listbox value and fence prepared actions`, async () => {
+    const { browser, page } = await fixture(engine, build);
+    try {
+      await page.evaluate(() => {
+        const listbox = document.createElement('div');
+        listbox.id = 'custom-listbox'; listbox.setAttribute('role', 'listbox');
+        listbox.innerHTML = '<div id="option-first" role="option" data-selected="true">First</div>'
+          + '<div id="option-second" role="option">Second</div>';
+        document.body.append(listbox);
+      });
+      await page.waitForFunction(() => feedback.some(event => event.kind === 'dom'), null, { timeout: 1000 });
+      await page.waitForTimeout(180);
+      await page.evaluate(() => {
+        feedback = [];
+        deliver('page_monitor_prepare', { operationId: 'listbox-selected', tool: 'click', selector: '#custom-listbox' });
+        deliver('page_monitor_dispatch', { operationId: 'listbox-selected', kind: 'click', selector: '#custom-listbox', fenceOnly: true });
+        document.getElementById('option-first').removeAttribute('data-selected');
+        document.getElementById('option-second').setAttribute('data-selected', 'true');
+      });
+      await page.waitForFunction(() => feedback.some(event => event.kind === 'dom' && event.source === 'page'), null, { timeout: 1000 });
+      const observation = await page.evaluate(() => feedback.find(event => event.kind === 'dom'));
+      assert.equal(observation.target, 'div#custom-listbox [listbox]', 'Feedback should identify the model-visible listbox value');
+      const blocked = await page.evaluate(() => {
+        try { __wbPageMonitor.activatePreparedDispatch({ operationId: 'listbox-selected', kind: 'click' }); return null; }
+        catch (error) { return error.code; }
+      });
+      assert.equal(blocked, 'page_feedback_pending', 'Changing the selected option must stale a prepared action');
     } finally { await browser.close(); }
   });
 
@@ -1477,11 +1532,13 @@ for (const [build, engine] of [['chrome', chromium], ['firefox', firefox]]) {
         const host = document.createElement('div'); host.id = 'shadow-host';
         host.attachShadow({ mode: 'open' }).innerHTML = '<button id="shadow-button">Before</button>';
         document.body.prepend(host);
-        const frame = document.createElement('iframe'); frame.src = 'https://monitor.test/frame';
+        const frame = document.createElement('iframe'); frame.name = 'NestedSource'; frame.src = 'https://monitor.test/frame';
         document.body.prepend(frame);
       });
       await page.waitForFunction(() => document.querySelector('iframe')?.contentWindow?.feedback);
       const child = page.frames().find(frame => frame.url() === 'https://monitor.test/frame');
+      assert.equal(await child.evaluate(() => pageMonitorStateRequests.at(-1)), 'NestedSource',
+        'The monitor registers the frame name with background for later named-target resolution');
       await page.locator('#human').click();
       await child.locator('#human').click();
       const tokens = await Promise.all([page.evaluate(() => feedback[0]?.documentToken), child.evaluate(() => feedback[0]?.documentToken)]);
@@ -1501,9 +1558,25 @@ for (const [build, engine] of [['chrome', chromium], ['firefox', firefox]]) {
         }, { target, id });
         await child.locator(`#${id}`).click();
         assert.ok((await child.evaluate(() => feedback)).some(event => event.source === 'agent'
-          && event.navigationTarget === '_top' && event.navigationUrl === 'https://monitor.test/destination'),
-        `${target} navigation must carry its safe destination and compatible top-frame target`);
+          && event.navigationTarget === target && event.navigationUrl === 'https://monitor.test/destination'),
+        `${target} navigation must carry its safe destination and original browsing-context target`);
       }
+      await child.evaluate(() => {
+        const link = document.createElement('a'); link.id = 'named-link'; link.href = 'https://monitor.test/destination';
+        link.target = 'SiblingTarget'; link.textContent = 'named-link';
+        link.addEventListener('click', event => event.preventDefault()); document.body.append(link);
+      });
+      await page.waitForTimeout(200);
+      await child.evaluate(() => {
+        deliver('page_monitor_prepare', { operationId: 'link-named', tool: 'click', selector: '#named-link' });
+        deliver('page_monitor_dispatch', { operationId: 'link-named', kind: 'click', selector: '#named-link' });
+        feedback = [];
+      });
+      await child.locator('#named-link').click();
+      const namedFeedback = await child.evaluate(() => feedback);
+      assert.ok(namedFeedback.some(event => event.source === 'agent'
+        && event.navigationTargetName === 'SiblingTarget' && event.navigationUrl === 'https://monitor.test/destination'),
+      `Named navigation targets must preserve their exact browsing-context name and safe destination: ${JSON.stringify(namedFeedback)}`);
       await page.waitForTimeout(200);
       await page.evaluate(() => {
         feedback = [];
