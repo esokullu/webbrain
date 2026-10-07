@@ -24,11 +24,11 @@
   let popoverTurns = new WeakMap();
   let roots = new WeakSet();
   let animationAttribution = new WeakMap();
-  let active = false, disposed = false, runToken = '', seq = 0, revision = 0;
+  let active = false, disposed = false, runToken = '', seq = 0, revision = 0, interventionRevision = 0;
   let observer = null, layoutObserver = null, domTimer = null, scrollTimer = null, controlTimer = null, lastUserAt = 0;
   let pointerHeld = false, composing = false, localOperation = null, controlIterator = null;
   let preparedOperationCursor = 0;
-  let requestGeneration = 0, unreported = 0, pendingDOM = null;
+  let requestGeneration = 0, unreported = 0, interventionUnreported = 0, pendingDOM = null;
   let lastViewport = '';
   let agentResize = null;
   let lastFeedbackDelivery = Promise.resolve();
@@ -114,11 +114,16 @@
     publishRevision();
     const feedback = { ...event, runToken, documentToken, seq: ++seq, revision };
     const pending = event.source !== 'agent';
+    const intervention = pending && (event.kind !== 'dom' || event.source !== 'page');
     const owner = runToken;
     if (pending) unreported++;
+    if (intervention) { interventionRevision++; interventionUnreported++; }
     try {
       const delivery = Promise.resolve(api.runtime.sendMessage({ target: 'background', action: 'page_feedback', feedback }))
-        .then(() => { if (pending && owner === runToken) unreported = Math.max(0, unreported - 1); })
+        .then(() => { if (owner === runToken) {
+          if (pending) unreported = Math.max(0, unreported - 1);
+          if (intervention) interventionUnreported = Math.max(0, interventionUnreported - 1);
+        } })
         .catch(() => stop());
       if (pending) lastFeedbackDelivery = delivery;
       return delivery;
@@ -440,6 +445,116 @@
       el.getAttribute('aria-hidden'), el.hasAttribute('open'), el.inert === true,
       el.getAttribute('aria-disabled'), el.getAttribute('value'), controlValue, el.disabled === true, el.readOnly === true, el.checked === true, el.validity?.valid !== false, Math.round((rect.width || 0) / 8), Math.round((rect.height || 0) / 8),
       Math.round(((rect.x || 0) + window.scrollX) / 8), Math.round(((rect.y || 0) + window.scrollY) / 8)]);
+  }
+  const passiveRebaseTools = new Set(['click', 'click_ax', 'type', 'type_ax', 'type_text', 'set_field', 'set_checked',
+    'press_keys', 'hover', 'upload_file', 'iframe_click', 'iframe_type', 'input', 'focus']);
+  const bindingParent = node => node?.parentElement || node?.getRootNode?.().host || null;
+  function labelBinding(el) {
+    const labels = new Set(el.labels || []);
+    for (const attribute of ['aria-labelledby', 'aria-describedby']) {
+      for (const id of (el.getAttribute(attribute) || '').split(/\s+/).filter(Boolean)) {
+        const node = el.getRootNode?.().getElementById?.(id) || document.getElementById(id);
+        if (!node) return null;
+        labels.add(node);
+      }
+    }
+    return [...labels].map(node => ({ node, value: JSON.stringify([signature(node), node.textContent]) }));
+  }
+  function preparedBinding(target) {
+    if (!(target instanceof Element) || !target.isConnected || target.ownerDocument !== document) return null;
+    const nodes = [], ancestors = [];
+    let scope = target.form || target.closest('form,dialog,[role="dialog"],[role="alertdialog"],[role="region"],[role="group"],article,[role="article"],[role="listitem"]');
+    if (!scope) {
+      // Include the composer containing both field and action when no semantic
+      // form/dialog exists. A page-wide ancestor would also bind unrelated feeds.
+      let parent = bindingParent(target);
+      scope = parent && parent !== document.body && parent !== document.documentElement ? parent : target;
+      for (let depth = 0; parent && depth < 4 && parent !== document.body && parent !== document.documentElement; depth++, parent = bindingParent(parent)) {
+        if (parent.querySelector('input,textarea,[contenteditable]:not([contenteditable="false"])')) { scope = parent; break; }
+      }
+    }
+    for (let ancestor = bindingParent(target); ancestor; ancestor = bindingParent(ancestor)) {
+      if (ancestors.length >= 24) return null;
+      const labels = labelBinding(ancestor);
+      if (!labels) return null;
+      ancestors.push({ node: ancestor, value: JSON.stringify([signature(ancestor), labels.map(label => label.value)]) });
+      nodes.push(...labels);
+    }
+    // Recipient/conversation headings can sit outside a composer form. Bind
+    // their identity and text without binding every counter in a live feed.
+    const headings = document.querySelectorAll('h1,h2,h3,[role="heading"],[aria-current]');
+    if (headings.length > 64) return null;
+    for (const node of headings) nodes.push({ node, value: JSON.stringify([signature(node), node.textContent]) });
+    if (target.form) for (const node of target.form.elements) {
+      if (nodes.length >= 256) return null;
+      if (node.tagName === 'INPUT' && node.type === 'file' && node.files?.length > 32) return null;
+      nodes.push({ node, value: JSON.stringify([signature(node), controlState(node), node.value]),
+        ...(node.tagName === 'INPUT' && node.type === 'file' ? { files: [...node.files || []] } : {}) });
+    }
+    const stack = [scope];
+    while (stack.length) {
+      const node = stack.pop();
+      if (nodes.length >= 256) return null;
+      if (node.nodeType === 1) {
+        if (ignored(node)) continue;
+        const labels = labelBinding(node);
+        if (!labels) return null;
+        if (node.tagName === 'INPUT' && node.type === 'file' && node.files?.length > 32) return null;
+        // Exact values remain private in the isolated monitor and never enter
+        // feedback/guards. Sampling could miss a middle edit in a long value.
+        nodes.push({ node, value: JSON.stringify([signature(node), controlState(node),
+          /^(INPUT|TEXTAREA|SELECT|OPTION)$/.test(node.tagName) ? node.value : null,
+          node.getAttribute('aria-describedby'), labels.map(label => label.value)]),
+          ...(node.tagName === 'INPUT' && node.type === 'file' ? { files: [...node.files || []] } : {}) }, ...labels);
+        const children = node.childNodes, shadowChildren = node.shadowRoot?.childNodes || [];
+        if (children.length + shadowChildren.length + stack.length + nodes.length > 256) return null;
+        for (let index = shadowChildren.length - 1; index >= 0; index--) stack.push(shadowChildren[index]);
+        for (let index = children.length - 1; index >= 0; index--) stack.push(children[index]);
+      } else if (node.nodeType === 3) nodes.push({ node, value: node.data });
+    }
+    const rect = target.getBoundingClientRect();
+    const hit = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
+    return { target, scope, ancestors, nodes, hit, context: JSON.stringify([location.href, document.baseURI,
+      currentViewport(), window.scrollX, window.scrollY]) };
+  }
+  function samePreparedBinding(before, after) {
+    if (!before || !after || before.target !== after.target || before.scope !== after.scope || before.hit !== after.hit || before.context !== after.context) return false;
+    return ['ancestors', 'nodes'].every(key => before[key].length === after[key].length
+      && before[key].every((item, index) => item.node === after[key][index].node && item.value === after[key][index].value
+        && (!item.files || (item.files.length === after[key][index].files?.length
+          && item.files.every((file, fileIndex) => file === after[key][index].files[fileIndex])))));
+  }
+  function preparedBindingChanged(op) {
+    return op?.allowPassiveRebase === true && !!op.preparedBinding && !op.dispatched
+      && !samePreparedBinding(op.preparedBinding, preparedBinding(op.preparedBinding.target));
+  }
+  function rebasePassivePreparation(op, params = {}) {
+    if (!active || !op || op.allowPassiveRebase !== true || op.dispatched || op.coordinateSensitive || op.layoutInvalidated
+        || op.until < Date.now() || lastUserAt > op.userAt || interventionUnreported
+        || op.preparedInterventionRevision !== interventionRevision
+        || (pendingDOM && pendingDOM.source !== 'page')
+        || (params.documentToken && params.documentToken !== documentToken)) return false;
+    const independentNavigation = op.tool === 'navigate';
+    if (independentNavigation) {
+      if (op.preparedPageContext !== JSON.stringify([location.href, document.baseURI, currentViewport(), window.scrollX, window.scrollY])) return false;
+    } else {
+      if (op.selector) {
+        try { if (document.querySelectorAll(op.selector).length !== 1) return false; } catch { return false; }
+      }
+      if (!passiveRebaseTools.has(op.tool) || !op.preparedBinding
+          || (params.element && params.element !== op.preparedBinding.target)
+          || (resolveTarget(op) || (op.focusEligible ? deepActiveElement() : null)) !== op.preparedBinding.target
+          || !samePreparedBinding(op.preparedBinding, preparedBinding(op.preparedBinding.target))) return false;
+    }
+    // Do not suppress feedback. Flush it for the agent while rebasing only this
+    // exact, freshly revalidated operation over unrelated passive mutations.
+    if (domTimer) {
+      clearTimeout(domTimer); domTimer = null;
+      const observation = pendingDOM; pendingDOM = null;
+      if (observation) send(observation);
+    }
+    op.preparedRevision = revision;
+    return true;
   }
   function seed(root, budget = { remaining: 600 }) {
     const nodes = root.querySelectorAll?.('*') || [];
@@ -811,6 +926,7 @@
     // the DOM observer; the CSSOM sampler should only report unseen changes.
     for (const op of operations.values())
       if (!op.dispatched && op.target && op.until >= Date.now()) op.preparedTargetSignature = signature(op.target);
+    if (source !== 'page' && source !== 'agent') interventionRevision++;
     revision++; publishRevision();
     clearTimeout(domTimer);
     pendingDOM = { kind: 'dom', source, target };
@@ -849,7 +965,7 @@
     if (disposed || !state?.active || state.documentToken !== documentToken) return;
     if (active && runToken === state.runToken) return;
     stop();
-    active = true; runToken = state.runToken; seq = 0; revision = 0; publishRevision();
+    active = true; runToken = state.runToken; seq = 0; revision = 0; interventionRevision = 0; publishRevision();
     observer = new MutationObserver(onMutations);
     observeRoot(document);
     controlTimer = setInterval(() => { sampleFormControls(); samplePreparedTargets(); }, 250);
@@ -1094,7 +1210,7 @@
     nativeTargets.clear();
     observer?.disconnect(); observer = null;
     layoutObserver?.disconnect(); layoutObserver = null;
-    clearTimeout(domTimer); clearTimeout(scrollTimer); clearInterval(controlTimer); domTimer = null; scrollTimer = null; controlTimer = null; unreported = 0; pendingDOM = null; lastFeedbackDelivery = Promise.resolve();
+    clearTimeout(domTimer); clearTimeout(scrollTimer); clearInterval(controlTimer); domTimer = null; scrollTimer = null; controlTimer = null; unreported = 0; interventionUnreported = 0; interventionRevision = 0; pendingDOM = null; lastFeedbackDelivery = Promise.resolve();
     listeners.splice(0).forEach(remove => remove());
     operations.clear(); localOperation = null; agentTurn = null;
     animationAttribution = new WeakMap();
@@ -1125,6 +1241,9 @@
       ? controlState(operationTarget) : undefined;
     operations.set(params.operationId, { ...params, target: operationTarget, focusTarget, focusEligible, controlStateAtPrepare,
       preparedTargetSignature: operationTarget ? signature(operationTarget) : undefined, kinds: new Set(),
+      preparedBinding: params.allowPassiveRebase === true && operationTarget ? preparedBinding(operationTarget) : null,
+      preparedInterventionRevision: interventionRevision,
+      preparedPageContext: JSON.stringify([location.href, document.baseURI, currentViewport(), window.scrollX, window.scrollY]),
       coordinateSensitive, coordinateTarget, coordinateHit, coordinateTargetAtPoint,
       coordinatePoint: coordinateSensitive ? { x: params.x, y: params.y } : null,
       coordinateRect: rectFor(coordinateTarget),
@@ -1164,7 +1283,9 @@
     flushPendingMutations(op);
     sampleFormControls(op?.target);
     const layoutChanged = coordinatePreparationShifted(op);
-    if (!active || !op || layoutChanged || domTimer || unreported
+    const bindingChanged = preparedBindingChanged(op);
+    const rebased = !layoutChanged && rebasePassivePreparation(op, params);
+    if (!active || !op || layoutChanged || bindingChanged || (!rebased && (domTimer || unreported))
         || (params.element && op.target !== params.element)
         || lastUserAt > op.userAt
         || (Number.isFinite(op.preparedRevision) && op.preparedRevision !== revision)) {
@@ -1182,9 +1303,13 @@
     flushPendingMutations(op);
     sampleFormControls(op?.target);
     const shifted = coordinatePreparationShifted(op);
-    if (!active || params.runToken !== runToken || params.documentToken !== documentToken || !op || shifted
-        || Number(params.revision) !== op.preparedRevision || op.preparedRevision !== revision
-        || domTimer || unreported || lastUserAt > op.userAt) return false;
+    const bindingChanged = preparedBindingChanged(op);
+    const preparedRevision = op?.preparedRevision;
+    const suppliedRevisionMatches = Number(params.revision) === preparedRevision;
+    const rebased = suppliedRevisionMatches && !shifted && rebasePassivePreparation(op, params);
+    if (!active || params.runToken !== runToken || params.documentToken !== documentToken || !op || shifted || bindingChanged
+        || !suppliedRevisionMatches || op.preparedRevision !== revision
+        || (!rebased && (domTimer || unreported)) || lastUserAt > op.userAt) return false;
     if (params.rebindFocus === true) {
       const target = deepActiveElement();
       if (!(op.nativeSequence > 0) || !target || target === document.body || target === document.documentElement) return false;
@@ -1213,8 +1338,15 @@
     if (!active || !localMutations.has(action)) return () => {};
     const operationId = `local-${randomToken()}`;
     const previous = localOperation;
+    const target = resolveTarget({ ...params, textMatch: action === 'click' ? params.text : undefined });
+    const approved = [...operations.values()].find(op => op.allowPassiveRebase === true && !op.dispatched
+      && op.preparedBinding?.target === target && op.until >= Date.now()
+      && op.preparedInterventionRevision === interventionRevision && lastUserAt <= op.userAt && !interventionUnreported
+      && (!pendingDOM || pendingDOM.source === 'page')
+      && samePreparedBinding(op.preparedBinding, preparedBinding(target)));
     prepare({ selector: params.selector, ref_id: params.ref_id, x: params.x, y: params.y,
-      textMatch: action === 'click' ? params.text : undefined, tool: action, operationId, runToken });
+      textMatch: action === 'click' ? params.text : undefined, tool: action, operationId, runToken,
+      allowPassiveRebase: params.allowPassiveRebase === true || !!approved });
     localOperation = { operationId, kind: kindFor(action), userAt: lastUserAt, revision,
       navigationCandidate: ['click', 'click_ax', 'set_checked'].includes(action),
       scrollIntoView: /^ax_resolve|ax_prepare_field/.test(action) };
@@ -1231,8 +1363,11 @@
     const operation = operations.get(localOperation.operationId);
     flushPendingMutations(operation);
     sampleFormControls(operation?.target);
-    const layoutChanged = coordinatePreparationShifted(operations.get(localOperation.operationId));
-    if (layoutChanged || domTimer || unreported || lastUserAt > localOperation.userAt || revision !== localOperation.revision) {
+    const layoutChanged = coordinatePreparationShifted(operation);
+    const bindingChanged = preparedBindingChanged(operation);
+    const rebased = !layoutChanged && rebasePassivePreparation(operation, { element: target });
+    if (rebased) localOperation.revision = operation.preparedRevision;
+    if (layoutChanged || bindingChanged || (!rebased && (domTimer || unreported)) || lastUserAt > localOperation.userAt || revision !== localOperation.revision) {
       const error = new Error('Browser changed during action preparation. Re-observe before acting.');
       error.code = 'page_feedback_pending'; error.dispatched = localOperation.started === true; throw error;
     }
@@ -1269,14 +1404,19 @@
     else if (msg.action === 'page_monitor_resize_finish') {
       void finishAgentResize(msg.params || {}).then(respond, () => respond({ ready: false })); return true;
     }
-    else if (msg.action === 'page_monitor_validate') { respond({ ready: validateNativeDispatch(msg.params || {}) }); }
+    else if (msg.action === 'page_monitor_validate') {
+      const ready = validateNativeDispatch(msg.params || {});
+      respond({ ready, ...(ready ? { revision } : {}) });
+    }
     else if (msg.action === 'page_monitor_dispatch') {
       const params = msg.params || {};
       const prepared = operations.get(params.operationId);
       if (!params.release) { flushPendingMutations(prepared); sampleFormControls(prepared?.target); }
       const layoutChanged = !params.release && active && coordinatePreparationShifted(prepared);
-      if (!params.release && active && (layoutChanged || domTimer || unreported || (prepared && prepared.preparedRevision !== revision)
-          || (params.documentToken && (params.documentToken !== documentToken || params.documentRevision !== revision)))) {
+      const bindingChanged = !params.release && preparedBindingChanged(prepared);
+      const rebased = !params.release && !layoutChanged && rebasePassivePreparation(prepared, params);
+      if (!params.release && active && (layoutChanged || bindingChanged || (!rebased && (domTimer || unreported)) || (prepared && prepared.preparedRevision !== revision)
+          || (params.documentToken && (params.documentToken !== documentToken || (!rebased && params.documentRevision !== revision))))) {
         if (domTimer) {
           clearTimeout(domTimer); domTimer = null; const observation = pendingDOM; pendingDOM = null;
           if (observation) send(observation);

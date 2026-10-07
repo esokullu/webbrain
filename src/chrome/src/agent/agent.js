@@ -12480,13 +12480,13 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
         return { action: 'abort', value };
       }
 
-      if (this._hasPendingSteering(tabId) || this._hasPendingPageFeedback(tabId)) {
+      if (this._hasPendingSteering(tabId) || await this._refreshPageFeedbackForCall(tabId, tc, onUpdate)) {
         this._appendSyntheticToolResults(tabId, toolCalls, toolIndex, messages, onUpdate, step, () => ({
           success: false, skipped: true, dispatched: false, noDispatch: true,
           pageFeedbackPending: this._hasPendingPageFeedback(tabId),
           error: 'Skipped because the user steered the current task or the browser changed. Reconsider remaining actions using the latest feedback.',
         }));
-        return { action: 'continue' };
+        return this._pageFeedbackRecoveryResult(tabId, messages, onUpdate) || { action: 'continue' };
       }
 
       const jevPending = this._jevPendingCalls?.get(tc.id);
@@ -13536,7 +13536,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
             this._throwIfAborted(abortSignal);
             // Permission, checkpoint and preflight waits can receive a correction.
             // Recheck after all preparation, before marking or invoking dispatch.
-            if (this._hasPendingSteering(tabId) || this._hasPendingPageFeedback(tabId)) return { steered: true };
+            if (this._hasPendingSteering(tabId) || await this._refreshPageFeedbackForCall(tabId, tc, onUpdate)) return { steered: true };
             if (!pipelineToolbarPreflight.block && !socialDispatchBlock) callState.invoked = true;
             const pipelineRawToolResult = pipelineToolbarPreflight.block || socialDispatchBlock || await this.executeTool(
               tabId,
@@ -13673,8 +13673,9 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
           pageFeedbackPending: this._hasPendingPageFeedback(tabId),
           error: 'Skipped because the user steered the current task or the browser changed. Reconsider remaining actions using the latest feedback.',
         }));
-        return { action: 'continue' };
+        return this._pageFeedbackRecoveryResult(tabId, messages, onUpdate) || { action: 'continue' };
       }
+      if (toolResult?.success !== false && toolResult?.noDispatch !== true && toolResult?.dispatched !== false) this._resetPageFeedbackProgress(tabId);
       if (jevPending) {
         this._jevPendingCalls.delete(tc.id);
         if (fnName !== 'get_accessibility_tree') jevPending.session.dispatched(toolResult);
@@ -13883,6 +13884,15 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
             );
           } catch {}
         }
+      }
+
+      if (this._accountPageFeedbackNoDispatch(tabId, fnName, toolResult)) {
+        messages.push({ role: 'tool', tool_call_id: tc.id, content: this._wrapUntrusted(fnName, this._limitToolResult(toolResult)) });
+        this._appendSyntheticToolResults(tabId, toolCalls, toolIndex + 1, messages, onUpdate, step, () => ({
+          success: false, skipped: true, dispatched: false, noDispatch: true, pageFeedbackPending: true,
+          error: 'Skipped remaining actions until the changed browser target is reconsidered.',
+        }));
+        return this._pageFeedbackRecoveryResult(tabId, messages, onUpdate) || { action: 'continue' };
       }
 
       if (toolResult?.blockedDone) {
@@ -38403,6 +38413,7 @@ If the user has already named or confirmed this exact recipient, do NOT ask agai
           limit: typeof toolArgs.limit === 'number' && toolArgs.limit > 0
             ? toolArgs.limit
             : (bulkSocialDownload ? Number.MAX_SAFE_INTEGER : 1),
+          ...(executionContext?._expectedMediaBinding ? { expectedMediaBinding: executionContext._expectedMediaBinding } : {}),
         };
         const results = await chrome.scripting.executeScript({
           target: { tabId },
@@ -38413,6 +38424,7 @@ If the user has already named or confirmed this exact recipient, do NOT ask agai
             }
             try {
               const runResult = await window.SocialMediaDownloader.run(runOpts);
+              if (runResult?.noDispatch === true || runResult?.errorCode === 'media_binding_changed') return runResult;
               // v4: run() now returns { urls, stats }. Earlier callers
               // got just the URL array — handle both shapes so a stale
               // injection in another extension realm doesn't blow up.
@@ -38450,7 +38462,7 @@ If the user has already named or confirmed this exact recipient, do NOT ask agai
               let mseSavedFiles = null;
               let mseSaveError = null;
               let mseSaveCode = null;
-              if (mseBytes > 0 && runOpts.target !== 'image' && completedRequestedFromStats === 0) {
+              if (!runOpts.expectedMediaBinding && mseBytes > 0 && runOpts.target !== 'image' && completedRequestedFromStats === 0) {
                 try {
                   mseSavedFiles = await window.SocialMediaDownloader.saveMse({
                     prefix: (window.location && window.location.hostname || 'mse').replace(/^www\./, ''),
@@ -38540,6 +38552,8 @@ If the user has already named or confirmed this exact recipient, do NOT ask agai
       };
 
       try {
+        // A bound call must never switch resources through MSE or vision fallback.
+        if (executionContext?._expectedMediaBinding) return await runDomDownloader();
         const strategy = ['auto', 'dom', 'vision'].includes(toolArgs.strategy) ? toolArgs.strategy : 'auto';
         const bulkSocialDownload = !!toolArgs.scroll || toolArgs.mode === 'all';
         const activeProvider = this._activeProvider(tabId);
@@ -43907,6 +43921,7 @@ If the user has already named or confirmed this exact recipient, do NOT ask agai
           if (shouldOrderInteractiveAskTrace) queueAskStreamingTraceWrite(writeRequestTrace);
           else writeRequestTrace();
         }
+        await this._capturePageFeedbackModelState(tabId);
         const _llmStart = Date.now();
         result = await chatMainTurn(prunedMessages, chatOpts, { tabId, generationName: 'main' });
         if (result?.usage?.prompt_tokens) {
@@ -44075,8 +44090,15 @@ If the user has already named or confirmed this exact recipient, do NOT ask agai
         break;
       }
 
-      if ((await this._applyPendingPageFeedback(tabId, messages, onUpdate, { responseToolCalls: result?.toolCalls }))
+      const feedbackCalls = result?.toolCalls?.length ? result.toolCalls
+        : !this._containsProviderReplayState(result?.responseItems) ? this._tryParseToolCallsFromText(result?.content || '', allowedToolNames) : [];
+      if ((await this._applyPendingPageFeedback(tabId, messages, onUpdate, { responseToolCalls: feedbackCalls }))
           || this._applyPendingSteering(tabId, messages, onUpdate)) {
+        const recovery = this._pageFeedbackRecoveryResult(tabId, messages, onUpdate);
+        if (recovery) {
+          finalResponse = recovery.value; _traceStatus = recovery.status;
+          messages.push({ role: 'assistant', content: finalResponse }); break;
+        }
         onUpdate('text', { content: '', replace: true });
         continue;
       }
@@ -44181,7 +44203,7 @@ If the user has already named or confirmed this exact recipient, do NOT ask agai
           tabId, result.toolCalls, messages, onUpdate, provider, assistantToolContent, allowedToolNames, steps, runOptions, toolSchemas
         );
         if (['continue', 'return'].includes(batchResult.action) && !batchResult.status
-            && ((await this._applyPendingPageFeedback(tabId, messages, onUpdate))
+            && ((await this._applyPendingPageFeedback(tabId, messages, onUpdate, { responseToolCalls: batchResult.action === 'return' ? [result.toolCalls.at(-1)] : null }))
               || this._applyPendingSteering(tabId, messages, onUpdate))) {
           onUpdate('text', { content: '', replace: true });
           continue;
@@ -45151,6 +45173,7 @@ If the user has already named or confirmed this exact recipient, do NOT ask agai
             runtimeMode: mode,
           });
         }
+        await this._capturePageFeedbackModelState(tabId);
         const _llmStart = Date.now();
         let costStopMessage = '';
 
@@ -45242,8 +45265,15 @@ If the user has already named or confirmed this exact recipient, do NOT ask agai
           toolCalls: streamedToolCalls,
         }));
 
-        if ((await this._applyPendingPageFeedback(tabId, messages, onUpdate, { responseToolCalls: streamedToolCalls }))
+        const feedbackCalls = streamedToolCalls?.length ? streamedToolCalls
+          : !this._containsProviderReplayState(responseItems) ? this._tryParseToolCallsFromText(fullText || '', allowedToolNames) : [];
+        if ((await this._applyPendingPageFeedback(tabId, messages, onUpdate, { responseToolCalls: feedbackCalls }))
             || this._applyPendingSteering(tabId, messages, onUpdate)) {
+          const recovery = this._pageFeedbackRecoveryResult(tabId, messages, onUpdate);
+          if (recovery) {
+            messages.push({ role: 'assistant', content: recovery.value });
+            return finish(recovery.value, recovery.status);
+          }
           onUpdate('text', { content: '', replace: true });
           continue;
         }
@@ -45334,7 +45364,7 @@ If the user has already named or confirmed this exact recipient, do NOT ask agai
             tabId, toolCalls, messages, onUpdate, provider, fullText, allowedToolNames, steps, runOptions, toolSchemas
           );
           if (['continue', 'return'].includes(batchResult.action) && !batchResult.status
-              && ((await this._applyPendingPageFeedback(tabId, messages, onUpdate))
+              && ((await this._applyPendingPageFeedback(tabId, messages, onUpdate, { responseToolCalls: batchResult.action === 'return' ? [toolCalls.at(-1)] : null }))
                 || this._applyPendingSteering(tabId, messages, onUpdate))) {
             onUpdate('text', { content: '', replace: true });
             continue;

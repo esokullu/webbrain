@@ -166,6 +166,26 @@
 
 window.SocialMediaDownloader = (() => {
   const sleep = ms => new Promise(r => setTimeout(r, ms));
+  // Re-injection must retain node identities for the same document. These
+  // private identities bind a prepared single-media download without binding
+  // unrelated labels/counters, and a replacement document gets a new token.
+  const mediaBindingState = () => {
+    let state = window.__smd_media_binding_state;
+    if (!state || state.document !== document || !(state.nodes instanceof WeakMap)) {
+      state = { document, token: crypto.randomUUID(), nodes: new WeakMap(), nextNode: 0 };
+      window.__smd_media_binding_state = state;
+    }
+    return state;
+  };
+  const mediaNodeIdentity = node => {
+    if (!node) return '';
+    const state = mediaBindingState();
+    if (!state.nodes.has(node)) state.nodes.set(node, `media_${++state.nextNode}`);
+    return state.nodes.get(node);
+  };
+  const collectionBindingSources = new WeakMap();
+  const collectionFocusScopes = new WeakMap();
+  const collectionFocusAmbiguity = new WeakMap();
 
   // ---------- known media hosts ----------
   const MEDIA_HOSTS = [
@@ -633,11 +653,14 @@ window.SocialMediaDownloader = (() => {
         if (intrinsicW < 120 || intrinsicH < 120) continue;
         const urls = directMediaUrls(el);
         if (!urls.length) continue;
-        candidates.push({ el, urls, score: mediaElementScore(el) });
+        candidates.push({ el, root, urls, score: mediaElementScore(el) });
       }
     }
     candidates.sort((a, b) => b.score - a.score);
-    return candidates[0] || null;
+    const best = candidates[0];
+    if (!best) return null;
+    const rival = candidates.find(candidate => mediaBoxElement(candidate.el) !== mediaBoxElement(best.el));
+    return { ...best, ambiguous: !!rival && Math.abs(best.score - rival.score) < 1 };
   };
 
   const queryVisibleRoots = selector => {
@@ -657,13 +680,13 @@ window.SocialMediaDownloader = (() => {
       '[data-pagelet*="MediaViewer" i], [data-testid*="lightbox" i]'
     );
     let best = bestFocusedMedia(dialogRoots, excluded);
-    if (best) return best.urls;
+    if (best) return { ...best, scope: 'dialog' };
 
     best = bestFocusedMedia(queryVisibleRoots(profile.focusSel), excluded);
-    if (best) return best.urls;
+    if (best) return { ...best, scope: 'main' };
 
     best = bestFocusedMedia([document.body || document.documentElement], excluded);
-    return best ? best.urls : [];
+    return best ? { ...best, scope: 'document' } : null;
   };
 
   // Extract candidate media URLs from a given root (default: document)
@@ -1490,10 +1513,12 @@ window.SocialMediaDownloader = (() => {
   const collect = (mode = 'auto') => {
     const profile = activeProfile();
     const excluded = buildExclusionSet(profile);
+    const bindingSources = [];
 
-    const focusedUrls = mode === 'auto'
+    const focusedMedia = mode === 'auto'
       ? collectFocusedMedia(profile, excluded)
-      : [];
+      : null;
+    const focusedUrls = focusedMedia?.urls || [];
     let useMain;
     if (mode === 'main') useMain = true;
     else if (mode === 'all') useMain = false;
@@ -1514,6 +1539,7 @@ window.SocialMediaDownloader = (() => {
     if (focusedUrls.length) {
       urls = focusedUrls;
       sourceMode = 'focused';
+      bindingSources.push({ root: focusedMedia.root, node: focusedMedia.el, urls: focusedUrls });
     } else if (useGallery) {
       const galleryUrls = [];
       const galleryEls = document.querySelectorAll(profile.gallerySel);
@@ -1545,7 +1571,10 @@ window.SocialMediaDownloader = (() => {
         meta[property="og:video:secure_url"]
       `).forEach(m => {
         const c = absoluteUrl(m.getAttribute("content"));
-        if (isMediaUrl(c)) ogUrls.push(c);
+        if (isMediaUrl(c)) {
+          ogUrls.push(c);
+          bindingSources.push({ root: m.parentElement || document.documentElement, node: m, urls: [c] });
+        }
       });
 
       // 2) Anything inside the main-content container
@@ -1556,6 +1585,9 @@ window.SocialMediaDownloader = (() => {
         const root = el.closest('img, video, picture, source')
           ? el.parentElement || el
           : el;
+        for (const node of mediaElementsIn(root)) {
+          if (!isExcluded(node, excluded)) bindingSources.push({ root, node, urls: directMediaUrls(node) });
+        }
         extractFromRoot(root, excluded).forEach(u => mainUrls.push(u));
         // Also extract from el itself (covers img/video matched directly)
         if (el.tagName === 'IMG' || el.tagName === 'VIDEO' || el.tagName === 'SOURCE') {
@@ -1604,10 +1636,68 @@ window.SocialMediaDownloader = (() => {
     }
     if (sourceMode === 'focused') finalUrls = focusedDownloadUrls(finalUrls);
     else if (sourceMode === 'main') finalUrls = videoFirstUrls(finalUrls);
-    return { urls: finalUrls, profile,
-             mode: sourceMode,
-             dashGroups: groups };
+    const result = { urls: finalUrls, profile,
+                     mode: sourceMode,
+                     dashGroups: groups };
+    collectionBindingSources.set(result, bindingSources);
+    collectionFocusScopes.set(result, focusedMedia?.scope || null);
+    collectionFocusAmbiguity.set(result, focusedMedia?.ambiguous === true);
+    return result;
   };
+
+  const collectBoundMedia = mode => {
+    const focused = collect('auto');
+    // Main-mode selectors may include a timeline behind an open photo modal.
+    // A bound single-media call uses the same focused selection as its capture;
+    // unbound main/bulk calls keep their existing collection behavior.
+    if (focused.mode === 'focused' && ['dialog', 'main'].includes(collectionFocusScopes.get(focused))) return focused;
+    return collect(mode);
+  };
+
+  const getMediaBinding = ({ mode = 'main', target = 'auto', all = false, limit = 1 } = {}) => {
+    if (all || !['main', 'auto'].includes(mode) || Number(limit) !== 1) return null;
+    if (target === 'media') target = 'auto';
+    if (!['auto', 'image', 'video'].includes(target)) return null;
+    const collection = collectBoundMedia(mode);
+    if (collectionFocusAmbiguity.get(collection)) return null;
+    const selected = filterUrlsForTarget(collection.urls, target).slice(0, 1);
+    if (selected.length !== 1 || !['main', 'focused'].includes(collection.mode)) return null;
+    const sources = (collectionBindingSources.get(collection) || []).filter(source =>
+      preferHighQuality(source.urls).some(url => selected.includes(url)));
+    // Do not retain downloads inferred from a URL without a live, identifiable
+    // media source, or a page's arbitrary main-container fallback.
+    if (!sources.length || sources.some(source => !source.node || !source.root)
+        || !sources.some(source => ['IMG', 'VIDEO', 'SOURCE'].includes(source.node.tagName)
+          && isVisibleElement(mediaBoxElement(source.node)))) return null;
+    const state = mediaBindingState();
+    const focusScope = collectionFocusScopes.get(collection);
+    return {
+      schema: 1, documentToken: state.token, pageUrl: location.href,
+      site: collection.profile.name, sourceMode: collection.mode,
+      focused: collection.mode === 'focused' && ['dialog', 'main'].includes(focusScope),
+      focusScope: focusScope || null,
+      request: { mode, target, limit: 1 },
+      candidates: selected.map(url => ({ url, type: isVideoDownloadUrl(url) ? 'video' : 'image' })),
+      // Include raw candidates too: currentSrc can keep the previous asset
+      // while the browser is loading a newly assigned src/srcset.
+      sources: sources.map(source => ({ root: mediaNodeIdentity(source.root), node: mediaNodeIdentity(source.node),
+        container: mediaNodeIdentity(mediaBoxElement(source.node)?.parentElement),
+        assets: source.urls, visible: ['IMG', 'VIDEO', 'SOURCE'].includes(source.node.tagName)
+          ? isVisibleElement(mediaBoxElement(source.node)) : null })),
+    };
+  };
+
+  const mediaBindingMatches = (expected, options) => {
+    if (!expected || expected.schema !== 1) return false;
+    const current = getMediaBinding(options);
+    return current !== null && JSON.stringify(current) === JSON.stringify(expected);
+  };
+  const changedMediaBinding = () => ({
+    success: false, noDispatch: true, dispatched: false, pageFeedbackPending: true,
+    errorCode: 'media_binding_changed',
+    error: 'The intended media or browser document changed before download. Re-observe the target before trying again.',
+    urls: [], stats: { triggered: 0, completed: 0, completedVideo: 0, openedInTab: 0, failed: 0, failures: [] },
+  });
 
   const list = (mode = 'auto') => {
     const { urls, profile, mode: m, dashGroups } = collect(mode);
@@ -1672,19 +1762,30 @@ window.SocialMediaDownloader = (() => {
   //                    and popup-blocking kills the SECOND such call onwards.
   //   'failed'       — HLS stitch or some other hard error; nothing was
   //                    triggered. Includes a `reason` string for the caller.
-  const download = async (url, filename) => {
+  const download = async (url, filename, bindingGuard = null) => {
+    const assertBinding = () => {
+      if (bindingGuard && !bindingGuard()) {
+        const error = new Error(changedMediaBinding().error);
+        error.code = 'media_binding_changed';
+        throw error;
+      }
+    };
+    assertBinding();
     url = clean(url);
     if (/\.m3u8(\?|#|$)/i.test(url)) {
       try {
         const blob = await stitchHls(url);
+        assertBinding();
         triggerBlobDownload(blob, filename.replace(/\.[^.]+$/, '') + '.ts');
         return { status: 'completed', filename };
       } catch (e) {
+        if (e?.code === 'media_binding_changed') throw e;
         console.warn('HLS stitch failed:', e);
         return { status: 'failed', filename, reason: `HLS stitch: ${e && e.message || e}` };
       }
     }
     if (url.startsWith('blob:')) {
+      assertBinding();
       console.warn('Blob URL — opening in new tab:', url);
       window.open(url, '_blank');
       return { status: 'opened-in-tab', filename, reason: 'blob URL — cannot be fetched programmatically' };
@@ -1703,10 +1804,16 @@ window.SocialMediaDownloader = (() => {
       try {
         const res = await fetch(url, init);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        triggerBlobDownload(await res.blob(), filename);
+        const blob = await res.blob();
+        assertBinding();
+        triggerBlobDownload(blob, filename);
         return { status: 'completed', filename };
-      } catch (e) { lastErr = e; }
+      } catch (e) {
+        if (e?.code === 'media_binding_changed') throw e;
+        lastErr = e;
+      }
     }
+    assertBinding();
     console.warn('All fetches failed (CDN sends no CORS headers). Opening in new tab — right-click → Save image as:', url);
     const a = document.createElement('a');
     a.href = url; a.target = '_blank'; a.rel = 'noopener';
@@ -1725,12 +1832,18 @@ window.SocialMediaDownloader = (() => {
     maxScrolls = 40, scrollDelay = 1000, settleDelay = 1500,
     limit = Infinity,
     prefix = location.hostname.replace(/^www\./, ''),
-    delayBetweenDownloads = 500
+    delayBetweenDownloads = 500,
+    expectedMediaBinding = null
   } = {}) => {
+    const bindingOptions = { mode, target, all, limit };
+    const bindingGuard = expectedMediaBinding
+      ? () => mediaBindingMatches(expectedMediaBinding, bindingOptions)
+      : null;
+    if (bindingGuard && !bindingGuard()) return changedMediaBinding();
     const urls = all
       ? await scrollAndCollect({ maxScrolls, scrollDelay, settleDelay,
                                   mode: mode === 'auto' ? 'all' : mode })
-      : list(mode);
+      : (bindingGuard ? collectBoundMedia(mode).urls : list(mode));
     const eligibleUrls = filterUrlsForTarget(urls, target);
     const selected = eligibleUrls.slice(0, limit);
     console.log(`[SMD] downloading ${selected.length} of ${eligibleUrls.length} target-matching URLs`);
@@ -1753,8 +1866,9 @@ window.SocialMediaDownloader = (() => {
       const filename = `${filenameSafe(prefix)}_${isVideo ? 'video' : 'photo'}_${String(i).padStart(3, '0')}${ext}`;
       let r;
       try {
-        r = await download(url, filename);
+        r = await download(url, filename, bindingGuard);
       } catch (e) {
+        if (e?.code === 'media_binding_changed') return changedMediaBinding();
         r = { status: 'failed', filename, reason: (e && e.message) || String(e) };
       }
       if (r.status === 'completed') {
@@ -1783,7 +1897,7 @@ window.SocialMediaDownloader = (() => {
   };
 
   return {
-    run, single, list, scrollAndCollect,
+    run, single, list, scrollAndCollect, getMediaBinding,
     // MSE recorder (v4). Arm BEFORE the player loads:
     //   SocialMediaDownloader.armMseRecorder()
     //   <reload the page>

@@ -193,8 +193,9 @@ for (const build of ['chrome', 'firefox']) {
         if (args.ref_id === 'ref_9') { url = 'https://mastoturk.org/public/local'; feedback(); }
         return { success: true, dispatched: true, verified: true };
       };
-      const getTab = api.tabs.get;
+      const getTab = api.tabs.get, webNavigation = api.webNavigation;
       api.tabs.get = async id => ({ id, url, title: 'Current page' });
+      api.webNavigation = { getAllFrames: async () => [{ frameId: 0, documentId: 'live-feed-document', url }] };
       try {
         const update = (type, data) => updates.push({ type, data });
         const result = streaming ? await agent.processMessageStream(tabId, 'go to emresokullu.com', update, 'act', options)
@@ -208,7 +209,7 @@ for (const build of ['chrome', 'firefox']) {
         assert.deepEqual(binding.updates.map(update => update.text), ['go to mastoturk.org', 'post something about webbrain']);
         assert.equal(updates.filter(update => update.type === 'steering_applied').length, 2);
         assertPairedTools(agent.conversations.get(tabId));
-      } finally { api.tabs.get = getTab; }
+      } finally { api.tabs.get = getTab; api.webNavigation = webNavigation; }
     });
   }
 

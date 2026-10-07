@@ -83,11 +83,33 @@ Steer or grant authorization. Enter and Alt+Enter retain their existing behavior
 - Runtime observations use nonce-delimited `page_feedback` untrusted data. They
   do not enter the trusted text-steering authorization path. Screenshots follow
   the current capture, vision-routing and budget policies.
-- Passive main-frame DOM updates on the same URL preserve a single explicit
-  `done` success candidate after refreshing the page observation. The completion
-  verifier still checks fresh evidence; the summary does not establish success.
-  User activity, navigation, unknown sources and mixed action batches still
-  require a new model decision.
+- Passive main-frame DOM updates use a tool-specific freshness policy. Fresh
+  reads, explicit navigation and read-only requests can proceed after refreshing
+  observations, even when counters keep changing during the refresh. Mutating
+  network requests, request replay, coordinates and arbitrary scripts retain
+  strict invalidation. Model state binds the URL, document identity and steering
+  revision before inference; human activity and unknown attribution still require
+  a new decision.
+- Focused social-media downloads bind the selected document, node, container and
+  exact media asset before inference. The downloader validates that identity
+  before fetching and again before saving. A replaced asset fails without a
+  download; a bound attempt cannot fall back to another MSE or vision resource.
+  Bulk and scrolling downloads keep their existing conservative behavior.
+- An unchanged AX target can opt into passive revalidation only after a fresh
+  target/context comparison. The content monitor then checks immutable node,
+  recipient/form/control/file state, labels, geometry and intervention identity
+  at preparation and dispatch. Guard tokens already issued retain strict fences.
+- A single explicit `done` success candidate survives passive DOM updates before
+  and after its tool batch. The completion verifier still checks fresh evidence;
+  the summary does not establish success.
+- Five consecutive passive invalidations without dispatch/progress end the run
+  with `page_unstable` and an explicit incomplete result. A recovery nudge is sent
+  after two. Successful reads/actions reset this budget; user intervention starts
+  fresh. This also covers preparation/transport failures and text-format tool
+  responses. App-owned feedback trees and captures are replaced by the latest
+  observation, preserving user instructions and tool results instead of growing
+  the prompt with repeated copies. Trace notes record disposition, reason,
+  refresh time, stage, tool names and retry streak without action arguments.
 
 ## Workflow and notifications
 
