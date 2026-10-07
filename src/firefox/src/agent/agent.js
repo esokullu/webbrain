@@ -18,6 +18,7 @@ import { handleDoneJson } from './cloud-output.js';
 import { applyReadPageWindow, fitReadPageWindowResult, isReadPageWindowResult } from './read-page-window.js';
 import { STANDARD_TOOL_RESULT_CHARS, createReadCompletenessState, isCommunicationThreadContext, normalizeReadScope, readCompletenessBlock, readCompletenessLimitation, readCompletenessMadeProgress, readWindowLimits, recordReadCompleteness, requirePlannerReadCompleteness, requiresCompleteThreadRead } from './read-completeness.js';
 import { LoopDetector } from './loop-detector.js';
+import { recordCollectionReadProgress } from './collection-read-progress.js';
 import { parseToolCallsFromText } from './tool-call-parser.js';
 import { IMAGE_BUDGET, estimateImageTokens, fitImageDimensions } from './image-budget.js';
 import { BROWSER_MUTATION_TOOLS, STATE_CHANGE_TOOLS as SHARED_STATE_CHANGE_TOOLS } from './mutation-tools.js';
@@ -913,6 +914,7 @@ export class Agent extends LoopDetector {
     // useful result before exhausting the run.
     this.deliveryObservationStreaks = new Map();
     this.deliveryActionableDiscoveryResets = new Set();
+    this.deliveryCollectionReads = new Map(); // tabId -> task-bound finite source coverage
     // Local screenshot redaction (issue #312). When true, screenshots sent
     // to a Vision endpoint are pixelated over DOM-detected PII regions
     // (form fields + email/phone text) BEFORE leaving the extension. Off by
@@ -7700,6 +7702,13 @@ export class Agent extends LoopDetector {
     return { method, requestShape, failed };
   }
 
+  // Source coverage survives navigation and page-level loop resets. Only a
+  // run boundary may forget it and register the same source ranges again.
+  _clearRunLoopState(tabId) {
+    super._clearRunLoopState(tabId);
+    this.deliveryCollectionReads.delete(tabId);
+  }
+
   /**
    * Extends the detector's own page-scoped cleanup with the Agent-owned state
    * that is equally invalidated by a page replacement: the delivery-checkpoint
@@ -8431,9 +8440,37 @@ export class Agent extends LoopDetector {
     return String(provider?.config?.providerName || '').trim().toLowerCase() === 'webbrain-cloud';
   }
 
+  _deliveryCollectionTask(tabId) {
+    const guard = this._planExecutionGuards.get(tabId);
+    const expected = this.progressExpectedItems.get(tabId);
+    if (!guard?.enabled || guard.requiresStateChange !== false || guard.requiresSubmission === true
+        || !Number.isInteger(expected?.count) || expected.count < 2 || expected.count > 1000) return null;
+    const session = this._currentProgressSession(tabId, { readOnly: true });
+    const collectionActions = new Set(['process_item', 'collect_profile', 'collect_email', 'visit', 'open']);
+    if (!isProgressIntentActive(session)
+        || !session.allowedActions.every(action => collectionActions.has(action))) return null;
+    const taskKey = this._progressTaskKeyHash(tabId);
+    if (!taskKey || guard.taskDrifted === true || (guard.taskKey && guard.taskKey !== taskKey)) return null;
+    return { expected, taskKey };
+  }
+
+  _deliveryCheckpointCollectionReadProgress(tabId, name, args, result) {
+    if (name !== 'fetch_url' || !this._isSuccessfulExecutionEvidence(result)) return false;
+    const task = this._deliveryCollectionTask(tabId);
+    if (!task) return false;
+    let coverage = this.deliveryCollectionReads.get(tabId);
+    if (!coverage || coverage.taskKey !== task.taskKey) {
+      coverage = { taskKey: task.taskKey, sources: new Map() };
+      this.deliveryCollectionReads.set(tabId, coverage);
+    }
+    return recordCollectionReadProgress(coverage, args, result).madeProgress;
+  }
+
   _checkDeliveryObservationStreak(tabId, name, args = {}, result = null, options = {}) {
     const observation = this.constructor.DELIVERY_OBSERVATION_TOOLS.has(name)
       && !isNetworkMutation(name, args);
+    const collectionReadProgress = observation
+      && this._deliveryCheckpointCollectionReadProgress(tabId, name, args, result);
     if (observation
       && options.discoveredActionableTargets === true
       && !this.deliveryActionableDiscoveryResets.has(tabId)) {
@@ -8442,6 +8479,12 @@ export class Agent extends LoopDetector {
       // repeatedly erase the delivery guard; meaningful consequential progress
       // below rearms the one-shot reset.
       this.deliveryActionableDiscoveryResets.add(tabId);
+      this.deliveryObservationStreaks.delete(tabId);
+      return { kind: 'none' };
+    }
+    if (collectionReadProgress) {
+      // Reading new ranges of a finite collection's source is task progress,
+      // even before complete item records can be entered in the ledger.
       this.deliveryObservationStreaks.delete(tabId);
       return { kind: 'none' };
     }
@@ -8478,14 +8521,18 @@ export class Agent extends LoopDetector {
       return {
         kind: 'deliver',
         count,
-        warning: `[DELIVERY REQUIRED: You have made ${count} consecutive read, scroll, or wait observations without verified consequential progress. Browser observation tools are now stopping. On the recovery turn, call done exactly once with outcome partial or failed and put the complete useful result, evidence, and blockers already known in its summary. Do not request another observation or claim unverified success.]`,
+        warning: `[DELIVERY REQUIRED: You have made ${count} consecutive read, scroll, or wait observations without verified task progress. Browser observation tools are now stopping. On the recovery turn, call done exactly once with outcome partial or failed and put the complete useful result, evidence, and blockers already known in its summary. Do not request another observation or claim unverified success.]`,
       };
     }
 
+    const collection = this._deliveryCollectionTask(tabId);
+    const guidance = collection
+      ? `The task requires all ${collection.expected.count} items. Continue through new source ranges or item records needed to complete that scope, and record complete items with progress_update. Do not reread covered ranges or stop just because the requested collection is large. If no new evidence can be obtained or a blocker prevents completion, deliver the useful partial result.`
+      : 'Do not keep observing merely to make the answer exhaustive. If the current evidence satisfies the request, call done now. For list or research tasks, deliver useful partial results rather than risk shipping nothing. Continue only when you can name a specific missing fact or control and the next tool will obtain it.';
     return {
       kind: 'nudge',
       count,
-      warning: `[DELIVERY CHECKPOINT: You have made ${count} consecutive read, scroll, or wait observations without verified consequential progress. Do not keep observing merely to make the answer exhaustive. If the current evidence satisfies the request, call done now. For list or research tasks, deliver useful partial results rather than risk shipping nothing. Continue only when you can name a specific missing fact or control and the next tool will obtain it.]`,
+      warning: `[DELIVERY CHECKPOINT: You have made ${count} consecutive read, scroll, or wait observations without verified task progress. ${guidance}]`,
     };
   }
 
