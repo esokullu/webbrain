@@ -61,7 +61,7 @@ test('hello carries identity, token, browser, version and platform', () => {
   assert.deepEqual({ ...hello.browser }, { name: 'Chrome', version: '126.0.1' });
   assert.equal(hello.extensionVersion, '1.2.3');
   assert.equal(hello.platform, 'Linux x86_64');
-  assert.deepEqual([...hello.capabilities], ['saved_workflows_v1', 'run_modes_v1', 'scheduled_jobs_v1']);
+  assert.deepEqual([...hello.capabilities], ['saved_workflows_v1', 'run_modes_v1', 'scheduled_jobs_v1', 'private_results_v1']);
   assert.equal(JSON.stringify(hello.status).includes('secret-token'), false, 'status must not leak the token');
   assert.equal(JSON.stringify(h.status()).includes('secret-token'), false);
 });

@@ -5,6 +5,7 @@ import {
 } from './agent/workflows.js';
 import { isCredentialField } from './agent/credential-fields.js';
 import { validateResumeArgs } from './agent/scheduler.js';
+import { PRIVATE_RESULT_TYPE, importPrivateResultRecipient, encryptPrivateResult } from './private-results.js';
 
 const DEFAULT_CLOUD_BRIDGE_URL = 'ws://127.0.0.1:17374/extension';
 const CLOUD_RUN_STORAGE_KEY = 'webbrainCloudRunSnapshots';
@@ -106,6 +107,8 @@ function scrubCloudValue(value) {
       if (LARGE_IMAGE_KEY.test(normalizedKey) && typeof item === 'string' && item.length > 500) {
         return `[large payload omitted: ${item.length} chars]`;
       }
+      if (key === 'ciphertext' && typeof item === 'string' && item.length <= 90000
+          && /^[A-Za-z0-9+/]*={0,2}$/.test(item)) return item;
       if (typeof item === 'string' && item.length > CLOUD_STRING_LIMIT) {
         return `${item.slice(0, CLOUD_STRING_LIMIT)}\n[truncated ${item.length - CLOUD_STRING_LIMIT} chars for cloud persistence]`;
       }
@@ -805,6 +808,8 @@ export function createCloudRunController({
   const strictSecretValues = new Map();
   const strictTraceValues = new Map();
   const strictSecretOverflowRuns = new Set();
+  const privateRecipients = new Map();
+  const privateStructuredResults = new Map();
   const strictTraceOverflowRuns = new Set();
 
   function rememberStrictCandidates(run, candidates, registry, overflowRuns) {
@@ -942,6 +947,7 @@ export function createCloudRunController({
         run.error = safeResult.error || 'done_json failed';
         run.summary = publicSummary || run.summary;
       } else if (Object.prototype.hasOwnProperty.call(result, 'cloudResult')) {
+        if (privateRecipients.has(run.runId)) privateStructuredResults.set(run.runId, structuredClone(result.cloudResult));
         run.result = strictSecretMode
           ? redactStrictSecretValues(run, result.cloudResult, true)
           : result.cloudResult;
@@ -1024,6 +1030,8 @@ export function createCloudRunController({
 
   async function startRunReserved(msg = {}) {
     await hydrate();
+    const recipient = msg.private_result_public_key == null
+      ? null : await importPrivateResultRecipient(msg.private_result_public_key);
     const suppliedRunId = msg.runId ?? msg.run_id;
     const requestedRunId = suppliedRunId == null ? '' : String(suppliedRunId).trim();
     const parentRunId = String(msg.parentRunId || msg.parent_run_id || '').trim() || null;
@@ -1129,10 +1137,12 @@ export function createCloudRunController({
       completedAt: null,
     };
     runs.set(run.runId, run);
+    if (recipient) privateRecipients.set(run.runId, recipient);
     try {
       await persist();
     } catch (error) {
       runs.delete(run.runId);
+      privateRecipients.delete(run.runId);
       startingTabs.delete(tabId);
       throw error;
     }
@@ -1304,6 +1314,24 @@ export function createCloudRunController({
             }
           }
         }
+        if (recipient && run.status !== 'aborted') {
+          const raw = structured ? privateStructuredResults.get(run.runId) : content;
+          if (raw !== undefined) {
+            // Encryption is asynchronous. Pollers must not observe completion
+            // until the encrypted result is ready, or release the browser lock.
+            const terminalStatus = run.status;
+            run.status = 'running';
+            const privateResult = await encryptPrivateResult(recipient, run.runId, raw);
+            if (run.status === 'aborting') {
+              run.status = 'aborted';
+              run.error = run.error || 'Aborted by cloud_abort.';
+            } else {
+              run.result = { type: PRIVATE_RESULT_TYPE, public_result: run.result,
+                private_result: privateResult };
+              run.status = terminalStatus;
+            }
+          }
+        }
       } catch (error) {
         run.pendingInput = null;
         run.status = run.status === 'aborting' ? 'aborted' : 'failed';
@@ -1312,6 +1340,8 @@ export function createCloudRunController({
         );
         run.finalUrl = cloudTerminalUrl(redactWorkflowValue(await getTabUrl(tabId)), { strictSecretMode });
       } finally {
+        privateRecipients.delete(run.runId);
+        privateStructuredResults.delete(run.runId);
         startingTabs.delete(tabId);
         // The bridge flag is a run-scoped grant, not the sidebar's persistent
         // /allow-api setting. Revoke only permission this run added; preserve a
