@@ -107389,6 +107389,113 @@ test('Firefox upload_file injects the exact user attachment bytes without re-fet
   }
 });
 
+test('Firefox fallback upload aborts before FileList assignment when the prepared monitor target is stale', async () => {
+  const originalBrowser = globalThis.browser;
+  const messages = [];
+  const scripts = [];
+  class MockFileInput {
+    constructor() { this.type = 'file'; this.id = 'upload'; this.labels = []; this.assignmentAttempts = 0; this._files = { length: 0 }; }
+    get files() { return this._files; }
+    set files(value) { this.assignmentAttempts++; this._files = value; }
+    getAttribute() { return null; }
+    dispatchEvent() { return true; }
+  }
+  const fileInput = new MockFileInput();
+  class MockDataTransfer {
+    constructor() {
+      const files = [];
+      files.item = index => files[index] || null;
+      this.files = files;
+      this.items = { add: file => { files.push(file); } };
+    }
+  }
+  class MockFile {
+    constructor(_bytes, name, options = {}) { this.name = name; this.type = options.type || ''; this.size = 1; }
+  }
+  const pageMonitor = {
+    activatePreparedDispatch({ operationId, kind, element }) {
+      assert.ok(operationId, 'the upload must carry its run-owned operation id');
+      assert.equal(kind, 'input');
+      assert.equal(element, fileInput, 'the final guard must bind to the probed file input');
+      const error = new Error('Browser changed during upload preparation. Re-observe before acting.');
+      error.code = 'page_feedback_pending';
+      throw error;
+    },
+    withPreparedDispatch() { assert.fail('stale upload must not enter the assignment callback'); },
+  };
+  const browser = {
+    tabs: {
+      async get(tabId) { return { id: tabId, url: 'https://example.com/upload' }; },
+      async sendMessage(_tabId, message) {
+        messages.push(message);
+        if (message.action === 'page_monitor_dispatch') {
+          return { ready: true, guard: {
+            operationId: message.params.operationId,
+            runToken: message.params.runToken,
+            documentToken: 'upload-document',
+            revision: 12,
+          } };
+        }
+        return { ready: true };
+      },
+      async executeScript(_tabId, details) {
+        scripts.push(details.code);
+        if (details.code.includes('WebBrain file attachment target probe')) {
+          return [{ success: true, dispatched: false }];
+        }
+        if (details.code.includes('WebBrain file attachment settle probe')) {
+          return [{ attachmentState: 'input_attached' }];
+        }
+        const document = {
+          querySelectorAll(selector) {
+            if (selector === 'input[type=file]') return [fileInput];
+            return [];
+          },
+        };
+        const result = vm.runInNewContext(details.code, {
+          window: { __wbPageMonitor: pageMonitor },
+          document,
+          HTMLInputElement: MockFileInput,
+          File: MockFile,
+          DataTransfer: MockDataTransfer,
+          Uint8Array,
+          Event: class MockEvent {},
+        });
+        return [result];
+      },
+    },
+    webNavigation: { async getAllFrames() { return [{ frameId: 0 }]; } },
+  };
+  let agent;
+  try {
+    globalThis.browser = browser;
+    agent = new AgentFx({});
+    await agent._beginPageFeedbackRun(42, 'chat');
+    const [attachment] = agent._registerUserAttachments(42, [{
+      kind: 'document', name: 'report.txt', mimeType: 'text/plain', dataUrl: 'data:text/plain;base64,cmVwb3J0',
+    }]);
+    const result = await agent.executeTool(42, 'upload_file', {
+      selector: 'input[type=file]', attachmentId: attachment.attachmentId,
+    }, null, { promptTier: 'mid' });
+
+    assert.equal(result.success, false);
+    assert.equal(result.pageFeedbackPending, true);
+    assert.equal(result.noDispatch, true);
+    assert.equal(result.dispatched, false);
+    assert.equal(fileInput.assignmentAttempts, 0, 'stale feedback must prevent FileList assignment');
+    assert.equal(fileInput.files.length, 0);
+    assert.equal(scripts.length, 2, 'the stale injection must not run the settle probe');
+    const boundary = messages.find(message => message.action === 'page_monitor_dispatch');
+    assert.equal(boundary.params.kind, 'input');
+    assert.equal(boundary.params.fenceOnly, true);
+    assert.ok(scripts[1].includes('activatePreparedDispatch'), 'the page-side injection must revalidate the monitor guard');
+  } finally {
+    try { agent?._finishPageFeedbackRun(42); } catch {}
+    if (originalBrowser === undefined) delete globalThis.browser;
+    else globalThis.browser = originalBrowser;
+  }
+});
+
 test('Firefox upload_file deadline distinguishes target preparation from FileList dispatch', async () => {
   const originalBrowser = globalThis.browser;
   try {

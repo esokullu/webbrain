@@ -1035,6 +1035,7 @@
     sampleFormControls(op?.target);
     const layoutChanged = coordinatePreparationShifted(op);
     if (!active || !op || layoutChanged || domTimer || unreported
+        || (params.element && op.target !== params.element)
         || lastUserAt > op.userAt
         || (Number.isFinite(op.preparedRevision) && op.preparedRevision !== revision)) {
       const error = new Error('Browser changed during action preparation. Re-observe before acting.');

@@ -1,4 +1,4 @@
-import { installPageFeedback, beforePageAgentDispatch } from './page-feedback.js';
+import { installPageFeedback, beforePageAgentDispatch, hasPageAgentDispatchOwner } from './page-feedback.js';
 import { JEV_FAST_KEYS, JEV_CLASSIFIER_THRESHOLD, JEV_BROWSER_THRESHOLD, confidentChoice, buildJevBrowserRequest, decideJevBrowser, jevVisualInputRequiresMainModel, JevFastSession } from './systemone-fast.js';
 import { redactSystemOneText, wrapSystemOneData } from './systemone-evidence.js';
 import { createSystemOneJudge, isSystemOneResponseContractError, systemOneFailureReason, SYSTEM_ONE_COST_PROVIDER } from './systemone-judge.js';
@@ -33482,7 +33482,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
             return { success: true, dispatched: false };
           })();
         `;
-        const buildInjectCode = actionDeadlineAt => `
+        const buildInjectCode = (actionDeadlineAt, pageFeedbackGuard) => `
           (function() {
             const actionDeadlineAt = ${Number(actionDeadlineAt) || 0};
             const deadlineExpired = () => actionDeadlineAt > 0 && Date.now() >= actionDeadlineAt;
@@ -33522,6 +33522,24 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
             if (!(el instanceof HTMLInputElement) || el.type !== 'file') {
               return { success: false, dispatched: false, error: 'Selector does not match an <input type="file"> element: ' + selector };
             }
+            const pageFeedbackGuard = ${JSON.stringify(pageFeedbackGuard || null)};
+            const pageMonitor = window.__wbPageMonitor;
+            if (pageFeedbackGuard?.operationId) {
+              if (typeof pageMonitor?.activatePreparedDispatch !== 'function'
+                  || typeof pageMonitor?.withPreparedDispatch !== 'function') {
+                return { success: false, dispatched: false, noDispatch: true, pageFeedbackPending: true,
+                  error: 'The page monitor is unavailable at the upload dispatch boundary. Re-observe the page before acting.' };
+              }
+              try {
+                pageMonitor.activatePreparedDispatch({ operationId: pageFeedbackGuard.operationId, kind: 'input', element: el });
+              } catch (e) {
+                if (e?.code === 'page_feedback_pending') {
+                  return { success: false, dispatched: false, noDispatch: true, pageFeedbackPending: true,
+                    error: e.message || 'The browser changed during upload preparation. Re-observe the page before acting.' };
+                }
+                throw e;
+              }
+            }
             const compactIdentity = value => String(value || '').replace(/\\s+/g, ' ').trim().slice(0, 160);
             let targetLabel = '';
             try {
@@ -33554,10 +33572,14 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
               if (deadlineExpired()) {
                 return { success: false, dispatched: false, deadlineExpired: true, error: 'Upload action deadline expired before dispatch' };
               }
-              el.files = dt.files;
-              dispatched = true;
-              el.dispatchEvent(new Event('input', { bubbles: true }));
-              el.dispatchEvent(new Event('change', { bubbles: true }));
+              const attach = () => {
+                dispatched = true;
+                el.files = dt.files;
+                el.dispatchEvent(new Event('input', { bubbles: true }));
+                el.dispatchEvent(new Event('change', { bubbles: true }));
+              };
+              if (pageFeedbackGuard?.operationId) pageMonitor.withPreparedDispatch(pageFeedbackGuard.operationId, attach);
+              else attach();
               const attachmentState = el.files && el.files.length
                 ? 'input_attached'
                 : 'page_consumed';
@@ -33616,10 +33638,23 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
           // change events, so a lost response must be treated as an unknown
           // upload outcome rather than retried blindly.
           this._throwIfAborted(abortSignal);
+          const pageFeedbackGuard = await beforePageAgentDispatch(globalThis.browser || globalThis.chrome, tabId, {
+            kind: 'input', selector: args.selector, fenceOnly: true,
+          });
+          this._throwIfAborted(abortSignal);
+          if (hasPageAgentDispatchOwner(tabId) && !pageFeedbackGuard?.operationId) {
+            return {
+              success: false,
+              dispatched: false,
+              noDispatch: true,
+              pageFeedbackPending: true,
+              error: 'The page monitor could not validate the upload target at dispatch. Re-observe the page before acting.',
+            };
+          }
           markContentPipelineDispatched();
           let results;
           try {
-            results = await browser.tabs.executeScript(tabId, { code: buildInjectCode(actionDeadlineAt) });
+            results = await browser.tabs.executeScript(tabId, { code: buildInjectCode(actionDeadlineAt, pageFeedbackGuard) });
           } catch (e) {
             this._throwIfAborted(abortSignal);
             return {
@@ -33644,6 +33679,17 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
               retryable: true,
               deadlineExpired: true,
               error: res.error || 'Upload action deadline expired before dispatch',
+            };
+          }
+          if (res?.pageFeedbackPending && res?.noDispatch === true) {
+            contentPipelineDispatchState.started = false;
+            return {
+              ...res,
+              success: false,
+              dispatched: false,
+              noDispatch: true,
+              outcomeUnknown: false,
+              retryable: true,
             };
           }
           this._throwIfAborted(abortSignal);

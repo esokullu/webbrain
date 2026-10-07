@@ -2693,6 +2693,52 @@ for (const [build, engine] of [['chrome', chromium], ['firefox', firefox]]) {
     } finally { await session.close(); await browser.close(); }
   });
 
+  test(`${build}: upload fences reject user changes and replacement inputs before file assignment`, async () => {
+    const { browser, page } = await fixture(engine, build);
+    try {
+      await page.evaluate(() => {
+        const input = document.createElement('input'); input.id = 'guarded-upload'; input.type = 'file';
+        document.body.append(input);
+      });
+      await page.waitForTimeout(200);
+      const prepare = operationId => page.evaluate(id => {
+        deliver('page_monitor_prepare', { operationId: id, tool: 'upload_file', selector: '#guarded-upload' });
+        deliver('page_monitor_dispatch', { operationId: id, kind: 'input', selector: '#guarded-upload', fenceOnly: true });
+        return lastMonitorResponse.guard;
+      }, operationId);
+      const assignIfCurrent = operationId => page.evaluate(id => {
+        const input = document.getElementById('guarded-upload');
+        const transfer = new DataTransfer(); transfer.items.add(new File(['x'], 'test.txt'));
+        try {
+          __wbPageMonitor.activatePreparedDispatch({ operationId: id, kind: 'input', element: input });
+        } catch (error) {
+          return { code: error.code, files: input.files.length };
+        }
+        __wbPageMonitor.withPreparedDispatch(id, () => { input.files = transfer.files; });
+        return { code: null, files: input.files.length };
+      }, operationId);
+
+      const userGuard = await prepare('upload-after-user-change');
+      assert.ok(userGuard?.operationId);
+      await page.locator('#human').click();
+      const afterUserChange = await assignIfCurrent('upload-after-user-change');
+      assert.equal(afterUserChange.code, 'page_feedback_pending');
+      assert.equal(afterUserChange.files, 0, 'user activity must block FileList assignment');
+
+      const replacementGuard = await prepare('upload-after-target-replacement');
+      assert.ok(replacementGuard?.operationId);
+      await page.evaluate(() => {
+        const oldInput = document.getElementById('guarded-upload');
+        const replacement = document.createElement('input'); replacement.id = oldInput.id; replacement.type = 'file';
+        oldInput.replaceWith(replacement);
+      });
+      await page.waitForTimeout(120);
+      const afterReplacement = await assignIfCurrent('upload-after-target-replacement');
+      assert.equal(afterReplacement.code, 'page_feedback_pending');
+      assert.equal(afterReplacement.files, 0, 'a selector replacement must not receive a prepared upload');
+    } finally { await browser.close(); }
+  });
+
   test(`${build}: navigation notes are plain text, deduplicated and survive history restoration`, async () => {
     const browser = await engine.launch({ headless: true });
     try {
