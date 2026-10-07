@@ -15229,8 +15229,8 @@ test('trace lossless tier: runtime-config accepts the boolean and defaults stay 
 test('trace lossless tier: recorder branches on the tier and clamps payloads', () => {
   for (const browser of ['chrome', 'firefox']) {
     const recorderSource = fs.readFileSync(path.join(ROOT, `src/${browser}/src/trace/recorder.js`), 'utf8');
-    assert.match(recorderSource, /async function losslessTraceEnabled\(\)/, `${browser}: losslessTraceEnabled missing`);
-    assert.match(recorderSource, /const lossless = meta\.lossless === true \|\| await losslessTraceEnabled\(\);/, `${browser}: tier decision missing in startRun`);
+    assert.match(recorderSource, /feedbackRecordingPolicy\(settings, meta\.force === true\)/, `${browser}: recording policy missing`);
+    assert.match(recorderSource, /const lossless = !policy\.feedbackOnly && \(meta\.lossless === true \|\| policy\.lossless\);/, `${browser}: tier decision must exclude automatic diagnostics`);
     assert.match(recorderSource, /\.\.\.\(lossless \? \{ lossless: true, losslessBytes: 0, losslessBytesEncoding: 'utf8' \} : \{\}\)/, `${browser}: run record does not stamp the tier and UTF-8 accounting unit`);
     assert.match(recorderSource, /const LOSSILESS_RESULT_CAP = 200_000;/, `${browser}: lossless result cap missing`);
     assert.match(recorderSource, /const LOSSILESS_REQUEST_CAP = 500_000;/, `${browser}: lossless request cap missing`);
@@ -27005,11 +27005,12 @@ test('cloud runs force trace capture without changing the interactive opt-in def
     'utf8',
   );
   assert.match(agentSource, /force:\s*runOptions\?\.cloudRun === true/);
-  assert.match(recorderSource, /if \(!forced && !\(await tracingEnabled\(\)\)\) return null/);
+  assert.match(recorderSource, /feedbackRecordingPolicy\(settings, meta\.force === true\)/);
+  assert.match(recorderSource, /if \(!policy\.enabled\) return null/);
   assert.match(recorderSource, /tracingEnabledForRun\(runId\)/);
   // The forced flag is restored from the durable run record after SW eviction
   // (peekRunFlags), keeping forced-capture semantics without an in-memory map.
-  assert.match(recorderSource, /forced: flags\.forced, lossless: flags\.lossless/);
+  assert.match(recorderSource, /forced: flags\.forced,[^\n]*lossless: flags\.lossless/);
 });
 
 test('cloud trace keeps CAPTCHA frame/vendor diagnostics after the rolling update window drops the event', async () => {

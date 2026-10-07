@@ -1,0 +1,4 @@
+:root { color-scheme: light dark; font: 15px/1.5 system-ui; }
+body { margin: 24px; } main { max-width: 1100px; margin: auto; }
+pre { white-space: pre-wrap; overflow-wrap: anywhere; border: 1px solid #8886; padding: 16px; border-radius: 8px; }
+button { padding: 8px 16px; margin-right: 8px; cursor: pointer; }

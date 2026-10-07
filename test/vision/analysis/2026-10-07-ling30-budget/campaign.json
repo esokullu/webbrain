@@ -1,0 +1,17 @@
+{
+  "date": "2026-10-07",
+  "fullRun": "test/vision/results/2026-10-07-openrouter-ling30-budget_inclusionai_ling-3.0-flash-vl_production",
+  "preflight": "test/vision/results/2026-10-07-openrouter-ling30-budget-preflight_inclusionai_ling-3.0-flash-vl_production",
+  "fullRunRequests": 100,
+  "preflightRequests": 1,
+  "inferenceResponses": 101,
+  "apiErrors": 0,
+  "retries": 0,
+  "fullRunCostUsd": 0.005382260800000002,
+  "preflightCostUsd": 0.0000477904,
+  "totalCostUsd": 0.005430051200000002,
+  "concurrency": 2,
+  "providerRouting": "automatic; all 101 responses from Novita",
+  "credentialsExcluded": true,
+  "rawStreamsChecked": 100
+}

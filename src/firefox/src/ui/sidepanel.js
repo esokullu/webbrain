@@ -73,6 +73,8 @@ import {
   normalizeState as normalizeStoreReviewState,
 } from './store-review-prompt.js';
 import { providerIconUrl } from './provider-icons.js';
+import { getFeedbackCopy } from './feedback-copy.js';
+import { requestFeedbackConsent, submitFeedbackWithTrace } from './feedback-consent.js';
 import { parseWatchSlashCommand, WATCH_COMMAND_USAGE } from './watch-command.js';
 import { createSidePanelWindowScope } from './sidepanel-window-scope.js';
 import { visionProviderKind } from '../providers/vision-capabilities.js';
@@ -1501,6 +1503,8 @@ function getExtensionStoreKey() {
 
 let storeReviewState = normalizeStoreReviewState(null);
 let storeReviewSelectedRating = null;
+let storeReviewTraceSource = Promise.resolve(null);
+let storeReviewSending = false;
 
 async function loadStoreReviewState() {
   const stored = await browser.storage.local.get(STORE_REVIEW_STORAGE_KEY);
@@ -1534,6 +1538,10 @@ function setStoreReviewStarPreview(rating) {
 
 async function openStoreReviewPrompt() {
   if (!storeReviewEl || isProcessing) return;
+  // Freeze the session before tabs or conversations can change beneath the prompt.
+  const sourceTabId = currentTabId;
+  storeReviewTraceSource = sourceTabId == null ? Promise.resolve(null)
+    : sendToBackground('export_traces', { tabId: sourceTabId, full: true }).catch(() => null);
   storeReviewSelectedRating = null;
   if (storeReviewFeedbackEl) storeReviewFeedbackEl.value = '';
   setStoreReviewStarPreview(null);
@@ -1579,15 +1587,54 @@ async function handleStoreReviewOpenStore() {
 }
 
 async function handleStoreReviewSendFeedback() {
+  if (storeReviewSending) return;
+  storeReviewSending = true;
   const rating = storeReviewSelectedRating || storeReviewState.rating || 3;
   const comment = storeReviewFeedbackEl?.value || '';
+  const copy = getFeedbackCopy(getLocale());
+  const button = document.getElementById('store-review-send-feedback');
+  const previousLabel = button?.textContent;
+  if (button) { button.disabled = true; button.textContent = copy.preparing; }
   try {
-    browser.tabs.create({ url: buildFeedbackUrl({ rating, comment }) });
-  } catch { /* ignore */ }
-  const next = markFeedbackSubmitted(storeReviewState);
-  await saveStoreReviewState(next);
-  showStoreReviewStep('thanks');
-  setTimeout(() => hideStoreReviewPrompt(), 2500);
+    const { stageFeedbackTrace, deleteFeedbackDraft } = await import('../feedback-store.js');
+    const source = await storeReviewTraceSource;
+    const completed = await submitFeedbackWithTrace({
+      rating, comment, copy,
+      prepare: async () => {
+        if (!source?.sessionId) return null;
+        const flushed = await sendToBackground('feedback_flush');
+        if (!flushed?.ok) throw new Error(flushed?.error || 'Trace flush failed.');
+        const [store, { prepareFeedbackTrace }] = await Promise.all([
+          import('../trace/recorder.js'), import('../trace/feedback-export.js'),
+        ]);
+        return prepareFeedbackTrace(store, source.sessionId, browser.runtime.getManifest().version || '');
+      },
+      stage: prepared => stageFeedbackTrace({ ...prepared, copy }),
+      discard: deleteFeedbackDraft,
+      consent: (prepared, staged) => requestFeedbackConsent(prepared, copy, () => browser.tabs.create({
+        url: browser.runtime.getURL(`src/ui/feedback-trace-preview.html?id=${encodeURIComponent(staged.id)}`),
+      })),
+      open: async params => {
+        if (!params.includeTrace) {
+          await browser.tabs.create({ url: buildFeedbackUrl(params) });
+          return;
+        }
+        const result = await sendToBackground('feedback_open', params);
+        if (!result?.ok) throw new Error(result?.error || 'Could not open feedback.');
+      },
+    });
+    if (!completed) return;
+    await saveStoreReviewState(markFeedbackSubmitted(storeReviewState));
+    showStoreReviewStep('thanks');
+    const thanks = document.querySelector('#store-review-step-thanks .store-review-body');
+    if (thanks) thanks.textContent = copy.draftReady;
+    setTimeout(() => hideStoreReviewPrompt(), 2500);
+  } catch (error) {
+    showComposerToast(error?.message || String(error));
+  } finally {
+    storeReviewSending = false;
+    if (button) { button.disabled = false; button.textContent = previousLabel; }
+  }
 }
 
 function initStoreReviewPrompt() {

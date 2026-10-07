@@ -1,0 +1,14 @@
+.feedback-trace-dialog {
+  margin: auto;
+  width: min(440px, calc(100vw - 48px)); max-height: calc(100vh - 48px);
+  overflow: auto; padding: 20px; border: 1px solid var(--border, #8886);
+  border-radius: 12px; background: var(--bg-secondary, Canvas); color: var(--text-primary, CanvasText);
+  font: inherit; box-shadow: 0 12px 48px #0005;
+}
+.feedback-trace-dialog::backdrop { background: #0008; }
+.feedback-trace-dialog h2 { font-size: 18px; margin: 0 0 12px; }
+.feedback-trace-dialog p { line-height: 1.5; margin: 0 0 12px; }
+.feedback-trace-details { overflow-wrap: anywhere; font-size: 12px; }
+.feedback-trace-actions { display: grid; gap: 8px; }
+.feedback-trace-actions button { white-space: normal; }
+.feedback-trace-secondary { padding: 9px; border: 1px solid #8886; border-radius: 8px; background: transparent; color: inherit; cursor: pointer; }

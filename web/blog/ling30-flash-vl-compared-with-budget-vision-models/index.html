@@ -1,0 +1,617 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Ling 3.0 Flash VL compared with budget vision models - WebBrain Blog</title>
+  <meta name="description" content="Ling 3.0 Flash VL scores 65 of 100 browser screenshots for $0.0054 on OpenRouter, compared with six budget Qwen vision models using the same images, prompt, and archived rubric.">
+  <meta name="keywords" content="Ling 3.0 Flash VL, inclusionAI, budget vision models, Qwen3-VL, Qwen3.5-35B-A3B, OpenRouter, screenshot benchmark, browser agent">
+  <meta property="og:title" content="Ling 3.0 Flash VL compared with budget vision models">
+  <meta property="og:description" content="A real 100-screenshot test against six budget Qwen references. Same production inputs and grader, dated serving results, and raw OpenRouter evidence.">
+  <meta property="og:type" content="article">
+  <meta property="og:url" content="https://webbrain.one/blog/ling30-flash-vl-compared-with-budget-vision-models">
+  <meta property="og:image" content="https://webbrain.one/og-image.png">
+  <meta property="og:image:secure_url" content="https://webbrain.one/og-image.png">
+  <meta property="og:image:type" content="image/png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="WebBrain — Open-source AI browser agent">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Ling 3.0 Flash VL versus budget Qwen vision models">
+  <meta name="twitter:description" content="65 strict passes, 3.57-second mean latency, and a $0.0054 bill for 100 screenshots. Strong pricing, with reasoning and output-format caveats.">
+  <meta name="twitter:image" content="https://webbrain.one/twitter-image.png">
+  <meta name="twitter:image:alt" content="WebBrain — Open-source AI browser agent">
+  <link rel="icon" type="image/png" href="/favicon.png">
+  <link rel="canonical" href="https://webbrain.one/blog/ling30-flash-vl-compared-with-budget-vision-models">
+  <!-- Blog is English-only; alternates point to locale homepages. -->
+  <link rel="alternate" hreflang="en" href="https://webbrain.one/">
+  <link rel="alternate" hreflang="es" href="https://webbrain.one/es/">
+  <link rel="alternate" hreflang="fr" href="https://webbrain.one/fr/">
+  <link rel="alternate" hreflang="tr" href="https://webbrain.one/tr/">
+  <link rel="alternate" hreflang="zh" href="https://webbrain.one/zh/">
+  <link rel="alternate" hreflang="ru" href="https://webbrain.one/ru/">
+  <link rel="alternate" hreflang="uk" href="https://webbrain.one/uk/">
+  <link rel="alternate" hreflang="ar" href="https://webbrain.one/ar/">
+  <link rel="alternate" hreflang="ja" href="https://webbrain.one/ja/">
+  <link rel="alternate" hreflang="ko" href="https://webbrain.one/ko/">
+  <link rel="alternate" hreflang="id" href="https://webbrain.one/id/">
+  <link rel="alternate" hreflang="th" href="https://webbrain.one/th/">
+  <link rel="alternate" hreflang="ms" href="https://webbrain.one/ms/">
+  <link rel="alternate" hreflang="tl" href="https://webbrain.one/tl/">
+  <link rel="alternate" hreflang="he" href="https://webbrain.one/he/">
+  <link rel="alternate" hreflang="x-default" href="https://webbrain.one/">
+  <style>
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+    :root {
+      --bg: #0b0e17;
+      --bg-card: #111827;
+      --bg-card-hover: #1a2233;
+      --surface: #161d2e;
+      --border: rgba(255,255,255,0.07);
+      --text: #e4e4ec;
+      --text-dim: #8b8fa4;
+      --accent: #6c63ff;
+      --accent-glow: rgba(108,99,255,0.25);
+      --accent2: #a78bfa;
+      --success: #34d399;
+      --warning: #fbbf24;
+      --danger: #f87171;
+      --tint-soft: rgba(255,255,255,0.05);
+      --tint-soft-2: rgba(255,255,255,0.04);
+      --tint-medium: rgba(255,255,255,0.08);
+      --nav-bg: rgba(11,14,23,0.85);
+      --code-bg: #0a0e17;
+      --inline-code-bg: rgba(255,255,255,0.06);
+      --shadow-strong: rgba(0,0,0,0.40);
+      --radius: 12px;
+      --radius-lg: 16px;
+      --max-w: 760px;
+      color-scheme: dark;
+    }
+    :root[data-theme="light"] {
+      --bg: #f7f1e6;
+      --bg-card: #fffdf8;
+      --bg-card-hover: #f2e9d4;
+      --surface: #ede2cb;
+      --border: rgba(89,55,25,0.15);
+      --text: #2c1810;
+      --text-dim: #6b5b47;
+      --accent: #5b52e8;
+      --accent-glow: rgba(91,82,232,0.20);
+      --accent2: #7c6ce6;
+      --success: #2d8866;
+      --warning: #9a6500;
+      --danger: #b74747;
+      --tint-soft: rgba(89,55,25,0.05);
+      --tint-soft-2: rgba(89,55,25,0.07);
+      --tint-medium: rgba(89,55,25,0.10);
+      --nav-bg: rgba(247,241,230,0.85);
+      --code-bg: #fff7e6;
+      --inline-code-bg: rgba(89,55,25,0.08);
+      --shadow-strong: rgba(89,55,25,0.18);
+      color-scheme: light;
+    }
+    html { scroll-behavior: smooth; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Inter, Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.75;
+      font-size: 17px;
+      overflow-x: hidden;
+    }
+    a { color: var(--accent2); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    .glow-bg {
+      position: fixed;
+      inset: 0;
+      z-index: -1;
+      pointer-events: none;
+      overflow: hidden;
+    }
+    .glow-bg::before,
+    .glow-bg::after {
+      content: '';
+      position: absolute;
+      border-radius: 50%;
+      filter: blur(120px);
+      opacity: 0.26;
+    }
+    .glow-bg::before {
+      width: 500px;
+      height: 500px;
+      background: var(--accent);
+      top: -220px;
+      left: -160px;
+    }
+    .glow-bg::after {
+      width: 500px;
+      height: 500px;
+      background: var(--accent2);
+      right: -180px;
+      bottom: -230px;
+      opacity: 0.18;
+    }
+    nav {
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      background: var(--nav-bg);
+      backdrop-filter: saturate(160%) blur(12px);
+      -webkit-backdrop-filter: saturate(160%) blur(12px);
+      border-bottom: 1px solid var(--border);
+    }
+    .nav-inner {
+      max-width: var(--max-w);
+      margin: 0 auto;
+      padding: 14px 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 20px;
+    }
+    .nav-brand {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      flex-shrink: 0;
+      color: var(--text);
+      font-size: 18px;
+      font-weight: 700;
+      text-decoration: none;
+    }
+    .nav-brand:hover { text-decoration: none; }
+    .nav-brand .brand-logo { width: 26px; height: 26px; border-radius: 7px; flex: 0 0 auto; }
+    .nav-brand .domain { opacity: 0.5; font-weight: 400; }
+    .nav-links {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 16px;
+      min-width: 0;
+    }
+    .nav-links a {
+      position: relative;
+      color: var(--text-dim);
+      font-size: 14px;
+      font-weight: 500;
+      white-space: nowrap;
+    }
+    .nav-links a:hover { color: var(--text); text-decoration: none; }
+    .nav-links a[aria-current="page"] { color: var(--text); }
+    .nav-links a[aria-current="page"]::after {
+      content: '';
+      position: absolute;
+      left: 1px;
+      right: 1px;
+      bottom: -7px;
+      height: 3px;
+      border-radius: 999px;
+      background: linear-gradient(90deg, var(--accent2), var(--accent));
+      box-shadow: 0 2px 12px var(--accent-glow);
+    }
+    .lang-dropdown {
+      background: var(--tint-soft);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 6px 10px;
+      font-size: 13px;
+      max-width: 120px;
+    }
+    .lang-dropdown:focus { outline: 2px solid var(--accent-glow); outline-offset: 1px; }
+    .lang-dropdown option { background-color: var(--bg-card-hover); color: var(--text); }
+    .theme-toggle {
+      appearance: none;
+      -webkit-appearance: none;
+      background: var(--tint-soft-2);
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      width: 30px;
+      height: 30px;
+      padding: 0;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      cursor: pointer;
+      color: var(--text-dim);
+      transition: background 0.2s, color 0.2s, border-color 0.2s, transform 0.1s;
+    }
+    .theme-toggle:hover {
+      background: var(--tint-medium);
+      border-color: var(--accent);
+      color: var(--text);
+      transform: translateY(-1px);
+    }
+    .theme-toggle:focus-visible {
+      outline: 2px solid var(--accent2);
+      outline-offset: 2px;
+    }
+    .theme-toggle svg { width: 16px; height: 16px; display: block; }
+    .theme-toggle .icon-sun { display: block; }
+    .theme-toggle .icon-moon { display: none; }
+    :root[data-theme="light"] .theme-toggle .icon-sun { display: none; }
+    :root[data-theme="light"] .theme-toggle .icon-moon { display: block; }
+    main,
+    article {
+      max-width: var(--max-w);
+      margin: 0 auto;
+      padding: 64px 24px 80px;
+    }
+    .sr-only {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+      border: 0;
+    }
+    h1 {
+      font-size: 38px;
+      line-height: 1.2;
+      font-weight: 700;
+      letter-spacing: 0;
+      margin-bottom: 16px;
+    }
+    .lede {
+      color: var(--text-dim);
+      line-height: 1.6;
+    }
+    .lede {
+      font-size: 19px;
+      margin-bottom: 40px;
+    }
+    .meta {
+      font-size: 13px;
+      color: var(--text-dim);
+      margin-bottom: 12px;
+      letter-spacing: 0;
+    }
+    h2 {
+      font-size: 24px;
+      font-weight: 700;
+      margin-top: 48px;
+      margin-bottom: 14px;
+      letter-spacing: 0;
+    }
+    h3 {
+      font-size: 18px;
+      font-weight: 600;
+      margin-top: 32px;
+      margin-bottom: 10px;
+      color: var(--text);
+    }
+    h4, h5, h6 {
+      color: var(--text);
+      margin-top: 28px;
+      margin-bottom: 10px;
+      line-height: 1.35;
+    }
+    p { margin-bottom: 16px; }
+    ul, ol { margin: 0 0 16px 20px; }
+    li { margin-bottom: 6px; }
+    code {
+      font-family: 'SF Mono', 'Menlo', 'Consolas', monospace;
+      font-size: 0.88em;
+      background: var(--inline-code-bg);
+      padding: 2px 6px;
+      border-radius: 4px;
+      color: color-mix(in srgb, var(--accent2) 80%, var(--text));
+    }
+    pre {
+      background: var(--code-bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 18px 20px;
+      overflow-x: auto;
+      margin: 20px 0;
+      font-size: 14px;
+      line-height: 1.55;
+      box-shadow: 0 18px 60px var(--shadow-strong);
+    }
+    pre code {
+      background: transparent;
+      padding: 0;
+      color: inherit;
+      font-size: inherit;
+    }
+    blockquote {
+      border-left: 3px solid var(--accent);
+      padding: 4px 0 4px 18px;
+      margin: 20px 0;
+      color: var(--text-dim);
+      font-style: italic;
+    }
+    blockquote p:last-child { margin-bottom: 0; }
+    hr {
+      border: 0;
+      border-top: 1px solid var(--border);
+      margin: 36px 0;
+    }
+    article img {
+      max-width: 100%;
+      height: auto;
+      display: block;
+      border-radius: var(--radius);
+      border: 1px solid var(--border);
+      margin: 24px 0;
+    }
+    .table-wrap { overflow-x: auto; margin: 24px 0; }
+    table {
+      width: 100%;
+      min-width: 560px;
+      border-collapse: collapse;
+      font-size: 14px;
+    }
+    th, td {
+      text-align: left;
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--border);
+      vertical-align: top;
+    }
+    th {
+      color: var(--text-dim);
+      font-weight: 600;
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0;
+      background: var(--tint-soft-2);
+    }
+    td code { font-size: 12px; }
+    .win { color: var(--success); font-weight: 600; }
+    .lose { color: var(--danger); }
+    .meh { color: var(--warning); }
+    .callout {
+      background: color-mix(in srgb, var(--accent) 10%, transparent);
+      border: 1px solid color-mix(in srgb, var(--accent) 24%, transparent);
+      border-radius: var(--radius);
+      padding: 16px 20px;
+      margin: 24px 0;
+      font-size: 15px;
+      line-height: 1.65;
+      color: var(--text-dim);
+    }
+    .callout strong { color: var(--text); }
+    .author-box {
+      margin-top: 64px;
+      padding-top: 32px;
+      border-top: 1px solid var(--border);
+      color: var(--text-dim);
+      font-size: 14px;
+    }
+    .post-list { display: flex; flex-direction: column; gap: 18px; }
+    .post-card {
+      display: block;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      padding: 24px 26px;
+      transition: background 0.18s, border-color 0.18s, transform 0.18s;
+    }
+    .post-card:hover {
+      background: var(--bg-card-hover);
+      border-color: color-mix(in srgb, var(--accent) 30%, transparent);
+      transform: translateY(-1px);
+      text-decoration: none;
+    }
+    .post-meta {
+      font-size: 12px;
+      color: var(--text-dim);
+      letter-spacing: 0;
+      margin-bottom: 8px;
+    }
+    .post-title {
+      font-size: 21px;
+      font-weight: 600;
+      color: var(--text);
+      margin-bottom: 6px;
+      letter-spacing: 0;
+      line-height: 1.35;
+    }
+    .post-excerpt {
+      color: var(--text-dim);
+      font-size: 15px;
+      line-height: 1.6;
+    }
+    footer {
+      max-width: var(--max-w);
+      margin: 0 auto;
+      padding: 40px 24px;
+      border-top: 1px solid var(--border);
+      display: flex;
+      justify-content: space-between;
+      gap: 24px;
+      color: var(--text-dim);
+      font-size: 13px;
+    }
+    footer a { color: var(--text-dim); }
+    footer a:hover { color: var(--text); }
+    @media (max-width: 700px) {
+      body { font-size: 16px; }
+      .nav-inner { padding: 14px 20px; align-items: flex-start; }
+      .nav-links { gap: 12px; flex-wrap: wrap; }
+      .lang-dropdown { display: none; }
+      h1 { font-size: 28px; }
+      .lede { font-size: 16px; }
+      main, article { padding: 48px 20px 64px; }
+      h2 { font-size: 20px; margin-top: 36px; }
+      .post-card { padding: 20px; }
+      .post-title { font-size: 19px; }
+      footer { flex-direction: column; padding: 32px 20px; }
+    }
+    @media (max-width: 420px) {
+      .nav-inner { gap: 12px; }
+      .nav-links a[href="https://github.com/webbrain-one/webbrain"] { display: none; }
+      .theme-toggle { width: 28px; height: 28px; }
+    }
+  </style>
+  <script>
+    (function () {
+      try {
+        var saved = localStorage.getItem('webbrain-theme');
+        var theme = (saved === 'light' || saved === 'dark')
+          ? saved
+          : (window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
+        document.documentElement.setAttribute('data-theme', theme);
+      } catch (_) {
+        document.documentElement.setAttribute('data-theme', 'dark');
+      }
+    })();
+  </script>
+  <!-- Plausible analytics: start -->
+  <!-- Privacy-friendly analytics by Plausible -->
+  <script async src="https://157.230.3.9.sslip.io/js/pa-omp0F7DsOXM4sGKR50l7S.js"></script>
+  <script>
+    window.plausible=window.plausible||function(){(plausible.q=plausible.q||[]).push(arguments)},plausible.init=plausible.init||function(i){plausible.o=i||{}};
+    plausible.init()
+  </script>
+  <!-- Plausible analytics: end -->
+  <script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "BlogPosting",
+  "headline": "Ling 3.0 Flash VL compared with budget vision models",
+  "description": "Ling 3.0 Flash VL scores 65 of 100 browser screenshots for $0.0054 on OpenRouter, compared with six budget Qwen vision models using the same images, prompt, and archived rubric.",
+  "author": {
+    "@type": "Person",
+    "name": "Emre Sokullu",
+    "url": "https://emresokullu.com"
+  },
+  "datePublished": "2026-10-07",
+  "image": "https://webbrain.one/og-image.png",
+  "publisher": {
+    "@type": "Organization",
+    "name": "WebBrain",
+    "logo": {
+      "@type": "ImageObject",
+      "url": "https://webbrain.one/logo-github.png"
+    }
+  },
+  "mainEntityOfPage": {
+    "@type": "WebPage",
+    "@id": "https://webbrain.one/blog/ling30-flash-vl-compared-with-budget-vision-models"
+  }
+}
+  </script>
+</head>
+<body>
+  <div class="glow-bg"></div>
+  <nav>
+    <div class="nav-inner">
+      <a href="/" class="nav-brand"><img class="brand-logo" src="/logo-github.png" alt="" aria-hidden="true"> WebBrain<span class="domain">.one</span></a>
+      <div class="nav-links">
+        <a href="/">Home</a>
+        <a href="/docs/">Docs</a>
+        <a href="/blog" aria-current="page">Blog</a>
+        <select class="lang-dropdown" id="lang-dropdown" aria-label="Select language" data-current="en"><option value="en">English</option><option value="es">Español</option><option value="fr">Français</option><option value="tr">Türkçe</option><option value="zh">中文</option><option value="ru">Русский</option><option value="uk">Українська</option><option value="ar">العربية</option><option value="ja">日本語</option><option value="ko">한국어</option><option value="id">Bahasa Indonesia</option><option value="th">ไทย</option><option value="ms">Bahasa Melayu</option><option value="tl">Filipino</option><option value="he">עברית</option></select>
+        <button class="theme-toggle" type="button" id="theme-toggle" aria-label="Toggle light / dark theme" title="Toggle light / dark theme">
+          <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <circle cx="12" cy="12" r="4"/>
+            <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/>
+          </svg>
+          <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+          </svg>
+        </button>
+        <a href="https://github.com/webbrain-one/webbrain" target="_blank" rel="noopener">GitHub</a>
+      </div>
+    </div>
+  </nav>
+
+  <article>
+    <div class="meta">October 7, 2026 &middot; 7 min read &middot; <a href="/blog">&larr; All posts</a></div>
+    <h1>Ling 3.0 Flash VL compared with budget vision models</h1>
+    <p class="lede"><strong>Ling 3.0 Flash VL completes our 100-screenshot browser-vision test with 65 strict passes, an 88.1% mean rubric score, and a reported bill of just $0.0054.</strong> Its 3.57-second mean latency falls between the two strongest budget Qwen vision references: 30B-A3B Instruct at 2.23 seconds and 32B Instruct at 4.61 seconds. Ling is the cheapest measured run in this comparison, but its output budget and response format need attention.</p>
+<h2 id="this-time-actual-screenshots">This time, actual screenshots</h2>
+<p>Our earlier <a href="/blog/ling30-flash-vl-vs-nex-n25-minimax-m3">Ling 3.0, Nex, and MiniMax comparison</a> tested text-only planner calls. Here Ling receives <strong>100 actual 1280×720 screenshots</strong> through <code>image_url</code>, without accessibility trees or extracted page text. The task is to describe the current viewport for WebBrain&#39;s planning agent. We do not ask it to choose tools or execute browser actions.</p>
+<p><a href="https://huggingface.co/inclusionAI/Ling-3.0-flash-VL" target="_blank" rel="noopener">inclusionAI&#39;s model card</a> describes a native image/video model with <strong>124B total parameters, 5.5B active per token</strong>, and up to 256K context. <a href="https://openrouter.ai/inclusionai/ling-3.0-flash-vl" target="_blank" rel="noopener">OpenRouter&#39;s route</a> supports visual inputs. The small active count concerns per-token compute; it does not make this a 5.5B model to load locally.</p>
+<p>We compare it with the six models in our <a href="/blog/qwen-budget-vision-openrouter">budget Qwen vision benchmark</a>. <strong>Only Ling is newly tested on October 7; the Qwen responses remain their August 22 runs.</strong> We reused the same images, production prompt, questions, and grader. The report checks every image hash, verifies the prompt/scorer/question/rubric bytes against the August Git revision, and reproduces all <strong>600 historical case scores exactly</strong>.</p>
+<p>Each request uses separate system and user messages, <strong>temperature 0</strong>, <strong>max_tokens 800</strong>, streaming usage, and the original <code>enable_thinking: false</code>, <code>think: false</code>, and <code>thinking: false</code> chat-template kwargs. The user text is fixed; case-specific focus questions are not sent. We retain provider auto-routing and use concurrency two. All 100 Ling responses came from <strong>Novita</strong>, without API errors or retries. A separate one-image preflight is archived but excluded from the ranking and 100-case bill.</p>
+<h2 id="seven-models-one-screenshot-contract">Seven models, one screenshot contract</h2>
+<p>The production prompt asks for six sections: page purpose, exact visible strings, input states, state signals, blockers, and unknowns. The original deterministic grader combines weighted fact checks with a proportional section-structure score. A strict pass reaches the case threshold and passes every critical check. <strong>Six complete sections are measured separately, rather than being an independent hard pass gate.</strong> These are rubric passes, not completed browser tasks or a human judgment of general visual intelligence.</p>
+<div class="table-wrap"><table><thead><tr><th>Model</th><th>Run date</th><th>Strict passes / 100</th><th>Mean rubric</th><th>Mean latency</th><th>Completion tokens</th><th>Reported cost / 100</th></tr></thead><tbody><tr><td>Qwen3-VL-32B Instruct</td><td>Aug 22</td><td><strong>69</strong></td><td><strong>91.9%</strong></td><td>4.61s</td><td>22.2K</td><td>$0.0216</td></tr><tr><td>Qwen3-VL-30B-A3B Instruct</td><td>Aug 22</td><td>68</td><td>91.3%</td><td>2.23s</td><td>17.1K</td><td>$0.0243</td></tr><tr><td>Qwen3.5-35B-A3B</td><td>Aug 22</td><td>67</td><td>90.8%</td><td>5.21s</td><td>55.4K</td><td>$0.0721</td></tr><tr><td>Ling 3.0 Flash VL</td><td>Oct 7</td><td>65</td><td>88.1%</td><td>3.57s</td><td>51.8K</td><td><strong>$0.0054</strong></td></tr><tr><td>Qwen3-VL-30B-A3B Thinking</td><td>Aug 22</td><td>62</td><td>88.9%</td><td>6.33s</td><td>68.5K</td><td>$0.1882</td></tr><tr><td>Qwen3-VL-8B Thinking</td><td>Aug 22</td><td>61</td><td>86.7%</td><td>6.37s</td><td>75.5K</td><td>$0.1799</td></tr><tr><td>Qwen3-VL-8B Instruct</td><td>Aug 22</td><td>48</td><td>84.0%</td><td><strong>2.12s</strong></td><td>14.9K</td><td>$0.0206</td></tr></tbody></table></div>
+<p>Ling finishes four passes behind 32B Instruct and three behind 30B-A3B Instruct, while beating both Qwen thinking variants on strict-pass count and mean latency. Against 32B, both models pass 58 screens; Ling alone passes seven and Qwen alone passes eleven. Against 30B-A3B Instruct, the corresponding counts are 58, seven, and ten. These small gaps come from one run per model and different serving dates; they do not establish a stable statistical ranking.</p>
+<p>The table uses <strong>actual summed <code>usage.cost</code></strong>, with 100 numeric cost records per model. Rechecking the historical files yields <strong>$0.07214 for Qwen3.5-35B-A3B</strong>, rather than the older post&#39;s $0.099, and <strong>$0.50678 for all six Qwen runs</strong>. This comparison uses those reproducible raw bills. Every latency in this table is a mean, not a median.</p>
+<h2 id="reasoning-survives-the-disabling-kwargs">Reasoning survives the disabling kwargs</h2>
+<p>Ling&#39;s bill covers <strong>120,800 prompt tokens</strong> and <strong>51,778 completion tokens</strong>, including <strong>33,885 reported reasoning tokens</strong>. All 100 responses report reasoning usage despite the request&#39;s thinking-disabling kwargs. We therefore cannot call this an effective non-thinking run. The model card documents <code>enable_thinking: false</code> for direct serving, but sending it through this route did not eliminate reported reasoning.</p>
+<p>The route returns <strong>22 responses with <code>finish_reason: &quot;length&quot;</code></strong>. That matters under an 800-token budget: the measured configuration sometimes fails to deliver the terse final description the planner expects. We did not raise the cap or change reasoning controls for Ling, because that would change the protocol relative to the saved Qwen runs. A separate run with verified reasoning control or a larger budget could measure another configuration; these results do not predict its score.</p>
+<p>Case <strong>046</strong> makes the distinction visible. The screenshot has an upload-failure toast reading “Upload failed” and “Network connection lost.” Ling identifies those strings inside a long analysis/drafting response, then hits the limit before producing the requested state-signals section. It scores <strong>33.3%</strong> and fails the critical toast checks. It saw the relevant evidence, but did not deliver it in the section checked by the grader.</p>
+<p>There is also a grader limitation. In <strong>case 021</strong>, Ling describes the page as “Sign-in page” and correctly lists the Atlas heading and controls. The archived purpose check accepts “sign in” or “login,” but not the hyphenated spelling, so it marks a critical failure. We leave the August rubric unchanged for every model and show this example so the score&#39;s literal matching is clear. It is not a direct measure of how often the model understands a login screen.</p>
+<p>The section parser finds all six numbered sections in <strong>98 responses</strong>; no output is empty. A numbered analysis can itself resemble that structure, so section coverage alone does not establish correct formatting. Scoring uses final <code>content</code>; the new raw streams preserve the separate reasoning evidence. Historical <code>reasoningChars: 0</code> fields reflect the old runner&#39;s stream-field convention, not proof that no reasoning occurred.</p>
+<h2 id="where-the-visual-results-differ">Where the visual results differ</h2>
+<p>Strict-pass rates by difficulty, with 20 screenshots in each band:</p>
+<div class="table-wrap"><table><thead><tr><th>Band</th><th>32B Inst</th><th>30B-A3B Inst</th><th>35B-A3B</th><th>Ling 3.0 VL</th><th>30B-A3B Think</th><th>8B Think</th><th>8B Inst</th></tr></thead><tbody><tr><td>Easy</td><td>70%</td><td>70%</td><td>80%</td><td>70%</td><td>65%</td><td>65%</td><td>60%</td></tr><tr><td>Basic</td><td>75%</td><td>80%</td><td>70%</td><td>70%</td><td>80%</td><td>70%</td><td>65%</td></tr><tr><td>Intermediate</td><td>80%</td><td>70%</td><td>60%</td><td>65%</td><td>65%</td><td>65%</td><td>50%</td></tr><tr><td>Advanced</td><td>65%</td><td>60%</td><td>70%</td><td>70%</td><td>50%</td><td>55%</td><td>35%</td></tr><tr><td>Challenging</td><td>55%</td><td>60%</td><td>55%</td><td>50%</td><td>50%</td><td>50%</td><td>30%</td></tr></tbody></table></div>
+<p>Ling holds up on advanced screens, then drops to ten passes on the challenging band. Categories reveal more specific strengths and weaknesses; each has only five cases, so one result changes the rate by twenty points.</p>
+<div class="table-wrap"><table><thead><tr><th>Category</th><th>Ling passes / 5</th><th>Best individual Qwen passes / 5</th></tr></thead><tbody><tr><td>Multilingual OCR</td><td><strong>3</strong></td><td>2</td></tr><tr><td>Calendar</td><td>5</td><td>5</td></tr><tr><td>Chart reading</td><td>5</td><td>5</td></tr><tr><td>Form validation</td><td>1</td><td>1</td></tr><tr><td>Modal overlays</td><td>0</td><td>1</td></tr><tr><td>Consent banners</td><td>2</td><td>5</td></tr><tr><td>Occlusion and contrast</td><td>2</td><td>5</td></tr></tbody></table></div>
+<p>Multilingual OCR is Ling&#39;s clearest category advantage in this small corpus. It matches the perfect calendar, chart, table, and kanban results, but does not resolve the budget tier&#39;s common overlay and validation failures. <strong>All eighteen screenshots that failed for every Qwen model also fail for Ling.</strong> Its seven unique passes against either leading Qwen reference occur elsewhere; adding Ling does not remove that shared failure set.</p>
+<h2 id="very-cheap-with-a-configuration-question">Very cheap, with a configuration question</h2>
+<p>All Ling responses use Novita&#39;s captured October 7 promotional rates: <strong>$0.021/M input, $0.0616/M output, and $0.0042/M cached input</strong>, advertised as a 72% discount. Usage reports <strong>20,480 cached prompt tokens</strong>, or <strong>17.0%</strong> of the prompt total. The observed bill therefore reflects both the promotion and this cache state. It is not a future price guarantee or an uncached speed test.</p>
+<p>At the measured bill, 1,000 equivalent screenshots would cost about <strong>$0.054</strong>, assuming the same token usage, rates, and cache conditions. That is roughly four times cheaper than the saved 32B Instruct run and 4.5 times cheaper than 30B-A3B Instruct. Ling&#39;s successful requests have a <strong>3.46-second median</strong> and <strong>4.88-second p95</strong>, while the full table retains means for comparability.</p>
+<p>For this exact production contract, Qwen3-VL-30B-A3B Instruct retains the better measured combination of strict passes and latency. Ling offers a substantially lower bill with competitive passes, but needs explicit attention to reasoning control, clipping, and output validation. Its low price makes that follow-up worthwhile; the current run already establishes a useful budget vision result without claiming the serving configuration is optimal.</p>
+<h2 id="raw-results-and-reproduction">Raw results and reproduction</h2>
+<p>The <a href="https://github.com/webbrain-one/webbrain/tree/main/test/vision/results/2026-10-07-openrouter-ling30-budget_inclusionai_ling-3.0-flash-vl_production" target="_blank" rel="noopener">100 raw Ling cases and summary</a> include final text, complete raw SSE streams, usage, provider, finish reason, latency, prompt metadata, and image hashes. The <a href="https://github.com/webbrain-one/webbrain/tree/main/test/vision/results/2026-10-07-openrouter-ling30-budget-preflight_inclusionai_ling-3.0-flash-vl_production" target="_blank" rel="noopener">separate preflight</a> is also committed. Screenshots remain in the shared corpus; credentials and authorization headers are absent.</p>
+<p>The <a href="https://github.com/webbrain-one/webbrain/tree/main/test/vision/analysis/2026-10-07-ling30-budget" target="_blank" rel="noopener">comparison and audit artifacts</a> contain all seven rows, case-level pass differences, archived rubrics, fixture/source hashes, endpoint metadata, and the historical regression check. The unchanged grader is applied to all 700 scored screenshots.</p>
+<pre><code class="language-powershell">node test/vision/report-ling30-budget.mjs
+npm run test:vision:validate
+node scripts/build-blog.mjs</code></pre>
+<p>For a new live run, set <code>VISION_PROBE_KEY</code> in the process environment and choose a fresh tag so the committed responses remain intact:</p>
+<pre><code class="language-powershell">node test/vision/run.mjs --base https://openrouter.ai/api/v1 --model inclusionai/ling-3.0-flash-vl --concurrency 2 --tag your-new-run</code></pre>
+<p>Tags: #Ling30FlashVL #inclusionAI #Qwen3VL #BudgetVision #OpenRouter #BrowserAgent #WebBrain</p>
+
+    <div class="author-box">
+      Written by <a href="https://emresokullu.com" target="_blank" rel="noopener">Emre Sokullu</a>. WebBrain 33.0.0 and later is GPL-3.0-or-later and open on <a href="https://github.com/webbrain-one/webbrain" target="_blank" rel="noopener">GitHub</a>.
+    </div>
+  </article>
+
+  <footer>
+    <div>&copy; 2026 WebBrain &middot; <a href="/privacy">Privacy</a></div>
+    <div><a href="https://github.com/webbrain-one/webbrain" target="_blank" rel="noopener">GitHub</a></div>
+  </footer>
+  <script>
+    (function () {
+      const btn = document.getElementById('theme-toggle');
+      if (!btn) return;
+      const root = document.documentElement;
+
+      function setTheme(theme, persist) {
+        root.setAttribute('data-theme', theme);
+        if (persist) {
+          try { localStorage.setItem('webbrain-theme', theme); } catch (_) {}
+        }
+      }
+
+      btn.addEventListener('click', function () {
+        const next = root.getAttribute('data-theme') === 'light' ? 'dark' : 'light';
+        setTheme(next, true);
+      });
+
+      const mq = window.matchMedia('(prefers-color-scheme: light)');
+      function onMQ(e) {
+        try {
+          if (localStorage.getItem('webbrain-theme')) return;
+        } catch (_) {}
+        setTheme(e.matches ? 'light' : 'dark', false);
+      }
+      if (typeof mq.addEventListener === 'function') mq.addEventListener('change', onMQ);
+      else if (typeof mq.addListener === 'function') mq.addListener(onMQ);
+    })();
+  </script>
+  <script>
+    (function () {
+      const LOCALES = ["en","es","fr","tr","zh","ru","uk","ar","ja","ko","id","th","ms","tl","he"];
+      const sel = document.getElementById('lang-dropdown');
+      if (!sel) return;
+      sel.value = sel.dataset.current || 'en';
+      sel.addEventListener('change', function () {
+        const target = sel.value;
+        if (!LOCALES.includes(target)) return;
+        window.location.href = target === 'en' ? '/' : '/' + target + '/';
+      });
+    })();
+  </script>
+</body>
+</html>
