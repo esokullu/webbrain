@@ -224,6 +224,24 @@ for (const build of ['chrome', 'firefox']) {
     assert.equal(agent._pageFeedbackRuns.size, 0);
   });
 
+  test(`${build}: detached-frame gestures release the idle gate after their lease expires`, async () => {
+    const agent = setup(Agent), tab = nextTab++;
+    agent._pageFeedbackGestureLeaseMs = 20;
+    await agent._claimRunEntry(tab, 'interactive');
+    try {
+      const child = bind(agent, tab, 2, 'detached-child', 'detached-token');
+      assert.equal(child.send({ kind: 'activity', interacting: true }).accepted, true);
+      const run = agent._pageFeedbackRuns.get(tab);
+      assert.equal(run.gestures.has(2), true);
+      // Removing a frame does not always produce a committed navigation or a
+      // final interacting:false message from the destroyed document.
+      run.frames.delete(2); run.documents.delete(2);
+      await agent._waitForPageFeedbackIdle(tab);
+      assert.equal(run.gestures.has(2), false);
+      assert.equal(run.gestureLeases.has(2), false);
+    } finally { agent._releaseRunEntry(tab); }
+  });
+
   test(`${build}: run startup awaits every accessible frame and cleanup stops all of them`, async () => {
     const agent = setup(Agent), tab = nextTab++, entered = deferred(), release = deferred();
     const states = new Map([[0, false], [2, false]]);

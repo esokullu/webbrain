@@ -895,6 +895,46 @@ for (const [build, engine] of [['chrome', chromium], ['firefox', firefox]]) {
     } finally { await browser.close(); }
   });
 
+  if (build === 'chrome') test('Chrome iframe fallback validates a stale target before scrolling it', async () => {
+    const { browser, page } = await fixture(chromium, 'chrome');
+    try {
+      const source = read('chrome', 'agent/agent.js');
+      const marker = 'func: (sel, matchIndex, monitorGuard) => {';
+      const start = source.indexOf(marker);
+      const endMarker = '\n          },\n          args: [selector, requestedMatchIndex, dispatchGuard],';
+      const end = source.indexOf(endMarker, start);
+      assert.ok(start >= 0 && end > start, 'Find the content-script-unavailable iframe click fallback');
+      const declaration = source.slice(start + 'func: '.length, end + '\n          }'.length);
+      await page.evaluate(code => { window.__iframeFallback = eval(`(${code})`); }, declaration);
+      await page.evaluate(() => {
+        const old = document.createElement('button'); old.id = 'stale-iframe-target'; old.textContent = 'Old target';
+        document.body.append(old);
+      });
+      await page.waitForTimeout(150);
+      const guard = await page.evaluate(() => {
+        feedback = [];
+        deliver('page_monitor_prepare', { operationId: 'stale-iframe-click', tool: 'click', selector: '#stale-iframe-target' });
+        deliver('page_monitor_dispatch', { operationId: 'stale-iframe-click', kind: 'click',
+          selector: '#stale-iframe-target', fenceOnly: true });
+        return lastMonitorResponse.guard;
+      });
+      assert.equal(guard.operationId, 'stale-iframe-click');
+      const outcome = await page.evaluate(monitorGuard => {
+        document.getElementById('stale-iframe-target').remove();
+        const replacement = document.createElement('button');
+        replacement.id = 'stale-iframe-target'; replacement.textContent = 'Replacement';
+        window.scrollAttempts = 0;
+        replacement.scrollIntoView = () => { window.scrollAttempts++; };
+        document.body.append(replacement);
+        const result = window.__iframeFallback('#stale-iframe-target', 0, monitorGuard);
+        return { scrollAttempts: window.scrollAttempts, result };
+      }, guard);
+      assert.equal(outcome.scrollAttempts, 0, 'A replacement must be rejected before it can trigger page scrolling');
+      assert.equal(outcome.result.dispatched, false);
+      assert.match(outcome.result.error, /changed during action preparation/i);
+    } finally { await browser.close(); }
+  });
+
   test(`${build}: large ancestor style changes stop descendant sampling at its cap`, async () => {
     const { browser, page } = await fixture(engine, build);
     try {

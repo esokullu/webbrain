@@ -1,10 +1,35 @@
 /** Run-owned browser observations. Keep the Firefox copy byte-identical. */
 export const PAGE_FEEDBACK_IDLE_MS = 1000;
 const EVENT_LIMIT = 32;
+const PAGE_GESTURE_LEASE_MS = 15000;
 const dispatchOwners = new Map();
 const clean = (value, limit = 240) => String(value ?? '').replace(/[\u0000-\u001f]/g, ' ').slice(0, limit);
 const token = () => globalThis.crypto.randomUUID();
 const apiFor = () => globalThis.browser || globalThis.chrome;
+
+function clearGestureLease(run, frameId) {
+  const lease = run.gestureLeases?.get(frameId);
+  if (lease) clearTimeout(lease.timer);
+  run.gestureLeases?.delete(frameId);
+  run.gestures.delete(frameId);
+}
+
+function clearGestureLeases(run) {
+  for (const frameId of run.gestureLeases?.keys() || []) clearGestureLease(run, frameId);
+  run.gestures.clear();
+}
+
+function renewGestureLease(run, frameId, duration) {
+  clearGestureLease(run, frameId);
+  const lease = { timer: null };
+  run.gestures.add(frameId);
+  run.gestureLeases.set(frameId, lease);
+  lease.timer = setTimeout(() => {
+    if (run.gestureLeases.get(frameId) !== lease) return;
+    run.gestureLeases.delete(frameId);
+    run.gestures.delete(frameId);
+  }, duration);
+}
 
 async function notifyPageMonitorFrames(api, tabId, message, knownFrames = [], onFrame = null) {
   if (!api?.tabs?.sendMessage) return;
@@ -124,7 +149,8 @@ export const pageFeedbackMethods = {
   async _beginPageFeedbackRun(tabId, kind) {
     this._pageFeedbackRuns ??= new Map();
     const run = { token: token(), kind, events: new Map(), frames: new Map(), documents: new Map(),
-      revision: 0, lastUserAt: 0, lastActivityAt: 0, gestures: new Set(), navigation: null, url: '', onUpdate: null };
+      revision: 0, lastUserAt: 0, lastActivityAt: 0, gestures: new Set(), gestureLeases: new Map(),
+      navigation: null, url: '', onUpdate: null };
     this._pageFeedbackRuns.set(tabId, run);
     dispatchOwners.set(tabId, { runToken: run.token, operationId: '', operationFrames: new Map(),
       pending: () => this._hasPendingPageFeedback(tabId),
@@ -172,6 +198,7 @@ export const pageFeedbackMethods = {
       id: `${run.token}:${run.revision}`, kinds: ['navigation'], source: navigation.source,
       navigation: true, before: navigation.before, after: navigation.after,
     }); } catch { /* UI delivery cannot retain run ownership. */ }
+    clearGestureLeases(run);
     this._pageFeedbackRuns.delete(tabId);
     if (dispatchOwners.get(tabId)?.runToken === run.token) dispatchOwners.delete(tabId);
     void notifyPageMonitorFrames(apiFor(), tabId, { target: 'content', action: 'page_monitor_state',
@@ -188,7 +215,7 @@ export const pageFeedbackMethods = {
     if (document?.id && sender.documentId !== document.id) return { active: false };
     if (document && !document.id && document.url && sender.url?.split('#')[0] !== document.url.split('#')[0]) return { active: false };
     const previous = run.frames.get(frameId);
-    if (previous && previous.token !== documentToken) run.gestures.delete(frameId);
+    if (previous && previous.token !== documentToken) clearGestureLease(run, frameId);
     if (!previous || previous.token !== documentToken) {
       run.frames.set(frameId, { token: documentToken, id: sender.documentId || '', seq: 0,
         name: clean(frameName, 256) });
@@ -256,8 +283,9 @@ export const pageFeedbackMethods = {
     if (feedback.source === 'user') {
       // DOM callbacks describe consequences; only physical activity extends the idle gate.
       if (feedback.kind !== 'dom') run.lastUserAt = Date.now();
-      if (feedback.interacting === true) run.gestures.add(frameId);
-      else if (feedback.interacting === false) run.gestures.delete(frameId);
+      if (feedback.interacting === true) renewGestureLease(run, frameId,
+        Math.max(1, Number(this._pageFeedbackGestureLeaseMs) || PAGE_GESTURE_LEASE_MS));
+      else if (feedback.interacting === false) clearGestureLease(run, frameId);
       // A physical interaction supersedes an expected agent navigation.
       run.navigation = null;
     }
@@ -273,11 +301,11 @@ export const pageFeedbackMethods = {
     const frameId = Number(details.frameId) || 0;
     if (type === 'committed') {
       run.frames.delete(frameId);
-      run.gestures.delete(frameId);
+      clearGestureLease(run, frameId);
       run.documents.set(frameId, { id: details.documentId || '', url: details.url || '',
         parentFrameId: Number.isSafeInteger(details.parentFrameId) ? details.parentFrameId : undefined });
       if (frameId === 0) {
-        run.frames.clear(); run.gestures.clear(); run.documents.clear();
+        run.frames.clear(); clearGestureLeases(run); run.documents.clear();
         run.documents.set(0, { id: details.documentId || '', url: details.url || '', parentFrameId: -1 });
       }
     }

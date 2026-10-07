@@ -38187,11 +38187,6 @@ If the user has already named or confirmed this exact recipient, do NOT ask agai
             try {
               const el = document.querySelectorAll(sel)[matchIndex];
               if (!el) return { ok: false, url: location.href, reason: 'not-found-after-census' };
-              if (el.tagName !== 'SELECT') el.scrollIntoView({ block: 'center', inline: 'center' });
-              const rect = el.getBoundingClientRect();
-              const cx = rect.left + rect.width / 2;
-              const cy = rect.top + rect.height / 2;
-              const opts = { bubbles: true, cancelable: true, view: window, clientX: cx, clientY: cy, button: 0 };
               if (monitorGuard?.operationId) {
                 if (typeof window.__wbPageMonitor?.activatePreparedDispatch !== 'function') {
                   return { ok: false, url: location.href, reason: 'page-monitor-unavailable' };
@@ -38200,6 +38195,18 @@ If the user has already named or confirmed this exact recipient, do NOT ask agai
                   operationId: monitorGuard.operationId, kind: 'click', element: el, navigationCandidate: true,
                 });
               }
+              if (el.tagName !== 'SELECT') {
+                const scroll = () => el.scrollIntoView({ block: 'center', inline: 'center' });
+                if (monitorGuard?.operationId && window.__wbPageMonitor?.withPreparedDispatch)
+                  window.__wbPageMonitor.withPreparedDispatch(monitorGuard.operationId, scroll);
+                else scroll();
+              }
+              if (!el.isConnected || document.querySelectorAll(sel)[matchIndex] !== el)
+                return { ok: false, url: location.href, reason: 'target-changed-after-scroll' };
+              const rect = el.getBoundingClientRect();
+              const cx = rect.left + rect.width / 2;
+              const cy = rect.top + rect.height / 2;
+              const opts = { bubbles: true, cancelable: true, view: window, clientX: cx, clientY: cy, button: 0 };
               const dispatch = () => {
                 targetDispatched = true;
                 try { el.dispatchEvent(new PointerEvent('pointerdown', opts)); } catch (e) {}
