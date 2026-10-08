@@ -70398,7 +70398,7 @@ function makeProviderManagerWriteRuntime(writes) {
   };
 }
 
-test('ProviderManager creates one blank independent duplicate per provider', async () => {
+test('ProviderManager creates unlimited blank independent duplicates per provider', async () => {
   const originalChrome = globalThis.chrome;
   const originalBrowser = globalThis.browser;
 
@@ -70467,24 +70467,69 @@ test('ProviderManager creates one blank independent duplicate per provider', asy
       const surfacedIds = Object.keys(surfaced);
       assert.equal(surfacedIds.indexOf(created.providerId), surfacedIds.indexOf('openai') + 1, `${label}: duplicate should appear immediately after its source`);
       assert.equal(surfaced.openai.hasDuplicate, true, `${label}: source should advertise its existing duplicate`);
-      assert.equal(surfaced.openai.canDuplicate, false, `${label}: source should enforce the one-duplicate limit in UI metadata`);
+      assert.equal(surfaced.openai.canDuplicate, true, `${label}: source should allow more duplicates`);
       assert.equal(surfaced[created.providerId].isDuplicate, true, `${label}: duplicate metadata missing`);
       assert.equal(surfaced[created.providerId].sourceProviderId, 'openai', `${label}: duplicate source metadata missing`);
-      assert.equal(surfaced[created.providerId].canDuplicate, false, `${label}: duplicates must not be duplicable`);
+      assert.equal(surfaced[created.providerId].canDuplicate, true, `${label}: saved duplicates should support further duplication`);
 
-      await assert.rejects(
-        () => manager.duplicateProvider('openai'),
-        /already has a duplicate/i,
-        `${label}: a second duplicate should be rejected`,
-      );
-      await assert.rejects(
-        () => manager.duplicateProvider(created.providerId),
-        /cannot be duplicated/i,
-        `${label}: duplicating a duplicate should be rejected`,
-      );
       assert.equal(writes.length, 2, `${label}: create and independent update should each persist once`);
       assert.equal(writes.at(-1)?.providers?.openai?.apiKey, `${label}-work-key`);
       assert.equal(writes.at(-1)?.providers?.[created.providerId]?.apiKey, `${label}-personal-key`);
+      const second = await manager.duplicateProvider('openai');
+      assert.equal(second.providerId, 'openai__duplicate_2');
+      assert.equal(manager.providers.get(second.providerId)?.config.label, 'OpenAI 3');
+      await assert.rejects(() => manager.duplicateProvider(second.providerId), /save provider before duplicating/i);
+      const third = await manager.duplicateProvider(created.providerId);
+      assert.deepEqual(third, { providerId: 'openai__duplicate_3', sourceProviderId: 'openai' });
+      assert.equal(manager.providers.get(third.providerId)?.config.duplicateOf, 'openai');
+      assert.equal(manager.providers.get(third.providerId)?.config.apiKey, undefined);
+      const additional = [];
+      for (let i = 0; i < 10; i++) additional.push((await manager.duplicateProvider('openai')).providerId);
+      const ids = Object.keys(manager.getAll());
+      assert.deepEqual(ids.slice(ids.indexOf('openai') + 1, ids.indexOf('kimi')),
+        [created.providerId, second.providerId, third.providerId, ...additional]);
+      await manager.removeDuplicateProvider(second.providerId);
+      assert.equal(manager.providers.has(third.providerId), true);
+      assert.equal(manager.providers.get(created.providerId)?.config.apiKey, `${label}-personal-key`);
+      assert.equal((await manager.duplicateProvider('openai')).providerId, second.providerId);
+    }
+  } finally {
+    globalThis.chrome = originalChrome;
+    globalThis.browser = originalBrowser;
+  }
+});
+
+test('ProviderManager saves custom titles independently without changing provider identity', async () => {
+  const originalChrome = globalThis.chrome;
+  const originalBrowser = globalThis.browser;
+  try {
+    for (const [label, PM, runtimeKey] of [
+      ['chrome', ProviderManagerCh, 'chrome'],
+      ['firefox', ProviderManagerFx, 'browser'],
+    ]) {
+      const writes = [];
+      globalThis[runtimeKey] = makeProviderManagerWriteRuntime(writes);
+      const manager = new PM();
+      const defaults = manager._defaultConfigs();
+      manager.providers.set('llamacpp', manager._createProvider('llamacpp', {
+        ...defaults.llamacpp, model: 'qwen', configured: true,
+      }));
+      manager.activeProviderId = 'llamacpp';
+      await manager.updateProvider('llamacpp', { label: '  strata (flash next)  ' });
+      const duplicate = await manager.duplicateProvider('llamacpp');
+      await manager.updateProvider(duplicate.providerId, { label: '<Personal & local>', baseUrl: 'http://localhost:8081', model: 'flash-next' });
+      assert.equal(manager.getAll().llamacpp.label, 'strata (flash next)');
+      assert.equal(manager.getAll()[duplicate.providerId].label, '<Personal & local>');
+      assert.equal(manager.activeProviderId, 'llamacpp');
+      assert.equal(manager.providers.get('llamacpp')?.config.type, 'llamacpp');
+      assert.equal(manager.providers.get('llamacpp')?.config.model, 'qwen');
+      assert.equal(manager.getAll()[duplicate.providerId].sourceProviderId, 'llamacpp');
+      assert.equal(writes.at(-1).providers.llamacpp.label, 'strata (flash next)');
+      assert.equal(writes.at(-1).providers[duplicate.providerId].label, '<Personal & local>');
+      for (const invalid of ['', '   ', 'x'.repeat(121), null, {}]) {
+        await assert.rejects(() => manager.updateProvider('llamacpp', { label: invalid }), /provider title/i);
+      }
+      assert.equal(manager.getAll().llamacpp.label, 'strata (flash next)');
     }
   } finally {
     globalThis.chrome = originalChrome;
@@ -70530,7 +70575,7 @@ test('ProviderManager removes only duplicates and safely reselects their source'
       assert.equal(writes.at(-1)?.activeProvider, 'openai', `${label}: fallback selection was not persisted atomically`);
 
       const recreated = await manager.duplicateProvider('openai');
-      assert.equal(recreated.providerId, providerId, `${label}: removing a duplicate should release the one-duplicate limit`);
+      assert.equal(recreated.providerId, providerId, `${label}: removing a duplicate should release its ID`);
 
       await assert.rejects(
         () => manager.duplicateProvider('webbrain_cloud'),
@@ -70627,7 +70672,7 @@ test('duplicated local providers retain their source-native model and vision beh
   }
 });
 
-test('ProviderManager reloads one valid duplicate and purges forged duplicate entries', async () => {
+test('ProviderManager reloads multiple named duplicates and purges forged duplicate entries', async () => {
   const originalChrome = globalThis.chrome;
   const originalBrowser = globalThis.browser;
   const validGuid = '11111111-1111-4111-8111-111111111111';
@@ -70661,6 +70706,7 @@ test('ProviderManager reloads one valid duplicate and purges forged duplicate en
       const defaults = new PM()._defaultConfigs();
       const source = {
         ...defaults.openai,
+        label: 'Work account',
         apiKey: `${label}-work-key`,
         configured: true,
       };
@@ -70676,7 +70722,13 @@ test('ProviderManager reloads one valid duplicate and purges forged duplicate en
         providers: {
           openai: source,
           openai__duplicate: validDuplicate,
-          openai__duplicate_2: { ...validDuplicate },
+          openai__duplicate_2: { ...validDuplicate, label: 'Personal account' },
+          openai__duplicate_3: { ...validDuplicate, configured: false, label: 'New endpoint' },
+          openai__duplicate_0: { ...validDuplicate },
+          openai__duplicate_02: { ...validDuplicate },
+          openai__duplicate_bad: { ...validDuplicate },
+          openai__duplicate__duplicate: { ...validDuplicate, duplicateOf: 'openai__duplicate' },
+          openai__duplicate_4: { ...validDuplicate, type: 'anthropic' },
           missing__duplicate: { ...validDuplicate, duplicateOf: 'missing' },
           webbrain_cloud__duplicate: {
             ...structuredClone(defaults.webbrain_cloud),
@@ -70702,14 +70754,20 @@ test('ProviderManager reloads one valid duplicate and purges forged duplicate en
       await manager.load();
       assert.equal(manager.activeProviderId, 'openai__duplicate', `${label}: a valid selected duplicate should survive reload`);
       assert.equal(manager.providers.get('openai__duplicate')?.config.apiKey, `${label}-personal-key`);
-      assert.equal(manager.providers.has('openai__duplicate_2'), false, `${label}: forged second duplicate should be rejected`);
+      assert.equal(manager.providers.get('openai')?.config.label, 'Work account');
+      assert.equal(manager.getAll().openai__duplicate_2?.label, 'Personal account');
+      assert.equal(manager.providers.get('openai__duplicate_3')?.config.configured, false);
+      for (const invalidId of ['openai__duplicate_0', 'openai__duplicate_02', 'openai__duplicate_bad', 'openai__duplicate__duplicate', 'openai__duplicate_4']) {
+        assert.equal(manager.providers.has(invalidId), false, `${label}: invalid duplicate ${invalidId} should be rejected`);
+        assert.equal(storageData.providers[invalidId], undefined);
+      }
       assert.equal(manager.providers.has('missing__duplicate'), false, `${label}: orphan duplicate should be rejected`);
       assert.equal(manager.providers.has('webbrain_cloud__duplicate'), false, `${label}: managed cloud duplicate should be rejected`);
       assert.equal(manager.providers.has('kimi__duplicate'), false, `${label}: duplicate created before its source was saved should be rejected`);
       assert.equal(manager.providers.has('groq'), true, `${label}: forged metadata must not delete a built-in provider`);
       assert.equal(manager.providers.get('groq')?.config.duplicateOf, undefined, `${label}: forged duplicate metadata should be stripped from built-ins`);
       assert.equal(storageData.providers.openai__duplicate?.apiKey, `${label}-personal-key`, `${label}: valid duplicate was not persisted`);
-      assert.equal(storageData.providers.openai__duplicate_2, undefined, `${label}: forged duplicate was not purged from storage`);
+      assert.equal(storageData.providers.openai__duplicate_2?.label, 'Personal account', `${label}: additional duplicate title should survive reload`);
       assert.equal(storageData.providers.missing__duplicate, undefined, `${label}: orphan duplicate was not purged from storage`);
       assert.equal(storageData.providers.webbrain_cloud__duplicate, undefined, `${label}: managed duplicate was not purged from storage`);
       assert.equal(storageData.providers.kimi__duplicate, undefined, `${label}: pre-Save duplicate was not purged from storage`);
@@ -70734,8 +70792,8 @@ test('duplicate provider controls are wired through background and settings in b
     assert.match(settings, /const definitionId = providerDefinitionId\(id, config\);[\s\S]*?providerConfigs\[definitionId\]/, `${label}: duplicate cards should reuse source fields`);
     assert.match(settings, /class="btn-secondary btn-duplicate"[\s\S]*?st\.providers\.duplicate/, `${label}: duplicate button missing`);
     assert.match(settings, /class="btn-secondary btn-remove-duplicate"[\s\S]*?st\.providers\.remove_duplicate/, `${label}: remove duplicate button missing`);
-    assert.match(settings, /config\.hasDuplicate[\s\S]*?st\.providers\.duplicate_limit[\s\S]*?st\.providers\.duplicate_unavailable/, `${label}: disabled duplicate buttons should explain limits and unsupported providers`);
-    assert.match(settings, /const duplicateDisabledKey = config\.hasDuplicate[\s\S]*?!config\.canDuplicate[\s\S]*?!isConfigured \|\| dirtyProviderIds\.has\(id\)[\s\S]*?'st\.providers\.duplicate_inactive'/, `${label}: an inactive or edited source provider should disable Duplicate`);
+    assert.match(settings, /const duplicateDisabledKey = !config\.canDuplicate[\s\S]*?st\.providers\.duplicate_unavailable[\s\S]*?!isConfigured \|\| dirtyProviderIds\.has\(id\)[\s\S]*?'st\.providers\.duplicate_inactive'/, `${label}: unsupported, inactive or edited providers should disable Duplicate`);
+    assert.doesNotMatch(settings, /st\.providers\.duplicate_limit/, `${label}: settings must not enforce the old duplicate cap`);
     assert.ok(settings.includes('${duplicateDisabledKey ? ` disabled title="'), `${label}: unavailable Duplicate actions should use native disabled buttons`);
     assert.match(settings, /document\.querySelectorAll\('\.btn-duplicate'\)[\s\S]*?duplicateProvider\(btn\.dataset\.provider\)/, `${label}: initially disabled Duplicate buttons should be ready after Save enables them`);
     assert.match(settings, /input\[data-provider\], select\[data-provider\], textarea\[data-provider\][\s\S]*?markProviderDirty\(input\.dataset\.provider\)/, `${label}: editing a saved provider should disable Duplicate until Save`);
@@ -128613,7 +128671,7 @@ test('Settings limits the subscription proxy guide to relevant provider cards', 
     }
     assert.match(settings, /if \(definitionId === 'local_openai_proxy'\)[\s\S]*?provider-local-proxy-guide/,
       `${label}: the generic local proxy card should have permanent guide context`);
-    assert.match(settings, /const subscriptionGuide = providerSubscriptionGuideHtml\(definitionId\);[\s\S]*?const body = `\s*\$\{subscriptionGuide\}\s*\$\{fieldsHTML\}/,
+    assert.match(settings, /const subscriptionGuide = providerSubscriptionGuideHtml\(definitionId\);[\s\S]*?const body = `\s*\$\{subscriptionGuide\}[\s\S]*?\$\{fieldsHTML\}/,
       `${label}: contextual guidance should appear before API-key fields and work for duplicates`);
     assert.equal((settings.match(/provider-subscription-guide-icon/g) || []).length, 2,
       `${label}: cloud-account and local-proxy guide branches should both include the decorative plug`);

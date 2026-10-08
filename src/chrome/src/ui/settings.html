@@ -300,6 +300,7 @@
     .provider-card.collapsed .provider-header { margin-bottom: 0; }
 
     .provider-card .btn-duplicate:disabled { cursor: not-allowed; opacity: 0.48; transform: none; }
+    .provider-card .btn-row { flex-wrap: wrap; }
     .provider-header {
       display: flex;
       align-items: center;
@@ -310,6 +311,7 @@
     .provider-header-clickable:hover .provider-name { color: var(--accent); }
     .provider-header-left {
       display: flex;
+      min-width: 0;
       align-items: center;
       gap: 8px;
       flex-wrap: wrap;
@@ -468,7 +470,7 @@
       .vision-local-option { grid-template-columns: 42px minmax(0, 1fr); }
       .vision-local-action { grid-column: 2; justify-self: start; }
     }
-    .provider-name { font-weight: 600; font-size: 14px; }
+    .provider-name { font-weight: 600; font-size: 14px; overflow-wrap: anywhere; max-width: 100%; }
     .provider-type { color: var(--text2); font-size: 11px; }
     .provider-status-badges { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
     .provider-status-badge {

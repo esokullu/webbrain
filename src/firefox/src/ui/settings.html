@@ -311,6 +311,7 @@
     .provider-header-clickable:hover .provider-name { color: var(--accent); }
     .provider-header-left {
       display: flex;
+      min-width: 0;
       align-items: center;
       gap: 8px;
       flex-wrap: wrap;
@@ -384,7 +385,7 @@
       height: 16px;
       padding: 1px;
     }
-    .provider-name { font-weight: 600; font-size: 14px; }
+    .provider-name { font-weight: 600; font-size: 14px; overflow-wrap: anywhere; max-width: 100%; }
     .provider-type { color: var(--text2); font-size: 11px; }
     .provider-status-badges { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
     .provider-status-badge {
@@ -1274,6 +1275,7 @@
     .btn-sign-in:hover { background: var(--accent2); }
     .btn-sign-in:disabled { opacity: 0.55; cursor: default; transform: none; }
     .provider-card .btn-duplicate:disabled { cursor: not-allowed; opacity: 0.48; transform: none; }
+    .provider-card .btn-row { flex-wrap: wrap; }
     .btn-sign-out {
       background: var(--bg3);
       color: var(--text);

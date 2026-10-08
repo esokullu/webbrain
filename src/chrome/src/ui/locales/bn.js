@@ -6,6 +6,7 @@ import { getApocalypseModeCopy } from './apocalypse-copy.mjs';
 import { getEmergencyBoxCopy } from './emergency-copy.mjs';
 
 export default {
+  'st.providers.title': 'প্রদানকারীর নাম',
   ...getGenerativeMediaCopy('bn'),
   ...bidiCopy,
   ...cloudBridgeCopy,

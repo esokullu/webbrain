@@ -599,13 +599,22 @@ state and is separate from `activeProvider`, which is the provider currently
 configured. Connection tests report reachability but do not control the Active
 flag.
 
-Settings can create one independent duplicate of each configurable endpoint
-provider. A duplicate is stored as a normal provider entry with the stable ID
-`<source>__duplicate` and a `duplicateOf` reference to the source definition,
+Settings can rename configurable providers using **Provider title** and Save.
+The persisted `label` appears in Settings and the chat provider picker without
+changing the provider's ID, implementation, or model.
+
+Settings can create any number of independent duplicates of each configurable
+endpoint provider, including from a saved duplicate. The first duplicate keeps
+the existing ID `<source>__duplicate`; subsequent instances use
+`<source>__duplicate_2`, `<source>__duplicate_3`, and so on. Each stores a
+`duplicateOf` reference to the original source definition,
 so credentials, models, endpoint URLs, compatibility options, export/import,
 and active-provider selection continue to use the existing provider schema.
-The manager rejects duplicate-of-duplicate, second, orphaned, type-mismatched,
-and forged duplicate entries when loading storage. WebBrain Compass and the
+New instances start with blank credentials, endpoint, model, and overrides,
+and must be saved before selection or further duplication. Duplicates stay
+grouped after their source; deleting one leaves the other instances intact.
+The manager rejects nested, orphaned, type-mismatched, and malformed duplicate
+entries when loading storage. WebBrain Compass and the
 Chromium-only WebGPU runtime are not duplicable because they do not represent
 independent user-managed API credentials or endpoints; their cards keep the
 Duplicate affordance disabled with an explanatory tooltip.

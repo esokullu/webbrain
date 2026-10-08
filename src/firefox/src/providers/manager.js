@@ -1120,12 +1120,21 @@ export class ProviderManager {
     return String(config?.duplicateOf || id || '');
   }
 
-  _duplicateProviderId(id) {
-    return `${id}${DUPLICATE_PROVIDER_SUFFIX}`;
+  _duplicateProviderId(id, number = 1) {
+    return `${id}${DUPLICATE_PROVIDER_SUFFIX}${number === 1 ? '' : `_${number}`}`;
+  }
+
+  _duplicateProviderNumber(id, sourceId) {
+    const prefix = this._duplicateProviderId(sourceId);
+    if (id === prefix) return 1;
+    if (!id.startsWith(`${prefix}_`)) return 0;
+    const suffix = id.slice(prefix.length + 1);
+    const number = Number(suffix);
+    return Number.isSafeInteger(number) && number >= 2 && String(number) === suffix ? number : 0;
   }
 
   _canDuplicateProvider(id, config = this.providers.get(id)?.config) {
-    return !!config && !config.duplicateOf && id !== WEBBRAIN_CLOUD_PROVIDER_ID && config.type !== 'webgpu';
+    return !!config && this._providerDefinitionId(id, config) !== WEBBRAIN_CLOUD_PROVIDER_ID && config.type !== 'webgpu';
   }
 
   _isValidDuplicateConfig(id, config, configs) {
@@ -1133,8 +1142,9 @@ export class ProviderManager {
     const sourceConfig = configs[sourceId];
     return typeof sourceId === 'string' &&
       SAFE_PROVIDER_ID_RE.test(sourceId) &&
-      id === this._duplicateProviderId(sourceId) &&
+      this._duplicateProviderNumber(id, sourceId) > 0 &&
       !!sourceConfig &&
+      !sourceConfig.duplicateOf &&
       this._canDuplicateProvider(sourceId, sourceConfig) &&
       sourceConfig.configured === true &&
       sourceConfig.type === config.type;
@@ -1537,6 +1547,12 @@ export class ProviderManager {
     }
     const current = this.providers.get(id).config;
     const updates = this._storedDefaultOverride(current, config);
+    if (Object.hasOwn(updates, 'label')) {
+      if (typeof updates.label !== 'string' || !updates.label.trim() || updates.label.trim().length > 120) {
+        throw new Error('Provider title must contain between 1 and 120 characters.');
+      }
+      updates.label = updates.label.trim();
+    }
     for (const key of ['id', 'duplicateOf', 'sourceProviderId', 'isDuplicate', 'hasDuplicate', 'canDuplicate']) {
       delete updates[key];
     }
@@ -1600,19 +1616,19 @@ export class ProviderManager {
     if (source.config.configured !== true) {
       throw new Error(`Save provider before duplicating it: ${id}`);
     }
-    const duplicateId = this._duplicateProviderId(id);
-    if (this.providers.has(duplicateId) || [...this.providers.values()].some(provider => provider.config?.duplicateOf === id)) {
-      throw new Error(`${source.config.label || id} already has a duplicate.`);
-    }
+    const sourceId = this._providerDefinitionId(id, source.config);
+    let number = 1;
+    while (this.providers.has(this._duplicateProviderId(sourceId, number))) number++;
+    const duplicateId = this._duplicateProviderId(sourceId, number);
 
-    const baseline = this._defaultConfigs()[id];
+    const baseline = this._defaultConfigs()[sourceId];
     if (!baseline || baseline.type !== source.config.type) {
       throw new Error(`Provider definition not found: ${id}`);
     }
     const duplicateConfig = structuredClone(baseline);
     for (const key of DUPLICATE_BLANK_CONFIG_KEYS) delete duplicateConfig[key];
-    duplicateConfig.duplicateOf = id;
-    duplicateConfig.label = `${baseline.label || id} 2`;
+    duplicateConfig.duplicateOf = sourceId;
+    duplicateConfig.label = `${baseline.label || sourceId} ${number + 1}`;
     duplicateConfig.configured = false;
     this.providers.set(duplicateId, this._createProvider(duplicateId, duplicateConfig));
     try {
@@ -1621,7 +1637,7 @@ export class ProviderManager {
       this.providers.delete(duplicateId);
       throw error;
     }
-    return { providerId: duplicateId, sourceProviderId: id };
+    return { providerId: duplicateId, sourceProviderId: sourceId };
   }
 
   /** Keep the persisted active ID valid when the selected duplicate disappears. */
@@ -1669,18 +1685,22 @@ export class ProviderManager {
     const duplicateEntriesBySourceId = new Map();
     for (const entry of this.providers) {
       const sourceId = entry[1].config?.duplicateOf;
-      if (sourceId) duplicateEntriesBySourceId.set(sourceId, entry);
+      if (!sourceId) continue;
+      if (!duplicateEntriesBySourceId.has(sourceId)) duplicateEntriesBySourceId.set(sourceId, []);
+      duplicateEntriesBySourceId.get(sourceId).push(entry);
+    }
+    for (const [sourceId, entries] of duplicateEntriesBySourceId) {
+      entries.sort((a, b) => this._duplicateProviderNumber(a[0], sourceId) - this._duplicateProviderNumber(b[0], sourceId));
     }
     const orderedEntries = [];
     for (const entry of this.providers) {
       const [id, provider] = entry;
       if (provider.config?.duplicateOf) continue;
       orderedEntries.push(entry);
-      const duplicateEntry = duplicateEntriesBySourceId.get(id);
-      if (duplicateEntry) orderedEntries.push(duplicateEntry);
+      orderedEntries.push(...(duplicateEntriesBySourceId.get(id) || []));
     }
-    for (const entry of duplicateEntriesBySourceId.values()) {
-      if (!this.providers.has(entry[1].config?.duplicateOf)) orderedEntries.push(entry);
+    for (const [sourceId, entries] of duplicateEntriesBySourceId) {
+      if (!this.providers.has(sourceId)) orderedEntries.push(...entries);
     }
     for (const [id, provider] of orderedEntries) {
       const config = provider.config;
@@ -1693,7 +1713,7 @@ export class ProviderManager {
         sourceProviderId: this._providerDefinitionId(id, config),
         isDuplicate,
         hasDuplicate,
-        canDuplicate: this._canDuplicateProvider(id, config) && !hasDuplicate,
+        canDuplicate: this._canDuplicateProvider(id, config),
       };
     }
     return result;

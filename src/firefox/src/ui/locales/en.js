@@ -6,6 +6,7 @@ import apocalypseModeCopy from './apocalypse-copy.mjs';
 import emergencyCopy from './emergency-copy.mjs';
 
 export default {
+  'st.providers.title': 'Provider title',
   ...getGenerativeMediaCopy('en'),
   ...bidiCopy,
   ...cloudBridgeCopy,

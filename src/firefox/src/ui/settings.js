@@ -3324,15 +3324,18 @@ function renderProviders() {
          </aside>`
       : '';
     const compatibilitySettings = renderProviderCompatibilitySettings(id, config);
-    const duplicateDisabledKey = config.hasDuplicate
-      ? 'st.providers.duplicate_limit'
-      : (!config.canDuplicate
-        ? 'st.providers.duplicate_unavailable'
-        : ((!isConfigured || dirtyProviderIds.has(id)) ? 'st.providers.duplicate_inactive' : ''));
+    const duplicateDisabledKey = !config.canDuplicate
+      ? 'st.providers.duplicate_unavailable'
+      : ((!isConfigured || dirtyProviderIds.has(id)) ? 'st.providers.duplicate_inactive' : '');
 
     const subscriptionGuide = providerSubscriptionGuideHtml(definitionId);
     const body = `
       ${subscriptionGuide}
+      ${id !== 'webbrain_cloud' ? `<div class="field">
+        <label for="provider-title-${id}">${escapeHtml(t('st.providers.title'))}</label>
+        <input id="provider-title-${id}" type="text" data-provider="${id}" data-key="label"
+               value="${escapeHtml(config.label || id)}" maxlength="120" required>
+      </div>` : ''}
       ${fieldsHTML}
       ${providerNote}
       ${id === 'webbrain_cloud' ? '<div class="webbrain-payment-notice" role="status" hidden></div>' : ''}
@@ -3343,9 +3346,8 @@ function renderProviders() {
         <button class="btn-secondary btn-test" data-provider="${id}">${escapeHtml(t('st.providers.test'))}</button>
         ${billingButton}
         ${!isSelected ? `<button class="btn-secondary btn-activate" data-provider="${id}">${escapeHtml(t('st.providers.select_for_chat'))}</button>` : ''}
-        ${config.isDuplicate
-          ? `<button class="btn-secondary btn-remove-duplicate" data-provider="${id}">${escapeHtml(t('st.providers.remove_duplicate'))}</button>`
-          : `<button class="btn-secondary btn-duplicate" data-provider="${id}"${duplicateDisabledKey ? ` disabled title="${escapeHtml(t(duplicateDisabledKey))}"` : ''}>${escapeHtml(t('st.providers.duplicate'))}</button>`}
+        <button class="btn-secondary btn-duplicate" data-provider="${id}"${duplicateDisabledKey ? ` disabled title="${escapeHtml(t(duplicateDisabledKey))}"` : ''}>${escapeHtml(t('st.providers.duplicate'))}</button>
+        ${config.isDuplicate ? `<button class="btn-secondary btn-remove-duplicate" data-provider="${id}">${escapeHtml(t('st.providers.remove_duplicate'))}</button>` : ''}
       </div>
       <div class="test-result" id="test-${id}"></div>
     `;
@@ -3366,7 +3368,7 @@ function renderProviders() {
   restoreProviderApiKeyWarnings();
 
   document.querySelectorAll('.btn-save').forEach(btn => {
-    btn.addEventListener('click', () => saveProvider(btn.dataset.provider));
+    btn.addEventListener('click', () => saveProvider(btn.dataset.provider).catch(() => {}));
   });
   document.querySelectorAll('.btn-test').forEach(btn => {
     btn.addEventListener('click', () => testProvider(btn.dataset.provider));
@@ -3805,6 +3807,7 @@ async function saveProvider(id, { showFlash = true, markConfigured = true } = {}
         : providerInputValue(input);
       setProviderConfigValue(config, input.dataset.key, value);
     });
+    if (typeof config.label === 'string') config.label = config.label.trim();
     apiKeyWarning = providerApiKeyWarning(id, config);
     await sendToBackground('update_provider', { providerId: id, config, markConfigured });
   } catch (e) {
@@ -3848,12 +3851,14 @@ function refreshProviderCardStatus(id) {
   card.classList.toggle('configured', isConfigured);
   card.classList.toggle('selected', isSelected);
   const duplicateButton = card.querySelector('.btn-duplicate');
-  if (duplicateButton && providersData[id]?.canDuplicate && !providersData[id]?.hasDuplicate) {
+  if (duplicateButton && providersData[id]?.canDuplicate) {
     const requiresSave = !isConfigured || dirtyProviderIds.has(id);
     duplicateButton.disabled = requiresSave;
     if (!requiresSave) duplicateButton.removeAttribute('title');
     else duplicateButton.title = t('st.providers.duplicate_inactive');
   }
+  const name = card.querySelector('.provider-name');
+  if (name) name.textContent = providersData[id]?.label || id;
   const badges = card.querySelector('.provider-status-badges');
   if (!badges) return;
   badges.innerHTML = `
@@ -3944,7 +3949,13 @@ async function duplicateProvider(id) {
     activeProviderId = refreshed.active;
     restoreProviderDrafts(providerDrafts);
     expandedProviders.add(created.providerId);
+    providerSearchQuery = '';
+    if (providerFilter !== 'all' && providerFilter !== providersData[created.providerId]?.category) {
+      providerFilter = 'all';
+      await browser.storage.local.set({ providerFilter }).catch(() => {});
+    }
     renderProviders();
+    document.querySelector(`.provider-card[data-provider-id="${created.providerId}"]`)?.scrollIntoView({ block: 'nearest' });
   } catch (error) {
     setProviderTestResult(id, 'fail', t('st.providers.failed', { error: error.message }));
   }
