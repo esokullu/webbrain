@@ -2809,6 +2809,9 @@ function nodeHasAssistantRenderableContent(node) {
   if (!node) return false;
   if (node.nodeType === 3) return !!node.textContent?.trim();
   if (node.nodeType !== 1) return false;
+  // Copy controls accompany output; their invisible labels must not reveal
+  // an empty reply after its text is cleared or its progress log is hidden.
+  if (node.matches?.('.msg-copy-btn, .code-copy-btn')) return false;
   if (!progressContentNodeIsVisible(node)) return false;
   if (node.matches?.(ASSISTANT_RENDERABLE_ELEMENT_SELECTOR)) return true;
   for (const child of node.childNodes || []) {
