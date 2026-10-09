@@ -91673,7 +91673,7 @@ test('download evidence recognizes completed core, screenshot, social, and skill
   }
 });
 
-test('planner-bypassed managed cloud runs never enable the execution guard', () => {
+test('planner-bypassed managed cloud Act runs retain the execution guard', () => {
   for (const [index, AgentClass] of [AgentCh, AgentFx].entries()) {
     const agent = new AgentClass({});
     const guard = agent._startPlanExecutionGuard(
@@ -91682,7 +91682,12 @@ test('planner-bypassed managed cloud runs never enable the execution guard', () 
       { proceed: true, requestKind: 'execute', requiresStateChange: false },
       { cloudRun: true, outputSchema: null },
     );
-    assert.equal(guard.enabled, false, `${AgentClass.name}: planner-bypassed cloud run enabled the guard`);
+    assert.equal(guard.enabled, true, `${AgentClass.name}: planner-bypassed cloud run disabled the guard`);
+    assert.equal(
+      agent._planOnlyTerminalDecision(8637 + index, "I'll navigate to the page now.")?.retry,
+      true,
+      `${AgentClass.name}: Cloud Act accepted a promise as completion`,
+    );
   }
 });
 

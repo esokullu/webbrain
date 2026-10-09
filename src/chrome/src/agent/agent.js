@@ -29842,7 +29842,6 @@ If the user has already named or confirmed this exact recipient, do NOT ask agai
   _startPlanExecutionGuard(tabId, mode, gateOutcome = {}, runOptions = {}) {
     const requestKind = gateOutcome?.requestKind || (this._isActionMode(mode) ? 'execute' : null);
     const enabled = this._isActionMode(mode)
-      && runOptions?.cloudRun !== true
       && requestKind === 'execute';
     const siteWorkflow = gateOutcome?.siteWorkflow?.job ? gateOutcome.siteWorkflow : null;
     const requiresDownload = gateOutcome?.requiresDownload === true;

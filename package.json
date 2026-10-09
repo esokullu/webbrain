@@ -1,6 +1,6 @@
 {
   "name": "webbrain",
-  "version": "38.0.16",
+  "version": "38.0.17",
   "description": "Open-source AI browser agent \u2014 chat with pages, automate tasks, multi-provider LLM support.",
   "private": true,
   "type": "module",
@@ -10,7 +10,7 @@
     "test:captcha:bridge:ui": "node test/captcha-callback-bridge-ui.mjs",
     "test:billing-notice": "node test/billing-payment-notice.mjs",
     "test:provider-limits": "node test/provider-model-limits.mjs",
-    "test:openrouter-capabilities": "node --test test/openrouter-model-capabilities.mjs test/muse-tool-choice.mjs test/model-retry.mjs",
+    "test:openrouter-capabilities": "node --test test/openrouter-model-capabilities.mjs test/muse-tool-choice.mjs test/demonroute-qwen-tools.mjs test/model-retry.mjs",
     "test:markdown": "node --test test/markdown-render.mjs",
     "test:accessibility-tree-benchmark": "node --test test/llm/lib/accessibility-tree-formats.test.mjs && node test/llm/accessibility-tree-benchmark.mjs --no-exact-tokenizer --check",
     "test:attachment-drop": "node test/attachment-drop.mjs",

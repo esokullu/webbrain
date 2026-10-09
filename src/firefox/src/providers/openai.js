@@ -13,6 +13,7 @@ import {
   supportsOpenAIAskStreaming,
   applyOpenRouterRoutingVariant,
   openRouterMuseToolOptions,
+  demonRouteQwenToolOptions,
 } from './provider-compatibility.js';
 import { normalizeRuntimeTraceConfig } from '../trace/runtime-config.js';
 import { RESEARCH_DATA_COLLECTION } from '../trace/research-consent.js';
@@ -598,6 +599,7 @@ export class OpenAICompatibleProvider extends BaseLLMProvider {
    * compatibility presets, and safe extraBody merge.
    */
   _buildChatCompletionsBody(messages, options = {}, stream = false) {
+    options = demonRouteQwenToolOptions({ ...this.config, baseUrl: this.baseUrl, model: this.model }, options);
     options = openRouterMuseToolOptions({ ...this.config, baseUrl: this.baseUrl, model: this.model }, options);
     let body = {
       messages: this._chatMessages(messages, options),
