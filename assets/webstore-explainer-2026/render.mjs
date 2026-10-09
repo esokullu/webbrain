@@ -539,81 +539,120 @@ function apocalypseScene({ nuke = false, onboarding = false } = {}) {
   };
 }
 
-/* ---------- 10 SAFESOCIAL ---------- */
-function safeSocialScene() {
-  const categories = ['Luxury & status', 'Travel & lifestyle', 'Romance & jealousy'];
+/* ---------- 10–13 FEATURE SLIDES (same structure as 03–05: big title, one-line sub, one focused card) ---------- */
+const featureCard = 'width:470px; padding:28px; background:#ffffff; border:1px solid var(--border); border-radius:26px; box-shadow:var(--shadow); transform:rotate(1deg);';
+const cardLabel = 'font-family:var(--mono); font-size:13px; font-weight:650; letter-spacing:0.07em; text-transform:uppercase; color:var(--muted);';
+
+function featureScene(file, title, sub, card) {
   return {
-    scale: 1.08,
-    file: '010-safesocial.png',
+    scale: 1.22,
+    file,
     theme: 'release',
     body: `
-      <div style="display:grid; grid-template-columns:430px 1fr; gap:46px; align-items:center; height:100%;">
+      <div style="display:grid; grid-template-columns: 440px 1fr; gap:40px; align-items:center; height:100%;">
         <div>
-          <div style="display:inline-flex; align-items:center; gap:10px; font-family:var(--mono); font-size:15px; font-weight:700;
-            letter-spacing:0.14em; text-transform:uppercase; color:var(--accent);">
-            <span style="width:10px; height:10px; border-radius:99px; background:var(--accent2); box-shadow:0 0 14px rgba(236,103,151,0.45);"></span>
-            SafeSocial
-          </div>
-          <h1 style="font-size:60px; line-height:1.04; margin-top:22px;">Give your mind<br>a break from<br>the feed.</h1>
-          <div class="sub" style="font-size:25px; max-width:400px; margin-top:24px;">
-            A calmer Instagram.<br>
-            <span style="font-size:22px;">Soften comparison triggers. Keep the feed yours.</span>
-          </div>
-          <div style="display:flex; gap:10px; flex-wrap:wrap; margin-top:30px;">
-            ${['Optional', '13.6 MB', 'On device'].map((label, i) => `
-              <span style="padding:10px 14px; border:1px solid var(--border); background:var(--panel); border-radius:999px;
-                color:${i === 2 ? 'var(--accent)' : 'var(--muted)'}; font-family:var(--mono); font-size:12px; font-weight:700;
-                letter-spacing:0.05em; text-transform:uppercase; box-shadow:0 8px 20px rgba(46,42,90,0.05);">${label}</span>`).join('')}
-          </div>
+          <h1>${title}</h1>
+          <div class="sub">${sub}</div>
         </div>
-
-        <div style="display:flex; justify-content:center;">
-          <div style="width:640px; background:#ffffff; border:1px solid var(--border); border-radius:26px; overflow:hidden;
-            box-shadow:var(--shadow); transform:rotate(1deg);">
-            <div style="display:flex; align-items:center; justify-content:space-between;">
-              <div style="padding:21px 24px 18px;">
-                <div style="font-size:22px; font-weight:800; color:var(--ink);">SafeSocial</div>
-                <div style="font-family:var(--mono); font-size:11px; font-weight:700; letter-spacing:0.08em; color:var(--muted); margin-top:5px;">LOCAL INSTAGRAM IMAGE FILTER</div>
-              </div>
-              <div style="display:flex; align-items:center; gap:9px; padding:0 24px;">
-                <span style="padding:6px 10px; border-radius:999px; background:rgba(101,214,157,0.13); color:#158653;
-                  font-family:var(--mono); font-size:11px; font-weight:700; letter-spacing:0.07em;">ON DEVICE</span>
-                <span style="font-family:var(--mono); font-size:18px; font-weight:800; color:var(--accent);">13.6 MB</span>
-              </div>
-            </div>
-            <div style="height:245px; position:relative; overflow:hidden; background:#ececf2;">
-              <img src="${assets.safeSocial}" alt="" style="width:100%; height:100%; object-fit:cover; object-position:70% 51%; display:block; filter:blur(3px) saturate(0.72); transform:scale(1.04); opacity:0.83;">
-              <div style="position:absolute; inset:0; background:linear-gradient(90deg, rgba(255,255,255,0.77), rgba(255,255,255,0.22));"></div>
-              <div style="position:absolute; inset:0; display:flex; align-items:center; justify-content:center;">
-                <div style="padding:14px 20px; border-radius:13px; background:#202a3a; color:#fff; font-size:16px; font-weight:750;
-                  box-shadow:0 10px 20px rgba(32,42,58,0.22);">SafeSocial &middot; Show image</div>
-              </div>
-            </div>
-            <div style="padding:18px 24px 21px;">
-              <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:13px;">
-                <div style="font-size:16px; font-weight:800; color:var(--ink);">Categories to soften</div>
-                <div style="font-family:var(--mono); font-size:11px; font-weight:700; color:var(--muted);">CHOOSE YOURS</div>
-              </div>
-              <div style="display:flex; gap:8px; flex-wrap:wrap;">
-              ${categories.map(label => `<span style="padding:7px 10px; border-radius:9px; background:#f4f1e8; color:#705e4d; font-size:12px; font-weight:700;">${label}</span>`).join('')}
-              </div>
-              <div style="display:flex; align-items:center; gap:10px; margin-top:18px; padding-top:16px; border-top:1px solid var(--border);">
-                <span style="width:10px; height:10px; border-radius:99px; background:#58c78d; box-shadow:0 0 10px rgba(88,199,141,0.45);"></span>
-                <span style="font-family:var(--mono); font-size:12px; font-weight:700; color:#158653; letter-spacing:0.06em;">CLASSIFICATION RUNS LOCALLY</span>
-                <span style="margin-left:auto; padding:6px 10px; border-radius:999px; background:#f0edff; color:var(--accent); font-family:var(--mono); font-size:11px; font-weight:700; letter-spacing:0.07em;">OFF BY DEFAULT</span>
-              </div>
-            </div>
-          </div>
-        </div>
+        <div style="display:flex; justify-content:center;">${card}</div>
       </div>`,
   };
+}
+
+/* ---------- 10 FULL-PAGE SCREENSHOTS (/screenshot command) ---------- */
+function screenshotScene() {
+  const bars = [['#e9e6ff', 44], ['#f1f3f8', 24], ['#ffe9f1', 44], ['#f1f3f8', 24], ['#e4f6ec', 44]];
+  return featureScene('10-full-page-screenshots.png', 'Capture the full page.',
+    'Just type <span style="font-family:var(--mono); font-weight:650; color:var(--accent);">/screenshot</span>.', `
+    <div style="${featureCard}">
+      <div style="${cardLabel} ">Full page</div>
+      <div style="margin-top:12px; border:2px dashed var(--accent); border-radius:16px; padding:12px; background:rgba(103,87,255,0.04);">
+        <div style="display:grid; gap:8px;">
+          <div style="height:12px; width:50%; border-radius:99px; background:#cfd5e3;"></div>
+          ${bars.map(([c, h]) => `<div style="height:${h}px; border-radius:9px; background:${c};"></div>`).join('')}
+        </div>
+      </div>
+      <div style="display:flex; align-items:center; gap:12px; padding:14px 16px; border:1px solid var(--border); border-radius:16px; background:#fbfbfe; margin-top:20px;">
+        <span style="flex:1; font-family:var(--mono); font-size:22px; font-weight:650; color:var(--ink);">/screenshot<span
+          style="display:inline-block; width:3px; height:24px; background:var(--accent); margin-left:4px; vertical-align:-4px; border-radius:2px;"></span></span>
+        <span style="width:40px; height:40px; border-radius:12px; background:var(--accent); color:#fff; display:grid; place-items:center; font-size:19px; font-weight:900;">&#8593;</span>
+      </div>
+    </div>`);
+}
+
+/* ---------- 11 DOWNLOADS (social media videos/photos + bulk files) ---------- */
+function bulkDownloadScene() {
+  const files = [
+    ['X', 'video.mp4', 'MP4', '#171827'],
+    ['YouTube', 'clip.mp4', 'MP4', '#e5484d'],
+    ['Instagram', 'photo.jpg', 'JPG', '#d6417f'],
+    ['example.com', 'report.pdf', 'PDF', '#3e6ff4'],
+  ];
+  return featureScene('11-bulk-file-downloads.png', 'Download them all.',
+    'Videos and photos from X, YouTube, Instagram, and more.', `
+    <div style="${featureCard}">
+      <div style="${cardLabel}">4 files · one task</div>
+      <div style="display:grid; gap:12px; margin-top:18px;">
+        ${files.map(([source, name, type, color]) => `
+          <div style="display:grid; grid-template-columns:1fr auto 28px; gap:12px; align-items:center; padding:12px 16px; border:1px solid var(--border); border-radius:14px; background:#fffefd;">
+            <span>
+              <span style="display:block; font-size:19px; font-weight:750; color:var(--ink);">${name}</span>
+              <span style="display:block; margin-top:2px; font-family:var(--mono); font-size:12px; font-weight:650; letter-spacing:0.05em; text-transform:uppercase; color:var(--muted);">${source}</span>
+            </span>
+            <span style="padding:5px 11px; border-radius:7px; background:${color}1c; color:${color}; font-family:var(--mono); font-size:12.5px; font-weight:800; letter-spacing:0.05em;">${type}</span>
+            <span style="width:28px; height:28px; border-radius:9px; display:grid; place-items:center; background:rgba(40,169,107,0.16); color:#1c8a56; font-size:15px; font-weight:900;">&#10003;</span>
+          </div>`).join('')}
+      </div>
+    </div>`);
+}
+
+/* ---------- 12 CAPTCHA ASSISTANCE ---------- */
+function captchaScene() {
+  const steps = [['done', 'Page blocked by a challenge'], ['done', 'Sent to your solving service'], ['live', 'Waiting for the solution…']];
+  return featureScene('12-captcha-assistance.png', 'Don’t stall on a CAPTCHA.', 'Connect a supported solving service.', `
+    <div style="${featureCard}">
+      <div style="${cardLabel}">CAPTCHA assistance</div>
+      <div style="border:1px solid #dfe3ee; border-radius:14px; padding:16px; background:#f8f9fc; margin-top:16px;">
+        <div style="display:flex; align-items:center; gap:14px; border:1px solid #d3d8e4; border-radius:8px; background:#fff; padding:16px;">
+          <span style="width:28px; height:28px; border-radius:6px; border:2px solid #b4bccd;"></span>
+          <span style="font-size:19px; font-weight:650; color:#3a4254;">I'm not a robot</span>
+        </div>
+      </div>
+      <div style="display:grid; gap:12px; margin-top:20px;">
+        ${steps.map(([state, label]) => `
+          <div style="display:grid; grid-template-columns:28px 1fr; gap:12px; align-items:center; font-size:17px; font-weight:720; color:var(--ink);">
+            <span style="width:28px; height:28px; border-radius:9px; display:grid; place-items:center; font-size:14px; font-weight:900;
+              ${state === 'live' ? 'background:var(--accent); color:#fff;' : 'background:rgba(40,169,107,0.16); color:#1c8a56;'}">${state === 'live' ? '&#9679;' : '&#10003;'}</span>
+            <span>${label}</span>
+          </div>`).join('')}
+      </div>
+      <div style="margin-top:20px; padding-top:16px; border-top:1px solid var(--border); font-size:14px; font-weight:600; line-height:1.4; color:var(--muted);">
+        Optional setup. Separate service account required; charges may apply.
+      </div>
+    </div>`);
+}
+
+/* ---------- 13 SAFESOCIAL ---------- */
+function safeSocialScene() {
+  return featureScene('13-safesocial.png', 'Give your mind a break from the feed.', 'A calmer Instagram, filtered on device.', `
+    <div style="${featureCard}">
+      <div style="${cardLabel}">SafeSocial</div>
+      <div style="height:230px; position:relative; overflow:hidden; border-radius:16px; margin-top:16px; background:#ececf2;">
+        <img src="${assets.safeSocial}" alt="" style="width:100%; height:100%; object-fit:cover; object-position:70% 51%; display:block; filter:blur(3px) saturate(0.72); transform:scale(1.04); opacity:0.83;">
+        <div style="position:absolute; inset:0; background:linear-gradient(90deg, rgba(255,255,255,0.7), rgba(255,255,255,0.2));"></div>
+        <div style="position:absolute; inset:0; display:grid; place-items:center;">
+          <div style="padding:14px 22px; border-radius:13px; background:#202a3a; color:#fff; font-size:18px; font-weight:750; box-shadow:0 10px 20px rgba(32,42,58,0.22);">Show image</div>
+        </div>
+      </div>
+      <div style="margin-top:18px; font-size:15px; font-weight:650; color:var(--muted);">Optional · runs on your device · off by default</div>
+    </div>`);
 }
 
 const scenes = [
   hero(), actScene(), askScene(), modelsScene(), planScene(), offerScene(), proofScene(),
   apocalypseScene(),
   apocalypseScene({ nuke: true }),
-  safeSocialScene(),
+  screenshotScene(), bulkDownloadScene(), captchaScene(), safeSocialScene(),
   hero(true), planScene(true),
   // The install page renders localized HTML over these copy-free variants.
   // Keep the Web Store artwork above unchanged: its English copy is intentional.
