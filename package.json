@@ -1,11 +1,11 @@
 {
   "name": "webbrain",
   "version": "38.0.17",
-  "description": "Open-source AI browser agent \u2014 chat with pages, automate tasks, multi-provider LLM support.",
+  "description": "Open-source AI browser agent — chat with pages, automate tasks, multi-provider LLM support.",
   "private": true,
   "type": "module",
   "scripts": {
-"test": "npm run test:cms && npm run test:markdown && npm run test:systemone && npm run test:systemone:fast && node --test test/browser-dialogs.mjs test/capsolver-cloud-broker.mjs test/captcha-providers.mjs test/captcha-weighted-fallback.mjs test/captcha-hcaptcha-providers.mjs test/captcha-native-providers.mjs test/captcha-runtime-policy.mjs test/captcha-callback-bridge.mjs test/captcha-aws-recovery.mjs test/captcha-documented-contracts.mjs test/huggingface-signup-recovery.mjs test/trace-full-export.mjs && npm run test:firefox-bidi && npm run test:runtime-lifecycle && npm run test:billing-notice && npm run test:provider-limits && npm run test:openrouter-capabilities && npm run test:accessibility-tree-benchmark && npm run test:toolbar-guard && npm run test:cloud-bridge-approval && npm run test:discord && npm run test:pdf-read && npm run test:pdf-selection && npm run test:social-contract && npm run test:safesocial && npm run test:build-unpacked && npm run test:attachment-drop && npm run test:workflow-editor && node --test test/profile-sync-stats.mjs && node test/run.js && node test/selection-scope-restoration.mjs && node scripts/benchmark-offline-relevance.mjs && npm run test:security",
+    "test": "npm run test:cms && npm run test:markdown && npm run test:systemone && npm run test:systemone:fast && node --test test/browser-dialogs.mjs test/capsolver-cloud-broker.mjs test/captcha-providers.mjs test/captcha-weighted-fallback.mjs test/captcha-hcaptcha-providers.mjs test/captcha-native-providers.mjs test/captcha-runtime-policy.mjs test/captcha-callback-bridge.mjs test/captcha-aws-recovery.mjs test/captcha-documented-contracts.mjs test/huggingface-signup-recovery.mjs test/trace-full-export.mjs && npm run test:firefox-bidi && npm run test:runtime-lifecycle && npm run test:billing-notice && npm run test:provider-limits && npm run test:openrouter-capabilities && npm run test:accessibility-tree-benchmark && npm run test:toolbar-guard && npm run test:cloud-bridge-approval && npm run test:discord && npm run test:pdf-read && npm run test:pdf-selection && npm run test:social-contract && npm run test:safesocial && npm run test:build-unpacked && npm run test:attachment-drop && npm run test:workflow-editor && node --test test/profile-sync-stats.mjs && node test/run.js && node test/selection-scope-restoration.mjs && node scripts/benchmark-offline-relevance.mjs && npm run test:security",
     "test:captcha:ui": "node test/captcha-settings-ui.mjs && node test/captcha-application-ui.mjs",
     "test:captcha:bridge:ui": "node test/captcha-callback-bridge-ui.mjs",
     "test:billing-notice": "node test/billing-payment-notice.mjs",
@@ -16,7 +16,7 @@
     "test:attachment-drop": "node test/attachment-drop.mjs",
     "test:workflow-editor": "node --test test/workflow-editor.mjs",
     "test:security": "node test/security/injection-corpus.mjs",
-    "test:cloud-bridge-approval": "node --test test/cloud-bridge-approval.mjs test/cloud-conversation-isolation.mjs test/cloud-run-outcomes.mjs",
+    "test:cloud-bridge-approval": "node --test test/cloud-bridge-approval.mjs test/cloud-conversation-isolation.mjs test/cloud-run-outcomes.mjs test/cloud-act-completion.mjs",
     "test:discord": "node --test test/discord-guard.mjs",
     "test:toolbar-guard": "node test/rich-text-toolbar-guard.mjs",
     "test:pdf-read": "node test/pdf-read.mjs",
