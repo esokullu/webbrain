@@ -1,4 +1,5 @@
 import { BaseLLMProvider } from './base.js';
+import { normalizeDemonRouteQwenResult, normalizeDemonRouteQwenStream } from './qwen-tool-calls.js';
 import { retryAfterMs } from './model-retry.js';
 import { fetchWithFallback } from './fetch-with-fallback.js';
 import {
@@ -1128,22 +1129,39 @@ export class OpenAICompatibleProvider extends BaseLLMProvider {
     }
     const message = this._chatCompletionMessage(data);
 
-    return {
-      content: message?.content || '',
-      reasoningContent: message?.reasoning_content || message?.reasoning || '',
-      toolCalls: message?.tool_calls || null,
-      usage: data.usage || null,
-      finishReason: String(data?.choices?.[0]?.finish_reason || ''),
-      raw: data,
-    };
+    return normalizeDemonRouteQwenResult(
+      { ...this.config, baseUrl: this.baseUrl, model: this.model },
+      { ...options, tools: body.tools, toolChoice: body.tool_choice },
+      {
+        content: message?.content || '',
+        reasoningContent: message?.reasoning_content || message?.reasoning || '',
+        toolCalls: message?.tool_calls || null,
+        usage: data.usage || null,
+        finishReason: String(data?.choices?.[0]?.finish_reason || ''),
+        raw: data,
+      },
+    );
   }
 
   async *chatStream(messages, options = {}) {
     if (this._usesResponsesApi()) {
-      yield* this._chatResponsesStream(messages, options);
+      yield* this._chatStreamNative(messages, options);
       return;
     }
     const body = this._buildChatCompletionsBody(messages, options, true);
+    yield* normalizeDemonRouteQwenStream(
+      { ...this.config, baseUrl: this.baseUrl, model: this.model },
+      { ...options, tools: body.tools, toolChoice: body.tool_choice },
+      this._chatStreamNative(messages, options, body),
+    );
+  }
+
+  async *_chatStreamNative(messages, options = {}, preparedBody = null) {
+    if (this._usesResponsesApi()) {
+      yield* this._chatResponsesStream(messages, options);
+      return;
+    }
+    const body = preparedBody || this._buildChatCompletionsBody(messages, options, true);
     const streamUrl = `${this.baseUrl}/chat/completions`;
     let res;
     try {

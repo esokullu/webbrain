@@ -77,15 +77,16 @@ const UNSAFE_OBJECT_KEYS = new Set(['__proto__', 'prototype', 'constructor']);
 /** The verified DemonRoute Qwen route can narrate a tool call under auto.
  * Require structured calls by default when browser tools are available, while
  * preserving explicit choices for classifiers and completion recovery. */
-export function demonRouteQwenToolOptions(config = {}, options = {}) {
-  if (!options.tools?.length || options.toolChoice !== undefined) return options;
+export function isDemonRouteQwenConfig(config = {}) {
   let endpoint;
-  try { endpoint = new URL(config.baseUrl || ''); } catch { return options; }
-  if (
-    endpoint.hostname.toLowerCase() !== 'api.demonroute.com'
-    || endpoint.pathname.replace(/\/+$/, '') !== '/v1'
-    || config.model !== 'huihui-ai/Huihui-Qwen3.5-27B-abliterated'
-  ) return options;
+  try { endpoint = new URL(config.baseUrl || ''); } catch { return false; }
+  return endpoint.hostname.toLowerCase() === 'api.demonroute.com'
+    && endpoint.pathname.replace(/\/+$/, '') === '/v1'
+    && config.model === 'huihui-ai/Huihui-Qwen3.5-27B-abliterated';
+}
+
+export function demonRouteQwenToolOptions(config = {}, options = {}) {
+  if (!options.tools?.length || options.toolChoice !== undefined || !isDemonRouteQwenConfig(config)) return options;
   return { ...options, toolChoice: 'required' };
 }
 

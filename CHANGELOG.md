@@ -4,6 +4,12 @@ All notable changes to WebBrain are documented in this file.
 
 This changelog was generated from the repository Git history and release tags. Versions without a Git tag are inferred from version-bump commits and the current `package.json` / browser manifest versions.
 
+## [38.0.18] - 2026-10-10
+
+### Fixed
+- Normalize complete tool-only XML and JSON envelopes from Qwen 3.5 on DemonRoute into supplied browser tools in Chrome and Firefox, preserving native calls and explicit tool choices.
+- Reject malformed, mixed, oversized, or interrupted tool envelopes as a whole so fallback parsing cannot dispatch a partial batch; retain provider response diagnostics.
+
 ## [38.0.17] - 2026-10-10
 
 ### Fixed
