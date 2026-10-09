@@ -4,6 +4,12 @@ All notable changes to WebBrain are documented in this file.
 
 This changelog was generated from the repository Git history and release tags. Versions without a Git tag are inferred from version-bump commits and the current `package.json` / browser manifest versions.
 
+## [38.0.17] - 2026-10-10
+
+### Fixed
+- Keep the Act completion guard active for managed Cloud runs, requiring real tool evidence and an explicit completion call while preserving bounded recovery and Ask mode.
+- Request native tool calls by default for Qwen 3.5 on DemonRoute when tools are available, preserving explicit tool choices and ordinary text requests.
+
 ## [38.0.16] - 2026-10-07
 
 ### Fixed
