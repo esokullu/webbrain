@@ -4,6 +4,7 @@ import { createSystemOneJudge, isSystemOneResponseContractError, systemOneFailur
 import { firefoxBidi } from '../bidi/client.js';
 import { SOCIAL_PLATFORMS, socialPublicationApiPlatform, normalizePublicationContract, publicationProgress, exactPublicationText, publicationMediaMatches, publicationContractMessages, publicationAuditMessages, publicationAuditAccepted } from './social-publish-contract.js';
 import { AGENT_TOOLS, AGENT_TOOL_NAMES, RESERVED_AGENT_TOOL_NAMES, getToolsForMode, SYSTEM_PROMPT_ASK, SYSTEM_PROMPT_ACT, SYSTEM_PROMPT_ACT_COMPACT, SYSTEM_PROMPT_ACT_MID, SYSTEM_PROMPT_DEV_APPENDIX } from './tools.js';
+import { rejectedCompletionRecovery } from './completion-recovery.js';
 import { validateToolArguments } from './tool-arguments.js';
 import { isSessionQuotaError, serializeConversationForSession, SESSION_CONVERSATION_BUDGET_BYTES, SESSION_CONVERSATION_RETRY_BUDGET_BYTES } from './conversation-persistence.js';
 import { formatErrorMessage } from '../error-format.js';
@@ -36497,6 +36498,12 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
             forceCompletionDoneTurn = true;
           }
         }
+        const recovery = rejectedCompletionRecovery(result.content,
+          result.finishReason || result.raw?.choices?.[0]?.finish_reason || '');
+        if (recovery.abbreviated) {
+          result = { ...result, content: recovery.content, responseItems: null, reasoningContent: '' };
+          plainFinalBlocks.push(recovery.nudge);
+        }
         messages.push(this._withResponseItems({ role: 'assistant', content: result.content }, result.responseItems, result.reasoningContent, provider));
         messages.push(this._appOwnedUserMessage(plainFinalBlocks.join('\n\n'), 'plain_final_block'));
         if (completionFinalBlock || readFinalBlock) onUpdate('text', { content: '', replace: true });
@@ -37404,6 +37411,13 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
             } else {
               forceCompletionDoneTurn = true;
             }
+          }
+          const recovery = rejectedCompletionRecovery(fullText, finishReason);
+          if (recovery.abbreviated) {
+            fullText = recovery.content;
+            responseItems = null;
+            reasoningContent = '';
+            plainFinalBlocks.push(recovery.nudge);
           }
           messages.push(this._withResponseItems({ role: 'assistant', content: fullText }, responseItems, reasoningContent, provider));
           messages.push(this._appOwnedUserMessage(plainFinalBlocks.join('\n\n'), 'plain_final_block'));

@@ -27178,7 +27178,7 @@ test('offscreen cloud bridge reconnects with backoff and rejects remote control 
   assert.equal(sockets[0].sent[0].protocolVersion, 2);
   assert.deepEqual(
     JSON.parse(JSON.stringify(sockets[0].sent[0].capabilities)),
-    ['saved_workflows_v1', 'run_modes_v1', 'scheduled_jobs_v1', 'private_results_v1'],
+    ['saved_workflows_v1', 'run_modes_v1', 'scheduled_jobs_v1', 'run_provider_v1', 'private_results_v1'],
   );
   sockets[0].close();
   assert.equal(timers[0].delay, 500);

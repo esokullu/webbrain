@@ -53,6 +53,12 @@
   if (!window.__wbElementMap) window.__wbElementMap = Object.create(null);
   if (typeof window.__wbRefCounter !== 'number') window.__wbRefCounter = 0;
 
+  function formatTreeHref(href) {
+    const escaped = String(href).replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\s/g, ' ');
+    if (escaped.length <= 512) return ' href="' + escaped + '"';
+    return ' [long href omitted; use this element ref to navigate]';
+  }
+
   function mintRefScopeId() {
     try {
       const words = new Uint32Array(2);
@@ -843,7 +849,10 @@
     line += ' [' + ref + ']';
 
     const href = el.getAttribute('href');
-    if (href) line += ' href="' + href + '"';
+    // Tracking URLs can occupy an entire tree chunk before any result appears.
+    // Keep the live href on the element/ref; never present a shortened URL as
+    // a navigable href. The agent can click the ref and read the final URL.
+    if (href) line += formatTreeHref(href);
     const type = el.getAttribute('type');
     if (type) line += ' type="' + type + '"';
     // A React-style form can replace a control node on every change, which

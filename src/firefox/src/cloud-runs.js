@@ -208,7 +208,8 @@ function cloudSafeUpdateData(type, data, { strictSecretMode = false } = {}) {
     return {
       ...data,
       result: {
-        success: result.success === true,
+        ...(typeof result.success === 'boolean' ? { success: result.success }
+          : result.error || result.isError === true ? { success: false } : {}),
         ...(Number.isFinite(Number(result.status)) ? { status: Number(result.status) } : {}),
         sensitivePayloadRedacted: true,
       },
@@ -261,7 +262,8 @@ function cloudSafeUpdateData(type, data, { strictSecretMode = false } = {}) {
     return {
       ...data,
       result: {
-        success: result.success === true,
+        ...(typeof result.success === 'boolean' ? { success: result.success }
+          : result.error || result.isError === true ? { success: false } : {}),
         ...(Number.isFinite(Number(result.status)) ? { status: Number(result.status) } : {}),
         sensitivePayloadRedacted: true,
       },
@@ -589,6 +591,8 @@ function compactCloudRunForPersistence(run) {
     traceRunId: run?.traceRunId || null,
     parentRunId: run?.parentRunId || null,
     conversationKey: run?.conversationKey || null,
+    providerId: run?.providerId || null,
+    expectedModel: run?.expectedModel || null,
     mode: run?.mode || 'act',
     captchaDiagnostics: run?.captchaDiagnostics || null,
     tabId: run?.tabId,
@@ -1038,6 +1042,23 @@ export function createCloudRunController({
     const suppliedRunId = msg.runId ?? msg.run_id;
     const requestedRunId = suppliedRunId == null ? '' : String(suppliedRunId).trim();
     const parentRunId = String(msg.parentRunId || msg.parent_run_id || '').trim() || null;
+    const savedParent = parentRunId ? runs.get(parentRunId) : null;
+    const providerId = msg.providerId ?? msg.provider_id ?? savedParent?.providerId ?? null;
+    const expectedModel = msg.expectedModel ?? msg.expected_model ?? savedParent?.expectedModel ?? null;
+    if (providerId != null || expectedModel != null) {
+      if (msg._workflow || typeof providerId !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(providerId)
+          || typeof expectedModel !== 'string' || !expectedModel.trim() || expectedModel.length > 256) {
+        throw cloudRunError('Per-run model selection requires provider_id and expected_model.', 400);
+      }
+      let provider;
+      try { provider = agent.providerManager?.getProvider?.(providerId); } catch { /* reject missing providers below */ }
+      if (!provider || provider.model !== expectedModel) {
+        throw cloudRunError('The configured browser model is missing or changed. Reconfigure this browser before running the task.', 409);
+      }
+      if (savedParent?.providerId && (providerId !== savedParent.providerId || expectedModel !== savedParent.expectedModel)) {
+        throw cloudRunError('A continuation must use its parent run model.', 409);
+      }
+    }
     let parentRun = null;
     let requestedTabId = msg.tabId ?? msg.tab_id;
     const conversationKey = msg.conversationKey ?? msg.conversation_key ?? null;
@@ -1117,6 +1138,8 @@ export function createCloudRunController({
     const run = {
       runId,
       conversationKey: conversationKey || parentRun?.conversationKey || null,
+      providerId,
+      expectedModel,
       status: 'running',
       workflowId: workflow?.id || null,
       traceRunId: null,
@@ -1239,6 +1262,7 @@ export function createCloudRunController({
             content = await agent.processMessage(tabId, prompt, publishUpdate, mode, [], {
               cloudRun: true,
               privateFinalResult: !!recipient,
+              ...(providerId == null ? {} : { providerId }),
               independentRun: !continuation,
               trustedContinuation: continuation,
               apiMutationsDenied: mode === 'ask',
