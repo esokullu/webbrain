@@ -24,6 +24,8 @@ for (const browser of ['chrome', 'firefox']) {
   const { OpenAICompatibleProvider } = await import(`../src/${browser}/src/providers/openai.js`);
   const { getToolsForMode } = await import(`../src/${browser}/src/agent/tools.js`);
   const { Agent } = await import(`../src/${browser}/src/agent/agent.js`);
+  const { modelOutputDiagnostics } = await import(`../src/${browser}/src/agent/model-output-diagnostics.js`);
+  const { projectTraceEventData } = await import(`../src/${browser}/src/trace/privacy.js`);
   const { parseDemonRouteQwenToolCalls: parse, normalizeDemonRouteQwenResult: normalize, normalizeDemonRouteQwenStream: normalizeStream, MAX_QWEN_TOOL_TEXT, INVALID_QWEN_TOOL_RESPONSE } = await import(`../src/${browser}/src/providers/qwen-tool-calls.js`);
   const config = {
     providerName: 'webbrain_me',
@@ -33,6 +35,62 @@ for (const browser of ['chrome', 'firefox']) {
   };
   const tools = getToolsForMode('act', { tier: 'full', cloudRun: true });
   const options = { tools };
+
+  test(`${browser}: rejected XML exports only structural diagnostics and never raw sentinel secrets`, () => {
+    const secret = 'private-sentinel-secret-do-not-export';
+    const content = `<tool_call><tool_name>not_offered</tool_name><tool_args>{"privateValue":"${secret}"}</tool_args></tool_call>`;
+    const raw = { choices: [{ message: { content } }] };
+    const result = normalize(config, { ...options, toolChoice: { type: 'function', function: { name: 'done' } } }, { content, finishReason: 'stop', raw });
+    assert.equal(result.raw, raw, 'Private evidence remains available on the provider result');
+    assert.deepEqual(result.rejectedToolResponse, { provider: 'demonroute_qwen', format: 'xml_name_args', reason: 'invalid_envelope', choice: 'named', contentChars: content.length, offeredTools: tools.length });
+    const metadata = modelOutputDiagnostics(result);
+    for (const includeContent of [false, true]) {
+      const exported = projectTraceEventData('llm_response', {
+        content: result.content,
+        ...metadata,
+        rejectedToolResponse: { ...metadata.rejectedToolResponse, originalContent: secret, toolName: secret, unexpected: { secret } },
+      }, { includeContent });
+      assert.deepEqual(exported.rejectedToolResponse, result.rejectedToolResponse);
+      assert.equal(JSON.stringify(exported).includes(secret), false);
+    }
+    assert.equal(projectTraceEventData('llm_response', { rejectedToolResponse: { ...result.rejectedToolResponse, reason: secret } }).rejectedToolResponse, undefined);
+  });
+
+  test(`${browser}: real streamed rejection keeps completion diagnostics with safe export metadata`, async () => {
+    const previousFetch = globalThis.fetch;
+    const secret = 'stream-private-sentinel-do-not-export';
+    const content = `<tool_call>{"name":"not_offered","arguments":{"value":"${secret}"}}</tool_call>`;
+    globalThis.fetch = async () => sseResponse(content);
+    try {
+      const streamed = await collect(new OpenAICompatibleProvider(config).chatStream([], options));
+      const done = streamed.at(-1);
+      assert.equal(done.type, 'done');
+      assert.equal(done.rejectedToolResponse.format, 'json_envelope');
+      assert.equal(done.rejectedToolResponse.reason, 'invalid_envelope');
+      assert.equal(done.rejectedToolResponse.choice, 'required');
+      assert.equal(done.rejectedToolResponse.contentChars, content.length);
+      assert.equal(done.raw.qwenToolNormalization.originalContent, content);
+      assert.equal(streamed.some(chunk => chunk.type === 'tool_call'), false);
+      const metadata = modelOutputDiagnostics({ ...done, content: streamed.filter(chunk => chunk.type === 'text').map(chunk => chunk.content).join('') });
+      assert.deepEqual(projectTraceEventData('llm_response', metadata).rejectedToolResponse, done.rejectedToolResponse);
+      assert.equal(JSON.stringify(projectTraceEventData('llm_response', metadata)).includes(secret), false);
+    } finally { globalThis.fetch = previousFetch; }
+  });
+
+  test(`${browser}: rejection reasons distinguish bounds, incomplete responses and mixed text safely`, async () => {
+    for (const [content, finishReason, reason] of [
+      [jsonNavigate + ' '.repeat(MAX_QWEN_TOOL_TEXT), 'stop', 'oversized'],
+      [jsonNavigate, 'length', 'incomplete_response'],
+      ['Explanation. ' + jsonNavigate, 'stop', 'mixed_content'],
+    ]) {
+      const result = normalize(config, options, { content, finishReason });
+      assert.equal(result.rejectedToolResponse.reason, reason);
+      const streamed = await collect(normalizeStream(config, options, chunks([{ type: 'text', content }, { type: 'done', finishReason }])));
+      assert.equal(streamed.at(-1).rejectedToolResponse.reason, reason);
+      assert.equal(streamed.at(-1).rejectedToolResponse.contentChars, content.length);
+      assert.equal(streamed.some(chunk => chunk.type === 'tool_call'), false);
+    }
+  });
 
   test(`${browser}: exact captured nested XML and complete JSON batches become supplied native calls`, () => {
     const parsed = parse(config, options, legacyNavigate);

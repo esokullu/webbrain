@@ -47,7 +47,20 @@ function responseHasReasoningItem(result) {
   });
 }
 
+export function normalizeRejectedToolResponse(value) {
+  if (value?.provider !== 'demonroute_qwen'
+    || !['xml_name_args', 'json_envelope', 'function_parameters', 'other_xml'].includes(value.format)
+    || !['oversized', 'incomplete_response', 'mixed_content', 'invalid_envelope'].includes(value.reason)
+    || !['named', 'auto', 'required', 'unspecified'].includes(value.choice)) return null;
+  const output = { provider: 'demonroute_qwen', format: value.format, reason: value.reason, choice: value.choice };
+  for (const key of ['contentChars', 'offeredTools']) {
+    if (Number.isSafeInteger(value[key]) && value[key] >= 0) output[key] = value[key];
+  }
+  return output;
+}
+
 export function modelOutputDiagnostics(result, { requestedMaxTokens = null, recoveryAttempt = 0 } = {}) {
+  const rejectedToolResponse = normalizeRejectedToolResponse(result?.rejectedToolResponse);
   const contentChars = typeof result?.content === 'string' ? result.content.trim().length : 0;
   const toolCallCount = Array.isArray(result?.toolCalls) ? result.toolCalls.length : 0;
   const reasoningChars = typeof result?.reasoningContent === 'string' ? result.reasoningContent.length : 0;
@@ -87,6 +100,7 @@ export function modelOutputDiagnostics(result, { requestedMaxTokens = null, reco
   }
 
   return {
+    ...(rejectedToolResponse ? { rejectedToolResponse } : {}),
     empty,
     emptyReason,
     finishReason: finishReason || null,

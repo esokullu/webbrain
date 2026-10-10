@@ -8503,11 +8503,49 @@ export class Agent extends LoopDetector {
   }
 
   _repairToolCallArgs(name, args = {}, options = {}) {
-    if (name !== 'get_accessibility_tree' || !args || typeof args !== 'object' || Array.isArray(args)) {
+    if (!['get_accessibility_tree', 'wait_for_stable'].includes(name) || !args || typeof args !== 'object' || Array.isArray(args)) {
       return { args, repaired: false, note: '' };
     }
-    const next = { ...args };
+    let next = { ...args };
     let repaired = false;
+    const decimal = value => typeof value === 'string' && /^-?(?:0|[1-9]\d*)(?:\.\d+)?$/.test(value.trim())
+      && Number.isFinite(Number(value.trim())) ? Number(value.trim()) : value;
+    if (name === 'wait_for_stable') {
+      for (const key of ['quietMs', 'timeout']) {
+        const value = decimal(next[key]);
+        if (value !== next[key]) { next[key] = value; repaired = true; }
+      }
+      if (next.checkNetwork === 'true' || next.checkNetwork === 'false') {
+        next.checkNetwork = next.checkNetwork === 'true';
+        repaired = true;
+      }
+      return { args: next, repaired, note: repaired ? '[TOOL ARGUMENT REPAIR: Normalized declared wait_for_stable scalar types. Schema validation still applies.]' : '' };
+    }
+    if (Object.hasOwn(next, 'continuationArgs')) {
+      let continuation = next.continuationArgs;
+      if (typeof continuation === 'string') {
+        try { continuation = continuation.length <= 32768 ? JSON.parse(continuation) : null; } catch { continuation = null; }
+      }
+      const allowed = ['filter', 'maxDepth', 'maxChars', 'ref_id', 'page', 'tree_revision'];
+      const valid = continuation && typeof continuation === 'object' && !Array.isArray(continuation)
+        && Object.keys(continuation).length > 0
+        && Object.keys(continuation).every(key => allowed.includes(key))
+        && Object.entries(continuation).every(([key, value]) => !Object.hasOwn(next, key) || Object.is(next[key], value));
+      if (!valid) {
+        return { args, repaired: false, note: '', result: {
+          success: false, invalidArguments: true, invalidToolArguments: true,
+          noDispatch: true, dispatched: false, errorCode: 'invalid_tool_arguments',
+          invalidArgumentNames: ['$.continuationArgs'],
+          error: 'get_accessibility_tree continuationArgs must be one complete JSON object containing only declared read fields, with no conflicting top-level fields. Re-emit the exact returned continuation fields as top-level arguments.',
+        } };
+      }
+      next = this._normalizeContinuationToolArgs(name, { ...next, continuationArgs: continuation });
+      repaired = true;
+    }
+    for (const key of ['maxDepth', 'maxChars', 'page']) {
+      const value = decimal(next[key]);
+      if (value !== next[key]) { next[key] = value; repaired = true; }
+    }
     const filter = String(next.filter || '').trim();
     if (filter && !/^(?:all|visible|interactive)$/i.test(filter)) {
       const match = filter.match(/\b(all|visible|interactive)\b/i);
@@ -12174,6 +12212,12 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       const argRepair = this._repairToolCallArgs(fnName, parsedArgs.args, {
         treePageChars: readLimits.treePageChars,
       });
+      if (argRepair.result) {
+        const recovery = await recordPreparationFailure(toolIndex, fnName, parsedArgs.args, argRepair.result);
+        if (recovery) return recovery;
+        if (interruptFailedBrowserAction(toolIndex, fnName)) { navNotices.length = 0; break; }
+        continue;
+      }
       let fnArgs = this._toolCallArgsWithReplayMethod(tabId, fnName, argRepair.args);
       const argRepairNotice = argRepair.note || '';
       let readWindowNotice = '';
@@ -13773,9 +13817,16 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       }
       if (argRepairNotice) {
         resultContent += '\n' + argRepairNotice;
-        onUpdate('warning', { message: 'Normalized accessibility-tree arguments.' });
+        onUpdate('warning', { message: fnName === 'wait_for_stable' ? 'Normalized wait_for_stable arguments.' : 'Normalized accessibility-tree arguments.' });
       }
       if (readWindowNotice) resultContent += '\n' + readWindowNotice;
+      if (fnName === 'get_accessibility_tree' && toolResult?.hasMore === true && toolResult.continuationArgs) {
+        const continuation = this._repairToolCallArgs(fnName, { continuationArgs: toolResult.continuationArgs }, { treePageChars: readLimits.treePageChars });
+        if (!continuation.result) {
+          resultContent += '\n[TRUSTED READ CONTINUATION: The next page uses these exact top-level JSON arguments: '
+            + JSON.stringify(continuation.args) + '. Do not quote the object or nest it under continuationArgs. Keep every field unchanged.]';
+        }
+      }
       if (mastodonObserved?.instruction) {
         resultContent += '\n' + mastodonObserved.instruction;
         onUpdate('warning', { message: 'Mastodon remote-follow handoff detected.' });
@@ -44339,6 +44390,7 @@ If the user has already named or confirmed this exact recipient, do NOT ask agai
         let reasoningContent = '';
         let streamUsage = null;
         let finishReason = '';
+        let rejectedToolResponse = null;
 
         const fastResult = await this._maybeJevFastTurn(tabId, userMessage, messages, mode, allowedToolNames, provider, costState, runOptions, completionRecoveryPolicy);
         const streamOpts = this._cloudGenerationOptions(provider, {
@@ -44419,6 +44471,7 @@ If the user has already named or confirmed this exact recipient, do NOT ask agai
               toolCallsAccumulator[idx].function.arguments += String(chunk.content ?? '');
             }
           } else if (chunk.type === 'done') {
+            rejectedToolResponse = chunk.rejectedToolResponse || null;
             if (Array.isArray(chunk.responseItems) && chunk.responseItems.length) {
               responseItems = chunk.responseItems;
             }
@@ -44448,6 +44501,7 @@ If the user has already named or confirmed this exact recipient, do NOT ask agai
           reasoningContent,
           usage: streamUsage,
           finishReason,
+          rejectedToolResponse,
           responseItems,
         }, {
           requestedMaxTokens: streamOpts.maxTokens,

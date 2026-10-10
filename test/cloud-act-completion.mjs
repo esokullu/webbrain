@@ -123,6 +123,90 @@ for (const browser of ['chrome', 'firefox']) {
     assert.deepEqual(h.dispatched, []);
   });
 
+  test(`${browser}: Cloud Act normalizes declared read scalars and follows an exact JSON-string continuation`, async () => {
+    const continuation = { filter: 'visible', maxDepth: 10, maxChars: 3000, page: 2, tree_revision: 'owned-revision' };
+    const firstArgs = { filter: 'visible', maxDepth: '12', maxChars: '3000' };
+    const waitArgs = { quietMs: '800', timeout: '10000', checkNetwork: 'true' };
+    const h = harness([
+      tool('wait_for_stable', waitArgs),
+      tool('get_accessibility_tree', firstArgs),
+      tool('get_accessibility_tree', { continuationArgs: JSON.stringify(continuation) }),
+      tool('done', { summary: 'Verified two real video results.', outcome: 'success' }),
+    ]);
+    h.agent._gateSettingLoaded = true;
+    h.agent._shouldAutoScreenshot = () => false;
+    h.agent._observeCaptchaChallenge = async () => ({ gate: null, loopCheck: { kind: 'none' } });
+    const dispatched = [];
+    h.agent.executeTool = async (_tab, name, args) => {
+      dispatched.push({ name, args });
+      if (name === 'done') return { done: true, summary: args.summary, outcome: args.outcome };
+      if (name === 'wait_for_stable') return { success: true, stable: true };
+      return args.page === 2
+        ? { pageContent: 'Second real video title and watch URL.', truncated: false, hasMore: false, page: 2 }
+        : { pageContent: 'First real video title and watch URL.', truncated: true, hasMore: true, page: 1, continuationArgs: continuation };
+    };
+    const run = await h.controller.startRun({ task: 'Read two video results from the current page. Read only.', mode: 'act' });
+    const snapshot = await finish(h.controller, run);
+    assert.equal(snapshot.status, 'completed', snapshot.error || JSON.stringify(snapshot.pendingInput));
+    assert.deepEqual(dispatched.map(call => call.name), ['wait_for_stable', 'get_accessibility_tree', 'get_accessibility_tree', 'done']);
+    assert.deepEqual(dispatched[0].args, { quietMs: 800, timeout: 10000, checkNetwork: true });
+    assert.deepEqual(dispatched[1].args, { filter: 'visible', maxDepth: 12, maxChars: 3000 });
+    assert.deepEqual(dispatched[2].args, continuation);
+    const firstRead = h.requests[2].messages.find(message => message.role === 'tool' && String(message.content).includes('TRUSTED READ CONTINUATION'));
+    assert.ok(firstRead, 'The next request must receive a trusted flat-call hint');
+    assert.ok(firstRead.content.includes('exact top-level JSON arguments: ' + JSON.stringify(continuation)));
+    assert.deepEqual(waitArgs, { quietMs: '800', timeout: '10000', checkNetwork: 'true' }, 'Provider diagnostics are not mutated');
+    assert.deepEqual(firstArgs, { filter: 'visible', maxDepth: '12', maxChars: '3000' });
+  });
+
+  test(`${browser}: read compatibility rejects ambiguous, unsafe and nondecimal arguments before dispatch`, async () => {
+    const cases = [
+      ['get_accessibility_tree', { continuationArgs: '{"filter":"visible","page":2' }],
+      ['get_accessibility_tree', { continuationArgs: 'null' }],
+      ['get_accessibility_tree', { continuationArgs: '[]' }],
+      ['get_accessibility_tree', { continuationArgs: '{}' }],
+      ['get_accessibility_tree', { continuationArgs: JSON.stringify({ page: 2, ref_id: 'x'.repeat(32768) }) }],
+      ['get_accessibility_tree', { continuationArgs: { page: 2, unknown: 'value' } }],
+      ['get_accessibility_tree', { continuationArgs: '{"page":2,"__proto__":{"admin":true}}' }],
+      ['get_accessibility_tree', { page: 1, continuationArgs: { page: 2 } }],
+      ['get_accessibility_tree', { continuationArgs: { page: { constructor: 'unsafe' } } }],
+      ['get_accessibility_tree', { maxChars: '3000.5' }],
+      ['get_accessibility_tree', { maxDepth: '1e3' }],
+      ['get_accessibility_tree', { page: 'Infinity' }],
+      ['wait_for_stable', { checkNetwork: 'TRUE' }],
+      ['wait_for_stable', { timeout: '0x1000' }],
+      ['wait_for_stable', { quietMs: 'NaN' }],
+      ['wait_for_stable', { undeclared: '800' }],
+    ];
+    for (const [name, args] of cases) {
+      const rejected = tool(name, args);
+      const h = harness([rejected, tool('read_page', {}), tool('done', { summary: 'Observed real page.', outcome: 'success' })]);
+      h.agent._gateSettingLoaded = true;
+      h.agent._shouldAutoScreenshot = () => false;
+      h.agent._observeCaptchaChallenge = async () => ({ gate: null, loopCheck: { kind: 'none' } });
+      const run = await h.controller.startRun({ task: 'Read the current page. Read only.', mode: 'act' });
+      const snapshot = await finish(h.controller, run);
+      assert.equal(snapshot.status, 'completed', JSON.stringify({ name, args, status: snapshot.status, error: snapshot.error }));
+      assert.deepEqual(h.dispatched, ['read_page', 'done'], 'Invalid read arguments cannot dispatch');
+      const feedback = JSON.parse(h.requests[1].messages.find(message => message.role === 'tool' && message.tool_call_id === rejected.toolCalls[0].id).content);
+      assert.equal(feedback.noDispatch, true);
+      assert.equal(feedback.dispatched, false);
+      assert.equal(feedback.errorCode, 'invalid_tool_arguments');
+    }
+  });
+
+  test(`${browser}: read compatibility preserves exact object wrappers and leaves other tools unchanged`, () => {
+    const h = harness([]);
+    const continuation = { filter: 'all', maxDepth: 15, maxChars: 3000, page: 2, ref_id: 'ref_1', tree_revision: 'revision' };
+    assert.deepEqual(h.agent._repairToolCallArgs('get_accessibility_tree', { continuationArgs: continuation }).args, continuation);
+    assert.deepEqual(h.agent._repairToolCallArgs('get_accessibility_tree', { page: 2, continuationArgs: continuation }).args, continuation);
+    const read = { continuationArgs: '{"offset":400,"limit":100}' };
+    const click = { x: '12', y: '34' };
+    assert.equal(h.agent._repairToolCallArgs('read_page', read).args, read);
+    assert.equal(h.agent._repairToolCallArgs('click', click).args, click);
+    assert.deepEqual(h.agent._repairToolCallArgs('wait_for_stable', { quietMs: '800.5', timeout: '10000', checkNetwork: 'false' }).args, { quietMs: 800.5, timeout: 10000, checkNetwork: false });
+  });
+
   test(`${browser}: rejected raw navigate arguments cannot poison the serialized recovery request`, async () => {
     const malformed = { id: 'rejected-navigate', type: 'function', function: { name: 'navigate', arguments: 'https://example.com' } };
     const transport = new OpenAICompatibleProvider({ baseUrl: 'https://api.demonroute.com/v1', model: 'huihui-ai/Huihui-Qwen3.5-27B-abliterated' });

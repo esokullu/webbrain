@@ -121,7 +121,22 @@ export function normalizeDemonRouteQwenResult(config, options, result) {
   const raw = result.raw || { qwenToolNormalization: { originalContent: result.content, originalFinishReason: result.finishReason } };
   return calls
     ? { ...result, content: '', toolCalls: calls, finishReason: 'tool_calls', raw }
-    : { ...result, content: INVALID_QWEN_TOOL_RESPONSE, raw };
+    : { ...result, content: INVALID_QWEN_TOOL_RESPONSE, raw, rejectedToolResponse: rejectedToolResponse(options, result.content, result.finishReason) };
+}
+
+// Only structural metadata crosses the trace/export boundary. Raw model text
+// stays on the private provider result and may contain page or user secrets.
+function rejectedToolResponse(options, content, finishReason, { tooLarge = false, contentChars = content.length } = {}) {
+  const text = content.trim();
+  const format = /<tool_name>/.test(text) ? 'xml_name_args'
+    : /<tool_call>\s*\{/.test(text) ? 'json_envelope'
+      : /<function=/.test(text) ? 'function_parameters' : 'other_xml';
+  const choice = options.toolChoice && typeof options.toolChoice === 'object'
+    ? 'named' : ['auto', 'required'].includes(options.toolChoice) ? options.toolChoice : 'unspecified';
+  const reason = tooLarge || contentChars > MAX_QWEN_TOOL_TEXT ? 'oversized'
+    : finishReason !== 'stop' ? 'incomplete_response'
+      : !text.startsWith('<tool_call>') || /```/.test(text) ? 'mixed_content' : 'invalid_envelope';
+  return { provider: 'demonroute_qwen', format, reason, choice, contentChars, offeredTools: options.tools.length };
 }
 
 export async function* normalizeDemonRouteQwenStream(config, options, stream) {
@@ -132,11 +147,13 @@ export async function* normalizeDemonRouteQwenStream(config, options, stream) {
   let tooLarge = false;
   let oversizedCandidate = false;
   let suffix = '';
+  let contentChars = 0;
   const raw = finishReason => ({ qwenToolNormalization: { originalContent: content, originalFinishReason: finishReason, ...(tooLarge ? { truncated: true } : {}) } });
   try {
     for await (const chunk of stream) {
       if (chunk.type === 'text' && !nativeCalls) {
         const delta = String(chunk.content || '');
+        contentChars = Math.min(Number.MAX_SAFE_INTEGER, contentChars + delta.length);
         if (tooLarge) {
           oversizedCandidate ||= isToolCandidate(suffix + delta);
           suffix = delta.slice(-32);
@@ -172,7 +189,11 @@ export async function* normalizeDemonRouteQwenStream(config, options, stream) {
         if (calls) yield { type: 'tool_call', content: calls.map((call, index) => ({ ...call, index })) };
         else if (candidate) yield { type: 'text', content: INVALID_QWEN_TOOL_RESPONSE };
         else for (const text of buffered) yield text;
-        yield candidate ? { ...chunk, ...(calls ? { finishReason: 'tool_calls' } : {}), raw: chunk.raw || raw(chunk.finishReason) } : chunk;
+        yield candidate ? {
+          ...chunk,
+          ...(calls ? { finishReason: 'tool_calls' } : { rejectedToolResponse: rejectedToolResponse(options, content, chunk.finishReason, { tooLarge, contentChars }) }),
+          raw: chunk.raw || raw(chunk.finishReason),
+        } : chunk;
         return;
       }
       yield chunk;

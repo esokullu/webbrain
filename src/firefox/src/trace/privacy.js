@@ -1,3 +1,5 @@
+import { normalizeRejectedToolResponse } from '../agent/model-output-diagnostics.js';
+
 /**
  * Privacy projection for durable trace records.
  *
@@ -127,6 +129,9 @@ export function projectTraceRun(run, { includeContent = false } = {}) {
 }
 
 export function projectTraceEventData(kind, data, { includeContent = false } = {}) {
+  if (kind === 'llm_response' && data?.rejectedToolResponse) {
+    data = { ...data, rejectedToolResponse: normalizeRejectedToolResponse(data.rejectedToolResponse) };
+  }
   // Auxiliary decisions never retain evidence, even in the opt-in content tier.
   if (kind === 'note' && data?.note === 'system_one') {
     const extra = {};
@@ -166,6 +171,7 @@ export function projectTraceEventData(kind, data, { includeContent = false } = {
 
   if (kind === 'llm_response') {
     const projected = pick(source, RESPONSE_METADATA_FIELDS);
+    if (source.rejectedToolResponse) projected.rejectedToolResponse = source.rejectedToolResponse;
     if (source.usage && typeof source.usage === 'object') projected.usage = projectUsage(source.usage);
     return projected;
   }

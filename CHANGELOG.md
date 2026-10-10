@@ -4,6 +4,13 @@ All notable changes to WebBrain are documented in this file.
 
 This changelog was generated from the repository Git history and release tags. Versions without a Git tag are inferred from version-bump commits and the current `package.json` / browser manifest versions.
 
+## [38.0.21] - 2026-10-10
+
+### Fixed
+- Normalize declared accessibility-tree and page-stability scalar arguments before schema validation, and accept complete, unambiguous read-continuation objects without changing action tools or dispatching invalid arguments.
+- Show exact top-level continuation arguments after truncated accessibility reads, preserving pagination and completion verification.
+- Record value-free structural diagnostics for rejected DemonRoute Qwen tool envelopes while preserving trace privacy and bounded recovery.
+
 ## [38.0.20] - 2026-10-10
 
 ### Fixed
