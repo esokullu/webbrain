@@ -25,13 +25,15 @@ const tool = (name, args) => ({
 for (const browser of ['chrome', 'firefox']) {
   const { Agent } = await import(`../src/${browser}/src/agent/agent.js`);
   const { createCloudRunController } = await import(`../src/${browser}/src/cloud-runs.js`);
-  function harness(responses) {
+  const { OpenAICompatibleProvider } = await import(`../src/${browser}/src/providers/openai.js`);
+  function harness(responses, validateRequest = () => {}) {
     const requests = [], dispatched = [];
     const provider = {
       name: 'test', model: 'test', promptTier: 'full', contextWindow: 128000,
       supportsTools: true, supportsVision: false,
       chat: async (messages, options) => {
         requests.push({ messages: structuredClone(messages), options });
+        validateRequest(messages, options);
         assert.ok(responses.length, 'Unexpected extra model request');
         return responses.shift();
       },
@@ -60,7 +62,7 @@ for (const browser of ['chrome', 'firefox']) {
         : { success: true, text: 'Observed video titles and URLs on the page.', url: 'https://example.com/' };
     };
     const controller = createCloudRunController({ chromeApi: api, agent, ensureOffscreen: async () => {} });
-    return { agent, controller, requests, dispatched };
+    return { agent, provider, controller, requests, dispatched };
   }
   async function finish(controller, run) {
     for (let attempt = 0; attempt < 100; attempt++) {
@@ -119,5 +121,44 @@ for (const browser of ['chrome', 'firefox']) {
     assert.equal(snapshot.result, 'The page is an example domain.');
     assert.equal(h.requests.length, 1);
     assert.deepEqual(h.dispatched, []);
+  });
+
+  test(`${browser}: rejected raw navigate arguments cannot poison the serialized recovery request`, async () => {
+    const malformed = { id: 'rejected-navigate', type: 'function', function: { name: 'navigate', arguments: 'https://example.com' } };
+    const transport = new OpenAICompatibleProvider({ baseUrl: 'https://api.demonroute.com/v1', model: 'huihui-ai/Huihui-Qwen3.5-27B-abliterated' });
+    const serialized = [];
+    const h = harness([
+      { content: null, toolCalls: [malformed] },
+      tool('navigate', { url: 'https://example.com/' }),
+      tool('read_page', {}),
+      tool('done', { summary: 'Verified Example Domain at https://example.com/.', outcome: 'success' }),
+    ], (messages, options) => {
+      const body = JSON.parse(JSON.stringify(transport._buildChatCompletionsBody(messages, options)));
+      for (const message of body.messages) for (const call of message.tool_calls || []) JSON.parse(call.function.arguments);
+      serialized.push(body);
+    });
+    h.agent._gateSettingLoaded = true;
+    h.agent._shouldAutoScreenshot = () => false;
+    h.agent._observeCaptchaChallenge = async () => ({ gate: null, loopCheck: { kind: 'none' } });
+    h.provider.model = transport.model;
+    h.provider.baseUrl = transport.baseUrl;
+    const run = await h.controller.startRun({ task: 'Open https://example.com and report the page title. Read only.', mode: 'act' });
+    const snapshot = await finish(h.controller, run);
+    assert.equal(snapshot.status, 'completed', snapshot.error || JSON.stringify(snapshot.pendingInput));
+    assert.deepEqual(h.dispatched, ['navigate', 'read_page', 'done'], 'Rejected navigate must never be dispatched');
+    assert.equal(h.requests.length, 4);
+    assert.equal(malformed.function.arguments, 'https://example.com', 'Original provider call remains diagnostic evidence');
+    const recovery = serialized[1].messages;
+    assert.deepEqual(serialized[1].tool_choice, { type: 'function', function: { name: 'navigate' } });
+    assert.ok(serialized.slice(2).every(body => body.tool_choice?.function?.name !== 'navigate'), 'Named repair is used for one model turn only');
+    const rejected = recovery.find(message => message.role === 'assistant' && message.tool_calls?.some(call => call.id === malformed.id));
+    assert.deepEqual(rejected.tool_calls[0], { ...malformed, function: { ...malformed.function, arguments: '{}' } });
+    const feedback = JSON.parse(recovery.find(message => message.tool_call_id === malformed.id).content);
+    assert.equal(feedback.invalidToolArguments, true);
+    assert.equal(feedback.noDispatch, true);
+    assert.equal(feedback.dispatched, false);
+    assert.equal(feedback.rawPreview, 'https://example.com');
+    assert.match(feedback.error, /Re-emit.*valid JSON object/);
+    assert.match(snapshot.result, /Example Domain/);
   });
 }

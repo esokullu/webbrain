@@ -9,6 +9,7 @@ import { validateToolArguments } from './tool-arguments.js';
 import { isSessionQuotaError, serializeConversationForSession, SESSION_CONVERSATION_BUDGET_BYTES, SESSION_CONVERSATION_RETRY_BUDGET_BYTES } from './conversation-persistence.js';
 import { formatErrorMessage } from '../error-format.js';
 import { retryModelCall } from '../providers/model-retry.js';
+import { isDemonRouteQwenConfig } from '../providers/provider-compatibility.js';
 import { aggregateMessageCompletion } from '../message-info.js';
 import { handleDoneJson } from './cloud-output.js';
 import { applyReadPageWindow, fitReadPageWindowResult, isReadPageWindowResult } from './read-page-window.js';
@@ -8318,10 +8319,15 @@ export class Agent extends LoopDetector {
   _parseToolCallArgs(tc) {
     const raw = tc?.function?.arguments;
     if (typeof raw !== 'string') {
+      if (raw != null && (typeof raw !== 'object' || Array.isArray(raw))) {
+        return { args: {}, error: 'Tool arguments must be a JSON object.', rawPreview: JSON.stringify(raw).slice(0, 240) };
+      }
       return { args: raw && typeof raw === 'object' ? raw : {}, error: null };
     }
     try {
-      return { args: raw.trim() ? JSON.parse(raw) : {}, error: null };
+      const args = raw.trim() ? JSON.parse(raw) : {};
+      if (!args || typeof args !== 'object' || Array.isArray(args)) throw new Error('Tool arguments must be a JSON object.');
+      return { args, error: null };
     } catch (e) {
       return {
         args: {},
@@ -8379,6 +8385,47 @@ export class Agent extends LoopDetector {
       detail: parsed?.error || 'invalid JSON',
       rawPreview: parsed?.rawPreview || '',
     };
+  }
+
+  _repairRejectedToolCallHistory(messages, rejectedCall) {
+    // Rejected arguments must not poison the next provider request. Repair
+    // only transcript replay; keep the original call and error diagnostics,
+    // and never execute the empty-object placeholder.
+    for (let index = messages.length - 1; index >= 0; index--) {
+      const message = messages[index];
+      if (message.role !== 'assistant' || !Array.isArray(message.tool_calls)) continue;
+      const callIndex = message.tool_calls.findIndex(call => call === rejectedCall
+        || (call.id === rejectedCall.id && call.function?.name === rejectedCall.function?.name));
+      if (callIndex < 0) continue;
+      const toolCalls = [...message.tool_calls];
+      toolCalls[callIndex] = { ...toolCalls[callIndex], function: { ...toolCalls[callIndex].function, arguments: '{}' } };
+      const repaired = { ...message, tool_calls: toolCalls };
+      if (Array.isArray(message.response_items)) {
+        repaired.response_items = message.response_items.map(item => item?.type === 'function_call'
+          && item.call_id === rejectedCall.id && item.name === rejectedCall.function?.name
+          ? { ...item, arguments: '{}' } : item);
+      }
+      messages[index] = repaired;
+      return;
+    }
+  }
+
+  _invalidArgumentRecoveryToolChoice(provider, messages, tools, explicitChoice = null) {
+    if (explicitChoice || !provider?.supportsTools || !isDemonRouteQwenConfig({
+      ...provider.config, baseUrl: provider.baseUrl || provider.config?.baseUrl, model: provider.model,
+    })) return null;
+    const index = messages.findLastIndex(message => message.role === 'assistant');
+    const calls = messages[index]?.tool_calls;
+    if (calls?.length !== 1 || calls[0].function?.arguments !== '{}') return null;
+    const call = calls[0];
+    if (!tools?.some(tool => tool.function?.name === call.function.name)) return null;
+    const feedback = messages.slice(index + 1).find(message => message.role === 'tool' && message.tool_call_id === call.id);
+    try {
+      const result = JSON.parse(String(feedback?.content || '').split('\n')[0]);
+      if (result.errorCode !== 'invalid_tool_arguments' || result.noDispatch !== true
+          || result.dispatched !== false || result.invalidToolArguments !== true || typeof result.rawPreview !== 'string') return null;
+      return { type: 'function', function: { name: call.function.name } };
+    } catch { return null; }
   }
 
   _toolParametersForValidation(tabId, fnName, toolSchemas = null) {
@@ -10806,6 +10853,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       const parsedArgs = this._parseToolCallArgs(tc);
       if (parsedArgs.error) {
         const result = this._invalidToolArgumentsResult(fnName, parsedArgs);
+        this._repairRejectedToolCallHistory(messages, tc);
         const recovery = await recordPreparationFailure(toolIndex, fnName, {}, result, result.error);
         if (recovery) return recovery;
         if (interruptFailedBrowserAction(toolIndex, fnName)) { navNotices.length = 0; break; }
@@ -35803,6 +35851,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     let allowCompletionFailureTurn = false;
     let forceCompletionDoneAfterVerification = false;
     let forceCompletionDoneTurn = false;
+    let invalidArgumentRecoveryUsed = false;
     let askStreamingDisabledForRun = false;
 
     // Keep trace persistence ordered without putting IndexedDB on the token
@@ -36035,7 +36084,10 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       if (completionRecoveryPolicy) {
         tools = completionRecoveryPolicy.tools;
       }
-      const completionToolChoice = completionRecoveryPolicy?.toolChoice || null;
+      const invalidArgumentToolChoice = !invalidArgumentRecoveryUsed && !completionRecoveryPolicy
+        ? this._invalidArgumentRecoveryToolChoice(provider, messages, tools) : null;
+      const completionToolChoice = completionRecoveryPolicy?.toolChoice || invalidArgumentToolChoice;
+      if (invalidArgumentToolChoice) invalidArgumentRecoveryUsed = true;
       allowedToolNames = new Set(tools.map(t => t.function.name));
       toolSchemas = new Map(tools.map(t => [t.function.name, t.function.parameters]));
 
@@ -36947,6 +36999,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     let allowCompletionFailureTurn = false;
     let forceCompletionDoneAfterVerification = false;
     let forceCompletionDoneTurn = false;
+    let invalidArgumentRecoveryUsed = false;
     let pendingVisionFallbackMessages = null;
     let visionFallbackAttempted = false;
     let streamEmittedOutput = false;
@@ -37030,7 +37083,10 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       if (completionRecoveryPolicy) {
         tools = completionRecoveryPolicy.tools;
       }
-      const completionToolChoice = completionRecoveryPolicy?.toolChoice || null;
+      const invalidArgumentToolChoice = !invalidArgumentRecoveryUsed && !completionRecoveryPolicy
+        ? this._invalidArgumentRecoveryToolChoice(provider, messages, tools) : null;
+      const completionToolChoice = completionRecoveryPolicy?.toolChoice || invalidArgumentToolChoice;
+      if (invalidArgumentToolChoice) invalidArgumentRecoveryUsed = true;
       allowedToolNames = new Set(tools.map(t => t.function.name));
       toolSchemas = new Map(tools.map(t => [t.function.name, t.function.parameters]));
 

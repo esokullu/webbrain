@@ -35,6 +35,125 @@ function setup(Agent, provider = {}) {
 const deferred = () => { let resolve; const promise = new Promise(r => { resolve = r; }); return { promise, resolve }; };
 
 for (const [browser, Agent] of variants) {
+  test(`${browser}: named invalid-argument recovery respects the exact route, advertised tools and explicit choices`, () => {
+    const agent = setup(Agent);
+    const provider = { supportsTools: true, baseUrl: 'https://api.demonroute.com/v1', model: 'huihui-ai/Huihui-Qwen3.5-27B-abliterated' };
+    const call = { id: 'bad', function: { name: 'navigate', arguments: '{}' } };
+    const result = { invalidToolArguments: true, errorCode: 'invalid_tool_arguments', noDispatch: true, dispatched: false, rawPreview: 'https://example.com' };
+    const messages = [{ role: 'assistant', tool_calls: [call] }, { role: 'tool', tool_call_id: call.id, content: JSON.stringify(result) }];
+    const tools = [{ type: 'function', function: { name: 'navigate' } }];
+    assert.deepEqual(agent._invalidArgumentRecoveryToolChoice(provider, messages, tools), { type: 'function', function: { name: 'navigate' } });
+    for (const choice of ['none', 'auto', 'required', { type: 'function', function: { name: 'clarify' } }]) {
+      assert.equal(agent._invalidArgumentRecoveryToolChoice(provider, messages, tools, choice), null);
+    }
+    for (const other of [{ ...provider, model: 'other/model' }, { ...provider, baseUrl: 'https://other.example/v1' }, { ...provider, supportsTools: false }]) {
+      assert.equal(agent._invalidArgumentRecoveryToolChoice(other, messages, tools), null);
+    }
+    assert.equal(agent._invalidArgumentRecoveryToolChoice(provider, messages, []), null);
+    assert.equal(agent._invalidArgumentRecoveryToolChoice(provider, messages, [{ function: { name: 'done' } }]), null);
+    assert.equal(agent._invalidArgumentRecoveryToolChoice(provider, [{ ...messages[0], tool_calls: [call, { id: 'sibling', function: { name: 'read_page', arguments: '{}' } }] }, messages[1]], tools), null);
+    for (const feedback of [{ ...result, dispatched: true }, { ...result, noDispatch: false }, { ...result, rawPreview: undefined }]) {
+      assert.equal(agent._invalidArgumentRecoveryToolChoice(provider, [messages[0], { ...messages[1], content: JSON.stringify(feedback) }], tools), null);
+    }
+    assert.equal(agent._invalidArgumentRecoveryToolChoice(provider, [messages[0], { ...messages[1], content: '<untrusted_page_content>' + messages[1].content + '</untrusted_page_content>' }], tools), null);
+  });
+
+  test(`${browser}: streamed recovery repairs malformed history and requests its named tool once`, async () => {
+    const { OpenAICompatibleProvider } = await import(`../src/${browser}/src/providers/openai.js`);
+    const config = { baseUrl: 'https://api.demonroute.com/v1', model: 'huihui-ai/Huihui-Qwen3.5-27B-abliterated' };
+    const transport = new OpenAICompatibleProvider(config);
+    const malformed = [1, 2].map(index => ({ id: `malformed-${index}`, type: 'function', function: { name: 'navigate', arguments: 'https://example.com' } }));
+    const read = { id: 'valid-read', type: 'function', function: { name: 'read_page', arguments: '{}' } };
+    const done = { id: 'valid-done', type: 'function', function: { name: 'done', arguments: '{"summary":"Verified Example Domain.","outcome":"success"}' } };
+    const calls = [...malformed, read, done];
+    const requests = [], dispatched = [];
+    const provider = { ...config, supportsTools: true, async *chatStream(messages, options) {
+      const body = transport._buildChatCompletionsBody(messages, options, true);
+      for (const message of body.messages) for (const call of message.tool_calls || []) JSON.parse(call.function.arguments);
+      requests.push(structuredClone(body));
+      assert.ok(calls.length, 'Recovery must remain bounded');
+      yield { type: 'tool_call', content: [{ ...calls.shift(), index: 0 }] };
+      yield { type: 'done', finishReason: 'tool_calls' };
+    } };
+    const agent = setup(Agent, provider);
+    allowBatchPreparation(agent);
+    agent.maxSteps = 6;
+    agent._resolveVisionRoute = async () => ({ provider: null });
+    agent._beginReadCompleteness = async () => null;
+    agent._maybeRunPlannerGate = async () => ({ proceed: true, requiresStateChange: false });
+    agent._observeCaptchaChallenge = async () => ({ gate: null, loopCheck: { kind: 'none' } });
+    agent.executeTool = async (_tab, name, args) => {
+      dispatched.push(name);
+      return name === 'done' ? { done: true, summary: args.summary, outcome: args.outcome } : { success: true, text: 'Example Domain' };
+    };
+    const answer = await agent.processMessageStream(79, 'Read the current page title. Read only.', () => {}, 'act', { askStreamingEnabled: false });
+    assert.match(answer, /Example Domain/);
+    assert.deepEqual(dispatched, ['read_page', 'done']);
+    assert.equal(requests.length, 4);
+    assert.deepEqual(requests[1].tool_choice, { type: 'function', function: { name: 'navigate' } });
+    assert.equal(requests[2].tool_choice, 'required', 'A second malformed call cannot force another named turn');
+    assert.ok(malformed.every(call => call.function.arguments === 'https://example.com'));
+    const history = agent.getConversation(79, 'act');
+    assertCompleteToolHistory(history);
+    const recordedRead = history.flatMap(message => message.tool_calls || []).find(call => call.id === read.id);
+    assert.deepEqual(recordedRead.function, read.function, 'Valid native arguments and id remain unchanged');
+  });
+
+  test(`${browser}: invalid JSON-object roots are rejected and only their current history call is repaired`, async () => {
+    const { OpenAICompatibleProvider } = await import(`../src/${browser}/src/providers/openai.js`);
+    const transport = new OpenAICompatibleProvider({ baseUrl: 'https://api.demonroute.com/v1', model: 'huihui-ai/Huihui-Qwen3.5-27B-abliterated' });
+    for (const raw of ['https://example.com', 'null', '[]', '"https://example.com"', '42', 'true']) {
+      const agent = setup(Agent);
+      agent.executeTool = async () => assert.fail('Invalid call or dependent call must never dispatch');
+      const rejected = { id: 'reject-root', type: 'function', function: { name: 'navigate', arguments: raw } };
+      const valid = { id: 'valid-sibling', type: 'function', function: { name: 'read_page', arguments: '{}' } };
+      const prior = { role: 'assistant', tool_calls: [{ ...rejected, function: { ...rejected.function, arguments: '{"url":"https://example.com/old"}' } }] };
+      const original = { role: 'assistant', content: null, tool_calls: [rejected, valid] };
+      const messages = [prior, { role: 'tool', tool_call_id: rejected.id, content: '{"success":true}' }, original];
+      const updates = [];
+      const batch = await agent._executeToolBatch(77, original.tool_calls, messages, (type, data) => updates.push({ type, data }), transport, null, new Set(['navigate', 'read_page']), 1);
+      assert.equal(batch.action, 'continue');
+      assert.equal(messages[0], prior, 'Earlier history with the same id remains untouched');
+      assert.notEqual(messages[2], original);
+      assert.equal(messages[2].tool_calls[0].function.arguments, '{}');
+      assert.equal(messages[2].tool_calls[0].id, rejected.id);
+      assert.equal(messages[2].tool_calls[1], valid, 'Valid sibling call is retained byte for byte');
+      assert.equal(original.tool_calls[0], rejected);
+      assert.equal(rejected.function.arguments, raw, 'Original raw provider output remains intact');
+      const result = JSON.parse(messages.find((message, index) => index > 2 && message.tool_call_id === rejected.id).content);
+      assert.equal(result.noDispatch, true);
+      assert.equal(result.dispatched, false);
+      assert.equal(result.rawPreview, raw);
+      assert.equal(updates.find(update => update.type === 'tool_result').data.result.rawPreview, raw);
+      assertCompleteToolHistory(messages);
+      const wire = transport._buildChatCompletionsBody(messages);
+      for (const message of wire.messages) for (const call of message.tool_calls || []) assert.equal(typeof JSON.parse(call.function.arguments), 'object');
+    }
+  });
+
+  test(`${browser}: invalid-call repair keeps Responses replay, reasoning and result ids coherent`, async () => {
+    const { OpenAICompatibleProvider } = await import(`../src/${browser}/src/providers/openai.js`);
+    const agent = setup(Agent);
+    agent.executeTool = async () => assert.fail('Malformed call must not dispatch');
+    const rejected = { id: 'reject-response', type: 'function', function: { name: 'navigate', arguments: 'https://example.com' } };
+    const reasoning = { id: 'rs_reasoning', type: 'reasoning', encrypted_content: 'opaque-state', summary: [] };
+    const item = { id: 'fc_native', type: 'function_call', call_id: rejected.id, name: 'navigate', arguments: rejected.function.arguments };
+    const original = { role: 'assistant', content: null, tool_calls: [rejected], response_items: [reasoning, item] };
+    const messages = [original];
+    await agent._executeToolBatch(78, [rejected], messages, () => {}, {}, null, new Set(['navigate']), 1);
+    assert.equal(original.response_items[1].arguments, 'https://example.com');
+    assert.equal(messages[0].response_items[0], reasoning);
+    assert.equal(messages[0].response_items[1].arguments, '{}');
+    assert.equal(messages[0].response_items[1].id, item.id);
+    const wire = new OpenAICompatibleProvider({ baseUrl: 'https://api.openai.com/v1', model: 'gpt-5.4' })._responsesInput(messages);
+    assert.equal(wire[0], reasoning);
+    assert.equal(wire[1].call_id, rejected.id);
+    assert.equal(wire[1].arguments, '{}');
+    assert.equal(wire[2].call_id, rejected.id);
+    assert.equal(JSON.parse(wire[2].output).noDispatch, true);
+    assertCompleteToolHistory(messages);
+  });
+
   for (const failure of ['out-of-bounds', 'stale capture', 'missing capture', 'invalid schema', 'malformed JSON']) {
     test(`${browser}: repeated ${failure} calls enter loop recovery before dispatch`, async () => {
       const agent = setup(Agent);

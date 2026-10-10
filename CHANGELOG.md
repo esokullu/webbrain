@@ -4,6 +4,12 @@ All notable changes to WebBrain are documented in this file.
 
 This changelog was generated from the repository Git history and release tags. Versions without a Git tag are inferred from version-bump commits and the current `package.json` / browser manifest versions.
 
+## [38.0.20] - 2026-10-10
+
+### Fixed
+- Keep rejected tool arguments from invalidating the next model request by repairing only their history representation, preserving raw diagnostics, call IDs, and no-dispatch feedback in Chrome and Firefox.
+- Give DemonRoute Qwen one named-tool recovery turn after a rejected single-call argument response, preserving completion rules, permissions, advertised tools, and mixed batches.
+
 ## [38.0.19] - 2026-10-10
 
 ### Fixed
