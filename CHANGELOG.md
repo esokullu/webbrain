@@ -4,6 +4,12 @@ All notable changes to WebBrain are documented in this file.
 
 This changelog was generated from the repository Git history and release tags. Versions without a Git tag are inferred from version-bump commits and the current `package.json` / browser manifest versions.
 
+## [38.0.24] - 2026-10-10
+
+### Fixed
+- Replay Dolphin Venice browser calls and untrusted tool results using the same text protocol as new calls, preserving conversation history without sending unsupported native tool roles.
+- Accept complete bounded JSON tool envelopes as well as explicit tool-call markup. Validate every offered schema and reject mixed batches, prose examples, unoffered tools, and incomplete responses before dispatch.
+
 ## [38.0.23] - 2026-10-10
 
 ### Fixed
