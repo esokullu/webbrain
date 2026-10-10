@@ -1,5 +1,6 @@
 import { BaseLLMProvider } from './base.js';
 import { normalizeDemonRouteQwenResult, normalizeDemonRouteQwenStream } from './qwen-tool-calls.js';
+import { normalizeDolphinPromptedResult, normalizeDolphinPromptedStream } from './dolphin-prompted-tools.js';
 import { retryAfterMs } from './model-retry.js';
 import { fetchWithFallback } from './fetch-with-fallback.js';
 import {
@@ -9,6 +10,8 @@ import {
   isOpenCodeZenConfig,
   isOpenRouterLingVisionModel,
   isOpenRouterNexN25MiniModel,
+  isOpenRouterDolphinVeniceConfig,
+  openRouterDolphinPromptedTools,
   requiresOpenAIDefaultTemperature,
   shouldUseOpenAIResponsesApi,
   supportsOpenAIAskStreaming,
@@ -119,7 +122,13 @@ export class OpenAICompatibleProvider extends BaseLLMProvider {
     // OpenRouter's Nex N2.5 mini route accepts chat completions but has no
     // function-compatible endpoint. Sending even read-only tools returns 404.
     if (this._isOpenRouterNexN25Mini()) return false;
+    if (isOpenRouterDolphinVeniceConfig({ ...this.config, baseUrl: this.baseUrl, model: this.model })) return false;
     return this.config.supportsTools !== false;
+  }
+
+  get requiresPromptedTools() {
+    return !this.supportsTools
+      && isOpenRouterDolphinVeniceConfig({ ...this.config, baseUrl: this.baseUrl, model: this.model });
   }
 
   get supportsVision() {
@@ -583,6 +592,9 @@ export class OpenAICompatibleProvider extends BaseLLMProvider {
    * compatibility presets, and safe extraBody merge.
    */
   _buildChatCompletionsBody(messages, options = {}, stream = false) {
+    if (this.requiresPromptedTools) {
+      ({ messages, options } = openRouterDolphinPromptedTools(messages, options));
+    }
     options = demonRouteQwenToolOptions({ ...this.config, baseUrl: this.baseUrl, model: this.model }, options);
     options = openRouterMuseToolOptions({ ...this.config, baseUrl: this.baseUrl, model: this.model }, options);
     let body = {
@@ -709,6 +721,9 @@ export class OpenAICompatibleProvider extends BaseLLMProvider {
   }
 
   _responsesBody(messages, options, stream) {
+    if (this.requiresPromptedTools) {
+      ({ messages, options } = openRouterDolphinPromptedTools(messages, options));
+    }
     options = openRouterMuseToolOptions({ ...this.config, baseUrl: this.baseUrl, model: this.model }, options);
     let body = {
       input: this._responsesInput(messages),
@@ -1129,7 +1144,7 @@ export class OpenAICompatibleProvider extends BaseLLMProvider {
     }
     const message = this._chatCompletionMessage(data);
 
-    return normalizeDemonRouteQwenResult(
+    const result = normalizeDemonRouteQwenResult(
       { ...this.config, baseUrl: this.baseUrl, model: this.model },
       { ...options, tools: body.tools, toolChoice: body.tool_choice },
       {
@@ -1141,6 +1156,7 @@ export class OpenAICompatibleProvider extends BaseLLMProvider {
         raw: data,
       },
     );
+    return this.requiresPromptedTools ? normalizeDolphinPromptedResult(options, result) : result;
   }
 
   async *chatStream(messages, options = {}) {
@@ -1149,6 +1165,10 @@ export class OpenAICompatibleProvider extends BaseLLMProvider {
       return;
     }
     const body = this._buildChatCompletionsBody(messages, options, true);
+    if (this.requiresPromptedTools) {
+      yield* normalizeDolphinPromptedStream(options, this._chatStreamNative(messages, options, body));
+      return;
+    }
     yield* normalizeDemonRouteQwenStream(
       { ...this.config, baseUrl: this.baseUrl, model: this.model },
       { ...options, tools: body.tools, toolChoice: body.tool_choice },

@@ -103,6 +103,47 @@ for (const browser of ['chrome', 'firefox']) {
     assert.equal(h.requests.length, 3);
   });
 
+  test(`${browser}: Dolphin text tools recover from prose, preserve tool history, and complete only after observed evidence`, async () => {
+    const h = harness([]);
+    const transport = new OpenAICompatibleProvider({ providerName: 'webbrain_me', baseUrl: 'https://openrouter.ai/api/v1', model: 'cognitivecomputations/dolphin-mistral-24b-venice-edition' });
+    const previousFetch = globalThis.fetch;
+    const serialized = [];
+    const responses = [
+      'I will read the page.',
+      '<tool_call>{"name":"read_page","arguments":{}}</tool_call>',
+      '<tool_call>{"name":"done","arguments":{"summary":"Verified the observed page title: Example.","outcome":"success"}}</tool_call>',
+    ];
+    h.provider.supportsTools = false;
+    h.provider.requiresPromptedTools = true;
+    h.provider.chat = async (messages, options) => {
+      h.requests.push({ messages: structuredClone(messages), options });
+      return transport.chat(messages, options);
+    };
+    h.agent._gateSettingLoaded = true;
+    h.agent._shouldAutoScreenshot = () => false;
+    h.agent._observeCaptchaChallenge = async () => ({ gate: null, loopCheck: { kind: 'none' } });
+    globalThis.fetch = async (_url, options) => {
+      assert.ok(responses.length, 'Unexpected model turn');
+      const body = JSON.parse(options.body);
+      serialized.push(body);
+      assert.equal(Object.hasOwn(body, 'tools'), false);
+      assert.equal(Object.hasOwn(body, 'tool_choice'), false);
+      assert.match(body.messages[0].content, /TEXT TOOL PROTOCOL/);
+      return Response.json({ choices: [{ finish_reason: 'stop', message: { content: responses.shift() } }] });
+    };
+    try {
+      const run = await h.controller.startRun({ task: 'Read the current page and report its title. Read only.', mode: 'act' });
+      const snapshot = await finish(h.controller, run);
+      assert.equal(snapshot.status, 'completed', snapshot.error);
+      assert.deepEqual(h.dispatched, ['read_page', 'done']);
+      assert.equal(h.requests.length, 3, 'One prose recovery followed by observed evidence and explicit completion');
+      assert.ok(h.requests[1].messages.some(message => String(message.content || '').startsWith('[PLAN EXECUTION BLOCK')));
+      assert.ok(serialized[2].messages.some(message => message.role === 'tool'));
+      assert.ok(serialized[2].messages.some(message => message.tool_calls?.[0]?.function?.name === 'read_page'));
+      assert.match(snapshot.result, /Verified the observed page title/);
+    } finally { globalThis.fetch = previousFetch; }
+  });
+
   test(`${browser}: Cloud Act cannot complete with done success before any tool evidence`, async () => {
     const h = harness([
       tool('done', { summary: 'Videos found.', outcome: 'success' }),

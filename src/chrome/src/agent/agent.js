@@ -43214,7 +43214,7 @@ If the user has already named or confirmed this exact recipient, do NOT ask agai
         if (!result) {
         const useTools = provider.supportsTools && tools.length > 0;
         const chatOpts = {
-          tools: useTools ? tools : undefined,
+          tools: useTools || provider.requiresPromptedTools ? tools : undefined,
           temperature: plannerTemperature,
            maxTokens: mainMaxTokens,
           ...(completionToolChoice ? { toolChoice: completionToolChoice } : {}),
@@ -43294,7 +43294,7 @@ If the user has already named or confirmed this exact recipient, do NOT ask agai
           try {
             const useTools = provider.supportsTools && tools.length > 0;
             const chatOpts = {
-              tools: useTools ? tools : undefined,
+              tools: useTools || provider.requiresPromptedTools ? tools : undefined,
               temperature: plannerTemperature,
                 maxTokens: mainMaxTokens,
               ...(completionToolChoice ? { toolChoice: completionToolChoice } : {}),
@@ -43353,7 +43353,7 @@ If the user has already named or confirmed this exact recipient, do NOT ask agai
           try {
             const useTools2 = provider.supportsTools && tools.length > 0;
             const chatOpts2 = {
-              tools: useTools2 ? tools : undefined,
+              tools: useTools2 || provider.requiresPromptedTools ? tools : undefined,
               temperature: plannerTemperature,
                 maxTokens: mainMaxTokens,
               ...(completionToolChoice ? { toolChoice: completionToolChoice } : {}),
@@ -44395,7 +44395,7 @@ If the user has already named or confirmed this exact recipient, do NOT ask agai
         const fastResult = await this._maybeJevFastTurn(tabId, userMessage, messages, mode, allowedToolNames, provider, costState, runOptions, completionRecoveryPolicy);
         const streamOpts = this._cloudGenerationOptions(provider, {
           signal: this._runAbortSignal(tabId),
-          tools: provider.supportsTools && tools.length > 0 ? tools : undefined,
+          tools: (provider.supportsTools || provider.requiresPromptedTools) && tools.length > 0 ? tools : undefined,
           temperature: plannerTemperature,
             maxTokens: mainMaxTokens,
           ...(completionToolChoice ? { toolChoice: completionToolChoice } : {}),

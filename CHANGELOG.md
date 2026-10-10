@@ -4,6 +4,12 @@ All notable changes to WebBrain are documented in this file.
 
 This changelog was generated from the repository Git history and release tags. Versions without a Git tag are inferred from version-bump commits and the current `package.json` / browser manifest versions.
 
+## [38.0.23] - 2026-10-10
+
+### Fixed
+- Run browser tools with OpenRouter's text-only Dolphin Mistral 24B Venice route using an explicit text protocol and the currently offered schemas. Keep native tool parameters out of requests and preserve named/disabled choices, task evidence, and bounded completion recovery in Chrome and Firefox.
+- Reject unavailable, incomplete, or mixed text tool responses before dispatch; preserve conversation tool history without changing other models.
+
 ## [38.0.22] - 2026-10-10
 
 ### Fixed
