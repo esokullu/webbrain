@@ -51,7 +51,7 @@ export function normalizeRejectedToolResponse(value) {
   if (value?.provider !== 'demonroute_qwen'
     || !['xml_name_args', 'json_envelope', 'function_parameters', 'other_xml'].includes(value.format)
     || !['oversized', 'incomplete_response', 'mixed_content', 'invalid_envelope'].includes(value.reason)
-    || !['named', 'auto', 'required', 'unspecified'].includes(value.choice)) return null;
+    || !['named', 'auto', 'required', 'none', 'unspecified'].includes(value.choice)) return null;
   const output = { provider: 'demonroute_qwen', format: value.format, reason: value.reason, choice: value.choice };
   for (const key of ['contentChars', 'offeredTools']) {
     if (Number.isSafeInteger(value[key]) && value[key] >= 0) output[key] = value[key];

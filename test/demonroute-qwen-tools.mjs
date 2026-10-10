@@ -9,6 +9,14 @@ globalThis.browser ||= globalThis.chrome;
 const legacyNavigate = '<tool_call><tool_call><tool_name>navigate</tool_name><tool_args>{"url":"https://www.youtube.com/results?search_query=browser+automation"}</tool_args></tool_call></tool_call>';
 const jsonNavigate = '<tool_call>{"name":"navigate","arguments":{"url":"https://example.com/"}}</tool_call>';
 const jsonDone = '<tool_call>{"name":"done","arguments":{"summary":"Verified the page.","outcome":"success"}}</tool_call>';
+// Complete canonical envelope from the owned cold-wake inference replay. Its
+// prose prefix is deliberately excluded: only a tool-only recovery may run.
+const canonicalTree = '<tool_call>\n<function=get_accessibility_tree>\n<parameter=filter>\nvisible</parameter>\n<parameter=maxDepth>\n12</parameter>\n<parameter=maxChars>\n8000\n</parameter>\n</function>\n</tool_call>';
+const canonicalDone = '<tool_call>\n<function=done>\n<parameter=summary>\nVerified the page.\n</parameter>\n<parameter=outcome>\nsuccess\n</parameter>\n</function>\n</tool_call>';
+const capturedPrefixes = [
+  'The page is still loading. Let me read the accessibility tree to see the video results.\n\n',
+  'The page has loaded but is still active with DOM mutations. Let me now read the accessibility tree to see the video results.\n\n',
+];
 const collect = async stream => { const chunks = []; for await (const chunk of stream) chunks.push(chunk); return chunks; };
 async function* chunks(values) { yield* values; }
 function sseResponse(content, finishReason = 'stop', nativeCalls = null) {
@@ -35,6 +43,146 @@ for (const browser of ['chrome', 'firefox']) {
   };
   const tools = getToolsForMode('act', { tier: 'full', cloudRun: true });
   const options = { tools };
+
+  test(`${browser}: captured canonical parameters decode using their offered schema in chat and stream`, async () => {
+    const parsed = parse(config, options, canonicalTree);
+    assert.equal(parsed[0].function.name, 'get_accessibility_tree');
+    assert.deepEqual(JSON.parse(parsed[0].function.arguments), { filter: 'visible', maxDepth: 12, maxChars: 8000 });
+    const batch = parse(config, options, canonicalTree + canonicalDone);
+    assert.deepEqual(batch.map(call => call.function.name), ['get_accessibility_tree', 'done']);
+    assert.deepEqual(JSON.parse(batch[1].function.arguments), { summary: 'Verified the page.', outcome: 'success' });
+    const previousFetch = globalThis.fetch;
+    globalThis.fetch = async (_url, request) => JSON.parse(request.body).stream ? sseResponse(canonicalTree) : Response.json({ choices: [{ finish_reason: 'stop', message: { content: canonicalTree } }] });
+    try {
+      const provider = new OpenAICompatibleProvider(config);
+      const result = await provider.chat([], options);
+      assert.deepEqual(JSON.parse(result.toolCalls[0].function.arguments), { filter: 'visible', maxDepth: 12, maxChars: 8000 });
+      assert.equal(result.content, '');
+      const streamed = await collect(provider.chatStream([], options));
+      assert.equal(streamed.at(-1).finishReason, 'tool_calls');
+      assert.deepEqual(JSON.parse(streamed.find(chunk => chunk.type === 'tool_call').content[0].function.arguments), { filter: 'visible', maxDepth: 12, maxChars: 8000 });
+    } finally { globalThis.fetch = previousFetch; }
+  });
+
+  test(`${browser}: canonical strings, arrays, objects, numbers and exact Python booleans preserve schema types`, () => {
+    const typedTools = [{ type: 'function', function: { name: 'typed_probe', parameters: {
+      type: 'object', properties: { text: { type: 'string' }, enabled: { type: 'boolean' }, count: { type: 'integer' }, ratio: { type: 'number' }, object: { type: 'object' }, items: { type: 'array' } },
+    } } }];
+    const content = '<tool_call><function=typed_probe><parameter=text>\ntrue\nsecond line\n</parameter><parameter=enabled>True</parameter><parameter=count>12</parameter><parameter=ratio>0.5</parameter><parameter=object>{"text":"literal </parameter> text","nested":{"value":1}}</parameter><parameter=items>[false,{"value":2}]</parameter></function></tool_call>';
+    const args = JSON.parse(parse(config, { tools: typedTools }, content)[0].function.arguments);
+    assert.deepEqual(args, { text: 'true\nsecond line', enabled: true, count: 12, ratio: 0.5, object: { text: 'literal </parameter> text', nested: { value: 1 } }, items: [false, { value: 2 }] });
+    for (const value of ['false', 'False']) {
+      const calls = parse(config, { tools: typedTools }, `<tool_call><function=typed_probe><parameter=enabled>${value}</parameter></function></tool_call>`);
+      assert.equal(JSON.parse(calls[0].function.arguments).enabled, false);
+    }
+  });
+
+  test(`${browser}: documented canonical prose prefixes preserve content after complete chat and stream parsing`, async () => {
+    assert.deepEqual(capturedPrefixes.map(prefix => prefix.length), [89, 126]);
+    const previousFetch = globalThis.fetch;
+    try {
+      for (const prefix of [...capturedPrefixes, 'I will inspect Example Domain and format the results as requested.\n\n']) {
+        const content = prefix + canonicalTree;
+        globalThis.fetch = async (_url, request) => JSON.parse(request.body).stream ? sseResponse(content) : Response.json({ choices: [{ finish_reason: 'stop', message: { content } }] });
+        const provider = new OpenAICompatibleProvider(config);
+        const result = await provider.chat([], options);
+        assert.equal(result.content, prefix.trimEnd());
+        assert.equal(result.toolCalls[0].function.name, 'get_accessibility_tree');
+        const streamed = await collect(provider.chatStream([], options));
+        assert.equal(streamed.filter(chunk => chunk.type === 'text').map(chunk => chunk.content).join(''), prefix.trimEnd());
+        assert.equal(streamed.find(chunk => chunk.type === 'tool_call').content[0].function.name, 'get_accessibility_tree');
+        assert.equal(streamed.at(-1).finishReason, 'tool_calls');
+      }
+    } finally { globalThis.fetch = previousFetch; }
+    const emitted = [];
+    async function* pending() {
+      yield { type: 'text', content: capturedPrefixes[0] };
+      yield { type: 'text', content: canonicalTree };
+      assert.deepEqual(emitted, [], 'Prefix and calls cannot escape before a real terminal stop');
+      yield { type: 'done', finishReason: 'stop' };
+    }
+    for await (const chunk of normalizeStream(config, options, pending())) emitted.push(chunk);
+    assert.equal(emitted[0].content, capturedPrefixes[0].trimEnd());
+    assert.equal(emitted[1].type, 'tool_call');
+  });
+
+  test(`${browser}: prefixed canonical calls reject code, examples, suffixes and malformed or legacy siblings`, async () => {
+    const rejected = [
+      'x'.repeat(1025) + canonicalTree,
+      'Example call: ' + canonicalTree,
+      'For example, ' + canonicalTree,
+      'Here is a sample response: ' + canonicalTree,
+      '```xml\n' + capturedPrefixes[0] + canonicalTree + '\n```',
+      '~~~xml\n' + canonicalTree + '\n~~~',
+      '<think>Reasoning</think>' + canonicalTree,
+      '`get_accessibility_tree` is the tool. ' + canonicalTree,
+      '{"tool_calls":[]} ' + canonicalTree,
+      capturedPrefixes[0] + canonicalTree + ' suffix',
+      capturedPrefixes[0] + canonicalTree + jsonDone,
+      capturedPrefixes[0] + canonicalTree + legacyNavigate,
+      capturedPrefixes[0] + canonicalTree + '<tool_call><function=done>',
+    ];
+    for (const content of rejected) {
+      assert.equal(parse(config, options, content), null);
+      const result = normalize(config, options, { content, finishReason: 'stop' });
+      assert.equal(result.content, INVALID_QWEN_TOOL_RESPONSE);
+      assert.deepEqual(Agent.prototype._tryParseToolCallsFromText.call({}, result.content), []);
+      const streamed = await collect(normalizeStream(config, options, chunks([{ type: 'text', content }, { type: 'done', finishReason: 'stop' }])));
+      assert.equal(streamed.some(chunk => chunk.type === 'tool_call'), false);
+      assert.equal(streamed.filter(chunk => chunk.type === 'text').map(chunk => chunk.content).join(''), INVALID_QWEN_TOOL_RESPONSE);
+    }
+    for (const finishReason of ['', 'length', 'content_filter', 'error']) {
+      const streamed = await collect(normalizeStream(config, options, chunks([{ type: 'text', content: capturedPrefixes[0] + canonicalTree }, { type: 'done', finishReason }])));
+      assert.equal(streamed.some(chunk => chunk.type === 'tool_call'), false);
+    }
+    for (const failure of [null, new Error('Transport failed'), new DOMException('Cancelled', 'AbortError')]) {
+      const emitted = [];
+      async function* incomplete() { yield { type: 'text', content: capturedPrefixes[0] + canonicalTree }; if (failure) throw failure; }
+      if (failure) await assert.rejects(async () => { for await (const chunk of normalizeStream(config, options, incomplete())) emitted.push(chunk); }, error => error === failure);
+      else for await (const chunk of normalizeStream(config, options, incomplete())) emitted.push(chunk);
+      assert.deepEqual(emitted, [{ type: 'text', content: INVALID_QWEN_TOOL_RESPONSE }]);
+    }
+  });
+
+  test(`${browser}: canonical malformed batches, duplicates, unknown parameters and unsafe values dispatch no subset`, async () => {
+    const rejected = [
+      canonicalTree.replace('<parameter=maxDepth>', '<parameter=not_declared>'),
+      canonicalTree.replace('</function>', '<parameter=filter>all</parameter></function>'),
+      canonicalTree.replace('<function=get_accessibility_tree>', '<function=not_offered>'),
+      canonicalTree.replace('12</parameter>', '"12"</parameter>'),
+      canonicalTree.replace('12</parameter>', 'NaN</parameter>'),
+      canonicalTree.replace('12</parameter>', '1e999</parameter>'),
+      canonicalTree.replace('</function>', '<parameter=__proto__>{}</parameter></function>'),
+      canonicalTree.replace('</function>', '<parameter=continuationArgs>{"page":2,"constructor":{}}</parameter></function>'),
+      canonicalTree.replace('</function>', '<parameter=continuationArgs>[1,2]</parameter></function>'),
+      canonicalTree.replace('</tool_call>', ''),
+      canonicalTree.replace('</function>', ''),
+      canonicalTree + '<tool_call><function=done><parameter=summary>Incomplete',
+      'Example call: ' + canonicalTree,
+      canonicalTree + ' prose after',
+      '```xml\n' + canonicalTree + '\n```',
+      canonicalTree.repeat(17),
+    ];
+    for (const content of rejected) {
+      assert.equal(parse(config, options, content), null, content.slice(0, 160));
+      const result = normalize(config, options, { content, finishReason: 'stop' });
+      assert.equal(result.content, INVALID_QWEN_TOOL_RESPONSE);
+      assert.deepEqual(Agent.prototype._tryParseToolCallsFromText.call({}, result.content), []);
+      const streamed = await collect(normalizeStream(config, options, chunks([{ type: 'text', content }, { type: 'done', finishReason: 'stop' }])));
+      assert.equal(streamed.some(chunk => chunk.type === 'tool_call'), false);
+    }
+    assert.equal(parse(config, { tools, toolChoice: 'none' }, canonicalTree), null);
+    assert.equal(parse(config, { tools: [] }, canonicalTree), null);
+    assert.equal(parse(config, { tools, toolChoice: { type: 'function', function: { name: 'done' } } }, canonicalTree), null);
+    assert.equal(parse(config, { tools, toolChoice: { type: 'function', function: { name: 'done' } } }, canonicalDone)[0].function.name, 'done');
+    for (const finishReason of ['length', 'error', 'content_filter', '']) {
+      assert.equal(normalize(config, options, { content: canonicalTree, finishReason }).content, INVALID_QWEN_TOOL_RESPONSE);
+      const streamed = await collect(normalizeStream(config, options, chunks([{ type: 'text', content: canonicalTree }, { type: 'done', finishReason }])));
+      assert.equal(streamed.some(chunk => chunk.type === 'tool_call'), false);
+    }
+    const eof = await collect(normalizeStream(config, options, chunks([{ type: 'text', content: canonicalTree }])));
+    assert.equal(eof.some(chunk => chunk.type === 'tool_call'), false);
+  });
 
   test(`${browser}: rejected XML exports only structural diagnostics and never raw sentinel secrets`, () => {
     const secret = 'private-sentinel-secret-do-not-export';
@@ -146,12 +294,12 @@ for (const browser of ['chrome', 'firefox']) {
     assert.deepEqual(Agent.prototype._tryParseToolCallsFromText.call({}, result.content), []);
   });
 
-  test(`${browser}: native calls, ordinary text, none, no tools and unrelated models are unchanged`, async () => {
+  test(`${browser}: native calls, ordinary text, no tools and unrelated models are unchanged`, async () => {
     const native = { content: jsonNavigate, toolCalls: [{ id: 'native', function: { name: 'navigate', arguments: '{}' } }], finishReason: 'tool_calls' };
     assert.equal(normalize(config, options, native), native);
     for (const [route, request, content] of [
       [config, options, 'Ordinary answer.'],
-      [config, { tools, toolChoice: 'none' }, jsonNavigate],
+      [config, { tools, toolChoice: 'none' }, 'Ordinary answer.'],
       [config, { tools: [] }, jsonNavigate],
       [config, {}, jsonNavigate],
       [{ ...config, model: 'other/model' }, options, jsonNavigate],
@@ -166,6 +314,30 @@ for (const browser of ['chrome', 'firefox']) {
     assert.equal(parse(config, { tools, toolChoice: { type: 'function', function: { name: 'done' } } }, jsonDone)[0].function.name, 'done');
     const original = [{ type: 'text', content: jsonNavigate }, { type: 'tool_call', content: native.toolCalls }, { type: 'text', content: 'Native suffix.' }, { type: 'done', finishReason: 'tool_calls' }];
     assert.deepEqual(await collect(normalizeStream(config, options, chunks(original))), original);
+  });
+
+  test(`${browser}: denied choices sanitize exact-route candidates before the Agent fallback`, async () => {
+    const canonicalNavigate = '<tool_call><function=navigate><parameter=url>https://example.com/</parameter></function></tool_call>';
+    assert.equal(Agent.prototype._tryParseToolCallsFromText.call({}, canonicalNavigate).length, 1, 'Fixture must exercise the generic text-parser escape path');
+    for (const toolChoice of ['none', { type: 'function', function: { name: 'not_offered' } }]) {
+      const request = { tools, toolChoice };
+      const result = normalize(config, request, { content: canonicalNavigate, finishReason: 'stop' });
+      assert.equal(result.content, INVALID_QWEN_TOOL_RESPONSE);
+      assert.deepEqual(Agent.prototype._tryParseToolCallsFromText.call({}, result.content), []);
+      const streamed = await collect(normalizeStream(config, request, chunks([{ type: 'text', content: canonicalNavigate }, { type: 'done', finishReason: 'stop' }])));
+      assert.equal(streamed.some(chunk => chunk.type === 'tool_call'), false);
+      assert.equal(streamed[0].content, INVALID_QWEN_TOOL_RESPONSE);
+      assert.deepEqual(Agent.prototype._tryParseToolCallsFromText.call({}, streamed[0].content), []);
+      assert.equal(streamed.at(-1).rejectedToolResponse.choice, toolChoice === 'none' ? 'none' : 'named');
+    }
+    const technical = { content: canonicalNavigate, finishReason: 'stop' };
+    assert.equal(normalize(config, {}, technical), technical);
+    assert.equal(normalize(config, { tools: [], toolChoice: 'none' }, technical), technical);
+    const ordinary = { content: 'Read about tool calling.', finishReason: 'stop' };
+    assert.equal(normalize(config, { tools, toolChoice: 'none' }, ordinary), ordinary);
+    const native = { ...technical, toolCalls: [{ id: 'native', function: { name: 'navigate', arguments: '{}' } }] };
+    assert.equal(normalize(config, { tools, toolChoice: 'none' }, native), native);
+    assert.equal(normalize({ ...config, model: 'other/model' }, { tools, toolChoice: 'none' }, technical), technical);
   });
 
   test(`${browser}: normalization requires a real stop and never executes EOF, error, cancellation or truncation`, async () => {
@@ -253,7 +425,7 @@ for (const browser of ['chrome', 'firefox']) {
         const streamed = await collect(provider.chatStream([], options));
         assert.equal(streamed.some(chunk => chunk.type === 'tool_call'), false);
         const text = streamed.filter(chunk => chunk.type === 'text').map(chunk => chunk.content).join('');
-        assert.equal(text, override.tool_choice && typeof override.tool_choice === 'object' ? INVALID_QWEN_TOOL_RESPONSE : jsonNavigate);
+        assert.equal(text, override.tool_choice === 'none' || typeof override.tool_choice === 'object' ? INVALID_QWEN_TOOL_RESPONSE : jsonNavigate);
       }
     } finally { globalThis.fetch = previousFetch; }
   });

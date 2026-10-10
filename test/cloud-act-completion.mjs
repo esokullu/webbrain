@@ -26,6 +26,8 @@ for (const browser of ['chrome', 'firefox']) {
   const { Agent } = await import(`../src/${browser}/src/agent/agent.js`);
   const { createCloudRunController } = await import(`../src/${browser}/src/cloud-runs.js`);
   const { OpenAICompatibleProvider } = await import(`../src/${browser}/src/providers/openai.js`);
+  const { getToolsForMode } = await import(`../src/${browser}/src/agent/tools.js`);
+  const { normalizeDemonRouteQwenResult } = await import(`../src/${browser}/src/providers/qwen-tool-calls.js`);
   function harness(responses, validateRequest = () => {}) {
     const requests = [], dispatched = [];
     const provider = {
@@ -205,6 +207,70 @@ for (const browser of ['chrome', 'firefox']) {
     assert.equal(h.agent._repairToolCallArgs('read_page', read).args, read);
     assert.equal(h.agent._repairToolCallArgs('click', click).args, click);
     assert.deepEqual(h.agent._repairToolCallArgs('wait_for_stable', { quietMs: '800.5', timeout: '10000', checkNetwork: 'false' }).args, { quietMs: 800.5, timeout: 10000, checkNetwork: false });
+  });
+
+  test(`${browser}: real Qwen canonical transport reaches read evidence and explicit Cloud completion`, async () => {
+    const previousFetch = globalThis.fetch;
+    const prefix = 'The page is still loading. Let me read the accessibility tree to see the video results.';
+    const contents = [
+      prefix + '\n\n<tool_call>\n<function=get_accessibility_tree>\n<parameter=filter>\nvisible</parameter>\n<parameter=maxDepth>\n12</parameter>\n<parameter=maxChars>\n8000\n</parameter>\n</function>\n</tool_call>',
+      '<tool_call><function=done><parameter=summary>Verified the live page title.</parameter><parameter=outcome>success</parameter></function></tool_call>',
+    ];
+    const transport = new OpenAICompatibleProvider({ baseUrl: 'https://api.demonroute.com/v1', model: 'huihui-ai/Huihui-Qwen3.5-27B-abliterated' });
+    const h = harness([]);
+    h.provider.model = transport.model;
+    h.provider.baseUrl = transport.baseUrl;
+    h.provider.contextWindow = 32768;
+    h.provider.chat = async (messages, options) => {
+      h.requests.push({ messages: structuredClone(messages), options });
+      return transport.chat(messages, options);
+    };
+    const reads = [];
+    const execute = h.agent.executeTool;
+    h.agent.executeTool = async (tabId, name, args) => {
+      if (name === 'get_accessibility_tree') reads.push(args);
+      return execute(tabId, name, args);
+    };
+    h.agent._gateSettingLoaded = true;
+    h.agent._shouldAutoScreenshot = () => false;
+    h.agent._observeCaptchaChallenge = async () => ({ gate: null, loopCheck: { kind: 'none' } });
+    globalThis.fetch = async () => {
+      assert.ok(contents.length, 'Unexpected model turn');
+      return Response.json({ choices: [{ finish_reason: 'stop', message: { content: contents.shift() } }] });
+    };
+    try {
+      const run = await h.controller.startRun({ task: 'Read the current page and report its title. Read only.', mode: 'act' });
+      const snapshot = await finish(h.controller, run);
+      assert.equal(snapshot.status, 'completed', snapshot.error);
+      assert.deepEqual(h.dispatched, ['get_accessibility_tree', 'done']);
+      assert.equal(h.requests.length, 2);
+      assert.equal(reads.length, 1);
+      assert.equal(reads[0].filter, 'visible');
+      assert.equal(reads[0].maxDepth, 12);
+      assert.ok(reads[0].maxChars > 0 && reads[0].maxChars <= 6000, 'Existing Agent read-window clamp still applies');
+      assert.equal(h.requests[1].messages.find(message => message.role === 'assistant' && message.tool_calls?.[0]?.function?.name === 'get_accessibility_tree').content, prefix);
+      assert.match(snapshot.result, /Verified the live page title/);
+    } finally { globalThis.fetch = previousFetch; }
+  });
+
+  test(`${browser}: denied Qwen tool choices cannot dispatch through the Cloud Agent text fallback`, async () => {
+    const content = '<tool_call><function=navigate><parameter=url>https://example.com/</parameter></function></tool_call>';
+    const config = { baseUrl: 'https://api.demonroute.com/v1', model: 'huihui-ai/Huihui-Qwen3.5-27B-abliterated' };
+    const tools = getToolsForMode('act', { tier: 'full', cloudRun: true });
+    assert.equal(Agent.prototype._tryParseToolCallsFromText.call({}, content).length, 1, 'Original candidate would reach the generic fallback');
+    for (const toolChoice of ['none', { type: 'function', function: { name: 'unavailable_tool' } }]) {
+      const normalized = normalizeDemonRouteQwenResult(config, { tools, toolChoice }, { content, finishReason: 'stop' });
+      const h = harness([normalized, normalized, normalized]);
+      h.agent._gateSettingLoaded = true;
+      h.agent._shouldAutoScreenshot = () => false;
+      h.agent._observeCaptchaChallenge = async () => ({ gate: null, loopCheck: { kind: 'none' } });
+      const run = await h.controller.startRun({ task: 'Open https://example.com/ and read the page title. Read only.', mode: 'act' });
+      const snapshot = await finish(h.controller, run);
+      assert.equal(snapshot.status, 'failed');
+      assert.deepEqual(h.dispatched, []);
+      assert.ok(h.requests.length >= 2 && h.requests.length <= 3, 'Completion guard keeps recovery bounded');
+      assert.doesNotMatch(snapshot.result || '', /<tool_call>|function=navigate/);
+    }
   });
 
   test(`${browser}: rejected raw navigate arguments cannot poison the serialized recovery request`, async () => {

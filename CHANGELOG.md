@@ -4,6 +4,12 @@ All notable changes to WebBrain are documented in this file.
 
 This changelog was generated from the repository Git history and release tags. Versions without a Git tag are inferred from version-bump commits and the current `package.json` / browser manifest versions.
 
+## [38.0.22] - 2026-10-10
+
+### Fixed
+- Accept Qwen 3.5's documented function/parameter envelopes, including a bounded natural-language preface, from the verified DemonRoute model. Decode only advertised schema fields while retaining model scope, named choices, size/depth limits, and validation before browser dispatch.
+- Continue rejecting fenced examples, trailing prose, and malformed batches without executing a valid subset. Native tool calls and other models keep their existing behavior.
+
 ## [38.0.21] - 2026-10-10
 
 ### Fixed
