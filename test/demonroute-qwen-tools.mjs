@@ -147,6 +147,19 @@ for (const browser of ['chrome', 'firefox']) {
     assert.deepEqual(await collect(normalizeStream(config, options, chunks(prose))), prose);
   });
 
+  test(`${browser}: an empty native delta cannot disable complete XML normalization or rejection`, async () => {
+    for (const [content, expectedCalls] of [[legacyNavigate, 1], [jsonNavigate + '<tool_call>{"name":"unknown","arguments":{}}</tool_call>', 0]]) {
+      const streamed = await collect(normalizeStream(config, options, chunks([
+        { type: 'tool_call', content: [] },
+        { type: 'text', content },
+        { type: 'done', finishReason: 'stop' },
+      ])));
+      assert.deepEqual(streamed[0], { type: 'tool_call', content: [] });
+      assert.equal(streamed.filter(chunk => chunk.type === 'tool_call').flatMap(chunk => chunk.content).length, expectedCalls);
+      if (!expectedCalls) assert.equal(streamed.find(chunk => chunk.type === 'text').content, INVALID_QWEN_TOOL_RESPONSE);
+    }
+  });
+
   test(`${browser}: actual provider responses normalize XML in chat and streamed terminal responses`, async () => {
     const previousFetch = globalThis.fetch;
     globalThis.fetch = async (_url, request) => {

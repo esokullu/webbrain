@@ -158,7 +158,7 @@ export async function* normalizeDemonRouteQwenStream(config, options, stream) {
         }
         continue;
       }
-      if (['tool_call', 'tool_call_start', 'tool_call_delta'].includes(chunk.type)) {
+      if ((chunk.type === 'tool_call' && chunk.content?.length) || ['tool_call_start', 'tool_call_delta'].includes(chunk.type)) {
         nativeCalls = true;
         for (const text of buffered) yield text;
         buffered = [];

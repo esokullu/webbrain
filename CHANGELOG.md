@@ -4,6 +4,11 @@ All notable changes to WebBrain are documented in this file.
 
 This changelog was generated from the repository Git history and release tags. Versions without a Git tag are inferred from version-bump commits and the current `package.json` / browser manifest versions.
 
+## [38.0.19] - 2026-10-10
+
+### Fixed
+- Keep strict DemonRoute Qwen tool-envelope normalization active when a streamed response includes an empty native tool-call array.
+
 ## [38.0.18] - 2026-10-10
 
 ### Fixed
