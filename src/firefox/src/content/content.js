@@ -5425,25 +5425,28 @@
 
       let gmailComposeRoot = null;
       if (gmailRecipientMode) {
-        const recipientRole = (el, root = null) => {
-          const roleFromAttribute = (attribute, value) => {
-            const text = compact(value, 120).toLowerCase();
-            if (!text) return '';
-            if (attribute === 'aria-label') {
-              if (/^(?:bcc|blind\s+carbon\s+copy)(?:$|\s*[:,-]\s*)/.test(text)) return 'bcc';
-              if (/^(?:cc|carbon\s+copy)(?:$|\s*[:,-]\s*)/.test(text)) return 'cc';
-              if (/^to(?:$|\s*[:,-]\s*)/.test(text)) return 'to';
-              return '';
-            }
-            if (attribute === 'name') {
-              return /^(?:to|cc|bcc)$/.test(text) ? text : '';
-            }
-            const tokens = text.split(/[^a-z]+/).filter(Boolean);
-            if (tokens.includes('bcc')) return 'bcc';
-            if (tokens.includes('cc')) return 'cc';
-            if (tokens.length === 1 && tokens[0] === 'to') return 'to';
+        // Chips and not-yet-committed address fields must use the same role
+        // parser. Keep it in their shared scope: a visible Subject/To input
+        // must not turn the entire recipient probe into a ReferenceError.
+        const roleFromAttribute = (attribute, value) => {
+          const text = compact(value, 120).toLowerCase();
+          if (!text) return '';
+          if (attribute === 'aria-label') {
+            if (/^(?:bcc|blind\s+carbon\s+copy)(?:$|\s*[:,-]\s*)/.test(text)) return 'bcc';
+            if (/^(?:cc|carbon\s+copy)(?:$|\s*[:,-]\s*)/.test(text)) return 'cc';
+            if (/^to(?:$|\s*[:,-]\s*)/.test(text)) return 'to';
             return '';
-          };
+          }
+          if (attribute === 'name') {
+            return /^(?:to|cc|bcc)$/.test(text) ? text : '';
+          }
+          const tokens = text.split(/[^a-z]+/).filter(Boolean);
+          if (tokens.includes('bcc')) return 'bcc';
+          if (tokens.includes('cc')) return 'cc';
+          if (tokens.length === 1 && tokens[0] === 'to') return 'to';
+          return '';
+        };
+        const recipientRole = (el, root = null) => {
           let current = el;
           for (let depth = 0; current && depth < 7; depth++, current = current.parentElement) {
             for (const attribute of ['data-recipient-type', 'data-type', 'name', 'aria-label']) {

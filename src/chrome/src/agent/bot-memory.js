@@ -141,6 +141,26 @@ export function observeMemoryPageInPage(args = {}) {
   const label = clip(safeText(element?.getAttribute?.('aria-label') || element?.innerText || element?.getAttribute?.('title') || ''), 512);
   const credential = privateDraftField(element);
   const form = element?.form || element?.closest?.('form');
+  // Gmail saves compose edits as owner drafts. They are not delivery actions
+  // and must not reserve the email's one-send memory entry. This fact comes
+  // from the isolated DOM observer, never model arguments or quoted page text.
+  const gmailDraftField = (() => {
+    if (!element || credential || location.hostname !== 'mail.google.com'
+        || !/^\/mail\//.test(location.pathname)) return false;
+    const dialog = element.closest?.('[role="dialog"]');
+    if (!dialog) return false;
+    const visible = field => {
+      if (!field?.isConnected || field.closest?.('[aria-hidden="true"]')) return false;
+      const rect = field.getBoundingClientRect();
+      const style = getComputedStyle(field);
+      return rect.width > 0 && rect.height > 0
+        && style.display !== 'none' && style.visibility !== 'hidden';
+    };
+    const subject = dialog.querySelector('input[name="subjectbox"]');
+    const bodies = Array.from(dialog.querySelectorAll('[role="textbox"][contenteditable="true"]')).filter(visible);
+    if (!visible(subject) || bodies.length !== 1 || !visible(element)) return false;
+    return element === bodies[0] || element.matches('input[name="subjectbox"],input[name="to"],input[name="cc"],input[name="bcc"]');
+  })();
   let scope = form || element;
   const draftSelector = 'textarea,[contenteditable=true],input:not([type=hidden]):not([type=submit]):not([type=button]):not([type=reset]):not([type=file]):not([type=checkbox]):not([type=radio])';
   let draftFields = [];
@@ -190,6 +210,7 @@ export function observeMemoryPageInPage(args = {}) {
     identifiers,
     elementFacts: { found: !!element, tag: clip(element?.tagName || '', 30), type, name,
       role: clip(element?.getAttribute?.('role') || '', 60), label, credential,
+      ...(gmailDraftField ? { gmailDraftField: true } : {}),
       href: clip(element?.href || element?.closest?.('a')?.href || '', 4096),
       formMethod: clip(form?.method || '', 20), formAction: clip(form?.action || '', 4096),
       draftText: clip(safeText(drafts.join('\n')), 2048), nearbyText: clip(safeText(scope?.innerText || ''), 2048) },
@@ -329,6 +350,17 @@ export class BotMemorySession {
     if (await this.canBootstrapNavigation(tabId, name, args)) return { allowed: true, readOnly: true, bootstrapNavigation: true };
     const observation = await this.observation(tabId, name, args);
     if (!observation.url || !observation.targets.length) return { allowed: false, reason: 'Observe the target page before acting.' };
+    if (name === 'set_field' && (args?.submit === false || args?.submit === undefined)
+        && !detectedSubmit && !consequentialSubmit
+        && observation.elementFacts?.found === true && observation.elementFacts.gmailDraftField === true
+        && observation.elementFacts.credential !== true) {
+      let gmailCompose = false;
+      try {
+        const url = new URL(observation.url);
+        gmailCompose = url.protocol === 'https:' && url.hostname === 'mail.google.com' && /^\/mail\//.test(url.pathname);
+      } catch {}
+      if (gmailCompose) return { allowed: true, readOnly: true, draftOnly: true };
+    }
     if ((name === 'click' || consequentialSubmit) && observation.elementFacts?.found !== true) {
       return { allowed: false, reason: 'The action target could not be resolved. Read the page and choose an observed control.' };
     }
