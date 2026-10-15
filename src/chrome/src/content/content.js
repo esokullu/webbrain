@@ -6187,7 +6187,11 @@
         messageSend = args.submit === true;
       } else if (tool === 'click' || tool === 'click_ax') {
         if (!targetResolved || !target) {
-          return { success: true, messageSend: null, conclusive: false, identityCandidates: [] };
+          return {
+            success: true, messageSend: null, conclusive: false,
+            targetResolved: false, reasonCode: 'message_target_unresolved',
+            identityCandidates: [],
+          };
         }
         const control = target.closest?.('button,[role="button"],input[type="submit"],input[type="button"],[data-action]') || target;
         const modal = _findTopmostBlockingModal();

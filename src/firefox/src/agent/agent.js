@@ -11811,7 +11811,11 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
         if (runId) trace.recordToolCall(runId, step, {
           name: fnName, args: fnArgs, result: messageRecipientBlock, latencyMs: 0,
         });
-        onUpdate('warning', { message: 'Message send blocked until the active recipient is verified.' });
+        onUpdate('warning', {
+          message: messageRecipientBlock.reasonCode === 'message_target_unresolved'
+            ? 'The requested control could not be resolved. No action was dispatched.'
+            : 'Message send blocked until the active recipient is verified.',
+        });
         if (interruptFailedBrowserAction(toolIndex, fnName)) { navNotices.length = 0; break; }
         continue;
       }
@@ -21818,10 +21822,12 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       messageRecipientGuard: true,
       ...(missingLinkedInComposer ? { retryable: false } : {}),
       reasonCode: probe?.success !== true || probe?.conclusive !== true || probe?.messageSend !== true
-        ? 'message_send_classification_inconclusive'
+        ? (probe?.reasonCode || 'message_send_classification_inconclusive')
         : (target ? 'active_recipient_unverified' : 'authorized_recipient_missing'),
       error: missingLinkedInComposer
         ? 'Message action blocked: no message composer is visible and this control is not a verified non-send action. Changing click targeting methods will not resolve this classification failure. Re-read the page to find a supported navigation or composer-opening control; if none is available, report the blocker instead of repeating the click.'
+        : probe?.reasonCode === 'message_target_unresolved'
+        ? 'The requested control could not be resolved in the current page or frame, so no action was dispatched. This does not establish a recipient mismatch or an attempted Send. Read fresh page evidence and use an exact visible control or fresh ref_id; do not guess hidden menu labels or repeat the same unresolved target. If the control is unavailable, report that blocker.'
         : probe?.success !== true || probe?.conclusive !== true || probe?.messageSend !== true
         ? 'Message action blocked: WebBrain could not conclusively resolve the target control and active composer. Re-read the page and retry with an exact visible control or fresh ref_id.'
         : target

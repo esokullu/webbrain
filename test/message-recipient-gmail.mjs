@@ -29,6 +29,48 @@ async function call(page, action, params = {}) {
 }
 
 for (const [kind, engine] of [['chrome', chromium], ['firefox', firefox]]) {
+  test(kind + ': unresolved Google account iframe controls are target errors, while Send remains blocked', async () => {
+    const browser = await engine.launch();
+    try {
+      const page = await browser.newPage();
+      const top = '<!doctype html><style>body{margin:0}a{display:block;width:150px;height:30px}iframe{width:600px;height:400px}</style>'
+        + '<header><a id="account" role="button" aria-label="Google Account: Fixture Owner">Account</a></header>'
+        + '<iframe src="https://ogs.google.com/u/0/widget/account"></iframe>';
+      await page.route('**/*', route => route.fulfill({ contentType: 'text/html', body: route.request().url().startsWith('https://ogs.google.com/')
+        ? '<!doctype html><a href="https://myaccount.google.com/">Manage your Google Account</a><a href="https://accounts.google.com/AddSession">Add another account</a>'
+        : top }));
+      await page.goto('https://mail.google.com/mail/u/0/#inbox');
+      const runtime = kind === 'firefox' ? 'browser' : 'chrome';
+      await page.addScriptTag({ content: 'window.' + runtime + '={runtime:{onMessage:{addListener(handler){window.__wb_handler=handler}}}}' });
+      for (const name of ['accessibility-tree', 'rich-text-toolbar-heuristic', 'content'])
+        await page.addScriptTag({ content: await readFile(new URL('../src/' + kind + '/src/content/' + name + '.js', import.meta.url), 'utf8') });
+      await page.evaluate(() => {
+        window.fixtureAccountOpens = 0;
+        document.querySelector('#account').addEventListener('click', () => window.fixtureAccountOpens++);
+      });
+      const { Agent } = await import('../src/' + kind + '/src/agent/agent.js');
+      const agent = new Agent({ getActive: () => ({ supportsVision: false }) });
+      agent._messageRecipientContentProbe = (_, params) => call(page, 'probe_message_recipient_guard', params);
+      agent._planExecutionGuards.set(1, { messaging: { target_kind: 'named', recipients: [{ identity: address, role: 'to' }] } });
+      assert.equal(await agent._messageRecipientGuardBlock(1, 'click', { selector: '#account' }, page.url()), null);
+      assert.equal((await call(page, 'click', { selector: '#account' })).success, true);
+      assert.equal(await page.evaluate(() => window.fixtureAccountOpens), 1);
+      for (const text of ['Manage your Google Account', 'Add another account', 'Send']) {
+        const probe = await call(page, 'probe_message_recipient_guard', {
+          tool: 'click', args: { text }, adapterName: 'gmail', supportsRecipientSets: true,
+        });
+        assert.equal(probe.reasonCode, 'message_target_unresolved');
+        assert.equal(probe.targetResolved, false);
+        const blocked = await agent._messageRecipientGuardBlock(1, 'click', { text }, page.url());
+        assert.equal(blocked?.noDispatch, true);
+        assert.equal(blocked?.dispatched, false);
+        assert.equal(blocked?.reasonCode, 'message_target_unresolved');
+        assert.match(blocked?.error, /control could not be resolved/);
+        assert.doesNotMatch(blocked?.error, /not the recipient authorized|active conversation does not exactly match/);
+      }
+      assert.equal(await page.evaluate(() => window.fixtureAccountOpens), 1);
+    } finally { await browser.close(); }
+  });
   test(`${kind}: only observed Gmail compose drafts bypass email reservation; Send and other fields stay protected`, async () => {
     const browser = await engine.launch();
     try {

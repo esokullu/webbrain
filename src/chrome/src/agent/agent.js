@@ -13192,7 +13192,11 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
         if (runId) trace.recordToolCall(runId, step, {
           name: fnName, args: fnArgs, result: messageRecipientBlock, latencyMs: 0,
         });
-        onUpdate('warning', { message: 'Message send blocked until the active recipient is verified.' });
+        onUpdate('warning', {
+          message: messageRecipientBlock.reasonCode === 'message_target_unresolved'
+            ? 'The requested control could not be resolved. No action was dispatched.'
+            : 'Message send blocked until the active recipient is verified.',
+        });
         if (interruptFailedBrowserAction(toolIndex, fnName)) { navNotices.length = 0; break; }
         continue;
       }
@@ -24053,6 +24057,8 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
         ? (probe?.reasonCode === 'message_commit_without_composer'
           ? 'Message send blocked: this control commits a message (for example "Send" / "Send without a note") but no active composer or recipient could be verified. Changing click targeting methods will not help; ask the user to confirm the recipient or open the intended conversation first.'
           : 'Message send blocked: no message composer is visible, so this send cannot be verified. Changing click targeting methods will not resolve this classification failure. Re-read the page to find a supported navigation or composer-opening control; if none is available, report the blocker instead of repeating the click.')
+        : probe?.reasonCode === 'message_target_unresolved'
+        ? 'The requested control could not be resolved in the current page or frame, so no action was dispatched. This does not establish a recipient mismatch or an attempted Send. Read fresh page evidence and use an exact visible control or fresh ref_id; do not guess hidden menu labels or repeat the same unresolved target. If the control is unavailable, report that blocker.'
         : inconclusive
         ? 'Message action blocked: WebBrain could not conclusively resolve the target control and active composer. Re-read the page and retry with an exact visible control or fresh ref_id.'
         : target
