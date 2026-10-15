@@ -303,8 +303,20 @@ export class BotMemorySession {
     this.closed = false;
   }
   rememberAttempt(attempt, observedTarget = null) {
+    const scope = this.config.context?.reconciliation;
+    const rootRunId = this.config.runId.replace(/-recovery-[23]$/, '');
+    const pinnedVerified = attempt?.status === 'verified' && scope?.version === 1
+      && /^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i.test(rootRunId)
+      && scope.runId === rootRunId && typeof scope.instructionHash === 'string' && /^[a-f0-9]{64}$/.test(scope.instructionHash)
+      && Array.isArray(scope.targets) && scope.targets.length <= 20
+      && typeof attempt.runId === 'string' && Number.isInteger(attempt.policyVersion)
+      && attempt.policyVersion > 0 && typeof attempt.actionKey === 'string' && !!attempt.actionKey
+      && typeof attempt.identity === 'string' && attempt.identity === memoryTargetIdentity(attempt.target)
+      && scope.targets.some(target => target?.attemptId === attempt.id && target.runId === attempt.runId
+        && target.policyVersion === attempt.policyVersion && target.actionKey === attempt.actionKey
+        && target.identity === attempt.identity);
     if (!attempt || typeof attempt.id !== 'string' || attempt.botId !== this.config.botId
-        || !['dispatched', 'uncertain'].includes(attempt.status)) return;
+        || (!['dispatched', 'uncertain'].includes(attempt.status) && !pinnedVerified)) return;
     const identity = memoryTargetIdentity(attempt.target);
     if (!identity || (observedTarget && identity !== memoryTargetIdentity(observedTarget))) return;
     this.knownAttempts.set(attempt.id, { attemptId: attempt.id, target: structuredClone(attempt.target),

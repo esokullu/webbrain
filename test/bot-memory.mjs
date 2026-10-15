@@ -222,6 +222,70 @@ for (const browser of ['chrome', 'firefox']) {
     assert.equal(callbacks.length, 1);
     await session.close();
   });
+  test(`${browser}: only the exact immutable reconciliation target can reverify a completed write`, async () => {
+    const root = '11111111-1111-4111-8111-111111111111';
+    const previous = { id: 'verified-attempt', botId: 'bot-1', runId: '22222222-2222-4222-8222-222222222222',
+      policyVersion: 1, actionKey: 'remind', identity: memoryTargetIdentity(target), status: 'verified', target,
+      dispatchedAt: Date.now() - 1000 };
+    const pinned = { attemptId: previous.id, runId: previous.runId, policyVersion: previous.policyVersion,
+      actionKey: previous.actionKey, identity: previous.identity };
+    const envelope = suffix => ({ ...config(), runId: root + suffix,
+      callbackUrl: 'https://app.test/api/internal/bot-memory/' + root + suffix,
+      context: { recentActions: [previous], reconciliation: { version: 1, runId: root,
+        instructionHash: 'a'.repeat(64), targets: [pinned] } } });
+    for (const suffix of ['', '-recovery-2', '-recovery-3']) {
+      const calls = [];
+      const session = new BotMemorySession(envelope(suffix), { observe: async () => observed(),
+        fetchImpl: async (_, options) => { const call = JSON.parse(options.body); calls.push(call);
+          return Response.json({ verified: true, attempt: previous }); } });
+      assert.equal(session.pending.size, 0, 'A completed write must never become pending or replayable');
+      assert.equal(session.knownAttempts.size, 1);
+      await session.afterTool(7, 'read_page', {}, { success: true, text: 'Fresh page' });
+      assert.deepEqual(calls, [], 'Fresh reads must not automatically mutate a completed record');
+      assert.equal((await session.tool(7, 'bot_memory_verify', { attempt_id: previous.id })).verified, true);
+      assert.deepEqual(calls.map(call => call.operation), ['verify']);
+      assert.equal(calls[0].args.attemptId, previous.id);
+      assert.deepEqual(JSON.parse(calls[0].args.evidence.facts.observedTarget), target);
+      await session.close();
+      assert.deepEqual(calls.map(call => call.operation), ['verify'], 'Closing must not downgrade completed history');
+    }
+    const wrong = [
+      value => { delete value.context.reconciliation; },
+      value => { value.context.reconciliation.version = 2; },
+      value => { value.context.reconciliation.runId = previous.runId; },
+      value => { value.context.reconciliation.instructionHash = ''; },
+      value => { value.context.reconciliation.instructionHash = ['a'.repeat(64)]; },
+      value => { value.context.reconciliation.targets[0].attemptId = 'other'; },
+      value => { value.context.reconciliation.targets[0].runId = root; },
+      value => { value.context.reconciliation.targets[0].policyVersion = 2; },
+      value => { value.context.reconciliation.targets[0].actionKey = 'other'; },
+      value => { value.context.reconciliation.targets[0].identity += '-other'; },
+      value => { value.context.recentActions[0].botId = 'bot-2'; },
+      value => { value.context.recentActions[0].target.url += '?different=1'; },
+      value => { value.runId += '-recovery-4'; value.callbackUrl += '-recovery-4'; },
+      value => { value.runId += '-recovery-2-recovery-3'; value.callbackUrl += '-recovery-2-recovery-3'; },
+    ];
+    for (const mutate of wrong) {
+      const value = structuredClone(envelope('')); mutate(value);
+      const calls = [];
+      const session = new BotMemorySession(value, { observe: async () => observed(),
+        fetchImpl: async (_, options) => { calls.push(JSON.parse(options.body)); return Response.json({ verified: true }); } });
+      assert.equal(session.knownAttempts.size, 0);
+      assert.equal((await session.verify(7, previous.id)).success, false);
+      await session.close(); assert.deepEqual(calls, []);
+    }
+    const calls = [];
+    const lookup = new BotMemorySession({ ...envelope(''), context: { ...envelope('').context, recentActions: [] } }, {
+      observe: async () => observed(), fetchImpl: async (_, options) => { const call = JSON.parse(options.body); calls.push(call);
+        return Response.json(call.operation === 'lookup' ? { previous } : { verified: true }); },
+    });
+    await lookup.tool(7, 'bot_memory_observe', {});
+    await lookup.tool(7, 'bot_memory_lookup', { action_key: 'remind', target_index: 0 });
+    assert.equal(lookup.knownAttempts.size, 1);
+    lookup.observe = async () => ({ ...observed(), targets: [{ kind: 'url', url: target.url + '?different=1' }] });
+    assert.equal((await lookup.verify(7, previous.id)).success, false);
+    await lookup.close(); assert.deepEqual(calls.map(call => call.operation), ['lookup']);
+  });
   test(`${browser}: identity preserves generic SPA fragments and meaningful queries, with known video URL equivalence`, async () => {
     assert.notEqual(memoryTargetIdentity({ kind: 'url', url: 'https://example.test/#!/invoice/103' }),
       memoryTargetIdentity({ kind: 'url', url: 'https://example.test/#!/invoice/104' }));
