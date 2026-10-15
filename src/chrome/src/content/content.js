@@ -5709,6 +5709,35 @@
           return false;
         }
       };
+      // Native Gmail search and draft fields are identified from the live DOM,
+      // before a missing/AI composer can make ordinary navigation look like Send.
+      const gmailComposeOf = (el) => {
+        if (params.adapterName !== 'gmail' || location.protocol !== 'https:' || location.hostname !== 'mail.google.com'
+            || !/^\/mail\//.test(location.pathname)) return null;
+        const root = el?.closest?.('[role="dialog"]');
+        const subject = root?.querySelector('input[name="subjectbox"]');
+        const bodies = Array.from(root?.querySelectorAll('[role="textbox"][contenteditable="true"]') || [])
+          .filter(field => visible(field) && (field.classList.contains('Am') || field.getAttribute('aria-label') === 'Message Body'));
+        return visible(subject) && bodies.length === 1 ? { root, subject, body: bodies[0] } : null;
+      };
+      const gmailDraftKind = (el) => {
+        const compose = gmailComposeOf(el);
+        if (!compose || !visible(el) || !editable(el)) return '';
+        if (el === compose.body) return 'body';
+        if (el === compose.subject) return 'subject';
+        return el.matches('input[name="to"],input[name="cc"],input[name="bcc"]')
+          || (el.matches('input[role="combobox"][autocomplete="off"]')
+            && /^(?:to|cc|bcc) recipients$/i.test(el.getAttribute('aria-label') || '')) ? 'recipient' : '';
+      };
+      const gmailSearchControl = (el) => {
+        if (params.adapterName !== 'gmail' || location.protocol !== 'https:' || location.hostname !== 'mail.google.com'
+            || !/^\/mail\//.test(location.pathname) || !visible(el)
+            || el.closest?.('[role="dialog"],.a3s,[data-message-id]')) return false;
+        const form = el.closest?.('form#aso_search_form_anchor[role="search"]');
+        const field = form?.querySelector('input[name="q"][autocomplete="off"]');
+        return form?.method.toLowerCase() === 'get' && el === field
+          && /^(?:Ask Gmail|Search mail)$/.test(field.getAttribute('aria-label') || '');
+      };
       const active = typeof _deepActiveElement === 'function' ? _deepActiveElement() : document.activeElement;
 
       let target = null;
@@ -5778,15 +5807,18 @@
       const viewportHeight = Math.max(0, Number(window.innerHeight) || 0);
       const twitterComposers = twitterConversation
         ? composerCandidates.filter(el => el.matches('textarea[data-testid="dm-composer-textarea"]')) : [];
-      const layoutCandidate = twitterConversation
+      const gmailComposers = composerCandidates.filter(el => gmailComposeOf(el)?.body === el);
+      const gmailScopedComposer = gmailComposeOf(target)?.body || gmailComposeOf(active)?.body
+        || (gmailComposers.length === 1 ? gmailComposers[0] : null);
+      const layoutCandidate = gmailScopedComposer || (gmailComposers.length ? null : twitterConversation
         ? (twitterComposers.length === 1 ? twitterComposers[0] : null)
-        : composerCandidates[0] || null;
+        : composerCandidates[0] || null);
       const layoutCandidateRect = layoutCandidate?.getBoundingClientRect?.();
       // A recipient/search field can be the only focused editable while the
       // real composer is temporarily hidden. Never promote an upper-page
       // editable into the message composer merely because it is focused.
       const layoutComposer = layoutCandidate
-        && (!viewportHeight || layoutCandidateRect?.bottom >= viewportHeight * 0.5)
+        && (gmailScopedComposer || !viewportHeight || layoutCandidateRect?.bottom >= viewportHeight * 0.5)
         ? layoutCandidate
         : null;
 
@@ -6128,6 +6160,27 @@
         return editors.length === 1;
       };
 
+      const singlePlainKey = tool === 'press_keys' && (args.repeat === undefined || args.repeat === 1)
+        && !['keys', 'modifiers', 'ctrlKey', 'altKey', 'metaKey', 'shiftKey'].some(key => args[key] !== undefined);
+      const safeComposeKey = singlePlainKey && ['Enter', 'Tab'].includes(args.key);
+      const gmailSearchTarget = tool === 'press_keys' ? active : (targetResolved ? target : null);
+      const gmailDraftTarget = tool === 'press_keys' ? active : (targetResolved ? target : null);
+      if (!observationOnly && ['set_field', 'press_keys'].includes(tool) && gmailSearchControl(gmailSearchTarget)) {
+        if (!(tool === 'press_keys' ? safeComposeKey : [undefined, false, true].includes(args.submit))) {
+          return { success: true, messageSend: null, conclusive: false, identityCandidates: [] };
+        }
+        return { success: true, messageSend: false, conclusive: true, nonMessagingTarget: true,
+          reasonCode: 'gmail_search_control', identityCandidates: [] };
+      }
+      if (!observationOnly && tool === 'press_keys' && gmailComposeOf(active) && active !== layoutComposer && !safeComposeKey) {
+        return { success: true, messageSend: null, conclusive: false, identityCandidates: [] };
+      }
+      if (!observationOnly && ((['click', 'click_ax'].includes(tool) && gmailDraftKind(gmailDraftTarget)
+          && [undefined, false].includes(args.submit))
+          || (safeComposeKey && gmailDraftKind(gmailDraftTarget) === 'recipient'))) {
+        return { success: true, messageSend: false, conclusive: true, nonMessagingTarget: true,
+          reasonCode: 'gmail_draft_field', identityCandidates: [] };
+      }
       let composer = null;
       let messageSend = null;
       const discordManagementTarget = tool === 'press_keys' && String(args.key) === 'Enter'
@@ -6313,7 +6366,14 @@
         const sameForm = !!composer.closest?.('form') && composer.closest('form') === control.closest?.('form');
         const horizontalGap = Math.max(0, composerRect.left - controlRect.right, controlRect.left - composerRect.right);
         const verticalGap = Math.max(0, composerRect.top - controlRect.bottom, controlRect.top - composerRect.bottom);
-        messageSend = sameForm || (horizontalGap <= 240 && verticalGap <= 120);
+        // Gmail can place its Gemini drafting UI between Message Body and Send.
+        // Its native Send control still needs all recipient/body dispatch binding;
+        // distance from the genuine body must not select the AI prompt instead.
+        const nativeGmailSend = gmailComposeOf(control)?.body === composer
+          && control.matches('.aoO[role="button"]')
+          && /(?:^|[^\p{L}])(?:send|enviar|envoyer|invia|senden|verzenden|gönder|отправить|送信|发送|發送|보내|إرسال|ارسال)(?:[^\p{L}]|$)/iu
+            .test(control.getAttribute('aria-label') || control.getAttribute('data-tooltip') || '');
+        messageSend = nativeGmailSend || sameForm || (horizontalGap <= 240 && verticalGap <= 120);
         if (!messageSend) {
           return { success: true, messageSend: null, conclusive: false, identityCandidates: [] };
         }
@@ -6384,9 +6444,9 @@
           const text = compact(value, 120).toLowerCase();
           if (!text) return '';
           if (attribute === 'aria-label') {
-            if (/^(?:bcc|blind\s+carbon\s+copy)(?:$|\s*[:,-]\s*)/.test(text)) return 'bcc';
-            if (/^(?:cc|carbon\s+copy)(?:$|\s*[:,-]\s*)/.test(text)) return 'cc';
-            if (/^to(?:$|\s*[:,-]\s*)/.test(text)) return 'to';
+            if (/^(?:bcc|blind\s+carbon\s+copy)(?:$|\s*[:,-]\s*|\s+recipients$)/.test(text)) return 'bcc';
+            if (/^(?:cc|carbon\s+copy)(?:$|\s*[:,-]\s*|\s+recipients$)/.test(text)) return 'cc';
+            if (/^to(?:$|\s*[:,-]\s*|\s+recipients$)/.test(text)) return 'to';
             return '';
           }
           if (attribute === 'name') {

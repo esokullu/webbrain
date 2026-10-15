@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { supplyReadOnlyCloudIntent } from './lib/cloud-intent-fixture.mjs';
 
 const area = { get: async () => ({}), set: async () => {}, remove: async () => {} };
 const api = {
@@ -41,6 +42,7 @@ for (const browser of ['chrome', 'firefox']) {
       },
     };
     const agent = new Agent({ getActive: () => provider, getProvider: () => provider, getVisionProvider: async () => null });
+    supplyReadOnlyCloudIntent(agent);
     agent.planBeforeAct = true;
     agent.planBeforeActMode = 'try';
     agent.maxSteps = 6;

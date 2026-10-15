@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { supplyReadOnlyCloudIntent } from './lib/cloud-intent-fixture.mjs';
 import { readFile } from 'node:fs/promises';
 
 const storage = {};
@@ -316,6 +317,7 @@ for (const browser of ['chrome', 'firefox']) {
         return responses.shift();
       } };
     const agent = new Agent({ getActive: () => provider, getProvider: () => provider, getVisionProvider: async () => null });
+    supplyReadOnlyCloudIntent(agent);
     agent.maxSteps = 6;
     agent._skipPermissionGate = true;
     agent._hydrate = async () => {};

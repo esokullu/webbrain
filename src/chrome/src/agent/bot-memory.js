@@ -157,9 +157,22 @@ export function observeMemoryPageInPage(args = {}) {
         && style.display !== 'none' && style.visibility !== 'hidden';
     };
     const subject = dialog.querySelector('input[name="subjectbox"]');
-    const bodies = Array.from(dialog.querySelectorAll('[role="textbox"][contenteditable="true"]')).filter(visible);
+    const bodies = Array.from(dialog.querySelectorAll('[role="textbox"][contenteditable="true"]')).filter(field => visible(field)
+      && (field.classList.contains('Am') || field.getAttribute('aria-label') === 'Message Body'));
     if (!visible(subject) || bodies.length !== 1 || !visible(element)) return false;
-    return element === bodies[0] || element.matches('input[name="subjectbox"],input[name="to"],input[name="cc"],input[name="bcc"]');
+    if (element === bodies[0]) return 'body';
+    if (element === subject) return 'subject';
+    if (element.matches('input[name="to"],input[name="cc"],input[name="bcc"]')) return 'recipient';
+    return element.matches('input[role="combobox"][autocomplete="off"]')
+      && /^(?:to|cc|bcc) recipients$/i.test(element.getAttribute('aria-label') || '') ? 'recipient' : false;
+  })();
+  const gmailSearchControl = (() => {
+    if (!element || credential || location.protocol !== 'https:' || location.hostname !== 'mail.google.com'
+        || !/^\/mail\//.test(location.pathname) || element.closest?.('[role="dialog"],.a3s,[data-message-id]')) return false;
+    const search = element.closest?.('form#aso_search_form_anchor[role="search"]');
+    if (!search || search.method.toLowerCase() !== 'get') return false;
+    const field = search.querySelector('input[name="q"][autocomplete="off"]');
+    return element === field && /^(?:Ask Gmail|Search mail)$/.test(field.getAttribute('aria-label') || '');
   })();
   let scope = form || element;
   const draftSelector = 'textarea,[contenteditable=true],input:not([type=hidden]):not([type=submit]):not([type=button]):not([type=reset]):not([type=file]):not([type=checkbox]):not([type=radio])';
@@ -210,7 +223,8 @@ export function observeMemoryPageInPage(args = {}) {
     identifiers,
     elementFacts: { found: !!element, tag: clip(element?.tagName || '', 30), type, name,
       role: clip(element?.getAttribute?.('role') || '', 60), label, credential,
-      ...(gmailDraftField ? { gmailDraftField: true } : {}),
+      ...(gmailDraftField ? { gmailDraftField: true, gmailDraftFieldKind: gmailDraftField } : {}),
+      ...(gmailSearchControl ? { gmailSearchControl: true } : {}),
       href: clip(element?.href || element?.closest?.('a')?.href || '', 4096),
       formMethod: clip(form?.method || '', 20), formAction: clip(form?.action || '', 4096),
       draftText: clip(safeText(drafts.join('\n')), 2048), nearbyText: clip(safeText(scope?.innerText || ''), 2048) },
@@ -350,16 +364,26 @@ export class BotMemorySession {
     if (await this.canBootstrapNavigation(tabId, name, args)) return { allowed: true, readOnly: true, bootstrapNavigation: true };
     const observation = await this.observation(tabId, name, args);
     if (!observation.url || !observation.targets.length) return { allowed: false, reason: 'Observe the target page before acting.' };
-    if (name === 'set_field' && (args?.submit === false || args?.submit === undefined)
-        && !detectedSubmit && !consequentialSubmit
-        && observation.elementFacts?.found === true && observation.elementFacts.gmailDraftField === true
-        && observation.elementFacts.credential !== true) {
+    const nonSubmitting = args?.submit === false || args?.submit === undefined;
+    const singlePlainKey = name === 'press_keys' && (args?.repeat === undefined || args.repeat === 1)
+      && !['keys', 'modifiers', 'ctrlKey', 'altKey', 'metaKey', 'shiftKey'].some(key => args?.[key] !== undefined);
+    const draftEdit = nonSubmitting && (['set_field', 'type_ax', 'type_text', 'click', 'click_ax'].includes(name)
+      || (singlePlainKey && (args.key === 'Tab' || (args.key === 'Enter' && observation.elementFacts?.gmailDraftFieldKind === 'recipient'))));
+    const searchEdit = (['type_ax', 'type_text'].includes(name) && nonSubmitting)
+      || (name === 'set_field' && [undefined, false, true].includes(args?.submit))
+      || (singlePlainKey && ['Enter', 'Tab'].includes(args.key));
+    if (!consequentialSubmit && observation.elementFacts?.found === true
+        && observation.elementFacts.credential !== true
+        && ((!detectedSubmit && draftEdit && observation.elementFacts.gmailDraftField === true)
+          || (searchEdit && observation.elementFacts.gmailSearchControl === true))) {
       let gmailCompose = false;
       try {
         const url = new URL(observation.url);
         gmailCompose = url.protocol === 'https:' && url.hostname === 'mail.google.com' && /^\/mail\//.test(url.pathname);
       } catch {}
-      if (gmailCompose) return { allowed: true, readOnly: true, draftOnly: true };
+      if (gmailCompose) return observation.elementFacts.gmailSearchControl === true
+        ? { allowed: true, readOnly: true, searchOnly: true }
+        : { allowed: true, readOnly: true, draftOnly: true };
     }
     if ((name === 'click' || consequentialSubmit) && observation.elementFacts?.found !== true) {
       return { allowed: false, reason: 'The action target could not be resolved. Read the page and choose an observed control.' };

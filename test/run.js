@@ -12286,6 +12286,10 @@ test('Ask and managed cloud classify communication read scope across languages',
       agent._getTabUrlTitle = async () => ({ tabUrl: gmailUrl, tabTitle: 'Gmail - Thread' });
       agent._chatWithCostAllowance = async (_provider, messages, _options, _costState, metadata) => {
         classifierCalls += 1;
+        if (fixture.runOptions.cloudRun && fixture.mode === 'act') {
+          assert.equal(metadata?.generationName, 'planner_intent', `${browserLabel}/${fixture.label}: Cloud ACT uses the non-interactive intent contract`);
+          return { content: plannerIntentFixture({ readScope: fixture.scope }), usage: {} };
+        }
         assert.equal(metadata?.generationName, 'read_scope', `${browserLabel}/${fixture.label}: wrong classifier generation`);
         assert.match(messages[0]?.content || '', /semantic request across any language/i, `${browserLabel}/${fixture.label}: classifier is language-bound`);
         return { content: JSON.stringify({ read_scope: fixture.scope }), usage: {} };
@@ -115347,7 +115351,7 @@ test('planner gate: scheduled runs auto-approve plan review', async () => {
   });
 });
 
-test('planner gate: managed cloud runs bypass planning in Chrome and Firefox', async () => {
+test('planner gate: managed cloud uses intent without interactive planning in Chrome and Firefox', async () => {
   await withPlannerBrowserGlobals(async () => {
     for (const [label, AgentClass] of [['chrome', AgentCh], ['firefox', AgentFx]]) {
       const tabId = label === 'chrome' ? 9223 : 9224;
@@ -115356,9 +115360,10 @@ test('planner gate: managed cloud runs bypass planning in Chrome and Firefox', a
       agent.setPlanReviewSettings({ mode: 'always', confidenceThreshold: 0.99 });
       agent.conversations.set(tabId, [{ role: 'system', content: 'system' }]);
       let plannerCalls = 0;
-      agent._chatWithCostAllowance = async () => {
+      agent._chatWithCostAllowance = async (_provider, _messages, _options, _costState, metadata) => {
         plannerCalls += 1;
-        return { content: plannerFixtureJson() };
+        assert.equal(metadata?.generationName, 'planner_intent', 'Cloud may use only the lightweight intent contract');
+        return { content: plannerIntentFixture() };
       };
       agent._waitForPlanReview = async () => {
         throw new Error('managed cloud run should never request interactive review');
@@ -115378,8 +115383,8 @@ test('planner gate: managed cloud runs bypass planning in Chrome and Firefox', a
         { cloudRun: true },
       );
 
-      assert.equal(outcome.proceed, true, `${label} cloud run should proceed without planning`);
-      assert.equal(plannerCalls, 0, `${label} cloud run should not call the planner model`);
+      assert.equal(outcome.proceed, true, `${label} cloud run should proceed without interactive planning`);
+      assert.equal(plannerCalls, 1, `${label} cloud run should classify current task intent once`);
       assert.equal(updates.includes('plan_review'), false, `${label} cloud run should not emit plan_review`);
       assert.equal(messages.at(-1)?.content, 'complex cloud task', `${label} should retain the user turn`);
     }
