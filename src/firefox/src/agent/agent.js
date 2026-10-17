@@ -1111,34 +1111,45 @@ export class Agent extends LoopDetector {
     return next;
   }
 
+  // The one hard check a lean run keeps at its end
+  // (native-chat-receipt-not-durable), for a done and for a plain final
+  // alike: both are the model's own success claim. A chat message sent in
+  // this run must be confirmed in the conversation and its receipt saved
+  // before the run ends as a success, or a resumed run could send it again.
+  // Returns null when the run may end as a success, otherwise the refusal. A
+  // receipt that cannot be saved refuses every time, as in a full run. A send
+  // the conversation cannot confirm (its read failed, the conversation
+  // changed, a new message arrived) refuses once per send, as a full run's
+  // submission-evidence check does.
+  async _leanChatReceiptBlock(tabId) {
+    if (!this.completionInvariants.get(tabId)?.lastAction?.chatDeliveryBinding
+        && !this.chatSessions.get(tabId)?.completionReceipt) return null;
+    let pageUrl = '';
+    try { pageUrl = await this._currentUrl(tabId); } catch {}
+    const nativeChatEvidence = await this._freshNativeChatTerminalEvidence(tabId, pageUrl || '');
+    if (nativeChatEvidence) {
+      const guard = this._planExecutionGuards.get(tabId);
+      if (guard) guard.nativeChatDeliveryEvidence = nativeChatEvidence;
+      const savedNativeReceipt = await this._persistNow(tabId);
+      if (savedNativeReceipt === true || savedNativeReceipt?.ok === true) return null;
+      return { receiptNotDurable: true,
+        error: 'The verified chat delivery receipt could not be saved. Retry completion after storage is available; do not send the message again.' };
+    }
+    if (!this._leanChatDeliveryUnconfirmedRefuses(tabId)) return null;
+    return { chatDeliveryUnconfirmed: true,
+      error: 'WebBrain could not confirm in the conversation that your message was delivered: its latest read failed, the conversation changed, or a new message arrived. Do not send the message again. Read the conversation now, then call done again; if the delivery still cannot be confirmed, finish with outcome "partial" and say so.' };
+  }
+
   // done in a lean run. The completion is the model's own call: WebBrain
   // takes no verification screenshot, runs no completion or incomplete-task
-  // judge and checks no page warnings or workflow evidence. One hard check
-  // stays (native-chat-receipt-not-durable): a chat message sent in this run
-  // must be confirmed in the conversation and its receipt saved before
-  // success is reported, or a resumed run could send it again. A receipt
-  // that cannot be saved refuses success every time, as in a full run. A send
-  // the conversation cannot confirm (its read failed, the conversation
-  // changed, a new message arrived) refuses success once per send, as a full
-  // run's submission-evidence check does; partial and failed always end.
+  // judge and checks no page warnings or workflow evidence. Only the chat
+  // receipt check stays (_leanChatReceiptBlock); partial and failed always
+  // end.
   async _leanDoneResult(tabId, args = {}) {
     const outcome = normalizeDoneOutcome(args?.outcome);
-    if (outcome === 'success' && (this.completionInvariants.get(tabId)?.lastAction?.chatDeliveryBinding
-        || this.chatSessions.get(tabId)?.completionReceipt)) {
-      let pageUrl = '';
-      try { pageUrl = await this._currentUrl(tabId); } catch {}
-      const nativeChatEvidence = await this._freshNativeChatTerminalEvidence(tabId, pageUrl || '');
-      if (nativeChatEvidence) {
-        const guard = this._planExecutionGuards.get(tabId);
-        if (guard) guard.nativeChatDeliveryEvidence = nativeChatEvidence;
-        const savedNativeReceipt = await this._persistNow(tabId);
-        if (savedNativeReceipt !== true && savedNativeReceipt?.ok !== true) {
-          return { success: false, blockedDone: true, error: 'The verified chat delivery receipt could not be saved. Retry completion after storage is available; do not send the message again.' };
-        }
-      } else if (this._leanChatDeliveryUnconfirmedRefuses(tabId)) {
-        return { success: false, blockedDone: true, chatDeliveryUnconfirmed: true,
-          error: 'WebBrain could not confirm in the conversation that your message was delivered: its latest read failed, the conversation changed, or a new message arrived. Do not send the message again. Read the conversation now, then call done again; if the delivery still cannot be confirmed, finish with outcome "partial" and say so.' };
-      }
+    if (outcome === 'success') {
+      const receiptBlock = await this._leanChatReceiptBlock(tabId);
+      if (receiptBlock) return { success: false, blockedDone: true, ...receiptBlock };
     }
     return { done: true, summary: args.summary, outcome };
   }
@@ -5115,9 +5126,12 @@ export class Agent extends LoopDetector {
 
   // A plain final the receipt check refused twice (or at the step limit)
   // ends the run as partial: the model's text and why it is not a success.
-  _chatReceiptPartialFinal(content) {
+  // A lean run's refusal can also be a send the conversation never confirmed.
+  _chatReceiptPartialFinal(content, receiptBlock = null) {
     const base = repairAssistantDisplayText(String(content || '')).trimEnd();
-    const why = 'WebBrain could not save the record that the message was delivered, so this run did not end as a success. Check the conversation before sending it again.';
+    const why = receiptBlock?.chatDeliveryUnconfirmed
+      ? 'WebBrain could not confirm in the conversation that the message was delivered, so this run did not end as a success. Check the conversation before sending it again.'
+      : 'WebBrain could not save the record that the message was delivered, so this run did not end as a success. Check the conversation before sending it again.';
     return base ? `${base}\n\n${why}` : why;
   }
 
@@ -45706,12 +45720,16 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       }
       // A plain final is the model's own success claim: a chat message sent
       // in this run is confirmed and its receipt saved first, as done does
-      // (native-chat-receipt-not-durable). Two refusals, or the step budget,
-      // end the run as partial, never as a success.
-      const plainFinalReceiptBlock = await this._plainFinalChatReceiptBlock(tabId);
+      // (native-chat-receipt-not-durable; in a lean run _leanChatReceiptBlock,
+      // which also refuses a send the conversation cannot confirm, once). Two
+      // refusals, or the step budget, end the run as partial, never as a
+      // success.
+      const plainFinalReceiptBlock = this._leanRunActive(tabId)
+        ? await this._leanChatReceiptBlock(tabId)
+        : await this._plainFinalChatReceiptBlock(tabId);
       if (plainFinalReceiptBlock) {
         if (plainFinalReceiptRefusals >= 2 || steps >= this.maxSteps) {
-          finalResponse = this._chatReceiptPartialFinal(result.content);
+          finalResponse = this._chatReceiptPartialFinal(result.content, plainFinalReceiptBlock);
           _traceStatus = 'partial';
           messages.push({ role: 'assistant', content: finalResponse });
           onUpdate('text', { content: finalResponse, replace: true });
@@ -46917,12 +46935,15 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
         }
         // A plain final is the model's own success claim: a chat message sent
         // in this run is confirmed and its receipt saved first, as done does
-        // (native-chat-receipt-not-durable). Two refusals, or the step budget,
-        // end the run as partial, never as a success.
-        const plainFinalReceiptBlock = await this._plainFinalChatReceiptBlock(tabId);
+        // (see the chat loop; a lean run uses _leanChatReceiptBlock). Two
+        // refusals, or the step budget, end the run as partial, never as a
+        // success.
+        const plainFinalReceiptBlock = this._leanRunActive(tabId)
+          ? await this._leanChatReceiptBlock(tabId)
+          : await this._plainFinalChatReceiptBlock(tabId);
         if (plainFinalReceiptBlock) {
           if (plainFinalReceiptRefusals >= 2 || steps >= this.maxSteps) {
-            const partialText = this._chatReceiptPartialFinal(fullText);
+            const partialText = this._chatReceiptPartialFinal(fullText, plainFinalReceiptBlock);
             messages.push({ role: 'assistant', content: partialText });
             onUpdate('text', { content: partialText, replace: true });
             onUpdate('warning', { message: 'Run ended without a saved chat delivery receipt.' });

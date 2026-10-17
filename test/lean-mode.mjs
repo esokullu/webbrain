@@ -357,9 +357,90 @@ for (const build of ['chrome', 'firefox']) {
       const tab = nextTab++;
       const h = runAgent(n => (n === 1 ? call('save', 'click_ax', { ref_id: 'ref_save' })
         : n === 2 ? call('look', 'get_accessibility_tree', { filter: 'visible' }) : { content: 'Saved the profile.' }));
+      let chatReads = 0;
+      h.agent._freshNativeChatTerminalEvidence = async () => { chatReads++; return null; };
       const result = await runLoop(h.agent, tab, streaming, 'Save the owned profile.');
       assert.equal(h.requests.length, 3, `${label}: no done-protocol nudge`);
       assert.equal(result, 'Saved the profile.');
+      assert.equal(chatReads, 0, `${label}: no chat send, so no conversation read at the end`);
+    });
+
+    // A plain final is the model's own success claim too: after a chat send
+    // it gets the lean done's receipt check (native-chat-receipt-not-durable).
+    const chatSendThenFinal = (getAgent, tab, { contract = false } = {}) => n => {
+      if (n === 1) return call('send', 'click_ax', { ref_id: 'ref_save' });
+      if (n === 2) {
+        const agent = getAgent();
+        // What the chat send's delivery binding records for the run.
+        agent.completionInvariants.set(tab, { ...(agent.completionInvariants.get(tab) || {}),
+          lastAction: { name: 'click_ax', sequence: 7, chatDeliveryBinding: { token: 'sent', threadKey: 'dom:chat:1' } } });
+        if (contract) {
+          Object.assign(agent._planExecutionGuards.get(tab) || {}, { enabled: true, requiresSubmission: true, requiresStateChange: true });
+          if (!agent._planExecutionGuards.get(tab)) {
+            agent._planExecutionGuards.set(tab, { enabled: true, requiresSubmission: true, requiresStateChange: true, taskKey: 'tk_reply' });
+          }
+        }
+      }
+      return { content: 'Sent the reply.' };
+    };
+    const runCollecting = async (agent, tab, text) => {
+      const events = [];
+      const finished = [];
+      const onUpdate = (type, data) => events.push({ type, data });
+      const options = { detachedRequestId: `lean-${tab}`, onRunFinished: status => finished.push(status) };
+      const result = streaming
+        ? await agent.processMessageStream(tab, text, onUpdate, 'act', options)
+        : await agent.processMessage(tab, text, onUpdate, 'act', [], options);
+      return { result, events, finished };
+    };
+
+    test(`${label}: a lean plain final after a chat send confirms the delivery and saves its receipt first`, async () => {
+      const tab = nextTab++;
+      let h = null;
+      h = runAgent(chatSendThenFinal(() => h.agent, tab));
+      let reads = 0, savedAfterRead = 0;
+      h.agent._freshNativeChatTerminalEvidence = async () => { reads++; return { receipt: 'delivered' }; };
+      h.agent._persistNow = async () => { if (reads) savedAfterRead++; return { ok: true }; };
+      const { result, events } = await runCollecting(h.agent, tab, 'Reply in the owned chat.');
+      assert.equal(result, 'Sent the reply.', `${label}: a confirmed, saved send ends as the model said`);
+      assert.equal(h.requests.length, 2, `${label}: no extra turn`);
+      assert.equal(reads, 1, `${label}: the conversation was read once at the end`);
+      assert.ok(savedAfterRead >= 1, `${label}: the receipt was saved before the run ended`);
+      assert.equal(events.some(event => event.type === 'run_status' && event.data?.status === 'partial'), false);
+    });
+
+    test(`${label}: a lean plain final whose chat receipt cannot be saved never ends as a success`, async () => {
+      const tab = nextTab++;
+      let h = null;
+      h = runAgent(chatSendThenFinal(() => h.agent, tab));
+      let reads = 0;
+      h.agent._freshNativeChatTerminalEvidence = async () => { reads++; return { receipt: 'delivered' }; };
+      h.agent._persistNow = async () => (reads ? false : { ok: true });
+      const { result, events, finished } = await runCollecting(h.agent, tab, 'Reply in the owned chat.');
+      const refusals = h.agent.conversations.get(tab).filter(message => message.webbrainAppOwnedKind === 'chat_receipt');
+      assert.equal(refusals.length, 2, `${label}: refused twice with the receipt instruction`);
+      assert.match(String(refusals[0].content), /delivery receipt could not be saved/);
+      assert.match(String(refusals[0].content), /do not send the message again/);
+      assert.equal(h.requests.length, 4, `${label}: the third plain final ends the run instead of looping`);
+      assert.notEqual(result, 'Sent the reply.', `${label}: not accepted as a plain success`);
+      assert.match(String(result), /^Sent the reply\.\n\nWebBrain could not save the record that the message was delivered/);
+      assert.ok(events.some(event => event.type === 'run_status' && event.data?.status === 'partial'), `${label}: run_status partial`);
+      assert.equal(finished.at(-1), 'partial', `${label}: the run finishes as partial`);
+    });
+
+    test(`${label}: a lean plain final over a send the conversation cannot confirm is refused once, then ends`, async () => {
+      const tab = nextTab++;
+      let h = null;
+      h = runAgent(chatSendThenFinal(() => h.agent, tab, { contract: true }));
+      let reads = 0;
+      h.agent._freshNativeChatTerminalEvidence = async () => { reads++; return null; };
+      const { result } = await runCollecting(h.agent, tab, 'Reply in the owned chat.');
+      const refusals = h.agent.conversations.get(tab).filter(message => message.webbrainAppOwnedKind === 'chat_receipt');
+      assert.equal(refusals.length, 1, `${label}: one refusal for the send`);
+      assert.match(String(refusals[0].content), /could not confirm in the conversation/);
+      assert.equal(h.requests.length, 3);
+      assert.equal(result, 'Sent the reply.', `${label}: once per send, the next plain final ends the run`);
+      assert.equal(reads, 2, `${label}: read again at the second final`);
     });
   }
 

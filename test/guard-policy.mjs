@@ -75,9 +75,9 @@ const GRANDFATHERED_CEILING = 158;
 // Completion refusals (`blockedDone: true`) per build. A new one must be a
 // registered guard routed through _guardRefusesOnce (or a hard-class guard);
 // raise the ceiling only in the change that registers it. Lean mode's done
-// keeps one hard check (native-chat-receipt-not-durable) in its own path:
-// a receipt that cannot be saved, and a send the conversation cannot confirm.
-const BLOCKED_DONE_CEILING = { chrome: 20, firefox: 19 };
+// keeps one hard check (native-chat-receipt-not-durable) in its own path
+// (_leanDoneResult over _leanChatReceiptBlock).
+const BLOCKED_DONE_CEILING = { chrome: 19, firefox: 18 };
 
 function walk(dir) {
   return fs.readdirSync(new URL(`../${dir}`, import.meta.url), { withFileTypes: true }).flatMap(entry => {
