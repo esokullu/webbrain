@@ -8648,21 +8648,84 @@ export class Agent extends LoopDetector {
     return `Cloud cost allowance reached: ${scopeText} is ${this._formatUsd(spentUsd)} against the ${this._formatUsd(limitUsd)} limit. Stopping before further cloud/router model calls. Increase or reset the allowance in Settings.`;
   }
 
-  _checkCostAllowanceState(state, costState) {
+  // `pending`: which requests in flight to count at their most (see
+  // _holdCostAllowance): 'background' counts background checks, so a request
+  // that starts beside one cannot spend past the limit with it; 'all' also
+  // counts the run's own requests, for a background check that may start
+  // beside them; 'none' counts only what was spent.
+  _checkCostAllowanceState(state, costState, { pending = 'background' } = {}) {
+    const onlyBackground = pending !== 'all';
     const sessionSpent = this._normalizeCostSpent(costState?.spentUsd);
-    if (sessionSpent + COST_EPSILON >= state.sessionLimitUsd) {
+    const sessionPending = pending !== 'none' && costState ? this._pendingCostUsd(costState, onlyBackground) : 0;
+    if (sessionSpent + sessionPending + COST_EPSILON >= state.sessionLimitUsd) {
       return this._costAllowanceMessage('session', sessionSpent, state.sessionLimitUsd);
     }
-    if (state.totalSpentUsd + COST_EPSILON >= state.totalLimitUsd) {
+    const totalPending = pending !== 'none' ? this._pendingCostUsd(null, onlyBackground) : 0;
+    if (state.totalSpentUsd + totalPending + COST_EPSILON >= state.totalLimitUsd) {
       return this._costAllowanceMessage('total', state.totalSpentUsd, state.totalLimitUsd);
     }
     return null;
   }
 
-  async _checkCostAllowance(provider, costState) {
+  // Before a request. A background check (`hold.background`) counts every
+  // request in flight at its most and does not start when that could pass
+  // the limit. Any other request counts background checks in flight; when
+  // only they would put it over the limit, it waits for them to settle and
+  // counts what they actually cost, like a request made after them.
+  async _checkCostAllowance(provider, costState, { signal = null, hold = null } = {}) {
     if (!this._isCostMeteredProvider(provider)) return null;
-    const state = await this._getCostAllowanceState();
-    return this._checkCostAllowanceState(state, costState);
+    for (;;) {
+      const state = await this._getCostAllowanceState();
+      if (hold?.background) return this._checkCostAllowanceState(state, costState, { pending: 'all' });
+      const message = this._checkCostAllowanceState(state, costState);
+      if (!message || !this._pendingCostUsd(null, true)
+          || this._checkCostAllowanceState(state, costState, { pending: 'none' })) return message;
+      await this._backgroundCostSettled(signal);
+    }
+  }
+
+  // Holds what a request in flight can cost at most (its prompt, tools and
+  // whole completion budget, priced like recorded usage) until it settles.
+  _holdCostAllowance(provider, messages, options, costState, { background = false } = {}) {
+    if (!this._isCostMeteredProvider(provider)) return null;
+    let toolChars = 0;
+    try { toolChars = JSON.stringify(options?.tools || []).length; } catch {}
+    const promptTokens = Math.max(1, Math.ceil(
+      (this._estimateContextChars(Array.isArray(messages) ? messages : []) + toolChars) / 4));
+    const completionTokens = Number.isFinite(options?.maxTokens) && options.maxTokens > 0 ? options.maxTokens : 4096;
+    const usd = this._estimateUsageCostUsd(provider, { prompt_tokens: promptTokens, completion_tokens: completionTokens });
+    if (!(usd > 0)) return null;
+    let settle = null;
+    const hold = { usd, costState, background, settled: new Promise(resolve => { settle = resolve; }) };
+    hold.release = () => {
+      if (this._costHolds?.delete(hold)) settle();
+    };
+    (this._costHolds ||= new Set()).add(hold);
+    return hold;
+  }
+
+  _pendingCostUsd(costState = null, onlyBackground = false) {
+    let usd = 0;
+    for (const hold of this._costHolds || []) {
+      if ((!costState || hold.costState === costState) && (!onlyBackground || hold.background)) usd += hold.usd;
+    }
+    return usd;
+  }
+
+  async _backgroundCostSettled(signal = null) {
+    const pending = [...(this._costHolds || [])].filter(hold => hold.background).map(hold => hold.settled);
+    if (!pending.length) return;
+    let onAbort = null;
+    const aborted = signal ? new Promise(resolve => {
+      if (signal.aborted) resolve();
+      else signal.addEventListener('abort', onAbort = () => resolve(), { once: true });
+    }) : null;
+    try {
+      await (aborted ? Promise.race([Promise.all(pending), aborted]) : Promise.all(pending));
+    } finally {
+      if (onAbort) signal.removeEventListener('abort', onAbort);
+    }
+    this._throwIfAborted(signal);
   }
 
   async _recordCostUsage(provider, usage, costState) {
@@ -8675,7 +8738,7 @@ export class Agent extends LoopDetector {
       if (costState) costState.spentUsd = this._normalizeCostSpent(costState.spentUsd) + costUsd;
       this.meteredProviderCostSpentUsd = nextTotal;
       try { await chrome.storage.local.set({ [CLOUD_COST_SPENT_KEY]: nextTotal }); } catch {}
-      return this._checkCostAllowanceState({ ...state, totalSpentUsd: nextTotal }, costState);
+      return this._checkCostAllowanceState({ ...state, totalSpentUsd: nextTotal }, costState, { pending: 'none' });
     });
   }
 
@@ -9290,9 +9353,12 @@ export class Agent extends LoopDetector {
     messages = foldBrowserBatchMessages(messages, { repairPending: true });
     const linked = this._linkAbortSignals(options?.signal, this._runAbortSignal(requestContext?.tabId));
     options = { ...options, signal: linked.signal };
+    // Held at its most until it settles: see _checkCostAllowance.
+    const hold = this._holdCostAllowance(provider, messages, options, costState,
+      { background: requestContext?.background === true });
     try {
     this._throwIfAborted(options.signal);
-    const before = await this._checkCostAllowance(provider, costState);
+    const before = await this._checkCostAllowance(provider, costState, { signal: options.signal, hold });
     if (before) throw this._costAllowanceError(before);
     this._throwIfAborted(options?.signal);
     const result = await provider.chat(messages, requestContext
@@ -9306,6 +9372,7 @@ export class Agent extends LoopDetector {
     if (after) result.costAllowanceMessage = after;
     return result;
     } finally {
+      hold?.release();
       linked.dispose();
     }
   }
@@ -9406,9 +9473,11 @@ export class Agent extends LoopDetector {
     messages = foldBrowserBatchMessages(messages, { repairPending: true });
     const linked = this._linkAbortSignals(options?.signal, this._runAbortSignal(requestContext?.tabId));
     options = { ...options, signal: linked.signal };
+    // Held at its most until it settles: see _checkCostAllowance.
+    const hold = this._holdCostAllowance(provider, messages, options, costState);
     try {
     this._throwIfAborted(options.signal);
-    const before = await this._checkCostAllowance(provider, costState);
+    const before = await this._checkCostAllowance(provider, costState, { signal: options.signal, hold });
     if (before) throw this._costAllowanceError(before);
 
     const streamOptions = requestContext
@@ -9531,6 +9600,7 @@ export class Agent extends LoopDetector {
     if (after) result.costAllowanceMessage = after;
     return result;
     } finally {
+      hold?.release();
       linked.dispose();
     }
   }
@@ -23952,7 +24022,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
         const response = await this._chatWithCostAllowance(provider, requestMessages,
           background ? { ...options, signal: call.signal } : options,
           background ? call.costState : (this.currentCostState.get(tabId) || null),
-          { tabId, generationName: 'social_publication_contract' });
+          { tabId, generationName: 'social_publication_contract', ...(background ? { background: true } : {}) });
         received = true;
         await this._tracePlannerAttemptResponse(runId, 0, provider, response,
           'social_publication_contract', attempt + 1, startedAt, options);
@@ -24374,7 +24444,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
         const response = await this._chatWithCostAllowance(provider, requestMessages,
           background ? { ...options, signal: background.signal } : options,
           background ? background.costState : (this.currentCostState.get(tabId) || null),
-          { tabId, generationName: 'social_publication_authorization' });
+          { tabId, generationName: 'social_publication_authorization', ...(background ? { background: true } : {}) });
         received = true;
         await this._tracePlannerAttemptResponse(runId, 0, provider, response,
           'social_publication_authorization', attempt + 1, startedAt, options);

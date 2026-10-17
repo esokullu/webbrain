@@ -377,6 +377,51 @@ for (const browser of ['chrome', 'firefox']) {
     assert.deepEqual(f.calls.map(call => call.name), ['social_publication_contract', 'social_publication_authorization']);
   });
 
+  test(`${browser}: a background check counts every request in flight at its most, and a request beside it counts the check`, async () => {
+    const agent = new Agent({});
+    const tabId = 977;
+    const gates = [];
+    const provider = { name: 'metered', model: 'metered', config: {},
+      chat: async () => { const gate = deferred(); gates.push(gate); return gate.promise; } };
+    agent._isCostMeteredProvider = () => true;
+    agent._getCostAllowanceState = async () => ({ sessionLimitUsd: 1, totalLimitUsd: 100, totalSpentUsd: 0 });
+    agent._estimateUsageCostUsd = () => 0.3; // the most a request can cost
+    agent._extractUsageCostUsd = (_provider, usage) => usage?.cost_usd || 0; // what it cost
+    const costState = { spentUsd: 0.5 };
+    const ask = (content, context = {}) => agent._chatWithCostAllowance(provider, [{ role: 'user', content }], {}, costState,
+      { tabId, ...context });
+    // The run's own request is in flight: a background check counts it at its
+    // most, and $0.50 spent + $0.30 + its own $0.30 could pass the $1 limit.
+    const main = ask('next turn');
+    await until(() => gates.length === 1, 'the run\'s request started');
+    await assert.rejects(ask('audit', { background: true }), error => agent._isCostAllowanceError(error),
+      'the background check does not start');
+    assert.equal(gates.length, 1, 'nothing was sent for the background check');
+    gates[0].release({ content: 'ok', usage: { cost_usd: 0.2 } });
+    await main;
+    assert.equal(costState.spentUsd, 0.7);
+    // A background check in flight ($0.40 + $0.30): a request beside it that
+    // would pass the limit only with the check's most waits for its actual
+    // cost, like a request made after it.
+    costState.spentUsd = 0.4;
+    const background = ask('audit', { background: true });
+    await until(() => gates.length === 2, 'the background check started');
+    costState.spentUsd = 0.8;
+    const next = ask('next turn');
+    await settle();
+    assert.equal(gates.length, 2, 'the next request waits for the check in flight');
+    gates[1].release({ content: 'ok', usage: { cost_usd: 0.05 } });
+    await background;
+    await until(() => gates.length === 3, 'the next request starts once the check cost $0.05');
+    gates[2].release({ content: 'ok', usage: { cost_usd: 0.1 } });
+    await next;
+    assert.ok(Math.abs(costState.spentUsd - 0.95) < 1e-9, `spent ${costState.spentUsd}`);
+    // Over the limit on what was spent alone, a request is refused at once.
+    costState.spentUsd = 1;
+    await assert.rejects(ask('after the limit'), error => agent._isCostAllowanceError(error));
+    assert.equal(gates.length, 3);
+  });
+
   test(`${browser}: every predispatch stage the agent records survives the trace projection`, async () => {
     const fs = await import('node:fs/promises');
     const source = await fs.readFile(new URL(`../src/${browser}/src/agent/agent.js`, import.meta.url), 'utf8');
