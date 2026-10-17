@@ -473,6 +473,71 @@ for (const browser of ['chrome', 'firefox']) {
     assert.ok(denied.notes[0].timing.permissionMs >= 10, 'the wait on the permission card is recorded');
   });
 
+  test(`${browser}: a consequential call stopped before its cards, or whose preparation fails, still records predispatch_timing`, async () => {
+    const run = async (name, args, stub) => {
+      const f = setup();
+      const { agent, tabId, provider } = f;
+      agent.currentRunId.set(tabId, 'prefetch-run');
+      agent._skipPermissionGate = true;
+      agent._ensureGateSetting = async () => true;
+      agent._persistNow = async () => ({ ok: true });
+      agent.isApiMutationsAllowed = () => false;
+      agent._recordProgressObservation = async () => null;
+      agent._autoRecordProgressAction = () => null;
+      agent._progressWarningForAction = () => '';
+      agent._captureFormValidationState = async () => [];
+      agent._waitForFormValidationFailure = async () => null;
+      agent._readCompletionResult = async () => null;
+      agent._messageRecipientGuardBlock = async () => null;
+      agent._captchaMutationPreflight = async () => null;
+      stub(agent);
+      const dispatched = [];
+      agent.executeTool = async (_tabId, tool) => { dispatched.push(tool); return { success: true, dispatched: true }; };
+      const notes = [];
+      agent._recordPredispatchTiming = (_tabId, step, timing) => notes.push({ step, timing });
+      const messages = [];
+      await agent._executeToolBatch(tabId, [{ id: 'call', function: { name, arguments: JSON.stringify(args) } }],
+        messages, () => {}, provider, '', new Set([name]), 6);
+      return { dispatched, notes, result: String(messages.find(message => message.role === 'tool')?.content || '') };
+    };
+    const click = ['click_ax', { ref_id: 'ref_9' }];
+    // The page did not answer the CAPTCHA safety check in time.
+    const preparationFails = agent => {
+      agent._captchaMutationPreflight = async () => {
+        const error = new Error('The page did not answer in time.');
+        error.code = 'content_action_timeout';
+        throw error;
+      };
+    };
+    for (const [label, [name, args], stub, outcome, stage] of [
+      ['CAPTCHA gate', click, agent => {
+        agent._captchaGateBlockResult = () => ({ success: false, blocked: true, noDispatch: true,
+          error: 'A verification challenge is active.' });
+        agent._observeHuggingFaceSignupRecovery = async () => '';
+      }, 'blocked', 'captchaGateMs'],
+      ['clarification authorization', click, agent => {
+        agent._clarificationAuthorizationBlock = () => ({ result: { success: false, blocked: true,
+          error: 'Answer the clarification first.' } });
+      }, 'blocked', 'clarificationMs'],
+      ['API mutation without /allow-api', ['fetch_url', { url: 'https://api.example.com/items', method: 'POST', body: '{}' }],
+        () => {}, 'blocked', 'clarificationMs'],
+      // Any other stop before dispatch: noted when the batch ends.
+      ['failed preparation', click, preparationFails, 'not_dispatched', 'stoppedMs'],
+    ]) {
+      const stopped = await run(name, args, stub);
+      assert.deepEqual(stopped.dispatched, [], `${label}: nothing was sent`);
+      assert.equal(stopped.notes.length, 1, `${label}: one timing note (${stopped.result.slice(0, 160)})`);
+      const [{ step, timing }] = stopped.notes;
+      assert.equal(step, 6, label);
+      assert.equal(timing.tool, name, label);
+      assert.equal(timing.outcome, outcome, label);
+      assert.equal(typeof timing[stage], 'number', `${label}: ${stage}`);
+      assert.equal(typeof timing.totalMs, 'number', label);
+    }
+    // A read stopped the same way records nothing.
+    assert.equal((await run('get_accessibility_tree', {}, preparationFails)).notes.length, 0);
+  });
+
   test(`${browser}: every predispatch stage the agent records survives the trace projection`, async () => {
     const fs = await import('node:fs/promises');
     const source = await fs.readFile(new URL(`../src/${browser}/src/agent/agent.js`, import.meta.url), 'utf8');

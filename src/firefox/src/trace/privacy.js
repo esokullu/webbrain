@@ -124,7 +124,7 @@ const PREDISPATCH_TIMING_MS_FIELDS = [
   'publicationRereadMs', 'submitDetectionMs', 'submitConfirmationMs', 'permissionMs', 'completionChecksMs',
   'recipientGuardMs', 'recipientReadingMs', 'checkpointMs', 'pipelineWaitMs', 'toolbarPreflightMs',
   'pipelinePublicationMs', 'feedbackRecheckMs', 'genericChatMs', 'attemptCheckpointMs',
-  'dispatchPreparationMs', 'unverifiedStepCardMs', 'preDispatchMs', 'executeToolMs', 'totalMs',
+  'dispatchPreparationMs', 'unverifiedStepCardMs', 'preDispatchMs', 'executeToolMs', 'stoppedMs', 'totalMs',
 ];
 function projectPredispatchTiming(data) {
   const extra = {};
