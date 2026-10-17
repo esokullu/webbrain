@@ -5,7 +5,7 @@ const encoder = new TextEncoder();
 const filename = path => path.replaceAll('/', '__');
 
 export function validateD1Manifest(manifest) {
-  if (manifest.dtype !== 'float32' || manifest.audio_included !== false) throw new Error('D1 package must be audio-free FP32.');
+  if (!['float32', 'float16'].includes(manifest.dtype) || manifest.audio_included !== false) throw new Error('D1 package must be audio-free FP32 or FP16.');
   const files = Array.isArray(manifest.files) ? manifest.files : [];
   const result = {};
   for (const path of D1_REQUIRED_FILES) {
@@ -25,10 +25,23 @@ export function validateD1Manifest(manifest) {
   return result;
 }
 
+const currentCacheName = () => D1_CACHE_NAME + '-' + D1_RELEASE.revision;
+
 export async function openD1Cache() {
   if (!navigator.storage?.getDirectory) throw new Error('D1 needs browser origin-private file storage (OPFS).');
   const root = await navigator.storage.getDirectory();
-  return root.getDirectoryHandle(D1_CACHE_NAME + '-' + D1_RELEASE.revision, { create: true });
+  return root.getDirectoryHandle(currentCacheName(), { create: true });
+}
+
+// Every pinned package lives in its own directory; earlier packages
+// (including the FP32 release) are unreachable once the pin moves.
+export async function removeStaleD1Caches() {
+  const root = await navigator.storage.getDirectory(), stale = [];
+  for await (const [name, handle] of root.entries()) {
+    if (handle.kind === 'directory' && name.startsWith('webbrain-d1-') && name !== currentCacheName()) stale.push(name);
+  }
+  for (const name of stale) await root.removeEntry(name, { recursive: true });
+  return stale;
 }
 
 export async function readD1Manifest(directory, { download = false, signal } = {}) {

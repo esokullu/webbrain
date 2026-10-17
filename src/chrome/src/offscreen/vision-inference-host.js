@@ -456,7 +456,7 @@ function defaultVisionWorkerTimeout(type) {
   // initialization. Keep its caller attached until the worker acknowledges
   // completion (or fails), so provider fallback cannot miss a late deletion.
   if (type === 'stop-text-download') return 0;
-  if (type === 'preload' || type === 'text-chat' || type === 'multimodal-text-chat' || type === 'download-text' || type === 'start-download-text') return 0;
+  if (type === 'preload' || type === 'text-chat' || type === 'multimodal-text-chat' || type === 'multimodal-decide' || type === 'download-text' || type === 'start-download-text') return 0;
   return WORKER_INITIALIZATION_TIMEOUT_MS;
 }
 
@@ -538,6 +538,7 @@ async function ensureVisionWorker() {
 
 const WEBGPU_MESSAGE_TYPES = new Set([
   'webgpu-chat',
+  'webgpu-decide',
   'webgpu-download-start',
   'webgpu-download-pause',
   'webgpu-download-stop',
@@ -714,6 +715,21 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         if (visionWorker) disposed.push(await sendVisionWorkerMessage('dispose-text'));
         if (bonsaiWorker) disposed.push(await sendBonsaiWorkerMessage('dispose-text'));
         sendResponse(disposed[0] || { ok: true, disposed: true });
+        return;
+      }
+      if (message.type === 'webgpu-decide') {
+        sendResponse(await sendTextWorkerMessage(message.model, 'multimodal-decide', {
+          modelId: message.model,
+          device: message.device,
+          dtype: message.dtype,
+          state: message.state,
+          images: message.images || [],
+          questions: message.questions,
+          temperature: message.temperature,
+          promptVariant: message.promptVariant,
+          returnHidden: message.returnHidden === true,
+          prefillSliceTokens: message.prefillSliceTokens,
+        }, { exclusive: true, runtime: message.runtime }));
         return;
       }
       if (message.type === 'webgpu-chat') {

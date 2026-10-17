@@ -205,6 +205,91 @@ Use the tools in `scripts/models/bonsai/`:
 - **Cache-only inference.** Chat never downloads. Only explicit download or
   preload flows fetch model files.
 
+## Decisions on WebGPU
+
+Two on-device paths answer typed decision questions (`choice`, `noul`,
+`score`) without generating text. `scripts/check-webgpu-decisions.mjs` runs
+both through the real extension on the same labelled questions:
+
+```bash
+node scripts/check-webgpu-decisions.mjs --test <final_test.json> --images <dir> \
+  --engines d1,bonsai --stress --download --profile <fresh profile> \
+  --adapter-luid 0,82094 --output result.json
+```
+
+The labelled set is d1's balanced-V3 held-out test (72 synthetic screenshots,
+144 questions). It is not in this repository.
+
+- **d1 (the decision model).** A bidirectional encoder that scores option
+  markers, published as
+  [`webbrain-one/d1-browser-decision-fp16`](https://huggingface.co/webbrain-one/d1-browser-decision-fp16).
+  - Its graphs pass the static audit, but its six full-attention layers are
+    dense: each row materializes a 16 × length × length FP32 score tensor.
+    The old batching budgeted tokens (65,536), not that tensor, and every
+    question is its own row with the whole state. On the 5090, 16 questions
+    on a ~2k-token state needed a 2.6 GB buffer and failed; 4k overflowed.
+  - `d1-runtime.js` now bounds batches by the score tensor (256 MiB, and never
+    more than the adapter's storage-binding limit), caps text-only rows at
+    2,048 tokens, runs tiled screenshots through the vision tower in crop
+    groups under the same budget, and keeps screenshot features on the GPU
+    between graphs.
+  - The FP16 package stores the FP32 release's weights rounded once and
+    computes in FP32. Against FP32 it agrees on 144/144 decisions with a
+    largest probability difference of 0.010, on the CPU and on WebGPU.
+  - Package checks for a re-export: `scripts/models/d1/convert_fp16.py`,
+    `scripts/models/d1/parity-cpu.mjs` (the extension's runtime on
+    onnxruntime-node, both packages, scored against the labels) and
+    `scripts/models/d1/package_fp16.py`.
+- **The chat model as a decision model** (`src/chrome/src/offscreen/webgpu-decisions.js`,
+  `bonsai-decision-probe.js`). Ternary Bonsai 2 2B Vision prefills the state
+  and screenshots once and appends each question as a short continuation of
+  that cache; nothing generates text.
+  - The zero-shot readout (option-code token probabilities, the Perplexity
+    decider's readout) follows the answer format but never says "unknown"
+    for completion: it called 30 of 48 pending or failed views completed. A
+    stricter prompt, chosen on the validation split, only reached 26/48.
+  - The shipped mode asks about one option at a time ("Proposed answer: …
+    Is the proposed answer correct?") and scores each option from its Yes
+    margin and the decoder's last-position hidden state with a 2,049-parameter
+    probe (`scripts/models/bonsai/train_decision_probe.py`). The backbone is
+    frozen; the probe is trained on d1's train split and its regularization
+    chosen on validation. The 2B decoder graph exposes that state as
+    `decision_hidden` (`scripts/models/bonsai/add_decision_hidden.py`);
+    logits and caches are unchanged.
+  - Settings → Decision models offers it in Chrome as an explicit, key-free,
+    local provider (`webgpu_chat`). Like D1, a positive completion still needs
+    independent confirmation, and the judge allows it 15 s instead of 5 s for
+    the first load after a browser restart.
+
+Results on the held-out test, RTX 5090, through the extension:
+
+| | d1 FP32, main | d1 FP16, new runtime | Bonsai 2B readout, no training | Bonsai 2B + probe |
+|---|---:|---:|---:|---:|
+| Categorical | 92/126 | 92/126 | 74/126 | 110/126 |
+| Completion found | 22/24 | 22/24 | 24/24 | 21/24 |
+| False completions | 1/48 | 1/48 | 30/48 | 4/48 |
+| Unknown recognized | 23/24 | 23/24 | 0/24 | 20/24 |
+| Other choice / yes-no | 10/36, 13/18 | 10/36, 13/18 | 18/36, 14/18 | 29/36, 16/18 |
+| Score MAE | 0.574 | 0.573 | 0.459 | 0.724 |
+| Latency p50 / p95 (s per request) | 0.83 / 0.97 | 0.75 / 0.88 | 1.65 / 2.16 | 2.25 / 2.81 |
+| 16 questions on 1k / 2k / 4k / 8k-token states | ok / fail / fail / fail | all ok | not run | not run |
+
+- At WebBrain's 0.9 completion threshold d1 is still the better completion
+  verifier (22 found, 1 false against 19 and 4); the probe is better on every
+  other question type and better calibrated overall (test NLL 1.04 against
+  1.38). Score questions got worse with the probe (18 test questions).
+- All of these are synthetic, AI-labelled screens from one generator; the
+  probe and d1 were trained on the same train split. Neither result
+  establishes real-site quality.
+- Bonsai's cost is the prefill (median 1.2 s; about 1.3 s for an
+  1,100-token state with one screenshot) plus about 0.15 s per option.
+- The 2B repository's decoder graph with `decision_hidden` is published
+  (Hugging Face commit `b9895bc`, `decision-validation.json`). On the CPU its
+  logits and caches are bit-identical to the previous graph
+  (`scripts/models/bonsai/check_decision_hidden.py`). Installs that cached
+  the previous graph keep it until the model is downloaded again in Settings;
+  until then the provider reports that it needs the updated decoder.
+
 ## Updating a published graph
 
 Prefer a new repository or file name for a changed graph. If a file must

@@ -122,11 +122,13 @@ for (const build of ['chrome', 'firefox']) {
     assert.equal(imported.decisionProvider, 'webgpu_d1'); assert.equal(config.resolveDecisionConfig(imported).enabled, false);
   });
   test(`${build}: hardware guards reject software and inadequate buffers, not other capable GPUs`, () => {
-    const adapter = { info: { description: 'Some capable GPU', isFallbackAdapter: false }, limits: { maxBufferSize: 268435456, maxStorageBufferBindingSize: 268435456 } };
+    // The WebGPU default limits (128 MiB) now hold the FP16 embedding.
+    const adapter = { info: { description: 'Some capable GPU', isFallbackAdapter: false }, limits: { maxBufferSize: 134217728, maxStorageBufferBindingSize: 134217728 } };
     assert.doesNotThrow(() => pin.assertD1Adapter(adapter));
     assert.throws(() => pin.assertD1Adapter({ ...adapter, info: { description: 'SwiftShader' } }), /software/);
     assert.throws(() => pin.assertD1Adapter({ ...adapter, limits: { maxBufferSize: 64 } }), /buffer/);
-    assert.throws(() => pin.assertD1Adapter({ ...adapter, limits: { ...adapter.limits, maxStorageBufferBindingSize: 134217728 } }), /storage-binding/);
+    assert.throws(() => pin.assertD1Adapter({ ...adapter, limits: { ...adapter.limits, maxStorageBufferBindingSize: 67108864 } }), /storage-binding/);
+    assert.equal(pin.D1_MODEL_ID, 'webbrain-one/d1-browser-decision-fp16');
   });
   test(`${build}: media remains inline data and separate from state, remote network media is rejected`, () => {
     const url = 'data:image/png;base64,YQ==';
@@ -162,14 +164,86 @@ for (const build of ['chrome', 'firefox']) {
     assert.doesNotThrow(() => cache.validateD1Manifest({ dtype: 'float32', audio_included: false, files }));
     files.at(-1).bytes = 10 * 1024 * 1024;
     assert.throws(() => cache.validateD1Manifest({ dtype: 'float32', audio_included: false, files }), /chunks/);
-    assert.throws(() => cache.validateD1Manifest({ dtype: 'float16', audio_included: false, files }), /FP32/);
-    files.at(-1).bytes = 2; files.at(-1).chunks = [];
+    assert.throws(() => cache.validateD1Manifest({ dtype: 'bfloat16', audio_included: false, files }), /FP32 or FP16/);
+    files.at(-1).bytes = 2;
+    assert.doesNotThrow(() => cache.validateD1Manifest({ dtype: 'float16', audio_included: false, files }), 'the FP16-weight package is valid');
+    files.at(-1).chunks = [];
     assert.throws(() => cache.validateD1Manifest({ dtype: 'float32', audio_included: false, files }), /coverage/);
   });
-  test(`${build}: source longest-first 65536-token sub-batches preserve original question indices`, () => {
-    const rows = [80, 16384, 16384, 16384, 16384, 16384, 16384].map(length => ({ input_ids: Array(length) }));
-    assert.deepEqual(runtime.d1RowBatches(rows, 0), [[1, 2, 3, 4], [5, 6, 0]]);
-    assert.deepEqual(runtime.d1RowBatches([{ input_ids: Array(896) }, { input_ids: Array(896) }], 16384), [[0, 1]]);
+  test(`${build}: batches are bounded by dense attention memory and keep original question indices`, () => {
+    const rows = lengths => lengths.map(length => ({ input_ids: Array(length) }));
+    // A 2048-token row's 16 × 2048² FP32 score tensor alone fills the 256 MiB budget.
+    assert.equal(runtime.d1AttentionBytes(1, runtime.D1_WEBGPU_MAX_TEXT_TOKENS), runtime.D1_ATTENTION_BUDGET_BYTES);
+    assert.deepEqual(runtime.d1RowBatches(rows([80, 2048, 2048, 2048]), 0), [[1], [2], [3], [0]]);
+    // Short rows still share one batch, longest first.
+    assert.deepEqual(runtime.d1RowBatches(rows([100, 512, 300, 512]), 0), [[1, 3, 2, 0]]);
+    // The media prefix counts toward every row's length.
+    assert.deepEqual(runtime.d1RowBatches(rows([400, 400, 400]), 1700), [[0], [1], [2]]);
+    assert.deepEqual(runtime.d1RowBatches(rows([400, 400, 400]), 1700, { budgetBytes: 2 ** 31 }), [[0, 1, 2]]);
+  });
+  test(`${build}: WebGPU rows are capped and rows too large for the adapter fail before inference`, async () => {
+    class Tensor { constructor(type, data, dims) { Object.assign(this, { type, data, dims }); } dispose() {} }
+    const tokenizer = { bos_token_id: 1, pad_token_id: 0, convert_tokens_to_ids: () => 5, encode: text => Array.from(text, c => c.charCodeAt(0) % 200) };
+    const seen = [];
+    const sessions = { vision: {}, projector: {}, decision: { async run(feeds) { seen.push(feeds); const batch = feeds.input_ids.dims[0]; return { probabilities: { getData: async () => Float32Array.from({ length: batch * 2 }, (_, i) => i % 2 ? .75 : .25), dispose() {} } }; } } };
+    const config = { max_length: 16384, image_text_length: 896, temperatures: {} };
+    const questions = Object.fromEntries(Array.from({ length: 3 }, (_, i) => [`q${i}`, { type: 'noul', instructions: `Question ${i}?` }]));
+    const model = runtime.createD1Runtime({ ort: { Tensor }, tokenizer, config, ratios: [], sessions, model: pin.D1_MODEL_ID });
+    const longState = 'x'.repeat(9000);
+    const result = await model.evaluate({ state: longState, questions });
+    assert.ok(seen.every(feeds => feeds.input_ids.dims[1] <= runtime.D1_WEBGPU_MAX_TEXT_TOKENS), 'text rows must be capped on WebGPU');
+    assert.equal(seen.length, 3, 'three capped rows cannot share one 256 MiB score tensor');
+    assert.equal(result.diagnostics.attention_budget_bytes, runtime.D1_ATTENTION_BUDGET_BYTES);
+    // A 128 MiB binding limit shortens rows instead of failing on the GPU.
+    seen.length = 0;
+    const small = runtime.createD1Runtime({ ort: { Tensor }, tokenizer, config, ratios: [], sessions, model: pin.D1_MODEL_ID, device: { limits: { maxStorageBufferBindingSize: 134217728 }, queue: { onSubmittedWorkDone: async () => {} } } });
+    await small.evaluate({ state: longState, questions });
+    assert.ok(seen.every(feeds => runtime.d1AttentionBytes(1, feeds.input_ids.dims[1]) <= 134217728));
+    const tiny = runtime.createD1Runtime({ ort: { Tensor }, tokenizer, config, ratios: [], sessions, model: pin.D1_MODEL_ID, device: { limits: { maxStorageBufferBindingSize: 65536 }, queue: { onSubmittedWorkDone: async () => {} } } });
+    await assert.rejects(tiny.evaluate({ state: longState, questions }), /too large for this GPU/);
+  });
+  test(`${build}: screenshot features stay on the GPU between the vision, projector and decision graphs`, async () => {
+    const saved = { createImageBitmap: globalThis.createImageBitmap, OffscreenCanvas: globalThis.OffscreenCanvas, GPUBufferUsage: globalThis.GPUBufferUsage };
+    globalThis.createImageBitmap = async () => ({ width: 64, height: 64, data: new Uint8ClampedArray(64 * 64 * 4).fill(128), close() {} });
+    globalThis.OffscreenCanvas = class { getContext() { let bitmap; return { drawImage: image => { bitmap = image; }, getImageData: () => ({ data: bitmap.data }) }; } };
+    globalThis.GPUBufferUsage = { STORAGE: 128, COPY_SRC: 4, COPY_DST: 8 };
+    try {
+      const copies = [], created = [], writes = [];
+      class Tensor {
+        constructor(type, data, dims) { Object.assign(this, { type, data, dims, location: 'cpu' }); }
+        static fromGpuBuffer(buffer, { dims, dispose }) { const tensor = new Tensor('float32', null, dims); Object.assign(tensor, { location: 'gpu-buffer', gpuBuffer: buffer, disposer: dispose }); return tensor; }
+        async getData() { if (this.location === 'gpu-buffer') throw new Error('GPU features must not be read back'); return this.data; }
+        dispose() { this.disposer?.(); }
+      }
+      const gpuOut = (name, dims) => { const tensor = Tensor.fromGpuBuffer({ name }, { dims }); return tensor; };
+      let decisionFeeds;
+      const sessions = {
+        vision: { async run(feeds) { return { hidden: gpuOut('hidden', [feeds.pixel_values.dims[0], 1024, 768]) }; } },
+        projector: { async run({ hidden }) { assert.equal(hidden.location, 'gpu-buffer'); const [, h, w] = hidden.dims; return { prefix: gpuOut('prefix', [1, (h / 2) * (w / 2), 1024]) }; } },
+        decision: { async run(feeds) { decisionFeeds = feeds; return { probabilities: { getData: async () => new Float32Array([.4, .6, .3, .7]), dispose() {} } }; } },
+      };
+      const device = {
+        limits: { maxStorageBufferBindingSize: 2 ** 31 },
+        createBuffer: ({ size, usage }) => { const buffer = { size, usage, destroyed: false, destroy() { this.destroyed = true; } }; created.push(buffer); return buffer; },
+        createCommandEncoder: () => ({ copyBufferToBuffer: (...args) => copies.push(args), finish: () => ({}) }),
+        queue: { submit() {}, writeBuffer: (...args) => writes.push(args), onSubmittedWorkDone: async () => {} },
+      };
+      const tokenizer = { bos_token_id: 1, pad_token_id: 0, convert_tokens_to_ids: () => 5, encode: text => Array.from(text, c => c.charCodeAt(0) % 200) };
+      const model = runtime.createD1Runtime({ ort: { Tensor }, tokenizer, config: { max_length: 16384, image_text_length: 896, temperatures: {} }, ratios: [], sessions, device, model: pin.D1_MODEL_ID });
+      const questions = { a: { type: 'noul', instructions: 'Is it grey?' }, b: { type: 'noul', instructions: 'Is it white?' } };
+      const result = await model.evaluate({ state: 'Grey page', images: ['data:image/png;base64,YQ=='], questions });
+      assert.equal(result.diagnostics.media_on_gpu, true);
+      const media = decisionFeeds.media_prefix;
+      assert.equal(media.location, 'gpu-buffer');
+      const rows = media.dims[1], rowBytes = rows * 1024 * 4;
+      assert.deepEqual(media.dims, [2, rows, 1024]);
+      const toMedia = copies.filter(([, , target]) => target === media.gpuBuffer);
+      assert.deepEqual(toMedia.map(([, , , offset, bytes]) => [offset, bytes]), [[0, rowBytes], [rowBytes, rowBytes]], 'each row receives the projected prefix by a GPU copy');
+      assert.equal(writes.length, 0, 'no screenshot features were uploaded from the CPU');
+      assert.ok(created.every(buffer => buffer.usage & 128), 'feature buffers must be storage buffers');
+    } finally {
+      for (const [key, value] of Object.entries(saved)) { if (value === undefined) delete globalThis[key]; else globalThis[key] = value; }
+    }
   });
   test(`${build}: encoder/head feeds are FP32, bidirectional and generate no tokens`, async () => {
     const seen = [];

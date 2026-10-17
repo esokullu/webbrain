@@ -1,5 +1,5 @@
 import { D1_MODEL_ID, D1_CONSENT_VERSION, D1_RELEASE, assertD1Adapter } from './d1-config.js';
-import { openD1Cache, readD1Manifest, validateD1Manifest, d1CachedFile, setD1Ready } from './d1-cache.js';
+import { openD1Cache, readD1Manifest, validateD1Manifest, d1CachedFile, setD1Ready, removeStaleD1Caches } from './d1-cache.js';
 import { createD1Runtime } from './d1-runtime.js';
 
 let runtime = null, device = null, state = { status: 'idle', progress: 0, loaded: false }, transfer = null;
@@ -34,10 +34,12 @@ async function prepare(signal) {
       publish({ status: 'loading', component: role, adapter: info });
       const graph = new Uint8Array(await (await d1CachedFile(directory, specs[`onnx/${role}.onnx`], { signal })).arrayBuffer());
       const data = new Uint8Array(await (await d1CachedFile(directory, specs[`onnx/${role}.data`], { signal })).arrayBuffer());
-      sessions[role] = await ort.InferenceSession.create(graph, { executionProviders: [{ name: 'webgpu', device: loadingDevice }], graphOptimizationLevel: 'basic', logSeverityLevel: 2, extra: { session: { disable_cpu_ep_fallback: '0' } }, externalData: [{ path: `${role}.data`, data }] });
+      // Vision and projector outputs feed the next graph on the GPU (d1-runtime.js).
+      const preferredOutputLocation = { vision: { hidden: 'gpu-buffer' }, projector: { prefix: 'gpu-buffer' } }[role];
+      sessions[role] = await ort.InferenceSession.create(graph, { executionProviders: [{ name: 'webgpu', device: loadingDevice }], graphOptimizationLevel: 'basic', logSeverityLevel: 2, ...(preferredOutputLocation ? { preferredOutputLocation } : {}), extra: { session: { disable_cpu_ep_fallback: '0' } }, externalData: [{ path: `${role}.data`, data }] });
       if (signal?.aborted) throw signal.reason;
     }
-    runtime = createD1Runtime({ ort, tokenizer, config, ratios, sessions, device: loadingDevice, model: D1_MODEL_ID });
+    runtime = createD1Runtime({ ort, tokenizer, config, ratios, sessions, device: loadingDevice, model: D1_MODEL_ID, dtype: manifest.dtype });
     publish({ status: 'ready', loaded: true, progress: 100, adapter: info, runtime: ort.env.versions, error: '', cpu_fallback_policy: 'CPU/WASM control/shape fallback allowed; not a pure GPU claim.' });
     return { ready: true, ...state };
   } catch (error) { for (const session of Object.values(sessions)) await session.release().catch(() => {}); loadingDevice.destroy(); if (device === loadingDevice) device = null; publish({ status: signal?.aborted ? 'stopped' : 'error', loaded: false, error: String(error.message || error) }); throw error; }
@@ -64,6 +66,8 @@ function startDownload(payload) {
   publish({ status: 'checking', error: '', progress: 0 });
   (async () => {
     await probe();
+    // Packages for other revisions are never loaded again; free their storage.
+    await removeStaleD1Caches().catch(() => {});
     const directory = await openD1Cache(), manifest = await readD1Manifest(directory, { download: true, signal: controller.signal }), specs = validateD1Manifest(manifest);
     await setD1Ready(directory, false);
     const total = Object.values(specs).reduce((n, spec) => n + spec.bytes, 0); let completed = 0;

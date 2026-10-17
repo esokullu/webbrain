@@ -4667,6 +4667,23 @@ async function handleMessage(msg, sender) {
       return await testImageGenProvider();
     }
 
+    // Diagnostic decision readout on the in-browser chat model, for the
+    // hardware eval (scripts/check-webgpu-decisions.mjs). Settings page only.
+    case 'webgpu_decide_fixture': {
+      const api = globalThis.browser || globalThis.chrome;
+      const settingsUrl = api.runtime.getURL('src/ui/settings.html');
+      if (sender.id !== api.runtime.id || String(sender.url || '').split('#')[0] !== settingsUrl) return { success: false, error: 'Decision fixtures are available only from extension Settings.' };
+      try {
+        await strictSecretModeReady;
+        if (agent.strictSecretMode) throw new Error('Decision requests are disabled in Strict Secret Mode.');
+        const fixture = msg.fixture;
+        if (!fixture || typeof fixture !== 'object' || Array.isArray(fixture)) throw new Error('Invalid decision fixture.');
+        const provider = providerManager.getProvider('webgpu');
+        if (typeof provider?.decide !== 'function') throw new Error('The WebGPU provider is unavailable.');
+        return { success: true, result: await provider.decide({ state: fixture.state, images: fixture.images || [], questions: fixture.questions, temperature: fixture.temperature, promptVariant: fixture.promptVariant, returnHidden: fixture.returnHidden === true }) };
+      } catch (error) { return { success: false, error: error.message }; }
+    }
+
     case 'd1_control': {
       const api = globalThis.browser || globalThis.chrome;
       const settingsUrl = api.runtime.getURL('src/ui/settings.html');

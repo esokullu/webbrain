@@ -8,6 +8,16 @@
  */
 
 import { BONSAI2_TOKENIZER_CONFIG } from '../../vendor/bonsai2/tokenizer-config.js';
+import {
+  decisionSystemPrompt,
+  decisionAnswer,
+  decisionOptions,
+  decisionQuestionText,
+  decisionVerifyText,
+  decisionStateText,
+  normalizeDecisionRequest,
+} from './webgpu-decisions.js';
+import { BONSAI_DECISION_PROBE, bonsaiProbeScores } from './bonsai-decision-probe.js';
 
 let libraryPromise = null;
 let libraryVersion = null;
@@ -52,10 +62,12 @@ const WEBGPU_BONSAI2_MODEL_IDS = new Set([
 // scripts/models/bonsai/chunk_gdn_prefill.py). Earlier revisions prefilled with
 // an ONNX Scan that WebGPU runs one token at a time on the CPU. Installs that
 // cached that graph keep it under the same URL, so replace just this small file;
-// the unchanged weight files stay cached.
+// the unchanged weight files stay cached. The 2B graph also exposes the
+// last-position hidden state as `decision_hidden` for the decision probe
+// (scripts/models/bonsai/add_decision_hidden.py); logits and caches are as before.
 const BONSAI2_DECODER_GRAPH_FILE = 'onnx/decoder_model_merged_q2f16.onnx';
 const BONSAI2_DECODER_GRAPH_SHA256 = new Map([
-  ['webbrain-one/Ternary-Bonsai-2-2B-ONNX-WebGPU-Vision', '2768d880f4fdab46a984d697b901db6e8ac54dc9b896524cb8cb769bbb339df0'],
+  ['webbrain-one/Ternary-Bonsai-2-2B-ONNX-WebGPU-Vision', '240c07e1191911a2306faf106ee537382a1b4d5e6ecdd32b618da160db9145c1'],
   ['webbrain-one/Ternary-Bonsai-2-4B-ONNX-WebGPU-Vision', '52424fbb7094ed0a1036d8795e78c3da349fce1838ee6bd077523929b0bb7bb2'],
 ]);
 // A refresh must never stall model loading on a flaky network; one attempt per
@@ -317,16 +329,10 @@ function presentToPastName(name) {
     .replace('present', 'past_key_values');
 }
 
-/**
- * Prefill all but the last prompt token in slices and return the cache, or
- * null when the prompt fits in one slice. generate() then continues from the
- * cache: the Qwen VL input preparation computes the full rotary positions and
- * feeds only the remaining token.
- */
-export async function prefillBonsai2InSlices(runtime, inputs, sliceTokens) {
+// Prefill the first `count` prompt tokens in slices of `sliceTokens` (one
+// pass when 0) and return the recurrent/conv/KV cache.
+async function prefillBonsai2Cache(runtime, inputs, sliceTokens, count) {
   const { model, library } = runtime;
-  const length = inputs.input_ids.dims.at(-1);
-  if (!sliceTokens || length - 1 <= sliceTokens) return null;
   let embeds = await model.encode_text({ input_ids: inputs.input_ids });
   let attentionMask = inputs.attention_mask;
   if (inputs.pixel_values) {
@@ -347,10 +353,11 @@ export async function prefillBonsai2InSlices(runtime, inputs, sliceTokens) {
     inputs.video_grid_thw ?? null,
     attentionMask,
   );
+  const step = sliceTokens || count;
   let cache = null;
   try {
-    for (let start = 0; start < length - 1; start += sliceTokens) {
-      const end = Math.min(start + sliceTokens, length - 1);
+    for (let start = 0; start < count; start += step) {
+      const end = Math.min(start + step, count);
       const outputs = await model.forward({
         inputs_embeds: embeds.slice(null, [start, end], null),
         attention_mask: attentionMask.slice(null, [0, end]),
@@ -369,6 +376,51 @@ export async function prefillBonsai2InSlices(runtime, inputs, sliceTokens) {
   } catch (error) {
     await cache?.dispose?.();
     throw error;
+  }
+}
+
+/**
+ * Prefill all but the last prompt token in slices and return the cache, or
+ * null when the prompt fits in one slice. generate() then continues from the
+ * cache: the Qwen VL input preparation computes the full rotary positions and
+ * feeds only the remaining token.
+ */
+export async function prefillBonsai2InSlices(runtime, inputs, sliceTokens) {
+  const length = inputs.input_ids.dims.at(-1);
+  if (!sliceTokens || length - 1 <= sliceTokens) return null;
+  return prefillBonsai2Cache(runtime, inputs, sliceTokens, length - 1);
+}
+
+/**
+ * Next-token logits after appending `suffixIds` to a prefilled prompt. The
+ * prefix cache is only read: the continuation's cache outputs are released,
+ * so every question starts from the same page state.
+ */
+export async function bonsai2ContinuationLogits(runtime, prefixInputs, cache, suffixIds, { withHidden = false } = {}) {
+  const { model, library } = runtime;
+  const prefixLength = prefixInputs.input_ids.dims.at(-1), suffixLength = suffixIds.dims.at(-1);
+  const total = prefixLength + suffixLength;
+  const fullIds = library.cat([prefixInputs.input_ids, suffixIds], 1);
+  const fullMask = new library.Tensor('int64', new BigInt64Array(total).fill(1n), [1, total]);
+  const [positions] = model.get_rope_index(fullIds, prefixInputs.image_grid_thw ?? null, null, fullMask);
+  const embeds = await model.encode_text({ input_ids: suffixIds });
+  const outputs = await model.forward({
+    inputs_embeds: embeds,
+    attention_mask: fullMask,
+    position_ids: positions.slice(null, null, [prefixLength, total]),
+    past_key_values: cache,
+  });
+  try {
+    const logits = Float32Array.from(outputs.logits.slice(null, -1, null).to('float32').data);
+    if (!withHidden) return logits;
+    // Present only in a decoder graph that exposes `decision_hidden`
+    // (scripts/models/bonsai/add_decision_hidden.py).
+    const hidden = outputs.decision_hidden ? Float32Array.from(outputs.decision_hidden.to('float32').data) : null;
+    return { logits, hidden };
+  } finally {
+    for (const tensor of Object.values(outputs)) {
+      if (tensor?.location === 'gpu-buffer') tensor.dispose();
+    }
   }
 }
 
@@ -1759,6 +1811,154 @@ async function runMultimodalText(payload) {
   return { content: result.content, reasoningContent: result.reasoningContent };
 }
 
+function encodeFloat16Base64(values) {
+  const half = new Uint16Array(values.length), view = new DataView(new ArrayBuffer(4));
+  for (let i = 0; i < values.length; i++) {
+    view.setFloat32(0, values[i]);
+    const bits = view.getUint32(0), sign = (bits >>> 16) & 0x8000, exponent = ((bits >>> 23) & 0xff) - 112, mantissa = (bits >>> 13) & 0x3ff;
+    half[i] = exponent <= 0 ? sign : exponent >= 31 ? sign | 0x7c00 : sign | (exponent << 10) | mantissa;
+  }
+  let binary = '';
+  const bytes = new Uint8Array(half.buffer);
+  for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+  return btoa(binary);
+}
+
+// Option probabilities read from one forward pass per question (see
+// webgpu-decisions.js). Only the Bonsai 2 Vision presets are supported: they
+// use the chunked decoder whose cache the continuations share.
+const DECISION_QUESTION_MARKER = '\u2063WEBBRAIN_DECISION_QUESTION\u2063';
+
+async function runMultimodalDecision(payload) {
+  const modelId = assertOnnxTextModel(payload?.modelId);
+  if (!WEBGPU_BONSAI2_VISION_MODEL_IDS.has(modelId)) {
+    throw new Error(`${modelId} does not support in-browser decisions.`);
+  }
+  const request = normalizeDecisionRequest(payload);
+  const dtype = payload?.dtype || { embed_tokens: 'fp16', vision_encoder: 'fp16', decoder_model_merged: 'q2f16' };
+  if (!await isTextModelReady(modelId, dtype)) {
+    throw new Error(`${modelId} is not downloaded. Open Settings > Providers > WebGPU or Apocalypse Mode > WebGPU to download it first.`);
+  }
+  const runtime = await getVisionRuntime(modelId, dtype, payload?.device || 'webgpu', {
+    localFilesOnly: true,
+    owner: 'text',
+    readiness: 'text',
+  });
+  const temperature = Number(payload?.temperature) > 0 ? Number(payload.temperature) : 1;
+  const messages = [
+    { role: 'system', content: [{ type: 'text', text: decisionSystemPrompt(payload?.promptVariant) }] },
+    { role: 'user', content: [
+      ...request.images.map(() => ({ type: 'image' })),
+      { type: 'text', text: `${decisionStateText(request.state)}\n\n${DECISION_QUESTION_MARKER}` },
+    ] },
+  ];
+  const rendered = runtime.processor.apply_chat_template(messages, { add_generation_prompt: true, enable_thinking: false });
+  const split = rendered.indexOf(DECISION_QUESTION_MARKER);
+  if (split < 0 || rendered.indexOf(DECISION_QUESTION_MARKER, split + 1) >= 0) {
+    throw new Error('The decision prompt did not render as expected.');
+  }
+  const prefixText = rendered.slice(0, split);
+  const tailText = rendered.slice(split + DECISION_QUESTION_MARKER.length);
+  const tokenizer = runtime.processor.tokenizer;
+  const codeIds = new Map();
+  const codeId = code => {
+    if (!codeIds.has(code)) {
+      const ids = tokenizer.encode(code, { add_special_tokens: false });
+      if (ids.length !== 1) throw new Error(`Decision answer code ${code} is not a single token.`);
+      codeIds.set(code, ids[0]);
+    }
+    return codeIds.get(code);
+  };
+  let prefix;
+  if (request.images.length) {
+    const images = await Promise.all(request.images.map(url => runtime.library.load_image(url)));
+    prefix = await processMultimodalInputs(runtime, modelId, images.length === 1 ? images[0] : images, prefixText);
+  } else {
+    prefix = tokenizer(prefixText, { add_special_tokens: false });
+  }
+  lastWebGpuDeviceError = '';
+  lastWebGpuDeviceLost = '';
+  const prefixLength = prefix.input_ids.dims.at(-1);
+  const started = performance.now();
+  let cache = null;
+  const answers = {};
+  const questionMs = [];
+  let suffixTokens = 0;
+  try {
+    cache = await prefillBonsai2Cache(runtime, prefix, bonsai2PrefillSliceTokens(payload?.prefillSliceTokens), prefixLength);
+    const prefillMs = performance.now() - started;
+    // `probe` (the default) scores each option's verify continuation with the
+    // trained probe; `verify` returns the raw Yes margins; `readout` and
+    // `strict` read the option codes in one pass. All but `probe` are for the
+    // diagnostic fixture path.
+    const variant = ['readout', 'default', 'strict', 'verify', 'probe'].includes(payload?.promptVariant) ? payload.promptVariant : 'probe';
+    const verify = variant === 'verify' || variant === 'probe';
+    if (variant === 'probe' && modelId !== BONSAI_DECISION_PROBE.model) {
+      throw new Error(`No decision probe is trained for ${modelId}.`);
+    }
+    const returnHidden = payload?.returnHidden === true;
+    const yesId = verify ? codeId('Yes') : null, noId = verify ? codeId('No') : null;
+    for (const [id, question] of request.entries) {
+      const questionStarted = performance.now();
+      if (verify) {
+        // One continuation per option; the answer compares their Yes margins.
+        const margins = [], hidden = [];
+        const count = decisionOptions(question).names.length;
+        for (let index = 0; index < count; index++) {
+          const suffix = tokenizer(`${decisionVerifyText(question, index)}${tailText}`, { add_special_tokens: false });
+          suffixTokens += suffix.input_ids.dims.at(-1);
+          const output = await bonsai2ContinuationLogits(runtime, prefix, cache, suffix.input_ids, { withHidden: true });
+          margins.push(output.logits[yesId] - output.logits[noId]);
+          if (variant === 'probe' && !output.hidden) {
+            throw new Error('In-browser decisions need the updated Ternary Bonsai 2 2B Vision decoder. Download the model again in Settings > Providers > WebGPU.');
+          }
+          hidden.push(output.hidden);
+        }
+        const scores = variant === 'probe' ? bonsaiProbeScores(margins, hidden) : margins;
+        answers[id] = {
+          ...decisionAnswer(question, scores, { temperature }),
+          ...(returnHidden ? { margins, hidden: hidden.map(vector => (vector ? encodeFloat16Base64(vector) : null)) } : {}),
+        };
+        questionMs.push(Math.round(performance.now() - questionStarted));
+        continue;
+      }
+      const suffix = tokenizer(`${decisionQuestionText(question)}${tailText}`, { add_special_tokens: false });
+      suffixTokens += suffix.input_ids.dims.at(-1);
+      const logits = await bonsai2ContinuationLogits(runtime, prefix, cache, suffix.input_ids);
+      const ids = decisionOptions(question).codes.map(codeId);
+      let top = -Infinity;
+      for (const value of logits) if (value > top) top = value;
+      let total = 0;
+      for (const value of logits) total += Math.exp(value - top);
+      const mass = ids.reduce((sum, tokenId) => sum + Math.exp(logits[tokenId] - top), 0) / total;
+      answers[id] = decisionAnswer(question, ids.map(tokenId => logits[tokenId]), { temperature, mass });
+      questionMs.push(Math.round(performance.now() - questionStarted));
+    }
+    noteWebgpuExecutionSuccess();
+    return {
+      model: modelId,
+      provider: 'webgpu',
+      answers,
+      usage: { input_tokens: prefixLength + suffixTokens, output_tokens: 0 },
+      diagnostics: {
+        generated_tokens: 0,
+        prefix_tokens: prefixLength,
+        images: request.images.length,
+        prefill_ms: Math.round(prefillMs),
+        question_ms: questionMs,
+        total_ms: Math.round(performance.now() - started),
+        temperature,
+        prompt_variant: variant,
+      },
+    };
+  } catch (error) {
+    if (isWebGpuExecutionFailure(error)) throw await handleWebGpuExecutionFailure(error);
+    throw error;
+  } finally {
+    if (cache) await cache.dispose().catch(() => {});
+  }
+}
+
 async function runText(payload) {
   const modelId = assertOnnxTextModel(payload?.modelId);
   const device = payload?.device || 'webgpu';
@@ -2031,6 +2231,11 @@ self.addEventListener('message', async event => {
         ...result,
         raw: { model: payload?.modelId || '' },
       });
+      return;
+    }
+    if (type === 'multimodal-decide') {
+      const result = await enqueueModelOperation(() => runMultimodalDecision(payload));
+      self.postMessage({ id, ok: true, ...result });
       return;
     }
     if (type === 'multimodal-text-chat') {

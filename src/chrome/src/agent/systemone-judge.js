@@ -5,6 +5,7 @@
 // interface. It never performs an action or turns a non-success into success.
 
 import { evaluateD1 } from '../providers/d1.js';
+import { evaluateWebgpuDecision } from '../providers/webgpu-decision.js';
 
 export const SYSTEM_ONE_API_URL = 'https://api.typesafe.ai/v1/systemone';
 export const SYSTEM_ONE_MODEL = 'jev-1.13.0';
@@ -274,14 +275,26 @@ export function createSystemOneJudge({
   return {
     async evaluate({ apiKey, state, images, questions, signal, beforeRequest, onUsage, config, headers = {}, metadata = {} } = {}) {
       const key = normalizeTypesafeApiKey(config?.apiKey ?? apiKey);
-      if (!key && !['local', 'compass', 'webgpu_d1'].includes(config?.provider)) throw new Error('Decision API key is not configured.');
+      if (!key && !['local', 'compass', 'webgpu_d1', 'webgpu_chat'].includes(config?.provider)) throw new Error('Decision API key is not configured.');
       const model = config?.model || SYSTEM_ONE_MODEL;
       validateState(state, config?.supportsVision === true);
       validateQuestions(questions);
       const started = now();
-      const request = requestSignal(signal, Math.max(1, Math.min(5000, Number(timeoutMs) || 5000)));
+      // The in-browser model prefills its screenshot on this GPU (about a second
+      // on a desktop card) and loads on first use after a browser restart.
+      const cap = config?.provider === 'webgpu_chat' ? 15000 : 5000;
+      const request = requestSignal(signal, Math.max(1, Math.min(cap, Number(timeoutMs) || cap)));
       const retries = Math.max(0, Math.min(2, Math.floor(Number(maxRetries) || 0)));
       try {
+        if (config?.provider === 'webgpu_chat') {
+          if (beforeRequest) await abortable(beforeRequest(), request.signal);
+          const result = await abortable(evaluateWebgpuDecision({ state, images, questions, config, signal: request.signal }), request.signal);
+          validateSystemOneAnswers(result.answers, questions);
+          if (result.model !== model || !Number.isInteger(result.usage?.input_tokens) || result.usage.input_tokens < 0 || result.usage?.output_tokens !== 0) throw systemOneError('JEV_INVALID_USAGE', 'Invalid in-browser decision usage/model.');
+          const metadata = { model: result.model, provider: result.provider, usage: result.usage, latencyMs: Math.max(0, now() - started), estimatedCostUsd: 0 };
+          if (onUsage) await abortable(onUsage(metadata), request.signal);
+          return { ...result, ...metadata };
+        }
         if (config?.provider === 'webgpu_d1') {
           if (beforeRequest) await abortable(beforeRequest(), request.signal);
           const result = await abortable(evaluateD1({ state, images, questions, config, signal: request.signal }), request.signal);

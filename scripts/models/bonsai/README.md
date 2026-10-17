@@ -192,3 +192,18 @@ already installed. For example:
 Repeat with `--size 4B` and a separate output filename. The native reference
 checks original source-pack hashes before loading and uses no model repository
 Python code. Include its JSON evidence in the bundle before resealing the manifest.
+
+## Decision probe
+
+`add_decision_hidden.py` adds the decoder's last-position hidden state as a
+`decision_hidden` output (an Identity of the LM-head input; logits, caches and
+the external weight file are unchanged). `train_decision_probe.py` trains the
+2B Vision decision probe from hardware-eval reports made with
+`scripts/check-webgpu-decisions.mjs --prompt verify --return-hidden
+--decoder-graph <graph>` on d1's balanced-V3 train, validation and test splits.
+The selected weights live in `src/chrome/src/offscreen/bonsai-decision-probe.js`.
+`check_decision_hidden.py <dir> --old <previous graph> --new <graph>` checks on
+onnxruntime's CPU provider that logits and caches stay bit-identical (the
+external `.onnx_data` must sit next to both graphs).
+A re-exported decoder or a retrained probe must be evaluated again through the
+extension before its pin or weights change.

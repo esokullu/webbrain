@@ -7,13 +7,30 @@ export const DECISION_SETTINGS_KEYS = [
   D1_CONSENT_KEY,
 ];
 
+// The in-browser chat model answers decisions through its trained probe
+// (Chrome; src/chrome/src/offscreen/bonsai-decision-probe.js). Kept in sync
+// with WEBGPU_DECISION_MODEL_ID in providers/webgpu.js.
+export const WEBGPU_CHAT_DECISION_MODEL = 'webbrain-one/Ternary-Bonsai-2-2B-ONNX-WebGPU-Vision';
+
 // Resolve legacy settings without rewriting credentials or opted-in features.
 export function resolveDecisionConfig(stored = {}, compass = null) {
   const explicitD1 = stored.decisionProvider === 'webgpu_d1' && stored.systemOneEnabled === true && stored[D1_CONSENT_KEY] === D1_CONSENT_VERSION;
-  const provider = explicitD1 ? 'webgpu_d1' : compass ? 'compass' : (stored.decisionProvider || (stored.typesafeApiKey ? 'typesafe' : 'openrouter'));
+  const explicitChat = stored.decisionProvider === 'webgpu_chat' && stored.systemOneEnabled === true;
+  const provider = explicitD1 ? 'webgpu_d1' : explicitChat ? 'webgpu_chat' : compass ? 'compass' : (stored.decisionProvider || (stored.typesafeApiKey ? 'typesafe' : 'openrouter'));
   if (provider === 'webgpu_d1') return {
     provider, model: D1_MODEL_ID, apiKey: '', baseUrl: '', url: '', local: true,
     enabled: stored.systemOneEnabled === true && stored[D1_CONSENT_KEY] === D1_CONSENT_VERSION,
+    doneEnabled: stored.systemOneDoneEnabled === true,
+    threshold: Number.isFinite(stored.systemOneDoneThreshold) && stored.systemOneDoneThreshold >= .5 && stored.systemOneDoneThreshold <= .99 ? stored.systemOneDoneThreshold : .9,
+    supportsVision: stored.decisionVisionMode !== 'off', experimental: true,
+    requiresIndependentSuccessConfirmation: true,
+    config: { category: 'local', providerName: provider, inputCostPerMillionUsd: 0, outputCostPerMillionUsd: 0 },
+  };
+  // Explicitly selected, like D1: an on-device decision provider that never
+  // leaves the browser. A positive completion still needs independent proof.
+  if (provider === 'webgpu_chat') return {
+    provider, model: WEBGPU_CHAT_DECISION_MODEL, apiKey: '', baseUrl: '', url: '', local: true,
+    enabled: stored.systemOneEnabled === true,
     doneEnabled: stored.systemOneDoneEnabled === true,
     threshold: Number.isFinite(stored.systemOneDoneThreshold) && stored.systemOneDoneThreshold >= .5 && stored.systemOneDoneThreshold <= .99 ? stored.systemOneDoneThreshold : .9,
     supportsVision: stored.decisionVisionMode !== 'off', experimental: true,
@@ -49,7 +66,8 @@ export function resolveDecisionConfig(stored = {}, compass = null) {
 }
 
 export async function listDecisionModels(config, fetchImpl = globalThis.fetch, signal) {
-  if (config.provider === 'webgpu_d1') return [{ id: D1_MODEL_ID, name: 'D1 FP32 (experimental, on-device)', supportsVision: true, inputRate: 0, outputRate: 0 }];
+  if (config.provider === 'webgpu_chat') return [{ id: WEBGPU_CHAT_DECISION_MODEL, name: 'Ternary Bonsai 2 2B Vision (in-browser, experimental)', supportsVision: true, inputRate: 0, outputRate: 0 }];
+  if (config.provider === 'webgpu_d1') return [{ id: D1_MODEL_ID, name: 'D1 FP16 (experimental, on-device)', supportsVision: true, inputRate: 0, outputRate: 0 }];
   return withCompletionTimeout(requestSignal => discoverDecisionModels(config, fetchImpl, requestSignal), signal, 5000);
 }
 

@@ -22,6 +22,7 @@
 // --download         download the model if it is not cached yet
 // --tasks a,b        run only these tasks
 // --timeout-ms N     per-task deadline (default 10 minutes)
+// --decoder-graph F  install a replacement decoder graph in the cache first
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import http from 'node:http';
@@ -141,6 +142,17 @@ try {
       console.log(`download ${JSON.stringify(status).slice(0, 200)}`);
       if (Date.now() - started > 60 * 60_000) throw new Error('Download did not finish within an hour');
     }
+  }
+  if (option('--decoder-graph', '')) {
+    // Replace the cached decoder graph (same external weights) before the
+    // first chat, to check a re-exported graph through the real extension.
+    const data = (await fs.readFile(option('--decoder-graph'))).toString('base64');
+    await harness.evaluate(async ({ url, data }) => {
+      const bytes = Uint8Array.from(atob(data), c => c.charCodeAt(0));
+      const cache = await caches.open('transformers-cache');
+      await cache.put(url, new Response(bytes, { headers: { 'content-type': 'application/octet-stream', 'content-length': String(bytes.length) } }));
+    }, { url: `https://huggingface.co/${model}/resolve/main/onnx/decoder_model_merged_q2f16.onnx`, data });
+    result.decoderGraph = option('--decoder-graph');
   }
   // The provider can be selected for chat only once its files are cached.
   const selected = await message('set_active_provider', { providerId: 'webgpu' });

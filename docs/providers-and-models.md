@@ -71,20 +71,30 @@ Image support follows available model capabilities or the custom override. Test
 Connection checks typed answers and, when enabled, two independent image-only
 facts. A successful HTTP response alone does not establish image support.
 
-**D1 FP32 WebGPU (experimental)** is a separate, optional on-device decision
+**D1 WebGPU (experimental)** is a separate, optional on-device decision
 provider. It does not replace the conversational/planning model and does not
 generate tokens. It supports named choice, noul (P(yes)) and ordinal score
 questions over bounded text/JSON state and inline screenshots. Selecting it
 does not download anything. Explicit consent and **Download and load** fetch
-about 1.9 GB of pinned FP32 model data and tokenizer/configuration files from
-the [Hugging Face model repository](https://huggingface.co/webbrain-one/d1-browser-decision-fp32)
-into OPFS. The repository name is not a production-readiness claim; this provider
+about 0.95 GB of pinned model data and tokenizer/configuration files from
+the [Hugging Face model repository](https://huggingface.co/webbrain-one/d1-browser-decision-fp16)
+into OPFS. The package stores FP16 weights and computes in FP32; it is the
+[FP32 release](https://huggingface.co/webbrain-one/d1-browser-decision-fp32)
+with its weights rounded once, and answers the same on its held-out test. A
+cached FP32 package from an earlier version is removed on the next download. The repository name is not a production-readiness claim; this provider
 remains experimental. Executable JS/WASM is packaged in the extension, not
 downloaded from the model repository. **Load cached model** verifies the files
 again; inference cannot trigger a model download.
 
 This experimental path needs hardware WebGPU, OPFS and substantial GPU/host
-memory. Software adapters are rejected. Chrome uses the shared MV3 offscreen
+memory. Software adapters are rejected. The encoder's attention is dense, so
+memory grows with the square of each row's length: rows are batched under a
+256 MiB attention budget (never more than the adapter's storage-binding
+limit), text-only rows are capped at 2,048 tokens on WebGPU (the state is
+truncated, as the source does at its context limit), and a request whose
+screenshots alone exceed the adapter limit fails with a clear error instead of
+losing the GPU device. Screenshot features stay on the GPU between the vision,
+projector and decision graphs. Chrome uses the shared MV3 offscreen
 document with a dedicated decision Worker; Firefox uses its background-page
 Worker when the corresponding browser capabilities are available. Mirrored
 code is not evidence that every browser/GPU is supported. CPU/WASM control and
@@ -94,6 +104,18 @@ retains the cache; **Remove cached model** requires the model to be unloaded.
 Page state and screenshots remain untrusted evidence, never instructions.
 No inference input goes to Hugging Face. Existing optional provider/research
 sharing settings and existing privacy boundaries are not bypassed.
+
+**In-browser chat model (experimental, Chrome)** answers decisions with the
+WebGPU chat model itself, Ternary Bonsai 2 2B Vision, so one downloaded model
+serves chat, screenshots and decisions. It needs no extra download, key or
+endpoint: download that preset under Providers → WebGPU first. Each option is
+scored from a short continuation of the prefilled page state by a small
+probe trained on d1's synthetic data, with the model's weights unchanged. On
+d1's held-out test it answers more questions correctly than D1 but accepts
+more false completions, so like D1 a positive completion is never the sole
+authority. The first decision after a browser restart loads the model and can
+fall back to the existing chain. Details and numbers are in
+[`docs/webgpu-models.md`](webgpu-models.md).
 
 The adapter retains Python-style JSON spacing and fractional exponent
 formatting. JavaScript cannot distinguish an integer `1` from a Python float

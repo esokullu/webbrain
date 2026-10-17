@@ -202,6 +202,9 @@ export const WEBGPU_HIDDEN_MODEL_IDS = Object.freeze([
 export const WEBGPU_SELECTABLE_MODEL_PRESETS = Object.freeze(WEBGPU_PICKER_MODEL_IDS
   .filter(id => !WEBGPU_HIDDEN_MODEL_IDS.includes(id))
   .map(id => WEBGPU_MODEL_PRESETS.find(preset => preset.id === id)));
+// The preset with a trained decision probe (src/chrome/src/offscreen/bonsai-decision-probe.js).
+export const WEBGPU_DECISION_MODEL_ID = WEBGPU_BONSAI2_VL_2B_MODEL_ID;
+export const WEBGPU_DECISION_MODEL_IDS = new Set([WEBGPU_DECISION_MODEL_ID]);
 export const WEBGPU_MODEL_NOT_READY_ERROR = `${WEBGPU_COMPASS_TINY_V2_MODEL_ID} is not downloaded. Open Settings > Providers > WebGPU or Apocalypse Mode > WebGPU to download it before chatting.`;
 // Chrome-only selection state. Keep this separate from the synced
 // `visionModel` endpoint so enabling the fallback never overwrites a user's
@@ -468,6 +471,39 @@ export class WebGPUProvider extends WebGPUOffscreenProvider {
       usage: null,
       raw: response.raw || null,
     };
+  }
+
+  /**
+   * Decision readout on the in-browser model: option probabilities from one
+   * forward pass per question, in the d1 answer shape. Bonsai 2 Vision only.
+   */
+  async decide({ state = '', images = [], questions, temperature, promptVariant, returnHidden = false } = {}) {
+    if (webgpuModelRuntime(this.model) !== WEBGPU_RUNTIME_ONNX_VL || !WEBGPU_DECISION_MODEL_IDS.has(this.model)) {
+      throw new Error(`${webgpuModelDisplayName(this.model)} does not support in-browser decisions.`);
+    }
+    const download = await this.downloadStatus();
+    if (!download.ready) {
+      throw new Error(`${webgpuModelDisplayName(this.model)} is not downloaded. Open Settings > Providers > WebGPU or Apocalypse Mode > WebGPU to download it first.`);
+    }
+    const prefillSliceTokens = await this._prefillSliceTokens();
+    const response = await this._dispatch({
+      type: 'webgpu-decide',
+      model: this.model,
+      runtime: WEBGPU_RUNTIME_ONNX_VL,
+      device: this.device,
+      dtype: this.dtype,
+      state,
+      images,
+      questions,
+      ...(Number(temperature) > 0 ? { temperature: Number(temperature) } : {}),
+      ...(['readout', 'strict', 'verify', 'probe'].includes(promptVariant) ? { promptVariant } : {}),
+      ...(returnHidden === true ? { returnHidden: true } : {}),
+      ...(prefillSliceTokens == null ? {} : { prefillSliceTokens }),
+    });
+    if (!response || response.ok === false || response.error) {
+      throw new Error(`In-browser WebGPU: ${response?.error || 'no response from the inference worker'}`);
+    }
+    return { model: response.model, provider: 'webgpu', answers: response.answers, usage: response.usage, diagnostics: response.diagnostics };
   }
 
   async _prefillSliceTokens() {
