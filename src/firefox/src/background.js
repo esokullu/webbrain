@@ -15,6 +15,7 @@ import { createSafeSocialHost } from './safesocial/host.js';
 import { firefoxBidi } from './bidi/client.js';
 import { ProviderManager } from './providers/manager.js';
 import { Agent } from './agent/agent.js';
+import { normalizeLeanModeSetting } from './agent/lean-mode.js';
 import {
   CUSTOM_SKILLS_STORAGE_KEY,
   DEFAULT_SKILL_SOURCES,
@@ -533,9 +534,10 @@ async function loadResearchEscalation() {
 const researchEscalationReady = loadResearchEscalation().catch(() => {});
 
 async function loadStrictSecretMode() {
-  const stored = await browser.storage.local.get(['strictSecretMode', 'strictGuards']).catch(() => ({}));
+  const stored = await browser.storage.local.get(['strictSecretMode', 'strictGuards', 'leanMode']).catch(() => ({}));
   agent.strictSecretMode = stored?.strictSecretMode === true;
   agent.strictGuards = stored?.strictGuards === true;
+  agent.leanMode = normalizeLeanModeSetting(stored?.leanMode);
 }
 const strictSecretModeReady = loadStrictSecretMode().catch(() => {});
 
@@ -1211,6 +1213,10 @@ browser.storage.onChanged.addListener((changes, areaName) => {
   }
   if (changes.strictGuards) {
     agent.strictGuards = changes.strictGuards.newValue === true;
+  }
+  // A running task keeps the mode it started with; the next run uses this.
+  if (changes.leanMode) {
+    agent.leanMode = normalizeLeanModeSetting(changes.leanMode.newValue);
   }
   if (changes.strictSecretMode) {
     agent.strictSecretMode = changes.strictSecretMode.newValue === true;

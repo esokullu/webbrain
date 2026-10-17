@@ -1716,6 +1716,9 @@ export class ScheduledJobManager {
     const isWatch = job.source === 'watch';
     const skip = reason => ({ decision: 'skip', reason });
     if (outcome !== 'success') return skip('not_success');
+    // Lean mode skips quality checks, this opt-in judge included
+    // (sched-systemone-downgrade).
+    if (runMeta.leanMode === true) return skip('lean_mode');
     if (!isWatch && runMeta.completionVerdict?.outcome === 'succeeded') return { decision: 'keep', reason: 'done_verified', model: runMeta.completionVerdict.model };
     const config = resolveDecisionConfig(settings);
     if (!this.systemOneJudge || !config.enabled || settings.systemOneEnabled !== true
@@ -2255,6 +2258,7 @@ export class ScheduledJobManager {
     let completionVerdict = null;
     let runStatus = null;
     let endedForUserInput = false;
+    let ranLean = false;
     let watchAlert = null;
     let sawFailureLikeUpdate = false;
     let judgeContext = null;
@@ -2401,7 +2405,10 @@ export class ScheduledJobManager {
           // A planner question ends the run without a run_status update or a
           // done outcome; the agent's own report is the only sign that the
           // task is waiting for information only the user can give.
-          onRunFinished: (_status, details) => { endedForUserInput = details?.needsUserInput === true; },
+          onRunFinished: (_status, details) => {
+            endedForUserInput = details?.needsUserInput === true;
+            ranLean = details?.leanMode === true;
+          },
           beforeConsequentialTool: async ({ name } = {}) => {
             if (execution.cancelled) return false;
             const binding = this.agent._scheduledCompletionBinding?.(tabId) || null;
@@ -2464,6 +2471,7 @@ export class ScheduledJobManager {
           signal: execution.controller.signal,
           sidecarAllowed: runStatus !== 'cost_limit',
           needsUserInput: endedForUserInput,
+          leanMode: ranLean,
         });
       }
     } catch (e) {

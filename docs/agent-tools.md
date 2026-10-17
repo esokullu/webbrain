@@ -22,6 +22,10 @@ WebBrain separates **model tier** from **conversation mode**.
 Tier defaults and resolution rules are documented in
 [providers and models](providers-and-models.md#prompttool-tiers-and-modes).
 
+In **lean mode** (Settings → General → Lean mode), an Act run gets 17 of these
+tools instead of its tier's set, with the same schemas, and a short prompt; see
+[lean mode](lean-mode.md).
+
 ## Accessibility read budgets
 
 For complete HTML-table JSON, `extract_data({type:"tables", caption:"Exact caption",

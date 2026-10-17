@@ -6,6 +6,7 @@ const STRING_ENUMS = Object.freeze({
   auto_screenshot: new Set(['off', 'navigation', 'state_change', 'every_step']),
   image_detail: new Set(['auto', 'low', 'high']),
   selection_scope_policy: new Set(['selection_only', 'selection_context']),
+  lean_mode_setting: new Set(['auto', 'on', 'off']),
 });
 
 const BOOLEAN_FIELDS = Object.freeze([
@@ -21,6 +22,7 @@ const BOOLEAN_FIELDS = Object.freeze([
   'tiny_ask_profile',
   'lossless_trace',
   'selection_scope_anchor_present',
+  'lean_mode',
 ]);
 
 // Bounds keep the payload sane, not to re-validate settings: each range is a

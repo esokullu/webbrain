@@ -1416,7 +1416,7 @@ export const pageFeedbackMethods = {
         || this._hasPendingSteering?.(tabId) || typeof this._guardAdvisesFor !== 'function') return false;
     return this._guardAdvisesFor(advisories, 'page-feedback-target-binding',
       'This target was outside the page observation WebBrain certified for this action, so its binding to what you observed was not checked. It was sent anyway; read the page to confirm what it changed.',
-      { decided: false });
+      { tabId, decided: false });
   },
 
   _pageFeedbackBlocksCall(tabId, name, args = {}) {

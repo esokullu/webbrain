@@ -17,7 +17,7 @@ import { SEMANTIC_BATCH_LIMITS, SEMANTIC_DECISION_VERSION, acceptSemanticAnswer,
 import { firefoxBidi } from '../bidi/client.js';
 import { SOCIAL_PLATFORMS, socialPublicationApiPlatform, normalizePublicationContract, resolvePublicationText, publicationProgress, exactPublicationText, publicationMediaMatches, publicationContractMessages, publicationAuditMessages, parsePublicationJson, publicationAuditValidation } from './social-publish-contract.js';
 import { mastodonPublicationIntentMessages, normalizeMastodonPublicationIntent, captureNativeMastodonPublication, mastodonPublicationBinding, mastodonPublicationReceipt, mastodonPublicationNavigation } from './mastodon-publication.js';
-import { AGENT_TOOLS, AGENT_TOOL_NAMES, RESERVED_AGENT_TOOL_NAMES, RETIRED_AGENT_TOOL_NAMES, getToolsForMode, SYSTEM_PROMPT_BATCHING, SYSTEM_PROMPT_ASK, SYSTEM_PROMPT_ACT, SYSTEM_PROMPT_ACT_COMPACT, SYSTEM_PROMPT_ACT_MID, SYSTEM_PROMPT_GENERATIVE_MEDIA, SYSTEM_PROMPT_DEV_APPENDIX } from './tools.js';
+import { AGENT_TOOLS, AGENT_TOOL_NAMES, RESERVED_AGENT_TOOL_NAMES, RETIRED_AGENT_TOOL_NAMES, getToolsForMode, SYSTEM_PROMPT_BATCHING, SYSTEM_PROMPT_ASK, SYSTEM_PROMPT_ACT, SYSTEM_PROMPT_ACT_COMPACT, SYSTEM_PROMPT_ACT_MID, SYSTEM_PROMPT_ACT_LEAN, SYSTEM_PROMPT_GENERATIVE_MEDIA, SYSTEM_PROMPT_DEV_APPENDIX } from './tools.js';
 import { rejectedCompletionRecovery } from './completion-recovery.js';
 import { FailureRecoveryRegistry, modelFailureRecovery } from './failure-recovery.js';
 import { validateToolArguments } from './tool-arguments.js';
@@ -158,6 +158,7 @@ import { repairAssistantDisplayText, repairClarifyText, sanitizeText as sanitize
 import { clarifyQuestionIsHard, clarifyTimedAnswer, clarifyTimeoutChoice, normalizeClarifyConsequence, normalizeClarifyTimeoutPolicy } from './clarify-timeout.js';
 import { guardAdvisory, guardEntry, guardOutcome, withGuardAdvisories } from './guard-policy.js';
 import { UNVERIFIED_STEP_CONTENT_LIMIT, UNVERIFIED_STEP_PROMPT_KIND, clipUnverifiedStepContent, normalizeUnverifiedStepConfirmation } from './unverified-step.js';
+import { leanSkipsGuard, normalizeLeanModeSetting, resolveLeanMode } from './lean-mode.js';
 import { emptyOutputFailureMessage, modelOutputDiagnostics } from './model-output-diagnostics.js';
 import { stepLimitUserMessage, terminalGuardUserMessage } from './terminal-messages.js';
 import { buildCustomSkillsPrompt, buildSkillLoaderDefinition, buildSkillToolDefinitions, buildSkillToolRegistry, getEligibleCustomSkills, getEligibleSkillCatalog, normalizeCustomSkills } from './skills.js';
@@ -701,6 +702,14 @@ export class Agent extends LoopDetector {
     // guards advise instead of refusing. See guard-policy.js.
     this.strictGuards = false;
     this._guardRunStates = new Map();
+    // Settings → General → "Lean mode": 'auto' (default) | 'on' | 'off'. A run
+    // resolves it once at its start (_beginLeanRun) and keeps the answer in
+    // _leanRuns, so its tools, prompt and guards agree. See lean-mode.js.
+    this.leanMode = 'auto';
+    this._leanRuns = new Map();
+    // Advisory lists a run's calls carry, by owning tab, so a guard that is
+    // handed only the list still knows which run it belongs to.
+    this._guardAdvisoryTabs = new WeakMap();
     this.maxContextMessages = 50; // minimum soft cap; larger provider windows scale this up
     this._debugLog = []; // ring buffer for deep verbose (LLM requests/responses)
     this._debugLogMax = 200; // max entries before oldest are dropped
@@ -1102,7 +1111,167 @@ export class Agent extends LoopDetector {
     return next;
   }
 
+  // The one hard check a lean run keeps at its end
+  // (native-chat-receipt-not-durable), for a done and for a plain final
+  // alike: both are the model's own success claim. A chat message sent in
+  // this run must be confirmed in the conversation and its receipt saved
+  // before the run ends as a success, or a resumed run could send it again.
+  // Returns null when the run may end as a success, otherwise the refusal. A
+  // receipt that cannot be saved refuses every time, as in a full run. A send
+  // the conversation cannot confirm (its read failed, the conversation
+  // changed, a new message arrived) refuses once per send, as a full run's
+  // submission-evidence check does. A site's own message job has its own
+  // receipt (_leanWorkflowMessageReceiptBlock).
+  async _leanChatReceiptBlock(tabId) {
+    const workflowSend = this._leanWorkflowMessageSend(tabId);
+    if (workflowSend) return this._leanWorkflowMessageReceiptBlock(tabId, workflowSend);
+    if (!this.completionInvariants.get(tabId)?.lastAction?.chatDeliveryBinding
+        && !this.chatSessions.get(tabId)?.completionReceipt) return null;
+    let pageUrl = '';
+    try { pageUrl = await this._currentUrl(tabId); } catch {}
+    const nativeChatEvidence = await this._freshNativeChatTerminalEvidence(tabId, pageUrl || '');
+    if (nativeChatEvidence) {
+      const guard = this._planExecutionGuards.get(tabId);
+      if (guard) guard.nativeChatDeliveryEvidence = nativeChatEvidence;
+      const savedNativeReceipt = await this._persistNow(tabId);
+      if (savedNativeReceipt === true || savedNativeReceipt?.ok === true) return null;
+      return { receiptNotDurable: true,
+        error: 'The verified chat delivery receipt could not be saved. Retry completion after storage is available; do not send the message again.' };
+    }
+    if (!this._leanChatDeliveryUnconfirmedRefuses(tabId)) return null;
+    return { chatDeliveryUnconfirmed: true,
+      error: 'WebBrain could not confirm in the conversation that your message was delivered: its latest read failed, the conversation changed, or a new message arrived. Do not send the message again. Read the conversation now, then call done again; if the delivery still cannot be confirmed, finish with outcome "partial" and say so.' };
+  }
+
+  // done in a lean run. The completion is the model's own call: WebBrain
+  // takes no verification screenshot, runs no completion or incomplete-task
+  // judge and checks no page warnings or other workflow evidence. Only the
+  // message receipt checks stay (_leanChatReceiptBlock); partial and failed
+  // always end.
+  async _leanDoneResult(tabId, args = {}) {
+    const outcome = normalizeDoneOutcome(args?.outcome);
+    if (outcome === 'success') {
+      const receiptBlock = await this._leanChatReceiptBlock(tabId);
+      if (receiptBlock) return { success: false, blockedDone: true, ...receiptBlock };
+    }
+    return { done: true, summary: args.summary, outcome };
+  }
+
+  // native-chat-receipt-not-durable in a lean run when the conversation could
+  // not confirm a send: true the first time for this send in this run. Only a
+  // send the plan contract requires is checked; outside one there is no
+  // receipt to confirm (_nativeChatTerminalEvidence).
+  _leanChatDeliveryUnconfirmedRefuses(tabId) {
+    const guard = this._planExecutionGuards.get(tabId);
+    if (!guard?.enabled || guard.siteWorkflow?.job || guard.requiresSubmission !== true
+        || guard.requiresStateChange !== true) return false;
+    const lastAction = this.completionInvariants.get(tabId)?.lastAction;
+    const receipt = this.chatSessions.get(tabId)?.completionReceipt;
+    const key = lastAction?.chatDeliveryBinding
+      ? `send:${lastAction.sequence ?? ''}:${lastAction.chatDeliveryBinding.threadKey || ''}`
+      : `receipt:${receipt?.threadKey || ''}:${receipt?.messageId || ''}`;
+    const state = this._guardRunState(tabId);
+    const refused = (state.leanUnconfirmedChatSends ||= new Set());
+    if (refused.has(key)) return false;
+    refused.add(key);
+    return true;
+  }
+
+  // An adapter's own message job (send-message on X, LinkedIn or Douyin,
+  // send-email in Gmail) whose send this task dispatched: its submit receipt,
+  // bound to the job. Null for any other run.
+  _leanWorkflowMessageSend(tabId) {
+    const guard = this._planExecutionGuards.get(tabId);
+    if (!guard?.enabled || !guard.siteWorkflow?.job
+        || this._workflowVerificationKind(guard.siteWorkflow) !== 'message_sent') return null;
+    const submit = this._currentCompletionSubmitState(tabId);
+    const binding = submit?.workflowBinding;
+    if (submit?.dispatched !== true || !binding
+        || binding.bindingKey !== this._adapterWorkflowBindingKey(guard.siteWorkflow)) return null;
+    return { guard, submit, binding };
+  }
+
+  // The receipt check of a lean run for that send. Such a job has no native
+  // conversation receipt: its receipt is the job's terminal evidence, which
+  // a full done records and a continued run checks before it would send
+  // again. So the same verification runs here: the conversation is read
+  // back against the dispatched body and recipients, and the page's live
+  // messages are read in any language for the sent status. The evidence is
+  // recorded and saved before the run ends as a success. As for a chat
+  // send, evidence that cannot be saved refuses every time, and a send that
+  // cannot be confirmed refuses once per send.
+  async _leanWorkflowMessageReceiptBlock(tabId, { guard, submit, binding }) {
+    const save = async () => {
+      const saved = await this._persistNow(tabId);
+      if (saved === true || saved?.ok === true) return null;
+      return { receiptNotDurable: true,
+        error: 'The verified message delivery receipt could not be saved. Retry completion after storage is available; do not send the message again.' };
+    };
+    if (this._workflowTerminalEvidenceMatchesState(guard, guard.workflowTerminalEvidence)) return save();
+    let pageUrl = '';
+    try { pageUrl = await this._currentUrl(tabId); } catch {}
+    const adapterName = guard.siteWorkflow.adapterName;
+    let probe = null;
+    try {
+      probe = await this._messageRecipientGuardProbe(tabId, {
+        tool: 'observe_active_conversation',
+        args: {},
+        adapterName,
+        expectedMessageBody: binding.messageBody || '',
+        expectedRecipients: binding.recipientTargets || [],
+        // Google Chat routes in Gmail have no recipient set of their own.
+        supportsRecipientSets: adapterName === 'gmail' && !isGmailChatRoute(pageUrl),
+      });
+    } catch (error) {
+      if (this._checkAbort(tabId)) throw error;
+    }
+    const pageState = { liveRegionMessages: await this._liveRegionMessages(tabId) };
+    const submissionEvidence = { submit };
+    await this._readWorkflowTerminalTexts(tabId, pageState, submissionEvidence, probe);
+    const current = this._planExecutionGuards.get(tabId) === guard
+      && !this._checkAbort(tabId) && !this._hasUnvalidatedSteering(tabId);
+    const evidence = current && probe
+      ? this._workflowTerminalEvidenceFromDone(tabId, pageState, pageUrl, submissionEvidence, probe) : null;
+    if (evidence) {
+      guard.workflowTerminalEvidence = evidence;
+      guard.verifiedSubmissionEvidence = true;
+      return save();
+    }
+    const key = `workflow:${binding.bindingKey}:${submit.runToken || ''}:${submit.actionSequence ?? ''}`;
+    const refused = (this._guardRunState(tabId).leanUnconfirmedChatSends ||= new Set());
+    if (refused.has(key)) return null;
+    refused.add(key);
+    return { chatDeliveryUnconfirmed: true,
+      error: 'WebBrain could not confirm on the page that your message was delivered: the conversation does not show it sent to the intended recipient with its exact text. Do not send the message again. Read the conversation now, then call done again; if the delivery still cannot be confirmed, finish with outcome "partial" and say so.' };
+  }
+
+  // The page's visible live messages (status, alert and aria-live regions),
+  // collected as the done probe collects them and returned as they are: a
+  // model reads what they say before anything relies on one.
+  async _liveRegionMessages(tabId) {
+    try {
+      const results = await browser.tabs.executeScript(tabId, { code: `(() => {
+        const visible = el => {
+          try {
+            const r = el.getBoundingClientRect();
+            if (r.width < 1 || r.height < 1) return false;
+            const s = window.getComputedStyle(el);
+            return !(s.visibility === 'hidden' || s.display === 'none' || parseFloat(s.opacity) === 0);
+          } catch (e) { return false; }
+        };
+        return Array.from(document.querySelectorAll('[role=status],[role=alert],[aria-live]'))
+          .filter(visible).map(e => (e.innerText || '').trim().slice(0, 120)).filter(Boolean).slice(0, 6);
+      })()` });
+      const value = results && results[0];
+      return Array.isArray(value) ? value.filter(text => typeof text === 'string' && text) : [];
+    } catch {
+      return [];
+    }
+  }
+
   _readCompletenessNeedsScopeClassification(tabId) {
+    // Lean mode enforces no read coverage, so it needs no scope reading.
+    if (this._leanRunActive(tabId)) return false;
     const state = this.readCompletenessStates.get(tabId);
     return state?.communicationThread === true && state.required !== true;
   }
@@ -2547,7 +2716,7 @@ export class Agent extends LoopDetector {
   // missing metadata, conflicting editor proofs, an unproven commit message
   // or an editor that cannot be read now keep the refusal; so do Strict checks.
   _githubCommitEvidenceAsk(tabId, pageUrl, binding) {
-    if (this._guardOutcome('github-commit-evidence-binding', { decided: false }) !== 'ask') return null;
+    if (this._guardOutcome('github-commit-evidence-binding', { decided: false, tabId }) !== 'ask') return null;
     if (!binding || binding.metadataRequirementsIncomplete === true || binding.githubFileCommit) return null;
     const workflow = this._planExecutionGuards.get(tabId)?.siteWorkflow;
     const requirements = Array.isArray(binding.metadataRequirements) ? binding.metadataRequirements : [];
@@ -2785,7 +2954,7 @@ export class Agent extends LoopDetector {
     // bind to it. Without Strict checks the action is sent now under that
     // contract, and the note tells the model what the rebuilt prompt requires.
     if (this._guardAdvisesFor(advisories, 'github-conditional-commit-rearm',
-      'WebBrain switched this resumed task to its conditional file-edit-and-commit contract before this action. Success now needs a verified file edit, a commit, and a readback of the exact committed file; verify the editor change before committing.')) {
+      'WebBrain switched this resumed task to its conditional file-edit-and-commit contract before this action. Success now needs a verified file edit, a commit, and a readback of the exact committed file; verify the editor change before committing.', { tabId })) {
       return null;
     }
     return {
@@ -2810,6 +2979,9 @@ export class Agent extends LoopDetector {
     const guard = this._planExecutionGuards.get(tabId);
     if (guard?.siteWorkflow?.adapterName !== 'github'
         || guard.siteWorkflow?.job?.id !== 'edit-file-and-commit') return null;
+    // Lean mode: github-commit-split-write-required and
+    // github-commit-evidence-binding are quality guards, so neither gate runs.
+    if (this._guardSkipped('github-commit-evidence-binding', tabId)) return null;
     // This gate decides before the click by what a text click's caption
     // means, so an unread caption is read now, once, in any language. The
     // recheck before dispatch uses that reading as it stands.
@@ -2863,7 +3035,7 @@ export class Agent extends LoopDetector {
     // An inconclusive detection is the cannot-decide case: it asks the user
     // (below). A missing binding keeps refusing (github-commit-evidence-binding).
     if (name !== 'click' && name !== 'click_ax' && name !== 'iframe_click') {
-      if (looksLikeSubmit && this._guardAdvises('github-commit-split-write-required')) {
+      if (looksLikeSubmit && this._guardAdvises('github-commit-split-write-required', { tabId })) {
         const pageUrl = await this._currentUrl(tabId);
         await this._refreshGithubTextReplacementProofs(tabId, pageUrl);
         const binding = this._workflowSubmitBindingForAttempt(tabId, pageUrl, {}, detectedSubmit);
@@ -2871,7 +3043,7 @@ export class Agent extends LoopDetector {
             && this._guardAdvisesFor(advisories, 'github-commit-split-write-required',
               name === 'execute_js'
                 ? 'This script may change the editor or commit message while it commits, so the earlier verified file and message proofs do not cover it. It ran anyway; read the committed file and commit message back before reporting success.'
-                : 'This action can change field values while it submits the commit, so the earlier verified file and message proofs do not cover it. It ran anyway; read the committed file and commit message back before reporting success.')) {
+                : 'This action can change field values while it submits the commit, so the earlier verified file and message proofs do not cover it. It ran anyway; read the committed file and commit message back before reporting success.', { tabId })) {
           return null;
         }
       }
@@ -2894,7 +3066,7 @@ export class Agent extends LoopDetector {
       // the user decides on WebBrain's card, which shows the editor's text.
       // One answer covers this one tool call (_unverifiedStepApproval).
       if (inconclusiveSubmitCapable
-          && this._guardOutcome('github-commit-split-write-required', { decided: false }) === 'ask') {
+          && this._guardOutcome('github-commit-split-write-required', { decided: false, tabId }) === 'ask') {
         const pageUrl = await this._currentUrl(tabId);
         await this._refreshGithubTextReplacementProofs(tabId, pageUrl);
         const binding = this._workflowSubmitBindingForAttempt(tabId, pageUrl, {}, detectedSubmit);
@@ -5013,7 +5185,7 @@ export class Agent extends LoopDetector {
 
   // True once guard `id` advises and has used its one refusal in this run.
   _guardHasAdvised(tabId, id, { decided = true } = {}) {
-    return this._guardAdvises(id, { decided }) && this._guardRunState(tabId).advised.has(id);
+    return this._guardOutcome(id, { decided, tabId }) === 'advise' && this._guardRunState(tabId).advised.has(id);
   }
 
   // A completion accepted over a check that KNOWS the task is not done
@@ -5049,9 +5221,12 @@ export class Agent extends LoopDetector {
 
   // A plain final the receipt check refused twice (or at the step limit)
   // ends the run as partial: the model's text and why it is not a success.
-  _chatReceiptPartialFinal(content) {
+  // A lean run's refusal can also be a send the conversation never confirmed.
+  _chatReceiptPartialFinal(content, receiptBlock = null) {
     const base = repairAssistantDisplayText(String(content || '')).trimEnd();
-    const why = 'WebBrain could not save the record that the message was delivered, so this run did not end as a success. Check the conversation before sending it again.';
+    const why = receiptBlock?.chatDeliveryUnconfirmed
+      ? 'WebBrain could not confirm in the conversation that the message was delivered, so this run did not end as a success. Check the conversation before sending it again.'
+      : 'WebBrain could not save the record that the message was delivered, so this run did not end as a success. Check the conversation before sending it again.';
     return base ? `${base}\n\n${why}` : why;
   }
 
@@ -5194,8 +5369,8 @@ export class Agent extends LoopDetector {
   // Strict checks: the third plain final under a completion block ends the
   // run as partial. By default each block refuses once and the next plain
   // final is accepted, so the run never needs this stop.
-  _plainFinalTwoStrikeEnds() {
-    return !this._guardAdvises('plain-final-two-strike-partial');
+  _plainFinalTwoStrikeEnds(tabId = null) {
+    return !this._guardAdvises('plain-final-two-strike-partial', { tabId });
   }
 
   // completion-verifier-not-done: the completion judge's sure pending or
@@ -5234,8 +5409,8 @@ export class Agent extends LoopDetector {
     return this._guardRefusesOnce(tabId, 'completion-page-warning', { decided: known, caveat });
   }
 
-  _completionPageWarningSuffix(blocks) {
-    return this._guardAdvises('completion-page-warning')
+  _completionPageWarningSuffix(blocks, tabId = null) {
+    return this._guardAdvises('completion-page-warning', { tabId })
       ? ' (If the task is complete and this form or dialog is unrelated to it, say so in the done summary.)'
       : ` (block attempt ${blocks}/2 — if you genuinely believe the task is complete and the visible form/dialog is unrelated, re-call done with summary explicitly acknowledging this, e.g. "already-existing product, no submit needed".)`;
   }
@@ -5307,7 +5482,7 @@ export class Agent extends LoopDetector {
   _planGuardAdvisory(tabId, state, flags) {
     if (state.taskDrifted || flags.staleCancellation || flags.structuredPlan) return null;
     const findings = this._planGuardFindings(state, flags);
-    if (!findings.length || findings.some(finding => !this._guardAdvises(finding.id, finding))) return null;
+    if (!findings.length || findings.some(finding => !this._guardAdvises(finding.id, { decided: finding.decided, tabId }))) return null;
     let refuses = false;
     for (const finding of findings) {
       if (this._guardRefusesOnce(tabId, finding.id, finding)) refuses = true;
@@ -5329,8 +5504,8 @@ export class Agent extends LoopDetector {
     // By default a refused completion only leaves its note: the model keeps
     // every tool and may still report success. Strict checks restore the
     // forced read-only turn, the done-only turn and the failure-only done.
-    if (this._guardAdvises('completion-recovery-forced-turns', { decided: false })
-        && this._guardAdvises('completion-failure-only-done', { decided: false })) return null;
+    if (this._guardAdvises('completion-recovery-forced-turns', { tabId, decided: false })
+        && this._guardAdvises('completion-failure-only-done', { tabId, decided: false })) return null;
     const state = this.completionInvariants.get(tabId);
     const available = Array.isArray(tools) ? tools : [];
     const failureOnlyTerminalTool = () => {
@@ -5876,8 +6051,7 @@ export class Agent extends LoopDetector {
       });
       if (!gate.responseOnly) await this._ensureProgressSessionForCurrentTask(tabId, {
         provider: this._activeProvider(tabId), costState,
-        progressLedgerPolicy: gate.progressLedgerPolicy, progressAction: gate.progressAction,
-        expectedItems: gate.expectedItems,
+        ...this._progressLedgerGateOptions(tabId, gate),
       });
       // The system prompt is rebuilt by the new guard. Clear the old approved
       // plan even when only intent classification is enabled for this revision.
@@ -5935,7 +6109,7 @@ export class Agent extends LoopDetector {
     // earlier submission. The user decides on WebBrain's card instead of a
     // refusal, and one answer covers this one action. Strict checks refuse.
     const stepKey = unresolvedTarget
-      && this._guardOutcome('steer-prior-submission-target-unresolved', { decided: false }) === 'ask'
+      && this._guardOutcome('steer-prior-submission-target-unresolved', { decided: false, tabId }) === 'ask'
       ? this._sha256TextSync(JSON.stringify(['steer-prior-submission-target-unresolved', guard.taskKey || '',
         Number(guard.steeringPriorSubmission?.actionSequence || 0), name, this._formValidationActionKey(name, args) || name,
         detectedSubmit?.frameDocumentIdentity || this._lastAxScopes.get(tabId)?.documentToken || '']))
@@ -7781,6 +7955,9 @@ export class Agent extends LoopDetector {
       prompt_tier: this._resolvePromptTier(provider),
       screenshot_redaction: this.screenshotRedaction === true,
       strict_secret_mode: this.strictSecretMode === true,
+      lean_mode_setting: normalizeLeanModeSetting(this.leanMode),
+      // Whether this tab's run resolved to lean mode (traces show which ran).
+      ...(tabId != null && this._leanRuns?.has(tabId) ? { lean_mode: this._leanRunActive(tabId) } : {}),
       plan_before_act_mode: this._normalizePlanBeforeActMode(this.planBeforeActMode),
       auto_screenshot: this.autoScreenshot,
       use_site_adapters: this.useSiteAdapters === true,
@@ -9545,7 +9722,7 @@ export class Agent extends LoopDetector {
     // checks. Otherwise it runs unbound with a note; the obligation stays
     // until a verified editor-body edit releases it.
     const advises = (note, decided) => this._guardAdvisesFor(executionContext?.guardAdvisories,
-      'rich-text-toolbar-recovery-obligation', note, { decided });
+      'rich-text-toolbar-recovery-obligation', note, { tabId, decided });
     const toolbarNote = 'This target belongs to the rich-text formatting toolbar that received the earlier text entry, not the editor body. It was used anyway; the requested content still has to be entered in the editor body and verified there.';
     const uncheckedNote = 'An earlier text entry went into a rich-text formatting toolbar, and WebBrain could not check that this target is not that toolbar. It was sent anyway; enter the requested content in the editor body and verify it there.';
     const probe = await this._probeRichTextToolbarRetryTarget(tabId, toolName, args);
@@ -9784,7 +9961,7 @@ export class Agent extends LoopDetector {
     // off skips the toolbar check and lets the tool resolve its target itself
     // (an iframe goes to the handler's own single-target census).
     const unresolvedAdvises = note => this._guardAdvisesFor(advisories, 'rich-text-toolbar-target-unresolved',
-      note, { decided: false });
+      note, { tabId, decided: false });
     const unresolvedNote = 'WebBrain could not resolve this typing target for its rich-text toolbar check, so it could not confirm the text goes into the editor body rather than a formatting control. It was sent anyway; read the field back to verify.';
     // A target the observed certificate cannot bind (such as a selector that
     // names several elements) gets that answer before any probe of it.
@@ -9858,6 +10035,8 @@ export class Agent extends LoopDetector {
     if (toolName !== 'iframe_type' && (probe.documentToken || probe.refScopeUrl)) {
       this._rememberAxScope(tabId, probe.documentToken || '', probe.refScopeUrl || '');
     }
+    // Lean mode: no toolbar classification, screenshot or vision audit.
+    if (this._leanRunActive(tabId)) return { block: null, shot: null, probe };
     const candidate = probe.fieldMeta?.toolbarCandidate;
     if (!candidate || Number(candidate.score) < 4 || !probe.rect) {
       return { block: null, shot: null, probe };
@@ -9982,7 +10161,7 @@ export class Agent extends LoopDetector {
       // still recorded, so later toolbar calls and completion know the
       // requested content may not be in the editor body.
       if (this._guardAdvisesFor(advisories, 'rich-text-toolbar-wrong-target',
-        'WebBrain\'s check reads this target as a rich-text formatting toolbar control (font, size, style, color or link), not the editor body. The text was typed there anyway; enter the requested content in the editor body and verify it there.')) {
+        'WebBrain\'s check reads this target as a rich-text formatting toolbar control (font, size, style, color or link), not the editor body. The text was typed there anyway; enter the requested content in the editor body and verify it there.', { tabId })) {
         this._recordRichTextToolbarWrongTarget(tabId, toolName, args, candidate, decision, audit, probe, { advised: true });
         return { block: null, shot, audit, decision, traceCapture, probe, wrongTargetAdvised: true };
       }
@@ -11682,7 +11861,9 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
   }
 
   _captchaToolsAvailable(tabId, mode = this._effectiveRunMode(tabId, 'act'), tier = this._resolvePromptTier()) {
-    return this._isActionMode(mode) && ['mid', 'full'].includes(tier);
+    // Lean mode offers no CAPTCHA tools: a challenge goes to the user, as on
+    // the Compact tier.
+    return this._isActionMode(mode) && ['mid', 'full'].includes(tier) && !this._leanRunActive(tabId);
   }
 
   _captchaGateForTools(tabId, gate) {
@@ -12853,15 +13034,15 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
   // still interrupt; so does a write an exact reader read back as a
   // different value, since the rest of the batch would build on a value
   // WebBrain knows is wrong, and every unverified result under Strict checks.
-  _advisoryTextWriteContinuesBatch(toolName, toolResult) {
+  _advisoryTextWriteContinuesBatch(toolName, toolResult, tabId = null) {
     return ['set_field', 'type_ax', 'type_text'].includes(toolName)
       && toolResult?.success === true && toolResult.unverifiedWrite === true && !toolResult.error
       && !textWriteRefuted(toolResult)
-      && this._guardAdvises('browser-batch-fresh-turn-interrupt', { decided: true });
+      && this._guardAdvises('browser-batch-fresh-turn-interrupt', { decided: true, tabId });
   }
 
-  _browserActionFreshTurnReason(tier, toolName, toolResult, batch = null) {
-    const advisoryWrite = this._advisoryTextWriteContinuesBatch(toolName, toolResult);
+  _browserActionFreshTurnReason(tier, toolName, toolResult, batch = null, tabId = null) {
+    const advisoryWrite = this._advisoryTextWriteContinuesBatch(toolName, toolResult, tabId);
     if (batch) {
       // Reads and waits can also be prerequisites of the next batched action.
       if (toolResult?.success === false || toolResult?.error || toolResult?.noProgress
@@ -13274,7 +13455,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       : policy.names.includes('calculate')
         ? `This calculate is not the task's literal calculation (${expression}), so its result is not the task's verified answer. It ran anyway; the answer needs calculate with that exact expression.`
         : 'The task\'s literal calculation was already verified; this repeated calculate ran anyway. The verified result stands: report it with done.';
-    return this._guardAdvisesFor(advisories, 'pure-calculation-tool-scope', note);
+    return this._guardAdvisesFor(advisories, 'pure-calculation-tool-scope', note, { tabId });
   }
 
   // A page action that runs on an arithmetic-only task (advised above) makes
@@ -13400,13 +13581,14 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       if (previous?._browserBatch) {
         const priorResult = messages.findLast(message => message.role === 'tool' && message.tool_call_id === previous.id);
         if (browserBatchResultStatus(priorResult, {
-          advisoryWritesContinue: this._guardAdvises('browser-batch-fresh-turn-interrupt', { decided: true }),
+          advisoryWritesContinue: this._guardAdvises('browser-batch-fresh-turn-interrupt', { tabId, decided: true }),
         }).failed && this._interruptToolBatchForFreshTurn(
           tabId, toolCalls, toolIndex, messages, onUpdate, step,
           { tier: promptTier, triggeringTool: previous.function.name, reason: 'action_failed', navNotices },
         )) { navNotices.length = 0; break; }
       }
-      const callState = { index: toolIndex, invoked: false, consequential: false, result: null, dispatchState: null, guardAdvisories: [] };
+      const callState = { index: toolIndex, invoked: false, consequential: false, result: null, dispatchState: null,
+        guardAdvisories: this._trackGuardAdvisories([], tabId) };
       cancellationState.active = callState;
       // The user's 'once' answers this call relies on are spent with it.
       this._beginUnverifiedStepScope(tabId);
@@ -13659,7 +13841,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       // A feed/profile URL may save a different item than the one the model
       // means. Without Strict checks the download runs with that warning.
       if (mediaTargetGuard && !this._guardAdvisesFor(callState.guardAdvisories, 'media-download-target-binding',
-        'The download URL is a feed or profile page, not one media item\'s permalink, so the saved file may be a different item than the one you meant. Check the downloaded file (list_downloads) before reporting it.')) {
+        'The download URL is a feed or profile page, not one media item\'s permalink, so the saved file may be a different item than the one you meant. Check the downloaded file (list_downloads) before reporting it.', { tabId })) {
         messages.push({
           role: 'tool',
           tool_call_id: tc.id,
@@ -13810,7 +13992,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
             this._throwIfAborted(abortSignal);
             const currentValidationBlock = this._formValidationBlocks.get(tabId) || null;
             const obviousSubmit = this._formValidationActionLooksSubmit(fnName, fnArgs, null, detected);
-            if ((obviousSubmit || detected?.isSubmit === true) && detected && fnName !== 'iframe_click'
+            if (!this._leanRunActive(tabId) && (obviousSubmit || detected?.isSubmit === true) && detected && fnName !== 'iframe_click'
                 && /^ref_\d+$/.test(String(fnArgs?.ref_id || ''))) {
               const baseline = await this._readCompletionResult(tabId, fnArgs.ref_id);
               if (baseline?.identity && baseline.scopeRef && typeof baseline.text === 'string') {
@@ -13823,7 +14005,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
             // yet, may still turn out to submit: keep the page's state from
             // before the click, so a rejection it shows is new.
             const caption = this._controlCaption(fnName, fnArgs, null);
-            const before = (currentValidationBlock || obviousSubmit || detected?.isSubmit === true
+            const before = !this._leanRunActive(tabId) && (currentValidationBlock || obviousSubmit || detected?.isSubmit === true
                 || (caption && this._controlEffectReading(caption) === null))
               ? await this._captureFormValidationState(tabId, { allFrames })
               : [];
@@ -13951,7 +14133,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
           // a note; a repeated rejection reports the page's messages itself.
           if (retryActionKey && retryActionKey === validationBlock.actionKey
               && !this._guardAdvisesFor(callState.guardAdvisories, 'form-validation-unchanged-repeat',
-                this._formValidationRepeatNote(validationBlock))) {
+                this._formValidationRepeatNote(validationBlock), { tabId })) {
             const blockedResult = this._formValidationRetryBlockResult(validationBlock);
             onUpdate('tool_call', { name: fnName, args: fnArgs });
             onUpdate('tool_result', { name: fnName, result: blockedResult });
@@ -14150,7 +14332,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
           // checks the call proceeds with an empty baseline and a note.
           if (this._guardAdvisesFor(callState.guardAdvisories, 'preparation-timeout-generic',
             'The form-validation snapshot did not finish before this action, so WebBrain has no baseline to tell new validation errors from old ones. Read the form after it to confirm the page accepted it.',
-            { decided: false })) {
+            { tabId, decided: false })) {
             formValidationBefore = [];
           } else {
             const loopStop = await recordPagePreparationTimeout(error, 'form-validation snapshot');
@@ -14346,7 +14528,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
         // gives the model one note about the Ask-mode limitation and the final
         // answer carries it. Strict checks replace the answer and end the run.
         const readLimitation = this._readCompletenessLimitation(tabId);
-        if (readLimitation && !this._guardAdvises('read-coverage-ask-limitation', { decided: false })) {
+        if (readLimitation && !this._guardAdvises('read-coverage-ask-limitation', { tabId, decided: false })) {
           const limitationResult = {
             success: false,
             done: true,
@@ -14673,14 +14855,14 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
           // before the checks below rely on it: for a control the probe saw inside a
           // form, and for any click in a run that has to prove a submission. A
           // caption page structure already decides is not read.
-          if (formValidationCandidate && (detectedSubmitAction?.isSubmit === true || this._runNeedsSubmissionProof(tabId))
+          if (formValidationCandidate && !this._leanRunActive(tabId) && (detectedSubmitAction?.isSubmit === true || this._runNeedsSubmissionProof(tabId))
               && pipelineToolResult && typeof pipelineToolResult === 'object' && !pipelineToolResult.done
               && pipelineToolResult.dispatched !== false
               && !this._controlCaptionDecidedByStructure(fnName, fnArgs, pipelineToolResult, detectedSubmitAction)) {
             await this._readControlEffect(tabId, this._controlCaption(fnName, fnArgs, pipelineToolResult));
             this._throwIfAborted(abortSignal);
           }
-          const inspectFormValidationAfter = formValidationCandidate
+          const inspectFormValidationAfter = formValidationCandidate && !this._leanRunActive(tabId)
             && this._formValidationActionLooksSubmit(
               fnName,
               fnArgs,
@@ -14811,9 +14993,11 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       const completionStateBeforeTool = this.completionInvariants.get(tabId) || null;
       // An upload's evidence reads the lines that name its file first, and an
       // edit of an item's details reads the labels of the field it wrote.
-      await this._readWorkflowUploadLines(tabId, fnName, toolResult);
-      await this._readWorkflowAuthoredFieldLabels(tabId, fnName, fnArgs, toolResult);
-      await this._readWorkflowReviewThreadControls(tabId, fnName, toolResult);
+      if (!this._leanRunActive(tabId)) {
+        await this._readWorkflowUploadLines(tabId, fnName, toolResult);
+        await this._readWorkflowAuthoredFieldLabels(tabId, fnName, fnArgs, toolResult);
+        await this._readWorkflowReviewThreadControls(tabId, fnName, toolResult);
+      }
       const completionStateAfterTool = this._recordCompletionToolResult(
         tabId,
         fnName,
@@ -15033,7 +15217,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
         // Strict checks: a negative verdict or page warning reopens verification
         // debt for a forced read-only turn. By default the model only gets the
         // note, and the debt guard does not refuse the next done for it.
-        if (completionNeedsRead && !this._guardAdvises('done-verification-debt', { decided: false })) { const state = this.completionInvariants.get(tabId); if (state) this.completionInvariants.set(tabId, { ...state, verificationDebt: true }); }
+        if (completionNeedsRead && !this._guardAdvises('done-verification-debt', { tabId, decided: false })) { const state = this.completionInvariants.get(tabId); if (state) this.completionInvariants.set(tabId, { ...state, verificationDebt: true }); }
         messages.push({ role: 'tool', tool_call_id: tc.id, content: this._wrapUntrusted(fnName, this._limitToolResult(toolResult)) });
         if (attachedImage) {
           messages.push({ role: 'user', transientCompletionVerification: true, content: [
@@ -15075,7 +15259,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
         const actionRun = this._isActionMode(this._effectiveRunMode(tabId));
         const unjudgedFailure = actionRun && ['partial', 'failed'].includes(normalizeDoneOutcome(toolResult.outcome))
           && this._planExecutionGuards.get(tabId)?.enabled === true;
-        if (!scheduledResume && !completionReading && String(doneSummaryText).trim()
+        if (!scheduledResume && !completionReading && String(doneSummaryText).trim() && !this._leanRunActive(tabId)
             && (unjudgedFailure || (!actionRun && this._doneSummaryMayOmitAnswer(doneSummaryText)))) {
           // A short Ask answer is read by the decision model only: the check is
           // not worth a call to the chat model on every answer. A failed or
@@ -15527,7 +15711,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
         hasRemaining: toolIndex < toolCalls.length - 1,
         submit: detectedSubmitAction?.isSubmit === true || this._formValidationActionLooksSubmit(fnName, fnArgs, toolResult, detectedSubmitAction),
       } : null;
-      const freshTurnReason = this._browserActionFreshTurnReason(promptTier, fnName, toolResult, batchContext);
+      const freshTurnReason = this._browserActionFreshTurnReason(promptTier, fnName, toolResult, batchContext, tabId);
       if (freshTurnReason && this._interruptToolBatchForFreshTurn(
         tabId,
         toolCalls,
@@ -16328,7 +16512,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     // without those hints would be; recipient, deletion and publication checks
     // still apply to that click.
     if (intentMismatch && this._guardAdvisesFor(messageRecipientContext.guardAdvisories, 'click-coordinate-intent',
-      'The point no longer resolves to the expected_name/expected_role you gave, so WebBrain could not confirm it hits the intended control. The point was clicked anyway; read the page to check what it activated.')) {
+      'The point no longer resolves to the expected_name/expected_role you gave, so WebBrain could not confirm it hits the intended control. The point was clicked anyway; read the page to check what it activated.', { tabId })) {
       return {
         result: null,
         diagnostic: this._coordinateReconciliationDiagnostic(point, resolution, 'coordinate-fallback', 'intent-mismatch'),
@@ -18327,26 +18511,51 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
   }
 
   /**
-   * What guard `id` does now: 'block' | 'ask' | 'advise' (guard-policy.js).
+   * Lean mode skips guard `id` in the run on `tabId`: a quality guard that no
+   * hard check depends on (lean-mode.js), in an Act run that resolved to lean
+   * mode. Strict checks do not apply then. A guard that cannot name its run
+   * (no tab) is never skipped.
+   */
+  _guardSkipped(id, tabId = null) {
+    return this._leanRunActive(tabId) && leanSkipsGuard(id);
+  }
+
+  /**
+   * What guard `id` does now: 'block' | 'ask' | 'advise' (guard-policy.js),
+   * or 'skip' when lean mode skips it (no refusal, note or caveat).
    * decided=false when the guard fires because it cannot decide.
    */
-  _guardOutcome(id, { decided = true } = {}) {
+  _guardOutcome(id, { decided = true, tabId = null } = {}) {
+    if (this._guardSkipped(id, tabId)) return 'skip';
     return guardOutcome(id, { decided, strict: this._guardStrict() });
   }
 
-  /** True when the guard advises instead of refusing in the current mode. */
-  _guardAdvises(id, { decided = true } = {}) {
-    return this._guardOutcome(id, { decided }) === 'advise';
+  /**
+   * True when the guard does not refuse in the current mode: it advises, or
+   * lean mode skips it. Callers take their non-refusing path either way.
+   */
+  _guardAdvises(id, { decided = true, tabId = null } = {}) {
+    const outcome = this._guardOutcome(id, { decided, tabId });
+    return outcome === 'advise' || outcome === 'skip';
+  }
+
+  // Marks a call's advisory list as belonging to the run on `tabId`.
+  _trackGuardAdvisories(advisories, tabId) {
+    if (Array.isArray(advisories) && tabId != null) (this._guardAdvisoryTabs ??= new WeakMap()).set(advisories, tabId);
+    return advisories;
   }
 
   /**
    * An action guard that advises lets the action proceed and leaves its note
    * on this call's tool result. Returns true when the caller must not refuse.
    * `advisories` is the call's list (executionContext.guardAdvisories or the
-   * batch call state).
+   * batch call state). A guard lean mode skips proceeds without a note.
    */
-  _guardAdvisesFor(advisories, id, message, { decided = true } = {}) {
-    if (!this._guardAdvises(id, { decided })) return false;
+  _guardAdvisesFor(advisories, id, message, { decided = true, tabId = null } = {}) {
+    const runTab = tabId ?? (Array.isArray(advisories) ? this._guardAdvisoryTabs?.get(advisories) : null) ?? null;
+    const outcome = this._guardOutcome(id, { decided, tabId: runTab });
+    if (outcome === 'skip') return true;
+    if (outcome !== 'advise') return false;
     if (Array.isArray(advisories)) advisories.push(guardAdvisory(id, message));
     return true;
   }
@@ -18371,7 +18580,10 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
    * time, or always when the guard blocks in the current mode.
    */
   _guardRefusesOnce(tabId, id, { decided = true, caveat = '' } = {}) {
-    if (this._guardOutcome(id, { decided }) !== 'advise') return true;
+    const outcome = this._guardOutcome(id, { decided, tabId });
+    // Lean mode: the completion is accepted with no note and no caveat.
+    if (outcome === 'skip') return false;
+    if (outcome !== 'advise') return true;
     const state = this._guardRunState(tabId);
     if (!state.advised.has(id)) {
       state.advised.add(id);
@@ -18391,6 +18603,51 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     if (!state?.caveats?.size) return '';
     const items = [...new Set(state.caveats.values())].filter(Boolean).slice(0, 4);
     return items.length ? `WebBrain could not verify everything: ${items.join(' ')}` : '';
+  }
+
+  /**
+   * Settings → General → "Lean mode" for a run on `tabId` with `provider`
+   * (the tab's active provider by default): 'on' and 'off' decide; 'auto'
+   * turns it on only for a strong model on a cloud provider whose prompt tier
+   * is Full (lean-mode.js). Act mode only: Ask, Dev and standalone chat keep
+   * their behavior. Returns { active, setting, reason, family? }.
+   */
+  _resolveLeanRun(tabId, provider = null, mode = null) {
+    const runMode = mode || (tabId != null ? this._effectiveRunMode(tabId) : 'act');
+    if (tabId != null && (this._standaloneChatRunTabs?.has(tabId) || this._standaloneWebgpuRunTabs?.has?.(tabId))) {
+      return { active: false, setting: normalizeLeanModeSetting(this.leanMode), reason: 'standalone_chat' };
+    }
+    let active = provider;
+    if (!active) {
+      try { active = this._activeProvider(tabId); } catch { active = null; }
+    }
+    return resolveLeanMode(this.leanMode, { mode: runMode, provider: active });
+  }
+
+  _leanModeActive(tabId, provider = null, mode = null) {
+    return this._resolveLeanRun(tabId, provider, mode).active === true;
+  }
+
+  // Resolves lean mode for the run starting on `tabId` and keeps the answer
+  // for the whole run (see processMessage / processMessageStream).
+  _beginLeanRun(tabId, mode = null) {
+    let state;
+    try { state = this._resolveLeanRun(tabId, null, mode); } catch { state = { active: false, setting: normalizeLeanModeSetting(this.leanMode), reason: 'unresolved' }; }
+    (this._leanRuns ??= new Map()).set(tabId, state);
+    return state;
+  }
+
+  /** Whether the run on `tabId` resolved to lean mode. No tab: no. */
+  _leanRunActive(tabId = null) {
+    return tabId != null && this._leanRuns?.get(tabId)?.active === true;
+  }
+
+  // The prompt follows the run's own answer; between runs it follows the
+  // current setting and provider (the next run rebuilds it anyway).
+  _leanPromptActive(tabId, mode, provider = null) {
+    if (mode !== 'act') return false;
+    if (tabId != null && this._leanRuns?.has(tabId)) return this._leanRunActive(tabId);
+    return this._leanModeActive(tabId, provider, mode);
   }
 
   _normalizeClarifyTimeoutPolicy(value) {
@@ -20977,7 +21234,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       // 'once'. Strict checks refuse.
       const draftIssues = new Set(['body_mismatch', 'body_unobserved', 'baseline_incomplete']);
       if (!issues.every(issue => draftIssues.has(issue.reason))
-          || this._guardOutcome('social-publication-draft-quality', { decided: false }) !== 'ask') return refusal;
+          || this._guardOutcome('social-publication-draft-quality', { decided: false, tabId }) !== 'ask') return refusal;
       if (!this._unverifiedStepApproval(tabId, 'social-publication-draft-quality', key)) {
         const bodies = (Array.isArray(snapshot?.posts) ? snapshot.posts : [])
           .map(post => (typeof post?.bodyText === 'string' ? post.bodyText : '')).filter(Boolean);
@@ -21261,6 +21518,13 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     }
     if (runId) {
       trace.recordTurnStart(runId, 0, { mode });
+      const leanRun = this._leanRuns?.get(tabId);
+      if (leanRun && mode === 'act') {
+        trace.recordNote(runId, null, 'lean_mode', {
+          leanMode: leanRun.active === true, setting: leanRun.setting, reason: leanRun.reason,
+          ...(leanRun.family ? { family: leanRun.family } : {}),
+        });
+      }
       this.currentRunId.set(tabId, runId);
       // How an automatically routed turn chose its mode, and how long it waited.
       if (runOptions?.modeRoute) {
@@ -25185,7 +25449,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     // Strict checks; otherwise the read keeps its result and the note says
     // nothing changed since the last one.
     if (block.verifyFormCount > 1 && !this._guardAdvisesFor(advisories, 'form-validation-unchanged-repeat',
-      'The form is unchanged since the last verify_form, so this read shows nothing new. Correct the reported checkbox with set_checked before verifying or submitting again.')) {
+      'The form is unchanged since the last verify_form, so this read shows nothing new. Correct the reported checkbox with set_checked before verifying or submitting again.', { tabId })) {
       result.success = false;
       result.noProgress = true;
       result.blockedValidationVerifyRepeat = true;
@@ -26000,7 +26264,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     // recipient, user-input (credentials, payment, a new user decision),
     // terminal-session, native-baseline, duplicate and draft checks are not
     // waivable and keep refusing below (chat-workflow.js says why).
-    const advise = note => this._guardAdvisesFor(advisories, 'chat-send-preconditions', note);
+    const advise = note => this._guardAdvisesFor(advisories, 'chat-send-preconditions', note, { tabId });
     if (previous && observed.newMessages.some(message => message.direction === 'incoming')
         && !observed.session.pendingOutbound && !observed.session.userInput?.required
         && !advise('A new incoming message appeared since your last chat observation; this reply was sent without considering it. Read the conversation (chat_observe) before the next reply.')) {
@@ -30045,6 +30309,12 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     return `${SYSTEM_PROMPT_ACT}\n\n${this.imageGenConfigured ? SYSTEM_PROMPT_GENERATIVE_MEDIA : GENERATIVE_MEDIA_SETUP_NOTE}`;
   }
 
+  // Lean mode's Act prompt. Image generation guidance is added only when
+  // generate_image is offered; the full prompt's setup note is not.
+  _getLeanActPrompt() {
+    return this.imageGenConfigured ? `${SYSTEM_PROMPT_ACT_LEAN}\n\n${SYSTEM_PROMPT_GENERATIVE_MEDIA}` : SYSTEM_PROMPT_ACT_LEAN;
+  }
+
   setBrowserBatchEnabled(enabled) {
     const next = enabled !== false;
     if (this.browserBatchEnabled === next) return;
@@ -30171,8 +30441,13 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     let provider = null;
     try { provider = this._activeProvider(tabId); } catch {}
     const tier = this._resolvePromptTier(provider);
-    let prompt = this._isActionMode(mode) ? this._getActPrompt(provider) : SYSTEM_PROMPT_ASK;
-    if (tier !== 'compact' && getToolsForMode(mode, { tier, browserBatchEnabled: this.browserBatchEnabled })
+    // Lean mode (Act only) swaps in its short prompt and drops the guidance
+    // for tools it does not offer (batching, WebMCP, research escalation,
+    // CAPTCHA solving).
+    const lean = this._leanPromptActive(tabId, mode, provider);
+    let prompt = !this._isActionMode(mode) ? SYSTEM_PROMPT_ASK
+      : lean ? this._getLeanActPrompt() : this._getActPrompt(provider);
+    if (tier !== 'compact' && getToolsForMode(mode, { tier, browserBatchEnabled: this.browserBatchEnabled, lean })
         .some(tool => tool.function.name === 'browser_batch')) prompt += `\n\n${SYSTEM_PROMPT_BATCHING}`;
     const botMemory = tabId == null ? null : this._botMemorySessions.get(tabId);
     if (botMemory) prompt += `\n\n${botMemory.systemNote()}\n\n${this._wrapUntrusted('bot_memory_observe', botMemory.contextData())}`;
@@ -30205,7 +30480,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       }
     }
 
-    if (this.researchEscalationEnabled) {
+    if (this.researchEscalationEnabled && !lean) {
       // Ask's clarify is only the ChatGPT consent card, so its note must not
       // send the model there for an ordinary missing-constraint question.
       prompt += `\n\n${researchEscalationSystemNote(this._isActionMode(mode) ? 'act' : 'ask')}`;
@@ -30227,7 +30502,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       const memoryPrompt = formatUserMemoryPrompt(this.userMemoryRecords, this.userMemoryMaxPromptChars);
       if (memoryPrompt) prompt += `\n\n${memoryPrompt}`;
     }
-    if (this.captchaSolverEnabled && this._captchaToolsAvailable(tabId, mode, tier)) {
+    if (this.captchaSolverEnabled && !lean && this._captchaToolsAvailable(tabId, mode, tier)) {
       prompt += `\n\n[CAPTCHA SOLVER — the user has enabled a CAPTCHA solver. Enabled providers run in descending weight order; failure or timeout tries the next compatible provider. Each attempt may charge. This fallback is internal to one tool call, not permission to call the tool again. Enabled coverage: ${this.captchaProviderIds.some(id => captchaProviderSupportsType(id, 'recaptcha_v2')) ? 'reCAPTCHA v2/v3 including Enterprise, Turnstile, and image CAPTCHAs. ' : ''}${this.captchaProviderIds.some(id => captchaProviderSupportsType(id, 'hcaptcha')) ? 'hCaptcha via NopeCHA or NoneCap. ' : 'hCaptcha requires manual completion. '} For other CAPTCHA families, call get_captcha_capabilities, inspect the chosen method schemas, and supply providerTasks to solve_captcha with inject:false. All documented token, recognition, cookie, and structured-answer methods are available through that route. Supply observed inputs for each compatible enabled provider so weight-based fallback can run. Apply the answer with apply_captcha_solution. When a CAPTCHA or verification dialog blocks a step, read the page/tree without dismissing it. The runtime will route a supported widget to \`solve_captcha\` once and block page-changing actions until a fresh root accessibility-tree read confirms the dialog cleared. If neither automatic nor native inputs can be obtained, the solve fails, or the dialog remains after solving, stop and ask the user to complete it manually; never dismiss and resubmit or retry solve_captcha. These limits apply per challenge: a new CAPTCHA that appears later, such as after a submit or on a newly loaded page, is a separate challenge. Read the page and solve it once with solve_captcha before asking the user.]`;
     }
     // Ordinary turns get the one-line rendering; the full block is reserved for
@@ -31683,8 +31958,8 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
    * (an unknown outcome, a replacement that was not inserted) stays a
    * failure report, but locks nothing.
    */
-  _textWriteAdvisory(name, args, result) {
-    if (!this._guardAdvises('text-write-debt-arm', { decided: false })) return null;
+  _textWriteAdvisory(name, args, result, tabId = null) {
+    if (!this._guardAdvises('text-write-debt-arm', { decided: false, tabId })) return null;
     const unverified = result?.unverified && typeof result.unverified === 'object' ? result.unverified : null;
     const textSent = result.noDispatch !== true && (result.success === true || !!unverified);
     let guard = 'content-action-outcome-unknown';
@@ -31707,7 +31982,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       guard = 'trusted-field-retry-guards';
       reason = 'trusted_retry_failed';
     }
-    if (!this._guardAdvises(guard, { decided })) return null;
+    if (!this._guardAdvises(guard, { decided, tabId })) return null;
     return { guard, reason, decided, textSent };
   }
 
@@ -31749,7 +32024,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
   // (default mode arms no lock), and so does the content failureScope, so
   // the loop detector does not count the write as a failed target. A write
   // whose text went out reports success with unverifiedWrite and a note.
-  _advisoryTextWriteResult(name, args, result, advisory, { expectedLength, expectedSha256 }) {
+  _advisoryTextWriteResult(name, args, result, advisory, { expectedLength, expectedSha256, tabId = null }) {
     const out = { ...result };
     delete out.repeatBlocked;
     if (out.recoveryRequired === 'verify_or_restore_field') delete out.recoveryRequired;
@@ -31784,7 +32059,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     out.expectedSha256 = expectedSha256;
     const advisories = [];
     this._guardAdvisesFor(advisories, advisory.guard, this._textWriteAdvisoryNote(name, args, out, advisory),
-      { decided: advisory.decided });
+      { decided: advisory.decided, tabId });
     return withGuardAdvisories(out, advisories);
   }
 
@@ -31835,7 +32110,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     });
     // Bounded: one entry per edited field; the oldest field yields first.
     while (records.size > 32) records.delete(records.keys().next().value);
-    return this._advisoryTextWriteResult(name, args, result, advisory, { expectedLength: text.length, expectedSha256 });
+    return this._advisoryTextWriteResult(name, args, result, advisory, { expectedLength: text.length, expectedSha256, tabId });
   }
 
   // Default mode: a write to a field whose last write went out unverified
@@ -31848,12 +32123,13 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     if (!prior || (prior.documentToken && target.documentToken && prior.documentToken !== target.documentToken)) return;
     this._guardAdvisesFor(advisories, 'text-write-debt-block',
       'An earlier write to this field was not verified and may already be in it, so this append can duplicate text. Read the field and fix it with one full replacement if needed.',
-      { decided: false });
+      { tabId, decided: false });
   }
 
   async _uncertainTextMutationBlock(tabId, name, args = {}, { advisories = null } = {}) {
     if (!['set_field', 'type_ax', 'type_text'].includes(name)) return null;
     this._notePriorUnverifiedTextWrite(tabId, name, args, advisories);
+    if (this._leanRunActive(tabId)) return null;
     const debts = this._uncertainTextMutations?.get(tabId);
     if (!(debts instanceof Map) || debts.size === 0) return null;
     let target = this._textMutationTarget(tabId, name, args);
@@ -32113,7 +32389,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     if (this._guardAdvisesFor(advisories, 'text-write-debt-block', replacement
       ? 'An earlier write to this field was not verified; this replacement went ahead. Check the field before relying on it.'
       : 'An earlier write to this field was not verified and may already be in it, so this append can duplicate text. Read the field and fix it with one full replacement if needed.',
-    { decided: false })) return null;
+    { tabId, decided: false })) return null;
 
     return {
       success: false,
@@ -32199,7 +32475,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       // reported (as an unverified success when its text went out) and kept
       // as a non-blocking record instead of debt that refuses later writes.
       // Strict checks fall through to today's debt and lock.
-      const advisory = this._textWriteAdvisory(name, args, result);
+      const advisory = this._textWriteAdvisory(name, args, result, tabId);
       if (advisory) {
         return this._recordUnverifiedTextWrite(tabId, name, args, result, advisory,
           { target, replacesValue, text, expectedSha256, enrich, liveDigest });
@@ -34532,6 +34808,17 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       taskText,
       pageScope,
     });
+  }
+
+  // The progress-ledger options a planner gate hands
+  // _ensureProgressSessionForCurrentTask, at a run's start and after each
+  // steering revision. Lean mode keeps no progress ledger (its tools omit
+  // progress_read and progress_update); the call still prepares the
+  // publication contract and the workflow fields hard checks rely on.
+  _progressLedgerGateOptions(tabId, gate) {
+    if (this._leanRunActive(tabId)) return { progressLedgerPolicy: 'disabled', progressAction: null, expectedItems: null };
+    return { progressLedgerPolicy: gate?.progressLedgerPolicy, progressAction: gate?.progressAction,
+      expectedItems: gate?.expectedItems };
   }
 
   async _ensureProgressSessionForCurrentTask(tabId, opts = {}) {
@@ -38923,7 +39210,8 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
   async _executeToolWithLifecycle(tabId, name, args, onUpdate = null, executionContext = null) {
     // Quality guards that advise instead of refusing leave their notes in
     // this call's list; the result carries them to the model.
-    const guardAdvisories = Array.isArray(executionContext?.guardAdvisories) ? executionContext.guardAdvisories : [];
+    const guardAdvisories = this._trackGuardAdvisories(
+      Array.isArray(executionContext?.guardAdvisories) ? executionContext.guardAdvisories : [], tabId);
     const result = await this._executeToolWithLifecycleInner(tabId, name, args, onUpdate, { ...(executionContext || {}), guardAdvisories });
     // A note says what went through despite a check. When another check
     // then refused the call, nothing went through and the note would mislead.
@@ -38949,7 +39237,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
         this._throwIfAborted(linked.signal);
         if (probe?.success !== true) {
           if (!this._guardAdvisesFor(executionContext.guardAdvisories, 'jev-target-changed', JEV_TARGET_CHANGED_NOTE,
-            { decided: probe?.staleJevTarget === true })) {
+            { tabId, decided: probe?.staleJevTarget === true })) {
             return { success: false, noDispatch: true, dispatched: false, staleJevTarget: true, error: 'Jev target changed; observe again before acting.' };
           }
           // Without Strict checks the fast-path call goes to whatever its
@@ -39231,7 +39519,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       // checks the question is shown with a note.
       if (technicalRecipientReason && explicitRecipientQuestion
           && !this._guardAdvisesFor(executionContext?.guardAdvisories, 'recipient-clarify-cannot-repair-technical',
-            `The user's answer cannot supply the page evidence the message guard is missing (${technicalRecipientReason}); a send still needs that evidence or WebBrain's own recipient card. Re-read the recipient and composer after the answer.`)) {
+            `The user's answer cannot supply the page evidence the message guard is missing (${technicalRecipientReason}); a send still needs that evidence or WebBrain's own recipient card. Re-read the recipient and composer after the answer.`, { tabId })) {
         return { success: false, blocked: true, noDispatch: true, dispatched: false, retryable: false,
           messageRecipientGuard: true, reasonCode: technicalRecipientReason,
           error: 'Recipient confirmation cannot repair the unresolved technical message guard. No clarification was shown. Re-read the active recipient and composer evidence; if it remains unavailable, report the blocker instead of requesting the same approval again.' };
@@ -39538,7 +39826,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       if (nonMonotonic && !this._guardAdvisesFor(executionContext?.guardAdvisories, 'carousel-traversal-guards',
         traversalDirection === 'reverse'
           ? `This reversed carousel scan already processed slides down to ${previousState.minVerifiedIndex}; slide ${target.requestedIndex} was opened anyway. Do not record it again as a new row.`
-          : `This forward carousel scan already processed slides up to ${previousState.maxVerifiedIndex}; slide ${target.requestedIndex} was opened anyway. Do not record it again as a new row.`)) {
+          : `This forward carousel scan already processed slides up to ${previousState.maxVerifiedIndex}; slide ${target.requestedIndex} was opened anyway. Do not record it again as a new row.`, { tabId })) {
         return {
           success: false, dispatched: false, noDispatch: true, nonMonotonic: true,
           requestedIndex: target.requestedIndex, highestVerifiedIndex: previousState.maxVerifiedIndex,
@@ -40279,6 +40567,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       const doneStartedAt = Date.now();
       const tableBlock = await this._resolveExactTableDone(tabId, args, onUpdate);
       if (tableBlock) return tableBlock;
+      if (this._leanRunActive(tabId)) return await this._leanDoneResult(tabId, args);
       // A form's ledger check at done uses which fields the request named.
       await this._readWorkflowRequestedFieldMatches(tabId);
       const outcome = normalizeDoneOutcome(args?.outcome);
@@ -40815,7 +41104,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
                   success: false,
                   blockedDone: true,
                   completionPageBlock: true,
-                  error: verification.completionWarning + this._completionPageWarningSuffix(blocks),
+                  error: verification.completionWarning + this._completionPageWarningSuffix(blocks, tabId),
                   pageUrl: verification.pageUrl,
                   pageState: verification.pageState,
                   ...(dataUrl ? { _attachImage: dataUrl } : {}),
@@ -42251,7 +42540,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
           // may not be the item it saw.
           if (boundResult?.errorCode === 'media_binding_changed'
               && this._guardAdvisesFor(executionContext?.guardAdvisories, 'media-download-target-binding',
-                'The media in focus changed after your last observation, so WebBrain could not confirm this download is the item you saw. It saved the media now in focus; check the downloaded file (list_downloads) before reporting it.')) {
+                'The media in focus changed after your last observation, so WebBrain could not confirm this download is the item you saw. It saved the media now in focus; check the downloaded file (list_downloads) before reporting it.', { tabId })) {
             this._throwIfAborted?.(executionContext?._contentActionAbortSignal || null);
             return await runDomDownloader({ bound: false });
           }
@@ -43309,7 +43598,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       // selector's current match without a binding; Strict checks refuse.
       if (!dispatchBinding?.token && !this._guardAdvisesFor(dispatchContext.guardAdvisories, 'typing-target-identity',
         'The field could not be pinned to the element checked before typing, so the text went to the current match of this selector. Check that the intended field changed.',
-        { decided: false })) {
+        { tabId, decided: false })) {
         return {
           success: false,
           dispatched: false,
@@ -43913,6 +44202,10 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     if (runOptions?.trustedContinuation !== true) this.persistenceDegradedTabs.delete(tabId);
     this._runUpdateCallbacks.set(tabId, onUpdate);
     this._runModeOverrides.set(tabId, mode);
+    // Lean mode is resolved once, now that the run's mode and provider are
+    // known, and holds for every tool list, prompt and guard of this run.
+    const previousLeanRun = this._leanRuns?.get(tabId);
+    this._beginLeanRun(tabId, mode);
     const previousBotMemory = this._botMemorySessions.get(tabId);
     let botMemorySession = null;
     const previousCloudContext = this.cloudRunContexts.get(tabId);
@@ -43946,6 +44239,8 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       }
       this._planExecutionGuards.delete(tabId);
       this._runModeOverrides.delete(tabId);
+      if (previousLeanRun) this._leanRuns.set(tabId, previousLeanRun);
+      else this._leanRuns?.delete(tabId);
       if (previousStandaloneChatRun) this._standaloneChatRunTabs.add(tabId);
       else this._standaloneChatRunTabs.delete(tabId);
       this.responseLanguagePolicies.delete(tabId);
@@ -44335,7 +44630,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     // the planner ended the run by asking the user a question (its status
     // varies), so an unattended caller such as a recurring scheduled task can
     // wait for the user instead of asking again on every run.
-    const runEnd = { needsUserInput: false };
+    const runEnd = { needsUserInput: false, leanMode: this._leanRunActive(tabId) };
     // Voluntary research sharing must only capture runs where the model was
     // actually called. Local-only fast paths (recommended first tool,
     // selection-restoration read, dev/attachment guards) return with status
@@ -44396,7 +44691,8 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     const sourceBoundAttachments = selectionOnly ? [] : attachments;
     if (sourceBoundAttachments && sourceBoundAttachments.length) {
       const attachmentToolNames = new Set(
-        getToolsForMode(mode, { browserBatchEnabled: this.browserBatchEnabled, tier: provider.promptTier, imageGenConfigured: this.imageGenConfigured })
+        getToolsForMode(mode, { browserBatchEnabled: this.browserBatchEnabled, tier: provider.promptTier, imageGenConfigured: this.imageGenConfigured,
+          lean: this._leanRunActive(tabId) })
           .map(tool => tool?.function?.name)
           .filter(Boolean),
       );
@@ -44506,9 +44802,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       await this._ensureProgressSessionForCurrentTask(tabId, {
         provider,
         costState,
-        progressLedgerPolicy: gateOutcome.progressLedgerPolicy,
-        progressAction: gateOutcome.progressAction,
-        expectedItems: gateOutcome.expectedItems,
+        ...this._progressLedgerGateOptions(tabId, gateOutcome),
       });
     }
     const tier = provider.promptTier;
@@ -44516,6 +44810,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     let skillTools = this._skillToolDefinitions(tabId, mode, tier, this._activeSkillSiteAdapter(tabId));
     const cloudRunContext = this.cloudRunContexts.get(tabId) || null;
     let tools = getToolsForMode(mode, { browserBatchEnabled: this.browserBatchEnabled,
+      lean: this._leanRunActive(tabId),
       strictSecretMode: this.strictSecretMode && this.cloudRunContexts?.get(tabId)?.privateFinalResult !== true,
       tier,
       imageGenConfigured: this.imageGenConfigured,
@@ -44793,6 +45088,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
 
       skillTools = this._skillToolDefinitions(tabId, mode, tier, this._activeSkillSiteAdapter(tabId));
       tools = getToolsForMode(mode, { browserBatchEnabled: this.browserBatchEnabled,
+        lean: this._leanRunActive(tabId),
         strictSecretMode: this.strictSecretMode && this.cloudRunContexts?.get(tabId)?.privateFinalResult !== true,
         tier,
         imageGenConfigured: this.imageGenConfigured,
@@ -44821,7 +45117,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
           }
         }
       }
-      await this._prepareCalculationReading(tabId);
+      if (!this._leanRunActive(tabId)) await this._prepareCalculationReading(tabId);
       const calculationToolPolicy = this._pureCalculationToolPolicy(tabId);
       if (calculationToolPolicy) tools = tools.filter(tool => calculationToolPolicy.names.includes(tool.function.name));
       const completionRecoveryPolicy = this._completionRecoveryPolicy(tabId, tools, {
@@ -45406,7 +45702,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
         return finalResponse;
       }
       const readFinalLimitation = this._readCompletenessLimitation(tabId);
-      if (readFinalLimitation && !this._guardAdvises('read-coverage-ask-limitation', { decided: false })) {
+      if (readFinalLimitation && !this._guardAdvises('read-coverage-ask-limitation', { tabId, decided: false })) {
         finalResponse = readFinalLimitation;
         _traceStatus = 'read_scope_limited';
         messages.push({ role: 'assistant', content: finalResponse });
@@ -45435,7 +45731,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       } = this._plainFinalGuardBlocks(tabId, result.content);
       const plainFinalBlocks = [progressFinalBlock, completionFinalBlock, readFinalBlock, exactTableFinalBlock].filter(Boolean);
       if (plainFinalBlocks.length) {
-        if (completionFinalBlock && completionPlainFinalRecoveryAttempted >= 2 && this._plainFinalTwoStrikeEnds()) {
+        if (completionFinalBlock && completionPlainFinalRecoveryAttempted >= 2 && this._plainFinalTwoStrikeEnds(tabId)) {
           finalResponse = this._completionPlainFinalPartial(tabId, result.content, {
             progressBlocked: !!progressFinalBlock,
             readBlocked: !!readFinalBlock,
@@ -45450,7 +45746,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
         }
         if (completionFinalBlock) completionPlainFinalRecoveryAttempted++;
         if (completionFinalBlock && completionPlainFinalRecoveryAttempted >= 2 && steps >= this.maxSteps
-            && this._plainFinalTwoStrikeEnds()) {
+            && this._plainFinalTwoStrikeEnds(tabId)) {
           finalResponse = this._completionPlainFinalPartial(tabId, result.content, {
             progressBlocked: !!progressFinalBlock,
             readBlocked: !!readFinalBlock,
@@ -45519,12 +45815,16 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       }
       // A plain final is the model's own success claim: a chat message sent
       // in this run is confirmed and its receipt saved first, as done does
-      // (native-chat-receipt-not-durable). Two refusals, or the step budget,
-      // end the run as partial, never as a success.
-      const plainFinalReceiptBlock = await this._plainFinalChatReceiptBlock(tabId);
+      // (native-chat-receipt-not-durable; in a lean run _leanChatReceiptBlock,
+      // which also refuses a send the conversation cannot confirm, once). Two
+      // refusals, or the step budget, end the run as partial, never as a
+      // success.
+      const plainFinalReceiptBlock = this._leanRunActive(tabId)
+        ? await this._leanChatReceiptBlock(tabId)
+        : await this._plainFinalChatReceiptBlock(tabId);
       if (plainFinalReceiptBlock) {
         if (plainFinalReceiptRefusals >= 2 || steps >= this.maxSteps) {
-          finalResponse = this._chatReceiptPartialFinal(result.content);
+          finalResponse = this._chatReceiptPartialFinal(result.content, plainFinalReceiptBlock);
           _traceStatus = 'partial';
           messages.push({ role: 'assistant', content: finalResponse });
           onUpdate('text', { content: finalResponse, replace: true });
@@ -45706,6 +46006,10 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     if (runOptions?.trustedContinuation !== true) this.persistenceDegradedTabs.delete(tabId);
     this._runUpdateCallbacks.set(tabId, onUpdate);
     this._runModeOverrides.set(tabId, mode);
+    // Lean mode is resolved once, now that the run's mode and provider are
+    // known, and holds for every tool list, prompt and guard of this run.
+    const previousLeanRun = this._leanRuns?.get(tabId);
+    this._beginLeanRun(tabId, mode);
     const previousBotMemory = this._botMemorySessions.get(tabId);
     let botMemorySession = null;
     const previousCloudContext = this.cloudRunContexts.get(tabId);
@@ -45738,6 +46042,8 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       }
       this._planExecutionGuards.delete(tabId);
       this._runModeOverrides.delete(tabId);
+      if (previousLeanRun) this._leanRuns.set(tabId, previousLeanRun);
+      else this._leanRuns?.delete(tabId);
       if (previousStandaloneChatRun) this._standaloneChatRunTabs.add(tabId);
       else this._standaloneChatRunTabs.delete(tabId);
       this.responseLanguagePolicies.delete(tabId);
@@ -45864,7 +46170,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     let lastTraceStep = 0; // step counter for turn_end, readable outside the loop
     let _traceStatus = 'done';
     // See processMessage: onRunFinished's second argument.
-    const runEnd = { needsUserInput: false };
+    const runEnd = { needsUserInput: false, leanMode: this._leanRunActive(tabId) };
     // See processMessage: only provider-backed completions may be shared.
     let shareHadProviderCompletion = false;
     // Exact pruned request of the last streaming provider call (set before
@@ -45964,9 +46270,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       await this._ensureProgressSessionForCurrentTask(tabId, {
         provider,
         costState,
-        progressLedgerPolicy: gateOutcome.progressLedgerPolicy,
-        progressAction: gateOutcome.progressAction,
-        expectedItems: gateOutcome.expectedItems,
+        ...this._progressLedgerGateOptions(tabId, gateOutcome),
       });
     }
     const tier = provider.promptTier;
@@ -45974,6 +46278,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     let skillTools = this._skillToolDefinitions(tabId, mode, tier, this._activeSkillSiteAdapter(tabId));
     const cloudRunContext = this.cloudRunContexts.get(tabId) || null;
     let tools = getToolsForMode(mode, { browserBatchEnabled: this.browserBatchEnabled,
+      lean: this._leanRunActive(tabId),
       strictSecretMode: this.strictSecretMode && this.cloudRunContexts?.get(tabId)?.privateFinalResult !== true,
       tier,
       imageGenConfigured: this.imageGenConfigured,
@@ -46087,6 +46392,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
 
       skillTools = this._skillToolDefinitions(tabId, mode, tier, this._activeSkillSiteAdapter(tabId));
       tools = getToolsForMode(mode, { browserBatchEnabled: this.browserBatchEnabled,
+        lean: this._leanRunActive(tabId),
         strictSecretMode: this.strictSecretMode && this.cloudRunContexts?.get(tabId)?.privateFinalResult !== true,
         tier,
         imageGenConfigured: this.imageGenConfigured,
@@ -46114,7 +46420,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
           }
         }
       }
-      await this._prepareCalculationReading(tabId);
+      if (!this._leanRunActive(tabId)) await this._prepareCalculationReading(tabId);
       const calculationToolPolicy = this._pureCalculationToolPolicy(tabId);
       if (calculationToolPolicy) tools = tools.filter(tool => calculationToolPolicy.names.includes(tool.function.name));
       const completionRecoveryPolicy = this._completionRecoveryPolicy(tabId, tools, {
@@ -46608,7 +46914,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
           return finish(clarificationFinalDecision.failure, clarificationFinalDecision.status);
         }
         const readFinalLimitation = this._readCompletenessLimitation(tabId);
-        if (readFinalLimitation && !this._guardAdvises('read-coverage-ask-limitation', { decided: false })) {
+        if (readFinalLimitation && !this._guardAdvises('read-coverage-ask-limitation', { tabId, decided: false })) {
           messages.push({ role: 'assistant', content: readFinalLimitation });
           onUpdate('text', { content: readFinalLimitation, replace: true });
           onUpdate('warning', { message: 'Ask mode could not verify that every Gmail message was expanded.' });
@@ -46637,7 +46943,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
         } = this._plainFinalGuardBlocks(tabId, fullText);
         const plainFinalBlocks = [progressFinalBlock, completionFinalBlock, readFinalBlock, exactTableFinalBlock].filter(Boolean);
         if (plainFinalBlocks.length) {
-          if (completionFinalBlock && completionPlainFinalRecoveryAttempted >= 2 && this._plainFinalTwoStrikeEnds()) {
+          if (completionFinalBlock && completionPlainFinalRecoveryAttempted >= 2 && this._plainFinalTwoStrikeEnds(tabId)) {
             const partial = this._completionPlainFinalPartial(tabId, fullText, {
               progressBlocked: !!progressFinalBlock,
               readBlocked: !!readFinalBlock,
@@ -46651,7 +46957,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
           }
           if (completionFinalBlock) completionPlainFinalRecoveryAttempted++;
           if (completionFinalBlock && completionPlainFinalRecoveryAttempted >= 2 && steps >= this.maxSteps
-              && this._plainFinalTwoStrikeEnds()) {
+              && this._plainFinalTwoStrikeEnds(tabId)) {
             const partial = this._completionPlainFinalPartial(tabId, fullText, {
               progressBlocked: !!progressFinalBlock,
               readBlocked: !!readFinalBlock,
@@ -46724,12 +47030,15 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
         }
         // A plain final is the model's own success claim: a chat message sent
         // in this run is confirmed and its receipt saved first, as done does
-        // (native-chat-receipt-not-durable). Two refusals, or the step budget,
-        // end the run as partial, never as a success.
-        const plainFinalReceiptBlock = await this._plainFinalChatReceiptBlock(tabId);
+        // (see the chat loop; a lean run uses _leanChatReceiptBlock). Two
+        // refusals, or the step budget, end the run as partial, never as a
+        // success.
+        const plainFinalReceiptBlock = this._leanRunActive(tabId)
+          ? await this._leanChatReceiptBlock(tabId)
+          : await this._plainFinalChatReceiptBlock(tabId);
         if (plainFinalReceiptBlock) {
           if (plainFinalReceiptRefusals >= 2 || steps >= this.maxSteps) {
-            const partialText = this._chatReceiptPartialFinal(fullText);
+            const partialText = this._chatReceiptPartialFinal(fullText, plainFinalReceiptBlock);
             messages.push({ role: 'assistant', content: partialText });
             onUpdate('text', { content: partialText, replace: true });
             onUpdate('warning', { message: 'Run ended without a saved chat delivery receipt.' });
