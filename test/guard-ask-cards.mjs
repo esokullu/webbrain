@@ -528,6 +528,61 @@ for (const { build, Agent, adapters, Scheduler } of builds) {
     }
   });
 
+  test(`${build}: a split-write answer covers only the editor text the user saw`, async () => {
+    const { agent, tab, page } = await githubFixture();
+    // A verified editor proof: the commit binding holds for POST_BODY.
+    const editorTarget = agent._textMutationTarget(tab, 'set_field', { ref_id: 'ref_editor' });
+    agent._unverifiedTextWrites.delete(tab);
+    agent._verifiedTextReplacements.get(tab).set(editorTarget.key, await agent._verifiedTextReplacementRecord(tab, editorTarget, POST_BODY, EDITOR_META));
+    const rerun = () => agent._workflowPreSubmitDispatchBlock(tab, 'execute_js', { code: 'void 0' }, null);
+    const block = await rerun();
+    assert.equal(block.unverifiedStepConfirmation.requireContent, true, 'the card needs the editor text it covers');
+    // The card shows text that differs from what the action would commit
+    // (the editor changed after the check), and the editor changes back while
+    // the card is open: the binding holds again, but the user approved other
+    // text.
+    const shown = `${POST_BODY}A line the user saw on the card.\n`;
+    page.editor = shown;
+    const cards = [];
+    const advisories = [];
+    const changed = await agent._resolveUnverifiedStepConfirmation(tab, block, (type, data) => {
+      if (type !== 'clarify') return;
+      cards.push(data);
+      page.editor = POST_BODY;
+      agent.submitClarifyResponse(tab, data.clarifyId, 'once', 'option');
+    }, rerun, advisories);
+    assert.equal(cards.length, 1);
+    assert.equal(cards[0].unverifiedStepConfirmation.content, shown);
+    assert.ok(changed, 'the action is not performed on text the user did not see');
+    assert.equal(changed.noDispatch, true);
+    assert.match(changed.error, /changed while the user was being asked/);
+    assert.deepEqual(advisories, []);
+    // The next attempt asks again with what the editor holds now, and that
+    // answer covers one action.
+    const next = await rerun();
+    assert.ok(next.unverifiedStepConfirmation, 'asked again');
+    const resolved = await agent._resolveUnverifiedStepConfirmation(tab, next, (type, data) => {
+      if (type !== 'clarify') return;
+      cards.push(data);
+      agent.submitClarifyResponse(tab, data.clarifyId, 'once', 'option');
+    }, rerun, advisories);
+    assert.equal(cards.length, 2);
+    assert.equal(cards[1].unverifiedStepConfirmation.content, POST_BODY, 'the card shows the editor as it reads now');
+    assert.equal(resolved, null, 'unchanged text goes ahead once');
+    assert.ok((await rerun()).unverifiedStepConfirmation, 'one answer covers one action');
+    // An editor that cannot be read cannot be approved.
+    const unreadable = await githubFixture();
+    const target = unreadable.agent._textMutationTarget(unreadable.tab, 'set_field', { ref_id: 'ref_editor' });
+    unreadable.agent._unverifiedTextWrites.delete(unreadable.tab);
+    unreadable.agent._verifiedTextReplacements.get(unreadable.tab).set(target.key,
+      await unreadable.agent._verifiedTextReplacementRecord(unreadable.tab, target, POST_BODY, EDITOR_META));
+    const unreadableBlock = await unreadable.agent._workflowPreSubmitDispatchBlock(unreadable.tab, 'execute_js', { code: 'void 0' }, null);
+    unreadable.agent._rememberUnverifiedStepDecision(unreadable.tab, unreadableBlock.unverifiedStepConfirmation,
+      { sha256: '', length: null }, 'once', 'user');
+    assert.equal(await unreadable.agent._consumeContentBoundApproval(unreadable.tab,
+      { ...unreadableBlock.unverifiedStepConfirmation, target: null }), false, 'no reading, no approval');
+  });
+
   // ── social-publication-draft-quality ───────────────────────────────────
   // The user asked to publish; the X composer's draft could not be confirmed
   // against the contract. The card shows the composer's text; the

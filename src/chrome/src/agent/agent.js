@@ -3333,10 +3333,13 @@ export class Agent extends LoopDetector {
         if (binding?.metadataRequirementsIncomplete !== true && binding?.githubFileCommit) {
           const stepKey = this._sha256TextSync(JSON.stringify(['github-commit-split-write-required',
             this._normalizeUrl(pageUrl), this._formValidationActionKey(name, args) || name, this._taskTokens.get(tabId) || '']));
-          if (this._unverifiedStepApproval(tabId, 'github-commit-split-write-required', stepKey, { consume: true })) return null;
-          return { ...splitWriteRefusal, unverifiedStepConfirmation: { guardId: 'github-commit-split-write-required',
-            hard: false, action: 'commit', reason: 'submit_unclear', host: normalizeHost(pageUrl) || 'github.com',
-            contentLabel: 'editor', target: this._githubEditorReadTarget(tabId, pageUrl), expectKind: 'github-editor', stepKey } };
+          const ask = { guardId: 'github-commit-split-write-required', hard: false, action: 'commit', reason: 'submit_unclear',
+            host: normalizeHost(pageUrl) || 'github.com', contentLabel: 'editor', target: this._githubEditorReadTarget(tabId, pageUrl),
+            expectKind: 'github-editor', requireContent: true, stepKey };
+          // The answer covers the editor text the card showed: the editor is
+          // read again first, and changed or unreadable text is asked again.
+          if (await this._consumeContentBoundApproval(tabId, ask)) return null;
+          return { ...splitWriteRefusal, unverifiedStepConfirmation: ask };
         }
       }
       return splitWriteRefusal;
@@ -30329,6 +30332,24 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     if (!entry || entry.choice !== 'once' || entry.stale === true || entry.consumed === true) return null;
     if (consume) entry.consumed = true;
     return entry;
+  }
+
+  /**
+   * Use up the one-step 'once' for `ask` only while the page still shows the
+   * content the user saw on the card: the same target is read again now, and
+   * its text must match the answer's digest and length. The user's latest
+   * answer for the step decides; changed or unreadable content returns
+   * false, so the caller asks again with what the page holds now.
+   */
+  async _consumeContentBoundApproval(tabId, ask) {
+    const approval = this._unverifiedStepApproval(tabId, ask?.guardId, ask?.stepKey);
+    if (!approval) return false;
+    const reading = await this._unverifiedStepReading(tabId, ask);
+    if (!reading.readable || !approval.contentSha256 || reading.sha256 !== approval.contentSha256
+        || reading.length !== approval.contentLength) return false;
+    if (approval.consumed === true || approval.stale === true) return false;
+    approval.consumed = true;
+    return true;
   }
 
   // The answers a trusted Continue of the same task keeps: the user's own,
