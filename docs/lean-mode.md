@@ -81,7 +81,7 @@ Some steps that look like quality work feed the hard checks, so they stay too:
 - the social publication contract;
 - the rich-text toolbar probe, which pins the typing target (only its classification is skipped);
 - automatic screenshots, as set in Settings;
-- a delivered chat message's receipt, which must be saved before `done` reports success, or a resumed run could send it again.
+- a chat message sent in the run: its delivery must be confirmed in the conversation and its receipt saved before `done` reports success, or a resumed run could send it again. A receipt that cannot be saved refuses success every time; a send the conversation cannot confirm refuses it once per send, and `partial` or `failed` always ends the run.
 
 These quality guards keep running, each because a hard check depends on it (`LEAN_KEPT_QUALITY_GUARDS` in `lean-mode.js`):
 

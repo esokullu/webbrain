@@ -1114,9 +1114,13 @@ export class Agent extends LoopDetector {
   // done in a lean run. The completion is the model's own call: WebBrain
   // takes no verification screenshot, runs no completion or incomplete-task
   // judge and checks no page warnings or workflow evidence. One hard check
-  // stays (native-chat-receipt-not-durable): a chat message delivered in this
-  // run must have its receipt saved before success is reported, or a resumed
-  // run could send it again.
+  // stays (native-chat-receipt-not-durable): a chat message sent in this run
+  // must be confirmed in the conversation and its receipt saved before
+  // success is reported, or a resumed run could send it again. A receipt
+  // that cannot be saved refuses success every time, as in a full run. A send
+  // the conversation cannot confirm (its read failed, the conversation
+  // changed, a new message arrived) refuses success once per send, as a full
+  // run's submission-evidence check does; partial and failed always end.
   async _leanDoneResult(tabId, args = {}) {
     const outcome = normalizeDoneOutcome(args?.outcome);
     if (outcome === 'success' && (this.completionInvariants.get(tabId)?.lastAction?.chatDeliveryBinding
@@ -1131,9 +1135,32 @@ export class Agent extends LoopDetector {
         if (savedNativeReceipt !== true && savedNativeReceipt?.ok !== true) {
           return { success: false, blockedDone: true, error: 'The verified chat delivery receipt could not be saved. Retry completion after storage is available; do not send the message again.' };
         }
+      } else if (this._leanChatDeliveryUnconfirmedRefuses(tabId)) {
+        return { success: false, blockedDone: true, chatDeliveryUnconfirmed: true,
+          error: 'WebBrain could not confirm in the conversation that your message was delivered: its latest read failed, the conversation changed, or a new message arrived. Do not send the message again. Read the conversation now, then call done again; if the delivery still cannot be confirmed, finish with outcome "partial" and say so.' };
       }
     }
     return { done: true, summary: args.summary, outcome };
+  }
+
+  // native-chat-receipt-not-durable in a lean run when the conversation could
+  // not confirm a send: true the first time for this send in this run. Only a
+  // send the plan contract requires is checked; outside one there is no
+  // receipt to confirm (_nativeChatTerminalEvidence).
+  _leanChatDeliveryUnconfirmedRefuses(tabId) {
+    const guard = this._planExecutionGuards.get(tabId);
+    if (!guard?.enabled || guard.siteWorkflow?.job || guard.requiresSubmission !== true
+        || guard.requiresStateChange !== true) return false;
+    const lastAction = this.completionInvariants.get(tabId)?.lastAction;
+    const receipt = this.chatSessions.get(tabId)?.completionReceipt;
+    const key = lastAction?.chatDeliveryBinding
+      ? `send:${lastAction.sequence ?? ''}:${lastAction.chatDeliveryBinding.threadKey || ''}`
+      : `receipt:${receipt?.threadKey || ''}:${receipt?.messageId || ''}`;
+    const state = this._guardRunState(tabId);
+    const refused = (state.leanUnconfirmedChatSends ||= new Set());
+    if (refused.has(key)) return false;
+    refused.add(key);
+    return true;
   }
 
   _readCompletenessNeedsScopeClassification(tabId) {
@@ -5915,8 +5942,7 @@ export class Agent extends LoopDetector {
       });
       if (!gate.responseOnly) await this._ensureProgressSessionForCurrentTask(tabId, {
         provider: this._activeProvider(tabId), costState,
-        progressLedgerPolicy: gate.progressLedgerPolicy, progressAction: gate.progressAction,
-        expectedItems: gate.expectedItems,
+        ...this._progressLedgerGateOptions(tabId, gate),
       });
       // The system prompt is rebuilt by the new guard. Clear the old approved
       // plan even when only intent classification is enabled for this revision.
@@ -34675,6 +34701,17 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     });
   }
 
+  // The progress-ledger options a planner gate hands
+  // _ensureProgressSessionForCurrentTask, at a run's start and after each
+  // steering revision. Lean mode keeps no progress ledger (its tools omit
+  // progress_read and progress_update); the call still prepares the
+  // publication contract and the workflow fields hard checks rely on.
+  _progressLedgerGateOptions(tabId, gate) {
+    if (this._leanRunActive(tabId)) return { progressLedgerPolicy: 'disabled', progressAction: null, expectedItems: null };
+    return { progressLedgerPolicy: gate?.progressLedgerPolicy, progressAction: gate?.progressAction,
+      expectedItems: gate?.expectedItems };
+  }
+
   async _ensureProgressSessionForCurrentTask(tabId, opts = {}) {
     const publicationGuard = this._planExecutionGuards.get(tabId);
     if (publicationGuard?.enabled && publicationGuard.requiresSubmission === true
@@ -44653,15 +44690,10 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     if (!initialTaskRevalidated) this._startPlanExecutionGuard(tabId, mode, gateOutcome, runOptions);
 
     if (this._isActionMode(mode) && !selectionOnly && !standaloneChatRun) {
-      // Lean mode keeps no progress ledger; the call still prepares the
-      // publication contract and workflow fields hard checks rely on.
-      const leanRun = this._leanRunActive(tabId);
       await this._ensureProgressSessionForCurrentTask(tabId, {
         provider,
         costState,
-        progressLedgerPolicy: leanRun ? 'disabled' : gateOutcome.progressLedgerPolicy,
-        progressAction: leanRun ? null : gateOutcome.progressAction,
-        expectedItems: leanRun ? null : gateOutcome.expectedItems,
+        ...this._progressLedgerGateOptions(tabId, gateOutcome),
       });
     }
     const tier = provider.promptTier;
@@ -46122,15 +46154,10 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     if (!initialTaskRevalidated) this._startPlanExecutionGuard(tabId, mode, gateOutcome, runOptions);
 
     if (this._isActionMode(mode) && !selectionOnly && !standaloneChatRun) {
-      // Lean mode keeps no progress ledger; the call still prepares the
-      // publication contract and workflow fields hard checks rely on.
-      const leanRun = this._leanRunActive(tabId);
       await this._ensureProgressSessionForCurrentTask(tabId, {
         provider,
         costState,
-        progressLedgerPolicy: leanRun ? 'disabled' : gateOutcome.progressLedgerPolicy,
-        progressAction: leanRun ? null : gateOutcome.progressAction,
-        expectedItems: leanRun ? null : gateOutcome.expectedItems,
+        ...this._progressLedgerGateOptions(tabId, gateOutcome),
       });
     }
     const tier = provider.promptTier;

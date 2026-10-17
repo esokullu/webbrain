@@ -404,13 +404,51 @@ for (const build of ['chrome', 'firefox']) {
     const done = await agent.executeTool(tab, 'done', { summary: 'Saved.', outcome: 'success' });
     assert.deepEqual(done, { done: true, summary: 'Saved.', outcome: 'success' });
     assert.equal(probes + judged, 0, 'no probe, screenshot or judge');
-    // recipient class: a delivered chat message must have its receipt saved.
-    agent.completionInvariants.set(tab, { lastAction: { name: 'click_ax', chatDeliveryBinding: { token: 'sent' } } });
+    // recipient class: a delivered chat message must have its receipt saved,
+    // every time, as in a full run.
+    agent.completionInvariants.set(tab, { lastAction: { name: 'click_ax', sequence: 3, chatDeliveryBinding: { token: 'sent', threadKey: 'dom:chat:1' } } });
     agent._freshNativeChatTerminalEvidence = async () => ({ receipt: 'delivered' });
     agent._persistNow = async () => false;
-    const refused = await agent.executeTool(tab, 'done', { summary: 'Sent.', outcome: 'success' });
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const refused = await agent.executeTool(tab, 'done', { summary: 'Sent.', outcome: 'success' });
+      assert.equal(refused.blockedDone, true, JSON.stringify(refused));
+      assert.match(refused.error, /delivery receipt could not be saved/);
+    }
+  });
+
+  test(`${build}: a lean done over a send the conversation cannot confirm is refused once, then ends`, async () => {
+    const agent = new Agent({ getActive: () => STRONG });
+    const tab = nextTab++;
+    agent.conversationModes.set(tab, 'act');
+    agent._runModeOverrides.set(tab, 'act');
+    leanState(agent, tab);
+    let reads = 0;
+    agent._freshNativeChatTerminalEvidence = async () => { reads++; return null; };
+    agent._persistNow = async () => assert.fail('nothing to save without confirmed delivery');
+    agent.completionInvariants.set(tab, { lastAction: { name: 'press_keys', sequence: 4, chatDeliveryBinding: { token: 'sent', threadKey: 'dom:chat:1' } } });
+    // Outside a plan contract that requires the send, there is no receipt
+    // to confirm.
+    assert.deepEqual(await agent.executeTool(tab, 'done', { summary: 'Replied.', outcome: 'success' }),
+      { done: true, summary: 'Replied.', outcome: 'success' });
+    agent._planExecutionGuards.set(tab, { enabled: true, requiresSubmission: true, requiresStateChange: true, taskKey: 'tk_reply' });
+    const refused = await agent.executeTool(tab, 'done', { summary: 'Replied.', outcome: 'success' });
     assert.equal(refused.blockedDone, true, JSON.stringify(refused));
-    assert.match(refused.error, /delivery receipt could not be saved/);
+    assert.equal(refused.chatDeliveryUnconfirmed, true);
+    assert.match(refused.error, /could not confirm in the conversation/);
+    assert.match(refused.error, /Do not send the message again/);
+    assert.match(refused.error, /outcome "partial"/);
+    // An honest ending is never refused.
+    for (const outcome of ['partial', 'failed']) {
+      assert.deepEqual(await agent.executeTool(tab, 'done', { summary: 'Sent; not confirmed.', outcome }),
+        { done: true, summary: 'Sent; not confirmed.', outcome });
+    }
+    // Once per send: the next success ends the run.
+    assert.deepEqual(await agent.executeTool(tab, 'done', { summary: 'Replied.', outcome: 'success' }),
+      { done: true, summary: 'Replied.', outcome: 'success' });
+    // A later send in the same run is checked again.
+    agent.completionInvariants.set(tab, { lastAction: { name: 'press_keys', sequence: 9, chatDeliveryBinding: { token: 'sent-2', threadKey: 'dom:chat:1' } } });
+    assert.equal((await agent.executeTool(tab, 'done', { summary: 'Replied again.', outcome: 'success' })).chatDeliveryUnconfirmed, true);
+    assert.ok(reads >= 3, 'the conversation is read again at every success');
   });
 
   test(`${build}: in a lean run an unverified CodeMirror write is a plain success with no note or lock`, async () => {
@@ -479,9 +517,53 @@ for (const build of ['chrome', 'firefox']) {
     // The run loop calls these through the lean checks; see agent.js.
     const source = read(`src/${build}/src/agent/agent.js`);
     assert.equal((source.match(/if \(!this\._leanRunActive\(tabId\)\) await this\._prepareCalculationReading\(tabId\);/g) || []).length, 2);
-    assert.equal((source.match(/progressLedgerPolicy: leanRun \? 'disabled' : gateOutcome\.progressLedgerPolicy,/g) || []).length, 2);
+    // Every gate that starts or revises a task (both run loops and steering)
+    // takes its ledger options from the one helper that honours lean mode.
+    const ledgerCalls = source.match(/await this\._ensureProgressSessionForCurrentTask\(tabId, \{[\s\S]*?\n\s*\}\);/g) || [];
+    assert.equal(ledgerCalls.length, 3);
+    for (const site of ledgerCalls) assert.match(site, /\.\.\.this\._progressLedgerGateOptions\(tabId, (?:gateOutcome|gate)\)/);
+    const gate = { progressLedgerPolicy: 'enabled', progressAction: 'process_item', expectedItems: [{ id: 'a' }] };
+    assert.deepEqual(agent._progressLedgerGateOptions(tab, gate), { progressLedgerPolicy: 'disabled', progressAction: null, expectedItems: null });
+    assert.deepEqual(agent._progressLedgerGateOptions(nextTab++, gate), gate, 'a run that is not lean keeps the gate\'s ledger');
     assert.equal(calculationReads, 0);
   });
+
+  // A correction mid-run reruns the planner gate; a lean run keeps no ledger
+  // after it either, so no auto-recorded result points at progress tools the
+  // run does not offer.
+  for (const setting of ['on', 'off']) {
+    test(`${build}: a steered ${setting === 'on' ? 'lean' : 'full'} run ${setting === 'on' ? 'keeps the progress ledger off' : 'takes the revised ledger'}`, async () => {
+      const agent = new Agent({ getActive: () => STRONG });
+      const tab = nextTab++;
+      agent.conversationModes.set(tab, 'act');
+      if (setting === 'on') leanState(agent, tab);
+      Object.assign(agent, { _persist: () => {}, _persistNow: async () => ({ ok: true }), _currentUrl: async () => PAGE,
+        _applyPendingSteering: () => {} });
+      agent._steeringRuns.set(tab, { requestId: `lean-${tab}`, messages: [], acceptedIds: new Set(), revision: 2,
+        authorizedRevision: 1, onUpdate: () => {} });
+      const revisedGate = { proceed: true, requestKind: 'execute', requiresStateChange: true, requiresSubmission: false,
+        progressLedgerPolicy: 'enabled', progressAction: 'process_item', expectedItems: [{ id: 'row-1' }, { id: 'row-2' }] };
+      agent._maybeRunPlannerGate = async () => revisedGate;
+      const ledgerCalls = [];
+      const ensure = agent._ensureProgressSessionForCurrentTask.bind(agent);
+      agent._ensureWorkflowMetadataRequirements = async () => {};
+      agent._ensureProgressSessionForCurrentTask = async (tabId, opts) => {
+        ledgerCalls.push({ policy: opts.progressLedgerPolicy, action: opts.progressAction, items: opts.expectedItems });
+        return setting === 'on' ? ensure(tabId, opts) : null;
+      };
+      const messages = [{ role: 'system', content: 'sys' }, { role: 'user', content: 'Process the two rows.' }];
+      agent.conversations.set(tab, messages);
+      const revised = await agent._revalidatePendingSteering(tab, messages, () => {}, 'act', {}, null, {});
+      assert.equal(revised?.changed, true);
+      if (setting === 'on') {
+        assert.deepEqual(ledgerCalls, [{ policy: 'disabled', action: null, items: null }]);
+        assert.equal(agent.progressSessions.get(tab)?.mode, 'inactive', 'the revised task has no active ledger');
+        assert.equal(agent.progressExpectedItems.has(tab), false);
+      } else {
+        assert.deepEqual(ledgerCalls, [{ policy: 'enabled', action: 'process_item', items: revisedGate.expectedItems }]);
+      }
+    });
+  }
 
   // ── Hard checks keep their cards ────────────────────────────────────────
   test(`${build}: a lean run still sends an unclear deletion to WebBrain's deletion card`, async () => {

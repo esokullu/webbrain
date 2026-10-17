@@ -8,12 +8,12 @@ The system prompt and tool schemas a model receives on each Act turn, with produ
 
 | Build | Provider model | Lean mode | System prompt | Tools | Tool schemas | Per turn |
 | --- | --- | --- | ---: | ---: | ---: | ---: |
-| Chrome | `claude-sonnet-4-5`, `gpt-5` | Off | 53,163 chars, ≈13,292 tokens | 58 | 82,870 chars, ≈20,718 tokens | ≈34,010 tokens |
-| Chrome | `claude-sonnet-4-5`, `gpt-5` | Auto → lean (strong_cloud_model) | 8,366 chars, ≈2,092 tokens | 17 | 29,900 chars, ≈7,475 tokens | ≈9,567 tokens |
-| Firefox | `claude-sonnet-4-5`, `gpt-5` | Off | 43,578 chars, ≈10,895 tokens | 57 | 79,799 chars, ≈19,950 tokens | ≈30,845 tokens |
-| Firefox | `claude-sonnet-4-5`, `gpt-5` | Auto → lean (strong_cloud_model) | 8,265 chars, ≈2,067 tokens | 17 | 28,866 chars, ≈7,217 tokens | ≈9,284 tokens |
+| Chrome | `claude-sonnet-4-5`, `gpt-5` | Off | 53,276 chars, ≈13,320 tokens | 58 | 83,121 chars, ≈20,781 tokens | ≈34,101 tokens |
+| Chrome | `claude-sonnet-4-5`, `gpt-5` | Auto → lean (strong_cloud_model) | 8,366 chars, ≈2,092 tokens | 17 | 30,151 chars, ≈7,538 tokens | ≈9,630 tokens |
+| Firefox | `claude-sonnet-4-5`, `gpt-5` | Off | 43,691 chars, ≈10,924 tokens | 57 | 80,050 chars, ≈20,013 tokens | ≈30,937 tokens |
+| Firefox | `claude-sonnet-4-5`, `gpt-5` | Auto → lean (strong_cloud_model) | 8,265 chars, ≈2,067 tokens | 17 | 29,117 chars, ≈7,280 tokens | ≈9,347 tokens |
 
-Lean mode cuts this fixed per-turn input by 72% in the Chrome build (≈34,010 → ≈9,567 tokens) and by 70% in the Firefox build. Tool schemas are unchanged; lean mode offers fewer of them.
+Lean mode cuts this fixed per-turn input by 72% in the Chrome build (≈34,101 → ≈9,630 tokens) and by 70% in the Firefox build. Tool schemas are unchanged; lean mode offers fewer of them.
 
 The lean Act tools (17): `calculate`, `get_accessibility_tree`, `click_ax`, `set_checked`, `type_ax`, `set_field`, `inspect_viewport`, `read_page`, `click`, `type_text`, `press_keys`, `scroll`, `navigate`, `wait_for_stable`, `done`, `clarify`, `upload_file`. `generate_image`, `carousel_navigate`, `gmail_count_results` and enabled skills' tools are added when they apply, as in a full run.
 
@@ -34,9 +34,9 @@ The model is a fixed script: it reads the page, acts on the targets it names by 
 
 | Task | Lean mode | Model turns | Tool calls | Refused | Notes | Caveat | LLM side calls | Cards | Page probes | Input tokens | On the page | Result |
 | --- | --- | ---: | ---: | ---: | ---: | --- | ---: | ---: | ---: | ---: | --- | --- |
-| GitHub edit + commit | Off | 8 | 8 | 1 | 0 | yes | 5 | 3 | 229 | ≈295k | committed once, file text exact | done, answer carries a caveat |
+| GitHub edit + commit | Off | 8 | 8 | 1 | 0 | yes | 5 | 3 | 229 | ≈296k | committed once, file text exact | done, answer carries a caveat |
 | GitHub edit + commit | Auto → lean | 7 | 7 | 0 | 0 | no | 4 | 3 | 174 | ≈86k | committed once, file text exact | success |
-| Contact form | Off | 7 | 7 | 0 | 0 | no | 3 | 2 | 136 | ≈249k | sent once with the requested values | success |
+| Contact form | Off | 7 | 7 | 0 | 0 | no | 3 | 2 | 136 | ≈250k | sent once with the requested values | success |
 | Contact form | Auto → lean | 7 | 7 | 0 | 0 | no | 1 | 2 | 102 | ≈78k | sent once with the requested values | success |
 | Read-only lookup | Off | 2 | 2 | 0 | 0 | no | 1 | 0 | 34 | ≈70k | answered $129.00 | success |
 | Read-only lookup | Auto → lean | 2 | 2 | 0 | 0 | no | 0 | 0 | 9 | ≈21k | answered $129.00 | success |
@@ -49,7 +49,7 @@ The case that motivated lean mode. The task replaces NOTES.md with a three-parag
 - **Auto → lean:** `get_accessibility_tree` → `set_field` → `click_ax` → `get_accessibility_tree` → `click_ax` → `get_accessibility_tree` → `done`.
 - **LLM side calls** (besides the planner's intent call, 1 in each mode): Off 5 (intent, reading: control_effect ×2, reading: page_blocker, completion_verification); lean 4 (intent, reading: control_effect ×2, reading: page_blocker).
 - **Cards shown to the user:** Off site permission, submit confirmation ×2; lean site permission, submit confirmation ×2.
-- **Model input:** Off 294,859 tokens over 8 turns (58 tools offered, a 54,593-character system prompt); lean 85,860 tokens over 7 turns (17 tools, 9,796 characters).
+- **Model input:** Off 295,587 tokens over 8 turns (58 tools offered, a 54,706-character system prompt); lean 86,298 tokens over 7 turns (17 tools, 9,796 characters).
 
 ### 2. Fill a simple form and submit it
 
@@ -59,7 +59,7 @@ Three fields and a Send button on a plain page; the page posts with fetch and sh
 - **Auto → lean:** `get_accessibility_tree` → `set_field` → `set_field` → `set_field` → `click_ax` → `get_accessibility_tree` → `done`.
 - **LLM side calls** (besides the planner's intent call, 1 in each mode): Off 3 (reading: control_effect, reading: status_message, completion_verification); lean 1 (reading: control_effect).
 - **Cards shown to the user:** Off site permission, submit confirmation; lean site permission, submit confirmation.
-- **Model input:** Off 249,078 tokens over 7 turns (58 tools offered, a 53,735-character system prompt); lean 77,984 tokens over 7 turns (17 tools, 8,938 characters).
+- **Model input:** Off 249,715 tokens over 7 turns (58 tools offered, a 53,848-character system prompt); lean 78,425 tokens over 7 turns (17 tools, 8,938 characters).
 
 ### 3. Read-only lookup on the current page
 
@@ -69,7 +69,7 @@ A question about the open product page: what does the Trail Runner 2 cost? The a
 - **Auto → lean:** `read_page` → `done`.
 - **LLM side calls** (besides the planner's intent call, 1 in each mode): Off 1 (completion_verification); lean 0.
 - **Cards shown to the user:** Off none; lean none.
-- **Model input:** Off 70,051 tokens over 2 turns (58 tools offered, a 53,735-character system prompt); lean 21,168 tokens over 2 turns (17 tools, 8,938 characters).
+- **Model input:** Off 70,233 tokens over 2 turns (58 tools offered, a 53,848-character system prompt); lean 21,293 tokens over 2 turns (17 tools, 8,938 characters).
 
 ## Limits
 
