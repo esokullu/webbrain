@@ -56,7 +56,7 @@ Every guard of class `quality` in the guard registry (`src/*/src/agent/guard-pol
 
 The page reads and model calls that only those guards use are skipped as well:
 
-- **At `done`:** the verification screenshot and page probes, the completion judge, the page-warning and workflow-evidence checks, the done-summary reading of a failed or partial result, and the forced read-only and done-only turns. `done` is the model's own call.
+- **At `done`:** the verification screenshot and page probes, the completion judge, the page-warning and workflow-evidence checks (except a message job's delivery, below), the done-summary reading of a failed or partial result, and the forced read-only and done-only turns. `done` is the model's own call.
 - **Typing:** the readback of text writes. A write the content script cannot read back exactly is reported as `success: true, verified: false, unverifiedWrite: true`, with no note, no lock and no text-write debt, so the next write to the field goes through.
 - **Around submits:** the form-validation snapshots before and after a submit and their caption readings, and the GitHub commit gates (the editor-proof binding and the split-write rule).
 - **Progress and reading:** the progress ledger (its classification and its checks), the read-coverage scope reading, the arithmetic-task reading, and the readings of upload lines, authored field labels and review-thread controls for workflow evidence.
@@ -81,7 +81,7 @@ Some steps that look like quality work feed the hard checks, so they stay too:
 - the social publication contract;
 - the rich-text toolbar probe, which pins the typing target (only its classification is skipped);
 - automatic screenshots, as set in Settings;
-- a chat message sent in the run: its delivery must be confirmed in the conversation and its receipt saved before `done` reports success, or a resumed run could send it again. A receipt that cannot be saved refuses success every time; a send the conversation cannot confirm refuses it once per send, and `partial` or `failed` always ends the run. A plain final answer gets the same check; after two refusals it ends the run as partial instead of looping.
+- a chat message sent in the run: its delivery must be confirmed in the conversation and its receipt saved before `done` reports success, or a resumed run could send it again. A receipt that cannot be saved refuses success every time; a send the conversation cannot confirm refuses it once per send, and `partial` or `failed` always ends the run. A plain final answer gets the same check; after two refusals it ends the run as partial instead of looping. A site's own message job (a direct message on X, LinkedIn or Douyin, an email in Gmail) is checked the way a full run checks it, from the conversation and the page's sent status, and its receipt is the job's evidence, which a continued run checks before it would send again.
 
 These quality guards keep running, each because a hard check depends on it (`LEAN_KEPT_QUALITY_GUARDS` in `lean-mode.js`):
 

@@ -1120,8 +1120,11 @@ export class Agent extends LoopDetector {
   // receipt that cannot be saved refuses every time, as in a full run. A send
   // the conversation cannot confirm (its read failed, the conversation
   // changed, a new message arrived) refuses once per send, as a full run's
-  // submission-evidence check does.
+  // submission-evidence check does. A site's own message job has its own
+  // receipt (_leanWorkflowMessageReceiptBlock).
   async _leanChatReceiptBlock(tabId) {
+    const workflowSend = this._leanWorkflowMessageSend(tabId);
+    if (workflowSend) return this._leanWorkflowMessageReceiptBlock(tabId, workflowSend);
     if (!this.completionInvariants.get(tabId)?.lastAction?.chatDeliveryBinding
         && !this.chatSessions.get(tabId)?.completionReceipt) return null;
     let pageUrl = '';
@@ -1142,9 +1145,9 @@ export class Agent extends LoopDetector {
 
   // done in a lean run. The completion is the model's own call: WebBrain
   // takes no verification screenshot, runs no completion or incomplete-task
-  // judge and checks no page warnings or workflow evidence. Only the chat
-  // receipt check stays (_leanChatReceiptBlock); partial and failed always
-  // end.
+  // judge and checks no page warnings or other workflow evidence. Only the
+  // message receipt checks stay (_leanChatReceiptBlock); partial and failed
+  // always end.
   async _leanDoneResult(tabId, args = {}) {
     const outcome = normalizeDoneOutcome(args?.outcome);
     if (outcome === 'success') {
@@ -1172,6 +1175,98 @@ export class Agent extends LoopDetector {
     if (refused.has(key)) return false;
     refused.add(key);
     return true;
+  }
+
+  // An adapter's own message job (send-message on X, LinkedIn or Douyin,
+  // send-email in Gmail) whose send this task dispatched: its submit receipt,
+  // bound to the job. Null for any other run.
+  _leanWorkflowMessageSend(tabId) {
+    const guard = this._planExecutionGuards.get(tabId);
+    if (!guard?.enabled || !guard.siteWorkflow?.job
+        || this._workflowVerificationKind(guard.siteWorkflow) !== 'message_sent') return null;
+    const submit = this._currentCompletionSubmitState(tabId);
+    const binding = submit?.workflowBinding;
+    if (submit?.dispatched !== true || !binding
+        || binding.bindingKey !== this._adapterWorkflowBindingKey(guard.siteWorkflow)) return null;
+    return { guard, submit, binding };
+  }
+
+  // The receipt check of a lean run for that send. Such a job has no native
+  // conversation receipt: its receipt is the job's terminal evidence, which
+  // a full done records and a continued run checks before it would send
+  // again. So the same verification runs here: the conversation is read
+  // back against the dispatched body and recipients, and the page's live
+  // messages are read in any language for the sent status. The evidence is
+  // recorded and saved before the run ends as a success. As for a chat
+  // send, evidence that cannot be saved refuses every time, and a send that
+  // cannot be confirmed refuses once per send.
+  async _leanWorkflowMessageReceiptBlock(tabId, { guard, submit, binding }) {
+    const save = async () => {
+      const saved = await this._persistNow(tabId);
+      if (saved === true || saved?.ok === true) return null;
+      return { receiptNotDurable: true,
+        error: 'The verified message delivery receipt could not be saved. Retry completion after storage is available; do not send the message again.' };
+    };
+    if (this._workflowTerminalEvidenceMatchesState(guard, guard.workflowTerminalEvidence)) return save();
+    let pageUrl = '';
+    try { pageUrl = await this._currentUrl(tabId); } catch {}
+    const adapterName = guard.siteWorkflow.adapterName;
+    let probe = null;
+    try {
+      probe = await this._messageRecipientGuardProbe(tabId, {
+        tool: 'observe_active_conversation',
+        args: {},
+        adapterName,
+        expectedMessageBody: binding.messageBody || '',
+        expectedRecipients: binding.recipientTargets || [],
+        // Google Chat routes in Gmail have no recipient set of their own.
+        supportsRecipientSets: adapterName === 'gmail' && !isGmailChatRoute(pageUrl),
+      });
+    } catch (error) {
+      if (this._checkAbort(tabId)) throw error;
+    }
+    const pageState = { liveRegionMessages: await this._liveRegionMessages(tabId) };
+    const submissionEvidence = { submit };
+    await this._readWorkflowTerminalTexts(tabId, pageState, submissionEvidence, probe);
+    const current = this._planExecutionGuards.get(tabId) === guard
+      && !this._checkAbort(tabId) && !this._hasUnvalidatedSteering(tabId);
+    const evidence = current && probe
+      ? this._workflowTerminalEvidenceFromDone(tabId, pageState, pageUrl, submissionEvidence, probe) : null;
+    if (evidence) {
+      guard.workflowTerminalEvidence = evidence;
+      guard.verifiedSubmissionEvidence = true;
+      return save();
+    }
+    const key = `workflow:${binding.bindingKey}:${submit.runToken || ''}:${submit.actionSequence ?? ''}`;
+    const refused = (this._guardRunState(tabId).leanUnconfirmedChatSends ||= new Set());
+    if (refused.has(key)) return null;
+    refused.add(key);
+    return { chatDeliveryUnconfirmed: true,
+      error: 'WebBrain could not confirm on the page that your message was delivered: the conversation does not show it sent to the intended recipient with its exact text. Do not send the message again. Read the conversation now, then call done again; if the delivery still cannot be confirmed, finish with outcome "partial" and say so.' };
+  }
+
+  // The page's visible live messages (status, alert and aria-live regions),
+  // collected as the done probe collects them and returned as they are: a
+  // model reads what they say before anything relies on one.
+  async _liveRegionMessages(tabId) {
+    try {
+      const results = await browser.tabs.executeScript(tabId, { code: `(() => {
+        const visible = el => {
+          try {
+            const r = el.getBoundingClientRect();
+            if (r.width < 1 || r.height < 1) return false;
+            const s = window.getComputedStyle(el);
+            return !(s.visibility === 'hidden' || s.display === 'none' || parseFloat(s.opacity) === 0);
+          } catch (e) { return false; }
+        };
+        return Array.from(document.querySelectorAll('[role=status],[role=alert],[aria-live]'))
+          .filter(visible).map(e => (e.innerText || '').trim().slice(0, 120)).filter(Boolean).slice(0, 6);
+      })()` });
+      const value = results && results[0];
+      return Array.isArray(value) ? value.filter(text => typeof text === 'string' && text) : [];
+    } catch {
+      return [];
+    }
   }
 
   _readCompletenessNeedsScopeClassification(tabId) {

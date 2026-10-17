@@ -12,6 +12,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { readFile } from 'node:fs/promises';
 import { test } from 'node:test';
+import vm from 'node:vm';
 import { chromium } from 'playwright';
 import { defaultDecide, installModelStub, stubPageTextReadings, withoutFixedChoiceAnswers } from './semantic-decision-stub.mjs';
 
@@ -568,6 +569,106 @@ for (const build of ['chrome', 'firefox']) {
     agent.completionInvariants.set(tab, { lastAction: { name: 'press_keys', sequence: 9, chatDeliveryBinding: { token: 'sent-2', threadKey: 'dom:chat:1' } } });
     assert.equal((await agent.executeTool(tab, 'done', { summary: 'Replied again.', outcome: 'success' })).chatDeliveryUnconfirmed, true);
     assert.ok(reads >= 3, 'the conversation is read again at every success');
+  });
+
+  test(`${build}: a lean done after a site's own message send records its delivery as the job's evidence`, async () => {
+    // An X direct message sent through the adapter's send-message job has no
+    // native conversation receipt; its receipt is the job's terminal
+    // evidence, which a continued run checks before it would send again.
+    const xUrl = 'https://x.com/i/chat/123-456';
+    const fixture = ({ delivered = true, saves = true } = {}) => {
+      const agent = new Agent({ getActive: () => STRONG });
+      const tab = nextTab++;
+      agent.conversationModes.set(tab, 'act');
+      agent._runModeOverrides.set(tab, 'act');
+      leanState(agent, tab);
+      agent.conversations.set(tab, [{ role: 'system', content: 'sys' }, { role: 'user', content: 'Send Alex: Hello there' }]);
+      const siteWorkflow = agent._resolvePlannerSiteWorkflow(xUrl, { request_kind: 'execute', requires_submission: true,
+        messaging: { target_kind: 'named', recipients: ['@altryne'] } });
+      assert.equal(siteWorkflow?.job?.id, 'send-message');
+      const guard = agent._startPlanExecutionGuard(tab, 'act', { requestKind: 'execute', requiresStateChange: true,
+        requiresSubmission: true, messaging: { target_kind: 'named', recipients: ['@altryne'] }, siteWorkflow });
+      guard.workflowMetadataRequirements = [{ field: 'body', value: 'Hello there' }];
+      guard.workflowMetadataRequirementsResolved = true;
+      const workflowBinding = agent._workflowSubmitBindingForAttempt(tab, xUrl, {
+        messageRecipientGuardRequired: true, messageRecipientDispatchBinding: { token: 'x-send' },
+        messageRecipientBody: 'Hello there', messageRecipientBodyBaselineCount: 0,
+        messageRecipientExistingMessageIds: ['message-prior'] });
+      assert.ok(workflowBinding, 'the send is bound to the job');
+      agent._completionSubmitStates.set(tab, { dispatched: true, observedAfterSubmit: true, originatingUrl: xUrl,
+        currentUrl: xUrl, taskKey: agent._progressTaskKeyHash(tab), runToken: 'run-1', actionSequence: 2, workflowBinding });
+      agent._currentUrl = async () => xUrl;
+      agent._liveRegionMessages = async () => [];
+      const reads = [];
+      agent._messageRecipientGuardProbe = async (_tab, params) => {
+        reads.push(params);
+        return { success: true, conclusive: true, composerEmpty: true,
+          strongRecipientCandidates: [{ identity: '@altryne', role: 'to' }],
+          existingMessageIds: delivered ? ['message-prior', 'message-new'] : ['message-prior'],
+          matchingOutgoingMessageIds: delivered ? ['message-new'] : [],
+          matchingOutgoingMessageCount: delivered ? 1 : 0 };
+      };
+      let persisted = 0;
+      agent._persistNow = async () => { persisted++; return saves ? { ok: true } : false; };
+      return { agent, tab, guard, reads, persisted: () => persisted };
+    };
+
+    // Delivered: the job's evidence is recorded and saved, and the run ends.
+    const sent = fixture();
+    assert.deepEqual(await sent.agent.executeTool(sent.tab, 'done', { summary: 'Sent.', outcome: 'success' }),
+      { done: true, summary: 'Sent.', outcome: 'success' });
+    assert.equal(sent.reads.length, 1, 'the conversation was read');
+    assert.equal(sent.reads[0].expectedMessageBody, 'Hello there');
+    assert.equal(sent.guard.workflowTerminalEvidence?.verificationKind, 'message_sent');
+    assert.equal(sent.guard.workflowTerminalEvidence?.job, 'send-message');
+    assert.equal(sent.persisted(), 1, 'the receipt was saved before the run ended');
+    assert.equal(sent.agent._workflowTerminalEvidenceMatchesState(sent.guard, sent.guard.workflowTerminalEvidence), true,
+      'a continued run sees the send as done');
+
+    // Delivered but not saved: refused every time.
+    const unsaved = fixture({ saves: false });
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const refused = await unsaved.agent.executeTool(unsaved.tab, 'done', { summary: 'Sent.', outcome: 'success' });
+      assert.equal(refused.blockedDone, true, JSON.stringify(refused));
+      assert.match(refused.error, /delivery receipt could not be saved/);
+    }
+
+    // Not confirmed: refused once per send, and an honest ending is never refused.
+    const unconfirmed = fixture({ delivered: false });
+    const refused = await unconfirmed.agent.executeTool(unconfirmed.tab, 'done', { summary: 'Sent.', outcome: 'success' });
+    assert.equal(refused.blockedDone, true, JSON.stringify(refused));
+    assert.equal(refused.chatDeliveryUnconfirmed, true);
+    assert.match(refused.error, /Do not send the message again/);
+    assert.equal(unconfirmed.guard.workflowTerminalEvidence, null);
+    assert.deepEqual(await unconfirmed.agent.executeTool(unconfirmed.tab, 'done', { summary: 'Not confirmed.', outcome: 'partial' }),
+      { done: true, summary: 'Not confirmed.', outcome: 'partial' });
+    assert.deepEqual(await unconfirmed.agent.executeTool(unconfirmed.tab, 'done', { summary: 'Sent.', outcome: 'success' }),
+      { done: true, summary: 'Sent.', outcome: 'success' });
+    // The plain-final path shares the check.
+    const plain = fixture({ delivered: false });
+    assert.equal((await plain.agent._leanChatReceiptBlock(plain.tab))?.chatDeliveryUnconfirmed, true);
+    assert.equal(await plain.agent._leanChatReceiptBlock(plain.tab), null);
+  });
+
+  test(`${build}: the live-message probe returns the page's visible status texts`, async () => {
+    const agent = new Agent({ getActive: () => STRONG });
+    const run = code => {
+      const element = (text, width = 10) => ({ innerText: text, getBoundingClientRect: () => ({ width, height: 10 }) });
+      const nodes = [element(' Message sent '), element('Hidden', 0), element('')];
+      // The page's value arrives serialized, as CDP and executeScript return it.
+      return JSON.parse(JSON.stringify(vm.runInNewContext(code, { document: { querySelectorAll: () => nodes },
+        window: { getComputedStyle: () => ({ visibility: 'visible', display: 'block', opacity: '1' }) } })));
+    };
+    if (build === 'chrome') {
+      const { cdpClient } = await import('../src/chrome/src/cdp/cdp-client.js');
+      const original = cdpClient.evaluate;
+      cdpClient.evaluate = async (_tab, expression) => ({ result: { value: run(expression) } });
+      try { assert.deepEqual(await agent._liveRegionMessages(1), ['Message sent']); } finally { cdpClient.evaluate = original; }
+    } else {
+      const original = globalThis.browser.tabs.executeScript;
+      globalThis.browser.tabs.executeScript = async (_tab, { code }) => [run(code)];
+      try { assert.deepEqual(await agent._liveRegionMessages(1), ['Message sent']); } finally { globalThis.browser.tabs.executeScript = original; }
+    }
   });
 
   test(`${build}: in a lean run an unverified CodeMirror write is a plain success with no note or lock`, async () => {
