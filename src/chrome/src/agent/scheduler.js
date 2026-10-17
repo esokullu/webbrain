@@ -1,4 +1,5 @@
 import { DECISION_SETTINGS_KEYS, resolveDecisionConfig } from './decision-config.js';
+import { normalizeUnverifiedStepConfirmation } from './unverified-step.js';
 import { createSystemOneEvidence, systemOneEvidenceState } from './systemone-evidence.js';
 import {
   buildCompletionQuestions,
@@ -178,6 +179,13 @@ function normalizePendingClarify(data, now = Date.now()) {
       url: String(mutationConfirmation.url || '').slice(0, 600),
       dialog: String(mutationConfirmation.dialog || '').slice(0, 300),
     };
+  }
+  // WebBrain's "go ahead?" card about a step one of its checks could not
+  // verify: its question, reason and the page text it shows, so a reopened
+  // panel restores the card (with timeoutAnswer above for its countdown).
+  const unverifiedStep = asObject(obj.unverifiedStepConfirmation);
+  if (unverifiedStep.guardId || unverifiedStep.action) {
+    pending.unverifiedStepConfirmation = normalizeUnverifiedStepConfirmation(unverifiedStep);
   }
   return pending;
 }

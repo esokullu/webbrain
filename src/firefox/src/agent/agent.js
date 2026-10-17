@@ -157,6 +157,7 @@ import { extractFirstJsonObject } from './json-extract.js';
 import { repairAssistantDisplayText, repairClarifyText, sanitizeText as sanitizePlannerText } from './text-sanitize.js';
 import { clarifyQuestionIsHard, clarifyTimedAnswer, clarifyTimeoutChoice, normalizeClarifyConsequence, normalizeClarifyTimeoutPolicy } from './clarify-timeout.js';
 import { guardAdvisory, guardEntry, guardOutcome, withGuardAdvisories } from './guard-policy.js';
+import { UNVERIFIED_STEP_CONTENT_LIMIT, UNVERIFIED_STEP_PROMPT_KIND, clipUnverifiedStepContent, normalizeUnverifiedStepConfirmation } from './unverified-step.js';
 import { emptyOutputFailureMessage, modelOutputDiagnostics } from './model-output-diagnostics.js';
 import { stepLimitUserMessage, terminalGuardUserMessage } from './terminal-messages.js';
 import { buildCustomSkillsPrompt, buildSkillLoaderDefinition, buildSkillToolDefinitions, buildSkillToolRegistry, getEligibleCustomSkills, getEligibleSkillCatalog, normalizeCustomSkills } from './skills.js';
@@ -798,6 +799,7 @@ export class Agent extends LoopDetector {
     this.planReviewConfidenceThreshold = PLAN_REVIEW_CONFIDENCE_DEFAULT;
     this._pendingPlans = new Map();
     this._planExecutionGuards = new Map(); // tabId → current run's plan-only terminal recovery state
+    this._unverifiedStepScopes = new Map(); // tabId → { used: Set } 'once' answers the current tool call relies on
     this._continuationExecutionEvidence = new Map(); // tabId → app-owned evidence carried only by continueProcessing()
     this._continuationResponseLanguagePolicies = new Map(); // tabId -> trusted policy carried only by continueProcessing()
     // Strict secret-handling mode — see chrome/agent.js for rationale.
@@ -1983,6 +1985,13 @@ export class Agent extends LoopDetector {
       mastodonPublication: !explicitlyNotDispatched && dispatchMayHaveOccurred && !result?.formValidationFailed
         ? currentPublication : null,
       workflowBinding,
+      // The user (or the timeout policy) let this go ahead on WebBrain's card
+      // although its content could not be verified; the post-submit checks,
+      // such as GitHub's committed raw-file check, stay the authority.
+      ...(executionContext?.publishesUnverifiedContent === true
+        || workflowBinding?.githubFileCommit?.publishesUnverifiedContent === true
+        || workflowBinding?.socialPublication?.publishesUnverifiedContent === true
+        ? { publishesUnverifiedContent: true } : {}),
     };
     if (social && workflowBinding?.socialPublication?.contractKey === social.key) {
       social.outcomes[workflowBinding.socialPublication.actionId] = {
@@ -2390,36 +2399,10 @@ export class Agent extends LoopDetector {
     };
   }
 
-  _workflowSubmitBindingForAttempt(tabId, pageUrl = '', executionContext = {}, detectedSubmit = null) {
-    const guard = this._planExecutionGuards.get(tabId);
-    const siteWorkflow = guard?.siteWorkflow;
-    if (!guard?.enabled || siteWorkflow?.job?.requiresSubmission !== true || !pageUrl) return null;
-    if (siteWorkflow.job.template === 'publish' && SOCIAL_PLATFORMS.includes(siteWorkflow.adapterName) && !guard.socialPublication?.dispatch) return null;
-    const live = resolveAdapterWorkflowJob(pageUrl, siteWorkflow.job.id);
-    if (!this._sameAdapterWorkflowBinding(siteWorkflow, live)) return null;
-    const recipientTarget = normalizeMessageTarget(guard.messaging);
-    const messageBody = this._workflowMessageBody(executionContext?.messageRecipientBody);
-    const messageBodyBaselineCount = Number(executionContext?.messageRecipientBodyBaselineCount);
-    const recipientBound = executionContext?.messageRecipientGuardRequired === true
-      && !!executionContext?.messageRecipientDispatchBinding?.token
-      && !!messageBody
-      && Object.prototype.hasOwnProperty.call(executionContext, 'messageRecipientBodyBaselineCount')
-      && Number.isInteger(messageBodyBaselineCount)
-      && messageBodyBaselineCount >= 0
-      && recipientTarget?.target_kind === 'named';
-    const metadataDetails = this._workflowJobStoresMetadataRequirements(siteWorkflow)
-      ? this._normalizeWorkflowMetadataRequirementsDetails(guard.workflowMetadataRequirements)
-      : { items: [], incomplete: false };
-    const metadataRequirements = metadataDetails.items;
-    const authoredMetadata = siteWorkflow.job.id === 'update-metadata'
-      ? this._workflowAuthoredMetadataForSubmit(tabId, pageUrl, siteWorkflow)
-      : null;
-    // Requested fields that were never resolved are not absent fields. A job
-    // whose contract binds them cannot verify anything until they are.
-    const metadataIncomplete = guard.workflowMetadataRequirementsIncomplete === true
-      || metadataDetails.incomplete === true
-      || (this._workflowJobStoresMetadataRequirements(siteWorkflow)
-        && guard.workflowMetadataRequirementsResolved !== true);
+  // The evidence a GitHub file commit binds to: the task's verified
+  // replacement proofs of the file editor, the edit scope (repository,
+  // branch, path) and whether the requested commit message is proven.
+  _githubFileCommitEvidence(tabId, pageUrl, siteWorkflow, metadataRequirements = []) {
     const replacementRecords = this._verifiedTextReplacements.get(tabId);
     const replacementRecordValues = [...(replacementRecords instanceof Map
       ? replacementRecords.values()
@@ -2505,14 +2488,127 @@ export class Agent extends LoopDetector {
     )));
     const commitMessageVerified = !commitMessageRequirement
       || (composableMessage && summaryVerified && bodyVerified);
+    return { editorProofs: githubEditorReplacements, verifiedReplacement, scope: githubEditScope, commitMessageVerified };
+  }
+
+  // The newest write in this task that replaced the whole GitHub file editor
+  // on this page and went out, but could not be read back exactly (PR B's
+  // unverified-write record: hashes and identity, no raw text). `target`
+  // re-reads the same editor; `stepKey` names this exact write.
+  _githubUnverifiedEditorCandidate(tabId, pageUrl) {
+    const workflow = this._planExecutionGuards.get(tabId)?.siteWorkflow;
+    if (workflow?.adapterName !== 'github' || workflow?.job?.id !== 'edit-file-and-commit' || !pageUrl) return null;
+    const record = this._unverifiedTextWriteRecord(tabId, { pageUrl,
+      match: item => item.textSent === true && item.replacesValue === true && this._isGithubFileEditorRecord(item) });
+    if (!record?.expectedSha256 || !Number.isInteger(record.expectedLength)) return null;
+    const target = record.locatorType === 'ax' && typeof record.refId === 'string' && record.refId
+      ? { locatorType: 'ax', refId: record.refId, ambiguous: false }
+      : record.locatorType === 'selector' && typeof record.selector === 'string' && record.selector
+        ? { locatorType: 'selector', selector: record.selector, ambiguous: false }
+        : typeof record.refreshSelector === 'string' && record.refreshSelector
+          ? { locatorType: 'selector', selector: record.refreshSelector, ambiguous: false }
+          : null;
+    const stepKey = this._sha256TextSync(JSON.stringify(['github-commit-evidence-binding', record.key,
+      this._normalizeUrl(record.pageUrl || pageUrl), record.expectedLength, record.expectedSha256, record.recordedAt]));
+    return { record, target, stepKey };
+  }
+
+  // The user's 'once' for committing the unverified editor write that is
+  // still the latest one on this page, or null.
+  _approvedGithubUnverifiedEditor(tabId, pageUrl) {
+    const candidate = this._githubUnverifiedEditorCandidate(tabId, pageUrl);
+    const approval = candidate && this._unverifiedStepApproval(tabId, 'github-commit-evidence-binding', candidate.stepKey);
+    return approval ? { record: candidate.record, approval } : null;
+  }
+
+  // Before each commit attempt (with the proof refresh): the answer covers
+  // the editor text the user was shown. Once the editor reads differently,
+  // or no longer reads as the file editor, the answer no longer covers it
+  // and the commit asks again.
+  async _refreshGithubUnverifiedEditorApproval(tabId, pageUrl) {
+    const candidate = this._githubUnverifiedEditorCandidate(tabId, pageUrl);
+    const approval = candidate && this._unverifiedStepApproval(tabId, 'github-commit-evidence-binding', candidate.stepKey,
+      { peek: true });
+    if (!approval) return;
+    let live = null;
+    try { live = candidate.target ? await this._textMutationValueDigest(tabId, candidate.target) : null; } catch { live = null; }
+    if (!live || !this._isGithubFileEditorRecord({ fieldMeta: live.fieldMeta })
+        || live.valueSha256 !== approval.contentSha256 || live.valueLength !== approval.contentLength) {
+      approval.stale = true;
+    }
+  }
+
+  // github-commit-evidence-binding (quality) cannot decide when the only
+  // missing piece is the exact editor proof: the editor text went out as a
+  // full replacement but its readback could not verify it (CodeMirror reads
+  // back rendered text), while the path, branch and commit message bind. It
+  // then asks the user on WebBrain's card, showing the editor's text, instead
+  // of refusing every commit. A missing write, an unresolved path or branch,
+  // missing metadata, conflicting editor proofs, an unproven commit message
+  // or an editor that cannot be read now keep the refusal; so do Strict checks.
+  _githubCommitEvidenceAsk(tabId, pageUrl, binding) {
+    if (this._guardOutcome('github-commit-evidence-binding', { decided: false }) !== 'ask') return null;
+    if (!binding || binding.metadataRequirementsIncomplete === true || binding.githubFileCommit) return null;
+    const workflow = this._planExecutionGuards.get(tabId)?.siteWorkflow;
+    const requirements = Array.isArray(binding.metadataRequirements) ? binding.metadataRequirements : [];
+    const evidence = this._githubFileCommitEvidence(tabId, pageUrl, workflow, requirements);
+    if (!evidence.scope?.repository || !evidence.scope.branch || !evidence.scope.path
+        || evidence.editorProofs.length > 0 || evidence.commitMessageVerified !== true) return null;
+    const candidate = this._githubUnverifiedEditorCandidate(tabId, pageUrl);
+    if (!candidate?.target) return null;
+    return { guardId: 'github-commit-evidence-binding', hard: false, action: 'commit', reason: 'editor_unverified',
+      host: normalizeHost(pageUrl) || 'github.com', contentLabel: 'editor', target: candidate.target,
+      expectKind: 'github-editor', requireContent: true, stepKey: candidate.stepKey };
+  }
+
+  _workflowSubmitBindingForAttempt(tabId, pageUrl = '', executionContext = {}, detectedSubmit = null) {
+    const guard = this._planExecutionGuards.get(tabId);
+    const siteWorkflow = guard?.siteWorkflow;
+    if (!guard?.enabled || siteWorkflow?.job?.requiresSubmission !== true || !pageUrl) return null;
+    if (siteWorkflow.job.template === 'publish' && SOCIAL_PLATFORMS.includes(siteWorkflow.adapterName) && !guard.socialPublication?.dispatch) return null;
+    const live = resolveAdapterWorkflowJob(pageUrl, siteWorkflow.job.id);
+    if (!this._sameAdapterWorkflowBinding(siteWorkflow, live)) return null;
+    const recipientTarget = normalizeMessageTarget(guard.messaging);
+    const messageBody = this._workflowMessageBody(executionContext?.messageRecipientBody);
+    const messageBodyBaselineCount = Number(executionContext?.messageRecipientBodyBaselineCount);
+    const recipientBound = executionContext?.messageRecipientGuardRequired === true
+      && !!executionContext?.messageRecipientDispatchBinding?.token
+      && !!messageBody
+      && Object.prototype.hasOwnProperty.call(executionContext, 'messageRecipientBodyBaselineCount')
+      && Number.isInteger(messageBodyBaselineCount)
+      && messageBodyBaselineCount >= 0
+      && recipientTarget?.target_kind === 'named';
+    const metadataDetails = this._workflowJobStoresMetadataRequirements(siteWorkflow)
+      ? this._normalizeWorkflowMetadataRequirementsDetails(guard.workflowMetadataRequirements)
+      : { items: [], incomplete: false };
+    const metadataRequirements = metadataDetails.items;
+    const authoredMetadata = siteWorkflow.job.id === 'update-metadata'
+      ? this._workflowAuthoredMetadataForSubmit(tabId, pageUrl, siteWorkflow)
+      : null;
+    // Requested fields that were never resolved are not absent fields. A job
+    // whose contract binds them cannot verify anything until they are.
+    const metadataIncomplete = guard.workflowMetadataRequirementsIncomplete === true
+      || metadataDetails.incomplete === true
+      || (this._workflowJobStoresMetadataRequirements(siteWorkflow)
+        && guard.workflowMetadataRequirementsResolved !== true);
+    const githubEvidence = this._githubFileCommitEvidence(tabId, pageUrl, siteWorkflow, metadataRequirements);
+    const { scope: githubEditScope, verifiedReplacement, commitMessageVerified } = githubEvidence;
+    // The user's answer on WebBrain's card (github-commit-evidence-binding
+    // asks when it cannot decide) stands in for the exact editor proof that
+    // the editor's readback could not give: only when no verified editor
+    // proof exists at all (conflicting proofs stay shut), and only for the
+    // editor text the user was shown (_refreshGithubUnverifiedEditorApproval).
+    const approvedUnverifiedEditor = !verifiedReplacement && githubEvidence.editorProofs.length === 0 && githubEditScope
+      ? this._approvedGithubUnverifiedEditor(tabId, pageUrl) : null;
+    const editorEvidence = verifiedReplacement || approvedUnverifiedEditor?.record || null;
     const githubFileCommit = !metadataIncomplete
       && githubEditScope
-      && verifiedReplacement
+      && editorEvidence
       && commitMessageVerified
       ? {
           ...githubEditScope,
-          expectedLength: verifiedReplacement.expectedLength,
-          expectedSha256: verifiedReplacement.expectedSha256,
+          expectedLength: editorEvidence.expectedLength,
+          expectedSha256: editorEvidence.expectedSha256,
           commitMessageVerified,
           // Chromium's contenteditable readback deterministically expands
           // newline runs (see _contentEditableValueMatches), so a verified
@@ -2520,8 +2616,13 @@ export class Agent extends LoopDetector {
           // here would permanently block every newline-terminated file;
           // record which notion of exactness authorized the binding instead.
           // The byte-exact raw-blob check after the commit stays fail-closed.
-          readbackByteExact: verifiedReplacement.readbackLength === verifiedReplacement.expectedLength
+          readbackByteExact: !!verifiedReplacement
+            && verifiedReplacement.readbackLength === verifiedReplacement.expectedLength
             && verifiedReplacement.readbackSha256 === verifiedReplacement.expectedSha256,
+          // The expected hash is still that of the requested text, so the
+          // raw-blob check after the commit verifies the committed bytes.
+          ...(approvedUnverifiedEditor ? { editorReadbackVerified: false, publishesUnverifiedContent: true,
+            unverifiedApprovalSource: approvedUnverifiedEditor.approval.source } : {}),
         }
       : null;
     const verificationKind = this._workflowVerificationKind(siteWorkflow);
@@ -2698,13 +2799,22 @@ export class Agent extends LoopDetector {
     const socialBlock = await this._socialPublicationPreSubmitBlock(tabId, name, args, detectedSubmit, provider);
     if (socialBlock) return socialBlock;
     await this._captureMastodonPublicationAttempt(tabId, name, args, detectedSubmit, provider);
+    return this._githubCommitPreSubmitBlock(tabId, name, args, detectedSubmit, advisories);
+  }
+
+  // GitHub's edit-file-and-commit gate: a commit goes out only on the exact
+  // file and message evidence (or the user's answer on the card for the
+  // editor text it showed). Run before the call's cards and again right
+  // before dispatch, since those cards can wait while the editor changes.
+  async _githubCommitPreSubmitBlock(tabId, name, args = {}, detectedSubmit = null, advisories = null, { recheck = false } = {}) {
     const guard = this._planExecutionGuards.get(tabId);
     if (guard?.siteWorkflow?.adapterName !== 'github'
         || guard.siteWorkflow?.job?.id !== 'edit-file-and-commit') return null;
     // This gate decides before the click by what a text click's caption
-    // means, so an unread caption is read now, once, in any language.
+    // means, so an unread caption is read now, once, in any language. The
+    // recheck before dispatch uses that reading as it stands.
     const caption = this._controlCaption(name, args, null);
-    if (caption && this._controlEffectReading(caption) === null) await this._readControlEffect(tabId, caption);
+    if (!recheck && caption && this._controlEffectReading(caption) === null) await this._readControlEffect(tabId, caption);
     const looksLikeSubmit = detectedSubmit?.isSubmit === true
       || this._formValidationActionLooksSubmit(name, args, null, detectedSubmit);
     // Fail closed when submit detection is inconclusive: a click_ax carrying
@@ -2750,8 +2860,8 @@ export class Agent extends LoopDetector {
     // like the commit and the verified file and message binding a commit click
     // would need is in place, Strict checks off lets it run with a note; the
     // committed raw file is then checked against that binding after the commit.
-    // An inconclusive detection is the cannot-decide case and keeps refusing,
-    // and so does a missing binding (github-commit-evidence-binding).
+    // An inconclusive detection is the cannot-decide case: it asks the user
+    // (below). A missing binding keeps refusing (github-commit-evidence-binding).
     if (name !== 'click' && name !== 'click_ax' && name !== 'iframe_click') {
       if (looksLikeSubmit && this._guardAdvises('github-commit-split-write-required')) {
         const pageUrl = await this._currentUrl(tabId);
@@ -2765,7 +2875,7 @@ export class Agent extends LoopDetector {
           return null;
         }
       }
-      return {
+      const splitWriteRefusal = {
         success: false,
         dispatched: false,
         noDispatch: true,
@@ -2778,12 +2888,35 @@ export class Agent extends LoopDetector {
           ? 'Arbitrary page JavaScript may change the editor or commit message, voiding previously verified proofs. Re-verify the complete values with field reads, then activate the commit control with a separate click; do not bundle mutation and submission.'
           : 'This action can change field values in the same dispatch as submission, so it cannot use previously verified proofs. Write the field with a non-submit call first, verify the complete value, then activate the commit control with a separate click.',
       };
+      // The inconclusive case: WebBrain cannot tell whether this action
+      // commits at all. When a commit click would be allowed now (the file
+      // and message binding is in place, verified or approved by the user),
+      // the user decides on WebBrain's card, which shows the editor's text.
+      // One answer covers this one tool call (_unverifiedStepApproval).
+      if (inconclusiveSubmitCapable
+          && this._guardOutcome('github-commit-split-write-required', { decided: false }) === 'ask') {
+        const pageUrl = await this._currentUrl(tabId);
+        await this._refreshGithubTextReplacementProofs(tabId, pageUrl);
+        const binding = this._workflowSubmitBindingForAttempt(tabId, pageUrl, {}, detectedSubmit);
+        if (binding?.metadataRequirementsIncomplete !== true && binding?.githubFileCommit) {
+          const stepKey = this._sha256TextSync(JSON.stringify(['github-commit-split-write-required',
+            this._normalizeUrl(pageUrl), this._formValidationActionKey(name, args) || name, this._taskTokens.get(tabId) || '']));
+          const ask = { guardId: 'github-commit-split-write-required', hard: false, action: 'commit', reason: 'submit_unclear',
+            host: normalizeHost(pageUrl) || 'github.com', contentLabel: 'editor', target: this._githubEditorReadTarget(tabId, pageUrl),
+            expectKind: 'github-editor', requireContent: true, stepKey };
+          // The answer covers the editor text the card showed: the editor is
+          // read again first, and changed or unreadable text is asked again.
+          if (await this._consumeContentBoundApproval(tabId, ask)) return null;
+          return { ...splitWriteRefusal, unverifiedStepConfirmation: ask };
+        }
+      }
+      return splitWriteRefusal;
     }
     const pageUrl = await this._currentUrl(tabId);
     await this._refreshGithubTextReplacementProofs(tabId, pageUrl);
     const binding = this._workflowSubmitBindingForAttempt(tabId, pageUrl, {}, detectedSubmit);
     if (binding?.metadataRequirementsIncomplete !== true && binding?.githubFileCommit) return null;
-    return {
+    const refusal = {
       success: false,
       dispatched: false,
       noDispatch: true,
@@ -2794,6 +2927,27 @@ export class Agent extends LoopDetector {
       ...(inconclusiveSubmitCapable ? { inconclusiveSubmitDetection: true } : {}),
       error: 'Commit submission is blocked because the complete GitHub file-editor replacement, requested commit message, path, or branch is not bound to exact pre-submit evidence. Resolve any uncertain text write with exact readback or reload and restore the editor, then verify the complete file and requested commit message before committing.',
     };
+    const ask = this._githubCommitEvidenceAsk(tabId, pageUrl, binding);
+    return ask ? { ...refusal, unverifiedStepConfirmation: ask } : refusal;
+  }
+
+  // Where the file editor can be read now for the card: the verified proof's
+  // own locator, else the unverified write's.
+  _githubEditorReadTarget(tabId, pageUrl) {
+    const workflow = this._planExecutionGuards.get(tabId)?.siteWorkflow;
+    const proof = this._githubFileCommitEvidence(tabId, pageUrl, workflow, []).verifiedReplacement;
+    if (proof) {
+      if (proof.focusedProof === true) {
+        return typeof proof.refreshSelector === 'string' && proof.refreshSelector
+          ? { locatorType: 'selector', selector: proof.refreshSelector, ambiguous: false } : null;
+      }
+      if (proof.locatorType === 'ax' && typeof proof.refId === 'string') return { locatorType: 'ax', refId: proof.refId, ambiguous: false };
+      if (proof.locatorType === 'selector' && typeof proof.selector === 'string') {
+        return { locatorType: 'selector', selector: proof.selector, ambiguous: false };
+      }
+      return null;
+    }
+    return this._githubUnverifiedEditorCandidate(tabId, pageUrl)?.target || null;
   }
 
   _workflowTerminalText(value) {
@@ -5405,6 +5559,7 @@ export class Agent extends LoopDetector {
   }
 
   _releaseRunEntry(tabId) {
+    this._settleUnverifiedStepScope(tabId);
     const feedbackRun = this._pageFeedbackRuns?.get(tabId);
     if (feedbackRun?.monitoringRetry && !feedbackRun.monitoringRetry.started) {
       this._restoreFailureRecoveryStart(tabId, feedbackRun.monitoringRetry.requestId, feedbackRun.onUpdate, feedbackRun.monitoringRetry);
@@ -5775,7 +5930,21 @@ export class Agent extends LoopDetector {
     // An unidentified target says nothing about the earlier effect; report
     // what is actually missing instead of an unreconciled submission.
     const unresolvedTarget = detectedSubmit?.isSubmit !== true && !isNetworkMutation(name, args) && name !== 'chrome_web_store_publish';
+    // steer-prior-submission-target-unresolved (quality) cannot decide: the
+    // probe could not identify this control, so it may or may not repeat the
+    // earlier submission. The user decides on WebBrain's card instead of a
+    // refusal, and one answer covers this one action. Strict checks refuse.
+    const stepKey = unresolvedTarget
+      && this._guardOutcome('steer-prior-submission-target-unresolved', { decided: false }) === 'ask'
+      ? this._sha256TextSync(JSON.stringify(['steer-prior-submission-target-unresolved', guard.taskKey || '',
+        Number(guard.steeringPriorSubmission?.actionSequence || 0), name, this._formValidationActionKey(name, args) || name,
+        detectedSubmit?.frameDocumentIdentity || this._lastAxScopes.get(tabId)?.documentToken || '']))
+      : '';
+    if (stepKey && this._unverifiedStepApproval(tabId, 'steer-prior-submission-target-unresolved', stepKey, { consume: true })) return null;
     return {
+      ...(stepKey ? { unverifiedStepConfirmation: { guardId: 'steer-prior-submission-target-unresolved', hard: false,
+        action: ['click', 'click_ax', 'iframe_click'].includes(name) ? 'click' : 'submit', reason: 'target_unresolved',
+        host: normalizeHost(detectedSubmit?.url || this._lastAxScopes.get(tabId)?.pageUrl || ''), contentLabel: 'page', stepKey } } : {}),
       success: false, blocked: true, noDispatch: true, dispatched: false,
       steeringPriorSubmission: true,
       actionGuard: { stage: 'steering', reason: unresolvedTarget ? 'target_unresolved'
@@ -6746,6 +6915,9 @@ export class Agent extends LoopDetector {
     }
     if (data.mutationConfirmation) {
       display.mutationConfirmation = record(data.mutationConfirmation, ['kind', 'reason', 'host', 'item', 'url', 'dialog'], 600);
+    }
+    if (data.unverifiedStepConfirmation) {
+      display.unverifiedStepConfirmation = normalizeUnverifiedStepConfirmation(data.unverifiedStepConfirmation);
     }
     if (data.researchEscalation) display.researchEscalation = record(data.researchEscalation, ['engine', 'request'], 6000);
     if (data.workflowHealing) {
@@ -12981,6 +13153,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       }
       throw error;
     } finally {
+      this._settleUnverifiedStepScope(tabId);
       // Each child owns its nonce boundary and trusted notes. Never re-wrap.
       if (parentCalls.length) {
         const folded = foldBrowserBatchMessages(messages, { repairPending: true });
@@ -13235,6 +13408,8 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       }
       const callState = { index: toolIndex, invoked: false, consequential: false, result: null, dispatchState: null, guardAdvisories: [] };
       cancellationState.active = callState;
+      // The user's 'once' answers this call relies on are spent with it.
+      this._beginUnverifiedStepScope(tabId);
       if (this._checkAbort(tabId)) {
         const value = '[Stopped by user before executing requested tool calls.]';
         this._appendSyntheticToolResults(tabId, toolCalls, toolIndex, messages, onUpdate, step, () => ({
@@ -13696,6 +13871,31 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
         // Stop. Hand the turn to the corrected task first.
         if (this._hasPendingSteering(tabId) && !this._checkAbort(tabId)) return skipSteeredPermissionWait(toolIndex);
         if (this._checkAbort(tabId) || workflowPreSubmitBlock?.mutationConfirmationCancelled === true) {
+          const value = '[Stopped by user before executing requested tool calls.]';
+          this._appendSyntheticToolResults(tabId, toolCalls, toolIndex, messages, onUpdate, step, () => ({
+            success: false,
+            cancelled: true,
+            error: value,
+          }));
+          onUpdate('warning', { message: 'Stopped by user.' });
+          return { action: 'abort', value };
+        }
+      }
+      // A quality guard that cannot verify a commit, publish or submit asks
+      // the user on WebBrain's card instead of refusing (guard-policy.js
+      // 'ask'); 'once' lets this one step go ahead with a note for the model.
+      // Strict checks never produce the question, so they keep the refusal.
+      if (workflowPreSubmitBlock?.unverifiedStepConfirmation) {
+        const askedGuard = String(workflowPreSubmitBlock.unverifiedStepConfirmation.guardId || '');
+        workflowPreSubmitBlock = await this._resolveUnverifiedStepConfirmation(tabId, workflowPreSubmitBlock, onUpdate,
+          runWorkflowPreSubmitChecks, callState.guardAdvisories);
+        // The step goes ahead with content WebBrain could not verify; the
+        // submit receipt says so for the completion checks.
+        if (!workflowPreSubmitBlock && ['github-commit-evidence-binding', 'social-publication-draft-quality'].includes(askedGuard)) {
+          callState.publishesUnverifiedContent = true;
+        }
+        if (this._hasPendingSteering(tabId) && !this._checkAbort(tabId)) return skipSteeredPermissionWait(toolIndex);
+        if (this._checkAbort(tabId) || workflowPreSubmitBlock?.unverifiedStepConfirmationCancelled === true) {
           const value = '[Stopped by user before executing requested tool calls.]';
           this._appendSyntheticToolResults(tabId, toolCalls, toolIndex, messages, onUpdate, step, () => ({
             success: false,
@@ -14264,7 +14464,8 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       // first, but a mismatched conversation never reaches executeTool().
       const messageRecipientExecutionContext = { chatCompletionBindingSink: {},
         ...(fnName === 'navigate' && this._completionSubmitStates.get(tabId)?.semanticCommit
-          ? { _completionNavigationReceipt: {} } : {}) };
+          ? { _completionNavigationReceipt: {} } : {}),
+        ...(callState.publishesUnverifiedContent === true ? { publishesUnverifiedContent: true } : {}) };
       let messageRecipientBlock = null;
       const runMessageRecipientGuard = () => this._withContentActionDeadline(
         async abortSignal => {
@@ -14382,8 +14583,19 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
             { onUpdate, guardAdvisories: callState.guardAdvisories },
           );
           this._throwIfAborted(abortSignal);
+          // The draft was asked about (and answered) before this deadline
+          // started. A question that comes up only now, because the draft
+          // changed since, cannot wait for the user here: the refusal
+          // stands, without the card's page text.
           const socialDispatchBlock = pipelineToolbarPreflight.block ? null
-            : await this._socialPublicationPreSubmitBlock(tabId, fnName, fnArgs, detectedSubmitAction, provider);
+            : this._withoutUnverifiedStepAsk(
+              await this._socialPublicationPreSubmitBlock(tabId, fnName, fnArgs, detectedSubmitAction, provider))
+              // The same for a GitHub commit: the submit and permission
+              // cards after the first check can wait while the editor
+              // changes, and a "Go ahead" covers only the text the user saw.
+              // Its notes were already given by the first check.
+              || this._withoutUnverifiedStepAsk(
+                await this._githubCommitPreSubmitBlock(tabId, fnName, fnArgs, detectedSubmitAction, [], { recheck: true }));
           this._throwIfAborted(abortSignal);
           // Permission, checkpoint and preflight waits can receive a correction.
           // Recheck after all preparation, before marking or invoking dispatch.
@@ -20742,15 +20954,43 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     if (!Array.isArray(detected.publicationResourceUrls) || detected.publicationResourceUrlsComplete !== true) {
       issues.push({ reason: 'baseline_incomplete' });
     }
-    if (issues.length) {
-      return { ...blocked('Publication preflight failed: ' + [...new Set(issues.map(issue => issue.reason))].join(', ')
-          + '. Resolve publicationValidation before retrying. For body_mismatch, use the exact contract body; preserve every space and line break. A pending text write must first be verified or restored.'),
-        publicationValidation: { issues } };
-    }
     const documentIdentity = detected.frameDocumentIdentity || '';
     const frameId = Number.isInteger(detected.frameId) ? detected.frameId : 0;
     const taskKey = guard.taskKey;
     const key = this._sha256TextSync(JSON.stringify({ contract: social.key, action, snapshot, pageUrl, documentIdentity, frameId }));
+    let publishesUnverifiedContent = false;
+    if (issues.length) {
+      const refusal = { ...blocked('Publication preflight failed: ' + [...new Set(issues.map(issue => issue.reason))].join(', ')
+          + '. Resolve publicationValidation before retrying. For body_mismatch, use the exact contract body; preserve every space and line break. A pending text write must first be verified or restored.'),
+        publicationValidation: { issues } };
+      // social-publication-draft-quality (quality) cannot decide when the
+      // only issues are the draft's text: a body that does not match the
+      // contract or could not be read, or a post baseline it could not
+      // observe. The user asked to publish here (the contract action is
+      // eligible), so WebBrain asks on its card, showing the composer's text,
+      // instead of refusing. The card shows only that text, so media that
+      // does not match and a composer that was not read completely keep the
+      // refusal: neither the user nor a timeout could judge them from the
+      // card. The account, the reply or quote target and the number of posts
+      // are not readback either. The independent publication audit
+      // (unrequested_publication) still runs on the observed draft after a
+      // 'once'. Strict checks refuse.
+      const draftIssues = new Set(['body_mismatch', 'body_unobserved', 'baseline_incomplete']);
+      if (!issues.every(issue => draftIssues.has(issue.reason))
+          || this._guardOutcome('social-publication-draft-quality', { decided: false }) !== 'ask') return refusal;
+      if (!this._unverifiedStepApproval(tabId, 'social-publication-draft-quality', key)) {
+        const bodies = (Array.isArray(snapshot?.posts) ? snapshot.posts : [])
+          .map(post => (typeof post?.bodyText === 'string' ? post.bodyText : '')).filter(Boolean);
+        const unobserved = issues.some(issue => issue.reason === 'body_unobserved') || !bodies.length;
+        return { ...refusal, unverifiedStepConfirmation: { guardId: 'social-publication-draft-quality', hard: false,
+          action: 'publish', reason: unobserved ? 'draft_unobserved' : 'draft_unverified', host: normalizeHost(pageUrl),
+          contentLabel: 'composer', text: bodies.join('\n\n'), stepKey: key } };
+      }
+      // The user's answer covers this exact draft (the key binds the
+      // contract action, the observed snapshot and the page); the post goes
+      // through the audit below and its receipt says it was not verified.
+      publishesUnverifiedContent = true;
+    }
     const auditBlocked = () => {
       const denied = social.deniedAudit?.status === 'denied';
       const message = denied
@@ -20829,7 +21069,8 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
         if (!authorized) return auditBlocked();
       }
       social.dispatch = { key, actionId: action.id, snapshot: JSON.parse(JSON.stringify(snapshot)), pageUrl,
-        documentIdentity, frameId, ...(bypassMatches ? { auditBypassed: true } : {}) };
+        documentIdentity, frameId, ...(bypassMatches ? { auditBypassed: true } : {}),
+        ...(publishesUnverifiedContent ? { publishesUnverifiedContent: true } : {}) };
     }
     // The semantic check can take time. Re-read the same target afterward;
     // neither a changed draft/account nor a navigated document inherits it.
@@ -27080,6 +27321,323 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     return next;
   }
 
+  /**
+   * Ask the user, on WebBrain's own card, whether a consequential step may go
+   * ahead when one of WebBrain's guards cannot verify it (guard-policy.js,
+   * onCannotDecide 'ask'): a commit, publish or submit whose content or
+   * effect could not be confirmed. `content` is what the page shows now, as
+   * plain text. It is page-derived, so the side panel renders it with
+   * textContent only and it never reaches the model
+   * (docs/prompt-injection-defense.md). Fixed choices return stable values:
+   * 'once' lets this one step go ahead, anything else refuses it. Returns
+   * 'once' | 'deny', or null when Stop or a correction cancelled the card.
+   *
+   * A quality guard's card (`hard: false`) follows Settings → General: the
+   * clarify timeout (Off waits for the user, Instant answers at once) and
+   * "When a question times out" ('finish' goes ahead, 'safe' does not). A
+   * hard-class card never times out, like the recipient and deletion cards,
+   * so only the user can let it go ahead. An unattended scheduled run cannot
+   * show a card: quality follows the timeout policy at once, hard denies.
+   * An answer WebBrain chose (timeout, Instant, unattended) is not the
+   * user's: `receipt.source` tells the caller which it was, and it is never
+   * recorded as task authority or memory.
+   */
+  async _promptUnverifiedStepConfirmation(tabId, request = {}, onUpdate = null, receipt = null) {
+    const step = normalizeUnverifiedStepConfirmation(request);
+    const timedAnswer = step.hard || this._normalizeClarifyTimeoutPolicy(this.clarifyTimeoutPolicy) === 'safe'
+      ? 'deny' : 'once';
+    const answered = (choice, source) => {
+      if (receipt && typeof receipt === 'object') receipt.source = source;
+      return choice;
+    };
+    if (this.scheduledRunPolicies.get(tabId)?.requireConsequentialConfirmation === false) {
+      return answered(timedAnswer, 'unattended');
+    }
+    // Without a card nobody can approve the step.
+    if (typeof onUpdate !== 'function') return answered('deny', 'unavailable');
+    const clarifyId = `unverified_${secureRandomBase36Token(12)}`;
+    // -1 is no timeout: a hard card waits, like the recipient and deletion cards.
+    const timeoutSec = step.hard ? -1 : this._normalizeClarifyTimeoutSec(this.clarifyTimeoutSec);
+    const waitSec = timeoutSec > 0 ? timeoutSec : 0;
+    const tabPending = this._pendingClarifications.get(tabId) || new Map();
+    this._pendingClarifications.set(tabId, tabPending);
+    const responsePromise = new Promise((resolve) => {
+      const entry = { resolve, ts: Date.now(), timer: null, settled: false, timeoutSec: waitSec, deadlineTs: 0, onUpdate };
+      if (timeoutSec >= 0) {
+        const source = timeoutSec === 0 ? 'auto' : 'timeout';
+        const autoSelect = () => {
+          entry.timer = null;
+          try { onUpdate('clarify_auto', { clarifyId, answer: timedAnswer, source, timeoutSec: waitSec }); }
+          catch { /* UI emit must never break the run */ }
+          this._settleClarification(entry, { answer: timedAnswer, source });
+        };
+        if (timeoutSec === 0) {
+          entry.timer = setTimeout(autoSelect, 0);
+        } else {
+          entry.deadlineTs = Date.now() + timeoutSec * 1000;
+          entry.timer = setTimeout(autoSelect, timeoutSec * 1000);
+        }
+      }
+      tabPending.set(clarifyId, entry);
+    });
+    const deadlineTs = tabPending.get(clarifyId)?.deadlineTs || 0;
+    try {
+      onUpdate('clarify', {
+        promptKind: UNVERIFIED_STEP_PROMPT_KIND,
+        clarifyId,
+        question: this._unverifiedStepQuestion(step),
+        unverifiedStepConfirmation: step,
+        options: ['once', 'deny'],
+        timeoutSec: waitSec,
+        ...(timeoutSec >= 0 ? { timeoutAnswer: timedAnswer } : {}),
+        ...(deadlineTs ? { deadlineTs } : {}),
+      });
+    } catch { /* UI emit must never break the run */ }
+    const response = await responsePromise;
+    this._clearClarifyTimer(tabPending.get(clarifyId));
+    tabPending.delete(clarifyId);
+    if (tabPending.size === 0 && this._pendingClarifications.get(tabId) === tabPending) this._pendingClarifications.delete(tabId);
+    if (response?.cancelled) return null;
+    // A timer's answer, whichever timer fired (the agent's or the side
+    // panel's backup), is the one decided when the card was shown.
+    if (response?.source === 'timeout' || response?.source === 'auto') return answered(timedAnswer, response.source);
+    return answered(String(response?.answer || '').trim().toLowerCase() === 'once' ? 'once' : 'deny', 'user');
+  }
+
+  // A guard's refusal without its question (and the page text it would show),
+  // where no card can be shown.
+  _withoutUnverifiedStepAsk(block) {
+    if (!block?.unverifiedStepConfirmation) return block;
+    const { unverifiedStepConfirmation: _ask, ...refusal } = block;
+    return refusal;
+  }
+
+  // The card's question in English, for traces and surfaces without the side
+  // panel's localized copy.
+  _unverifiedStepQuestion(step) {
+    const host = step?.host || 'this site';
+    return { commit: `Commit this on ${host}?`, publish: `Publish this on ${host}?`,
+      click: `Click this control on ${host}?` }[step?.action] || `Submit this on ${host}?`;
+  }
+
+  // What an unverified-step card shows: text the guard already holds (a
+  // composer snapshot) or the field read now. The digest binds the user's
+  // answer to exactly this content; the text is bounded page content that
+  // only the card displays.
+  async _unverifiedStepReading(tabId, ask) {
+    if (typeof ask?.text === 'string') {
+      return { text: clipUnverifiedStepContent(ask.text), sha256: this._sha256TextSync(ask.text),
+        length: ask.text.length, readable: !!ask.text };
+    }
+    const unreadable = { text: '', sha256: '', length: null, readable: false };
+    if (!ask?.target) return unreadable;
+    let digest = null;
+    try {
+      digest = await this._textMutationValueDigest(tabId, ask.target, null,
+        { preview: UNVERIFIED_STEP_CONTENT_LIMIT + 1 });
+    } catch { digest = null; }
+    // The locator must still name the same kind of field it was written as.
+    if (!digest || (ask.expectKind === 'github-editor' && !this._isGithubFileEditorRecord({ fieldMeta: digest.fieldMeta }))) {
+      return unreadable;
+    }
+    return { text: clipUnverifiedStepContent(digest.valuePreview || ''), sha256: digest.valueSha256,
+      length: digest.valueLength, readable: true };
+  }
+
+  // The user's (or the timeout's) answers about unverified steps in this
+  // task, newest last. A guard looks up the answer for its own step key; a
+  // 'deny' for the same step and content is not asked again.
+  _unverifiedStepDecisions(tabId) {
+    const guard = this._planExecutionGuards.get(tabId);
+    if (!guard) return [];
+    const taskToken = this._taskTokens.get(tabId) || '';
+    return (Array.isArray(guard.unverifiedStepDecisions) ? guard.unverifiedStepDecisions : [])
+      .filter(entry => entry?.taskKey === guard.taskKey && entry.taskToken === taskToken);
+  }
+
+  /**
+   * The 'once' that covers this guard's step, or null. `contentSha256`, when
+   * given, must be the content the user was shown. A guard whose own refresh
+   * found the content changed marks the answer stale. A 'once' covers one
+   * tool call: inside a call, every check it runs (again after another
+   * guard's card, too) sees the answer, and the answer is spent when the call
+   * ends, whether or not the step went out (_settleUnverifiedStepScope), so
+   * the next such action, a repeated commit or post included, is asked about
+   * again. Outside a call, `consume` spends it now. `peek` only looks.
+   */
+  _unverifiedStepApproval(tabId, guardId, stepKey, { contentSha256 = null, consume = false, peek = false } = {}) {
+    if (!stepKey) return null;
+    const entry = this._unverifiedStepDecisions(tabId).findLast(item => item.guardId === guardId && item.stepKey === stepKey
+      && (contentSha256 === null || item.contentSha256 === contentSha256));
+    if (!entry || entry.choice !== 'once' || entry.stale === true || entry.consumed === true) return null;
+    if (!peek) this._useUnverifiedStepApproval(tabId, entry, consume);
+    return entry;
+  }
+
+  _useUnverifiedStepApproval(tabId, entry, consume = false) {
+    const scope = this._unverifiedStepScopes.get(tabId);
+    if (scope) scope.used.add(entry);
+    else if (consume) entry.consumed = true;
+  }
+
+  // Each tool call of a batch is one scope for the user's 'once' answers:
+  // the answers it relied on are spent when the next call starts, when the
+  // batch ends, or when the run ends.
+  _beginUnverifiedStepScope(tabId) {
+    this._settleUnverifiedStepScope(tabId);
+    this._unverifiedStepScopes.set(tabId, { used: new Set() });
+  }
+
+  _settleUnverifiedStepScope(tabId) {
+    const scope = this._unverifiedStepScopes.get(tabId);
+    if (!scope) return;
+    this._unverifiedStepScopes.delete(tabId);
+    for (const entry of scope.used) entry.consumed = true;
+  }
+
+  /**
+   * Use the one-step 'once' for `ask` only while the page still shows the
+   * content the user saw on the card: the same target is read again now, and
+   * its text must match the answer's digest and length. The user's latest
+   * answer for the step decides; changed or unreadable content returns
+   * false, so the caller asks again with what the page holds now. The answer
+   * is spent with the call that used it (_unverifiedStepApproval).
+   */
+  async _consumeContentBoundApproval(tabId, ask) {
+    const approval = this._unverifiedStepApproval(tabId, ask?.guardId, ask?.stepKey, { peek: true });
+    if (!approval) return false;
+    const reading = await this._unverifiedStepReading(tabId, ask);
+    if (!reading.readable || !approval.contentSha256 || reading.sha256 !== approval.contentSha256
+        || reading.length !== approval.contentLength) return false;
+    if (approval.consumed === true || approval.stale === true) return false;
+    this._useUnverifiedStepApproval(tabId, approval, true);
+    return true;
+  }
+
+  // The answers a trusted Continue of the same task keeps: the user's own,
+  // newest last. An answer WebBrain chose (timeout, Instant, unattended, no
+  // card) is not carried; the continued run lets the user answer.
+  _carriedUnverifiedStepDecisions(guard) {
+    return (Array.isArray(guard?.unverifiedStepDecisions) ? guard.unverifiedStepDecisions : [])
+      .filter(entry => entry?.source === 'user' && entry.taskKey === guard.taskKey).slice(-32);
+  }
+
+  _rememberUnverifiedStepDecision(tabId, ask, reading, choice, source) {
+    const guard = this._planExecutionGuards.get(tabId);
+    if (!guard) return null;
+    const entry = { guardId: String(ask?.guardId || ''), stepKey: String(ask?.stepKey || ''), taskKey: guard.taskKey,
+      taskToken: this._taskTokens.get(tabId) || '', contentSha256: reading?.sha256 || '',
+      contentLength: Number.isInteger(reading?.length) ? reading.length : null,
+      choice: choice === 'once' ? 'once' : 'deny', source: String(source || 'user'), at: Date.now() };
+    guard.unverifiedStepDecisions = [...(Array.isArray(guard.unverifiedStepDecisions)
+      ? guard.unverifiedStepDecisions.slice(-31) : []), entry];
+    return entry;
+  }
+
+  // What the model reads about an unverified step, by guard: what could not
+  // be verified, and what to check afterwards. Never the page content.
+  _unverifiedStepWording(guardId) {
+    return {
+      'github-commit-evidence-binding': { subject: 'the editor text WebBrain could not verify', what: 'The editor text could not be verified exactly',
+        after: 'Read the committed file back before reporting success; WebBrain checks it against the requested text.',
+        declined: 'fix the editor so its text reads back exactly, or report that the commit was not made' },
+      'github-commit-split-write-required': { subject: 'this action, which may commit the file', what: 'WebBrain could not tell whether this action commits',
+        after: 'Read the committed file and commit message back before reporting success.',
+        declined: 'write the field with a non-submit call, then commit with a separate click' },
+      'social-publication-draft-quality': { subject: 'this post draft', what: 'The post draft could not be verified against the request',
+        after: 'Check the published post before reporting success.',
+        declined: 'fix the draft so it matches the request, or report that it was not published' },
+      'steer-prior-submission-target-unresolved': { subject: 'this unidentified control', what: 'WebBrain could not tell what this control does',
+        after: 'Inspect the page to see what it did before acting again.',
+        declined: 'target an identified control by its ref, or report what was not done' },
+      'clickax-task-click-lock': { subject: 'clicking this control again', what: 'An earlier click on this control may already have taken effect',
+        after: 'Inspect the page to see what both clicks did before acting again.',
+        declined: 'inspect the page to reconcile the earlier click, or report what was not done' },
+    }[guardId] || { subject: 'this step', what: 'This step could not be verified', after: 'Check its result before reporting success.',
+      declined: 'report what was not done' };
+  }
+
+  _unverifiedStepNote(guardId, source) {
+    const wording = this._unverifiedStepWording(guardId);
+    const answer = source === 'user' ? 'the user approved it on WebBrain\'s card for this one step'
+      : source === 'unattended' ? 'this unattended run could not ask, and the user\'s timeout setting let it go ahead'
+        : 'nobody answered WebBrain\'s question in time, and the user\'s timeout setting let it go ahead';
+    return `${wording.what}; ${answer}. ${wording.after}`;
+  }
+
+  _unverifiedStepDeclined(refusal, guardId, source, repeated = false) {
+    const wording = this._unverifiedStepWording(guardId);
+    const why = source === 'user'
+      ? `The user ${repeated ? 'already chose' : 'chose'} not to go ahead with ${wording.subject}`
+      : source === 'unattended' ? `This unattended run cannot ask the user about ${wording.subject}`
+        : `Nobody answered WebBrain's question in time${repeated ? ' when it was asked before' : ''}, and the user's timeout setting does not let ${wording.subject} go ahead`;
+    return { ...refusal, retryable: false, unverifiedStepDeclined: true,
+      error: `${why}, so it was not performed. Do not repeat it unchanged; ${wording.declined}.` };
+  }
+
+  /**
+   * Resolve a pre-dispatch refusal that a guard turned into a question
+   * (`block.unverifiedStepConfirmation`): read what the page shows now, ask
+   * once on WebBrain's card, record the answer for this exact step and
+   * content, and re-run the checks so the action binds to a fresh reading of
+   * the same page. Returns null when the action may proceed (its note for
+   * the model goes into `advisories`), otherwise the result for the model.
+   * With no card to show (no update channel), or nothing to show where the
+   * guard requires it, the guard's refusal stands as before. When the re-run
+   * reaches another guard's question about the same action, that card is
+   * asked in turn (`depth` bounds the chain) and the first answer stands.
+   */
+  async _resolveUnverifiedStepConfirmation(tabId, block, onUpdate, rerunChecks, advisories = null, depth = 0) {
+    const ask = block?.unverifiedStepConfirmation;
+    if (!ask || typeof ask !== 'object') return block;
+    const { unverifiedStepConfirmation: _ask, ...refusal } = block;
+    if (typeof onUpdate !== 'function') return refusal;
+    const guard = this._planExecutionGuards.get(tabId);
+    const taskKey = guard?.taskKey;
+    const stillCurrent = () => this._planExecutionGuards.get(tabId) === guard && guard?.taskKey === taskKey
+      && !this._checkAbort(tabId);
+    const reading = await this._unverifiedStepReading(tabId, ask);
+    if (!stillCurrent() || (ask.requireContent === true && !reading.readable)) return refusal;
+    const declined = this._unverifiedStepDecisions(tabId).findLast(entry => entry.guardId === ask.guardId
+      && entry.stepKey === ask.stepKey && entry.contentSha256 === (reading.sha256 || ''));
+    if (declined?.choice === 'deny') return this._unverifiedStepDeclined(refusal, ask.guardId, declined.source, true);
+    const receipt = {};
+    const choice = await this._promptUnverifiedStepConfirmation(tabId, { ...ask, content: reading.text }, onUpdate, receipt);
+    if (choice === null) {
+      return { ...refusal, cancelled: true, unverifiedStepConfirmationCancelled: true,
+        error: 'The step was not confirmed because the user stopped or corrected the task, so it was not performed.' };
+    }
+    if (!stillCurrent()) {
+      return { ...refusal, error: 'The task changed while the user was being asked about this step, so it was not performed. Continue under the latest request.' };
+    }
+    const decision = this._rememberUnverifiedStepDecision(tabId, ask, reading, choice, receipt.source);
+    if (choice !== 'once') return this._unverifiedStepDeclined(refusal, ask.guardId, receipt.source);
+    const next = await rerunChecks();
+    const nextAsk = next?.unverifiedStepConfirmation;
+    if (nextAsk && nextAsk.guardId !== ask.guardId && depth < 3) {
+      // The answer was accepted, and another guard asks about the same
+      // action (a GitHub commit click can also meet the repeat-click lock):
+      // ask that card too. The first answer stays recorded either way.
+      const nextAdvisories = [];
+      const resolved = await this._resolveUnverifiedStepConfirmation(tabId, next, onUpdate, rerunChecks,
+        nextAdvisories, depth + 1);
+      if (resolved) return resolved;
+      if (Array.isArray(advisories)) {
+        advisories.push(guardAdvisory(ask.guardId, this._unverifiedStepNote(ask.guardId, receipt.source)), ...nextAdvisories);
+      }
+      return null;
+    }
+    if (nextAsk) {
+      // The re-run did not accept the answer: what the page shows changed.
+      if (decision) decision.stale = true;
+      const { unverifiedStepConfirmation: _changed, ...changed } = next;
+      return { ...changed, error: 'What the page shows changed while the user was being asked, so the step was not performed. Read the page again; WebBrain asks again if the step still cannot be verified.' };
+    }
+    if (next) return next;
+    if (Array.isArray(advisories)) advisories.push(guardAdvisory(ask.guardId, this._unverifiedStepNote(ask.guardId, receipt.source)));
+    return null;
+  }
+
   _fallbackSubmitConfirmationInfo(host, tool, reason, summary = '') {
     const normalizedHost = normalizeHost(host || '') || String(host || '').trim() || 'this site';
     return {
@@ -30698,7 +31256,10 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     }
   }
 
-  async _textMutationValueDigest(tabId, target, expected = null) {
+  // `preview` (characters) also returns the start of the value as plain text,
+  // for WebBrain's unverified-step card only; it is page content and never
+  // goes to the model.
+  async _textMutationValueDigest(tabId, target, expected = null, { preview = 0 } = {}) {
     if (!target || (target.ambiguous === true && target.focusedProof !== true)) return null;
     const params = target.locatorType === 'ax' && typeof target.refId === 'string'
       ? { ref_id: target.refId }
@@ -30708,6 +31269,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
           ? { focused: true }
           : null;
     if (!params) return null;
+    const previewChars = Number.isInteger(preview) && preview > 0 ? Math.min(preview, 4000) : 0;
     try {
       const response = await browser.tabs.sendMessage(tabId, {
         target: 'content',
@@ -30715,6 +31277,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
         params: {
           ...params,
           ...(typeof expected === 'string' ? { expected } : {}),
+          ...(previewChars ? { preview: previewChars } : {}),
         },
       });
       if (response?.success !== true
@@ -30738,6 +31301,8 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
         // caller may hold empty/stale scope while this is current.
         documentToken: String(response.documentToken || ''),
         pageUrl: String(response.refScopeUrl || ''),
+        ...(previewChars && typeof response.valuePreview === 'string'
+          ? { valuePreview: response.valuePreview.slice(0, previewChars) } : {}),
       };
     } catch {
       return null;
@@ -30954,6 +31519,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
   }
 
   async _refreshGithubTextReplacementProofs(tabId, pageUrl) {
+    await this._refreshGithubUnverifiedEditorApproval(tabId, pageUrl);
     const records = this._verifiedTextReplacements.get(tabId);
     if (!(records instanceof Map)) return;
     for (const [key, record] of records) {
@@ -31088,6 +31654,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
    *                     // | 'not_inserted' | 'trusted_retry_failed'
    *   textSent,         // true when the text went out (the result reported success)
    *   fieldMeta,        // field identity (id, name, labels, contentEditable, codeMirror, …)
+   *   refreshSelector,  // focused writes: element-derived selector read with the write, or null
    *   taskToken, recordedAt,           // the task that wrote it; epoch ms
    * }
    * `key` selects one editor. Without it, the newest record on `pageUrl`
@@ -31258,6 +31825,11 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       reason: advisory.reason,
       textSent: advisory.textSent,
       fieldMeta: result.fieldMeta || observed?.fieldMeta || null,
+      // A focused write has no locator of its own, and the focus moves on (to
+      // the commit dialog, say). The element-derived selector read with the
+      // write lets the unverified-step card read the same field later.
+      refreshSelector: target.locatorType === 'focused' && typeof observed?.stableSelector === 'string'
+        && observed.stableSelector ? observed.stableSelector : null,
       taskToken: this._taskTokens?.get(tabId) || null,
       recordedAt: Date.now(),
     });
@@ -34578,6 +35150,13 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       // The user's answers on WebBrain's deletion card hold for the same task.
       deletionDecisions: carryMatches && Array.isArray(carried.deletionDecisions)
         ? structuredClone(carried.deletionDecisions.slice(-32)) : [],
+      // So do the user's own answers on its unverified-step card. They are
+      // authorization, not execution evidence, so they need only the same task
+      // scope: a "Don't" is not asked again for the same step and content, and
+      // a one-use "Go ahead" keeps its consumed state. The task token still
+      // binds them (_unverifiedStepDecisions).
+      unverifiedStepDecisions: carryScopeMatches && Array.isArray(carried.unverifiedStepDecisions)
+        ? structuredClone(carried.unverifiedStepDecisions.slice(-32)) : [],
       approvedPlan: this._hasApprovedExecutionPlan(this.conversations.get(tabId) || []),
       // Only the app-owned Continue action can carry verified evidence from
       // the immediately preceding run; ordinary user turns always start at 0.
@@ -35062,6 +35641,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       || guard.verifiedSubmissionEvidence === true
       || !!guard.steeringPriorSubmission
       || (guard.deletionDecisions || []).length > 0
+      || this._carriedUnverifiedStepDecisions(guard).length > 0
       || !!guard.workflowTerminalEvidence
       || !!guard.workflowLedgerReconciliation
       || !!guard.workflowInventoryEvidence
@@ -35112,6 +35692,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
         steeringPriorSubmissionReconciliation: structuredClone(guard.steeringPriorSubmissionReconciliation || null),
         resourceMutationDispatches: structuredClone(guard.resourceMutationDispatches || []),
         deletionDecisions: structuredClone((guard.deletionDecisions || []).slice(-32)),
+        unverifiedStepDecisions: structuredClone(this._carriedUnverifiedStepDecisions(guard)),
         socialPublication: guard.socialPublication ? structuredClone(guard.socialPublication) : null,
         socialPublicationClarifications: structuredClone(guard.socialPublicationClarifications || []),
         socialPublicationSteering: guard.socialPublicationSteering ? structuredClone(guard.socialPublicationSteering) : null,
