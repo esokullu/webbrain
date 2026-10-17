@@ -15476,6 +15476,26 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
         if (interruptFailedBrowserAction(toolIndex, fnName)) { navNotices.length = 0; break; }
         continue;
       }
+      // Where this call's time goes before dispatch (_predispatchTimer), from
+      // its first preparation step on: a consequential call whose arguments
+      // or coordinates fail, or that a check stops, still records it.
+      const predispatch = this._predispatchTimer(tabId);
+      let fnArgs = {};
+      let protectedPageFailure = null;
+      // Whether this call can change something: until the permission
+      // capabilities and the submit probe are known, its tool and the
+      // arguments known so far decide (reassigned below once they are).
+      let predispatchConsequential = () => !protectedPageFailure && (Agent.STATE_CHANGE_TOOLS.has(fnName)
+        || capabilitiesFor(fnName, fnArgs).length > 0);
+      // A consequential call that a check stops before dispatch still records
+      // where its time went, the wait on a card included. One that stops any
+      // other way gets its note when the next call starts or the batch ends
+      // (_flushPredispatchTiming).
+      const predispatchBlocked = stage => {
+        predispatch.lap(stage);
+        if (predispatchConsequential()) predispatch.emit(step, { tool: fnName, outcome: 'blocked' });
+      };
+      callState.predispatchTiming = { timer: predispatch, step, tool: fnName, consequential: () => predispatchConsequential() };
       const parsedArgs = this._parseToolCallArgs(tc);
       if (parsedArgs.error) {
         const result = this._invalidToolArgumentsResult(fnName, parsedArgs);
@@ -15494,7 +15514,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
         if (interruptFailedBrowserAction(toolIndex, fnName)) { navNotices.length = 0; break; }
         continue;
       }
-      let fnArgs = this._toolCallArgsWithReplayMethod(tabId, fnName, argRepair.args);
+      fnArgs = this._toolCallArgsWithReplayMethod(tabId, fnName, argRepair.args);
       const argRepairNotice = argRepair.note || '';
       let readWindowNotice = '';
       const readState = this.readCompletenessStates.get(tabId);
@@ -15533,22 +15553,8 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       // executeTool(). Keep the failure in the ordinary result pipeline below
       // so tracing, loop handling, and trusted recovery notes still behave
       // exactly like other tool results.
-      const predispatch = this._predispatchTimer(tabId);
-      const protectedPageFailure = await this._chromeProtectedPageFailure(tabId, fnName);
-      // Whether this call can change something: until the permission
-      // capabilities and the submit probe are known, its tool and arguments
-      // decide (reassigned below once they are).
-      let predispatchConsequential = () => !protectedPageFailure && (Agent.STATE_CHANGE_TOOLS.has(fnName)
-        || capabilitiesFor(fnName, fnArgs).length > 0);
-      // A consequential call that a check stops before dispatch still records
-      // where its time went, the wait on a card included. One that stops any
-      // other way gets its note when the next call starts or the batch ends
-      // (_flushPredispatchTiming).
-      const predispatchBlocked = stage => {
-        predispatch.lap(stage);
-        if (predispatchConsequential()) predispatch.emit(step, { tool: fnName, outcome: 'blocked' });
-      };
-      callState.predispatchTiming = { timer: predispatch, step, tool: fnName, consequential: () => predispatchConsequential() };
+      predispatch.lap('argumentsMs');
+      protectedPageFailure = await this._chromeProtectedPageFailure(tabId, fnName);
       if (!protectedPageFailure && fnName !== 'done' && !Agent.NAV_TOOLS.has(fnName)) {
         try {
           await this._adoptLiveSocialPublishWorkflow(tabId, provider);

@@ -117,7 +117,7 @@ function projectDoneTiming(data) {
 // in milliseconds, the tool's name and the call's outcome, never what the
 // page or the model said.
 const PREDISPATCH_TIMING_MS_FIELDS = [
-  'workflowAdoptMs', 'captchaGateMs', 'preparationMs', 'clarificationMs', 'submitPreflightMs',
+  'argumentsMs', 'workflowAdoptMs', 'captchaGateMs', 'preparationMs', 'clarificationMs', 'submitPreflightMs',
   'submitProbeMs', 'submitCaptionReadingMs', 'resultBaselineMs', 'validationSnapshotMs',
   'workflowPreSubmitMs', 'resourceMutationMs', 'githubTransitionMs', 'workflowDispatchMs',
   'publicationContractMs', 'publicationAuditMs', 'publicationAuditReusedMs', 'publicationAuditAwaitedMs',

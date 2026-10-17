@@ -496,7 +496,8 @@ for (const browser of ['chrome', 'firefox']) {
       const notes = [];
       agent._recordPredispatchTiming = (_tabId, step, timing) => notes.push({ step, timing });
       const messages = [];
-      await agent._executeToolBatch(tabId, [{ id: 'call', function: { name, arguments: JSON.stringify(args) } }],
+      await agent._executeToolBatch(tabId, [{ id: 'call', function: { name,
+        arguments: typeof args === 'string' ? args : JSON.stringify(args) } }],
         messages, () => {}, provider, '', new Set([name]), 6);
       return { dispatched, notes, result: String(messages.find(message => message.role === 'tool')?.content || '') };
     };
@@ -521,8 +522,11 @@ for (const browser of ['chrome', 'firefox']) {
       }, 'blocked', 'clarificationMs'],
       ['API mutation without /allow-api', ['fetch_url', { url: 'https://api.example.com/items', method: 'POST', body: '{}' }],
         () => {}, 'blocked', 'clarificationMs'],
-      // Any other stop before dispatch: noted when the batch ends.
+      // Any other stop before dispatch: noted when the batch ends, arguments
+      // that cannot be used included.
       ['failed preparation', click, preparationFails, 'not_dispatched', 'stoppedMs'],
+      ['unreadable arguments', ['click_ax', '{"ref_id": "ref_9"'], () => {}, 'not_dispatched', 'stoppedMs'],
+      ['invalid arguments', ['click_ax', { ref_id: 9 }], () => {}, 'not_dispatched', 'stoppedMs'],
     ]) {
       const stopped = await run(name, args, stub);
       assert.deepEqual(stopped.dispatched, [], `${label}: nothing was sent`);
