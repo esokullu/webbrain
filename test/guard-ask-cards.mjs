@@ -496,6 +496,22 @@ for (const { build, Agent, adapters, Scheduler } of builds) {
     assert.equal(dispatched.length, 2);
   });
 
+  test(`${build}: one answer covers one commit call; committing the same text again asks again`, async () => {
+    const { agent, tab, provider } = await githubFixture();
+    const { dispatched, cards, run } = pipeline(agent, provider, 'once');
+    await run(tab, [call('commit-1', 'click_ax', { ref_id: 'ref_7' })]);
+    assert.equal(cards.length, 1);
+    assert.equal(dispatched.length, 1);
+    assert.equal(agent._completionSubmitStates.get(tab).workflowBinding.githubFileCommit.unverifiedApprovalSource, 'user',
+      'the commit that went out carries the answer on its receipt');
+    // The editor reads the same as on the card, but the answer was spent with
+    // the commit call: a second commit is asked about again.
+    await run(tab, [call('commit-2', 'click_ax', { ref_id: 'ref_7' })]);
+    assert.equal(cards.length, 2, 'a repeated commit is asked about again');
+    assert.equal(cards[1].unverifiedStepConfirmation.content, POST_BODY);
+    assert.equal(dispatched.length, 2);
+  });
+
   // ── github-commit-split-write-required ─────────────────────────────────
   test(`${build}: an action that may or may not commit asks when a commit is otherwise allowed`, async () => {
     for (const strict of [false, true]) {
@@ -583,6 +599,25 @@ for (const { build, Agent, adapters, Scheduler } of builds) {
       { ...unreadableBlock.unverifiedStepConfirmation, target: null }), false, 'no reading, no approval');
   });
 
+  test(`${build}: inside one call, a split-write answer holds for every re-run of the call's checks`, async () => {
+    const { agent, tab } = await githubFixture();
+    const editorTarget = agent._textMutationTarget(tab, 'set_field', { ref_id: 'ref_editor' });
+    agent._unverifiedTextWrites.delete(tab);
+    agent._verifiedTextReplacements.get(tab).set(editorTarget.key, await agent._verifiedTextReplacementRecord(tab, editorTarget, POST_BODY, EDITOR_META));
+    const rerun = () => agent._workflowPreSubmitDispatchBlock(tab, 'execute_js', { code: 'void 0' }, null);
+    const cards = [];
+    agent._beginUnverifiedStepScope(tab);
+    const resolved = await agent._resolveUnverifiedStepConfirmation(tab, await rerun(), (type, data) => {
+      if (type === 'clarify') { cards.push(data); agent.submitClarifyResponse(tab, data.clarifyId, 'once', 'option'); }
+    }, rerun, []);
+    assert.equal(resolved, null);
+    assert.equal(await rerun(), null, 'the same call checks again on the same answer');
+    assert.equal(await rerun(), null);
+    agent._settleUnverifiedStepScope(tab);
+    assert.equal(cards.length, 1);
+    assert.ok((await rerun()).unverifiedStepConfirmation, 'the next call asks again');
+  });
+
   // ── social-publication-draft-quality ───────────────────────────────────
   // The user asked to publish; the X composer's draft could not be confirmed
   // against the contract. The card shows the composer's text; the
@@ -649,6 +684,33 @@ for (const { build, Agent, adapters, Scheduler } of builds) {
     // A different draft is a different question.
     f.detected.publicationSnapshot.posts[0].bodyText = 'Hell';
     assert.equal((await check()).unverifiedStepConfirmation.text, 'Hell');
+  });
+
+  test(`${build}: a draft answer covers one publish call; publishing the same draft again asks again`, async () => {
+    const f = socialFixture();
+    const check = () => f.agent._workflowPreSubmitDispatchBlock(f.tab, 'click_ax', { ref_id: 'ref_post' }, f.detected, f.provider);
+    const late = async () => f.agent._withoutUnverifiedStepAsk(await f.agent._socialPublicationPreSubmitBlock(f.tab, 'click_ax',
+      { ref_id: 'ref_post' }, f.detected, f.provider));
+    const cards = [];
+    const answer = (type, data) => {
+      if (type === 'clarify') { cards.push(data); f.agent.submitClarifyResponse(f.tab, data.clarifyId, 'once', 'option'); }
+    };
+    // The publish call: its checks and the pipeline's late check see the answer.
+    f.agent._beginUnverifiedStepScope(f.tab);
+    assert.equal(await f.agent._resolveUnverifiedStepConfirmation(f.tab, await check(), answer, check, []), null);
+    assert.equal(await check(), null, 'the call\'s checks run again on the same answer');
+    assert.equal(await late(), null);
+    f.agent._settleUnverifiedStepScope(f.tab);
+    assert.equal(cards.length, 1);
+    assert.equal(f.audits.length, 1);
+    assert.ok(f.guard.socialPublication.dispatch, 'the audited dispatch keeps its key');
+    // The next publish call with the unchanged draft does not reuse the
+    // answer, so it cannot skip the card and the audit.
+    f.agent._beginUnverifiedStepScope(f.tab);
+    const again = await check();
+    f.agent._settleUnverifiedStepScope(f.tab);
+    assert.equal(again?.noDispatch, true, 'a repeated publish is not let through');
+    assert.equal(again.unverifiedStepConfirmation?.guardId, 'social-publication-draft-quality', 'it is asked about again');
   });
 
   test(`${build}: an unobserved account, a wrong reply target, or Strict checks keep the draft refusal without a card`, async () => {
@@ -745,6 +807,41 @@ for (const { build, Agent, adapters, Scheduler } of builds) {
     assert.match(changed.error, /What the page shows changed/);
     assert.equal(changed.unverifiedStepConfirmation, undefined);
     assert.equal(same.agent._unverifiedStepDecisions(same.tab).find(entry => entry.guardId === draftAsk.guardId)?.stale, true);
+  });
+
+  test(`${build}: an answer its guard spends at check time holds while a second guard's card is asked`, async () => {
+    const agent = new Agent({});
+    agent._persist = () => {};
+    agent.clarifyTimeoutSec = 30;
+    const tab = nextTab++;
+    agent._taskTokens.set(tab, `task-${tab}`);
+    agent._lastAxScopes.set(tab, { documentToken: 'doc', pageUrl: 'https://forms.example/apply' });
+    agent._planExecutionGuards.set(tab, { enabled: true, taskKey: 'steered', steeringPriorSubmission: { actionSequence: 3 } });
+    const refusal = { success: false, dispatched: false, noDispatch: true, error: 'refused' };
+    const second = { guardId: 'social-publication-draft-quality', hard: false, action: 'publish', reason: 'draft_unverified',
+      host: 'forms.example', contentLabel: 'composer', text: 'Helo', stepKey: 'second-step' };
+    // The call's checks: the real unidentified-control guard (it spends its
+    // answer as it checks), then another guard about the same click.
+    const checks = async () => agent._steeringPriorSubmissionBlock(tab, 'click_ax', { ref_id: 'ref_9' }, null)
+      || (agent._unverifiedStepApproval(tab, second.guardId, second.stepKey) ? null : { ...refusal, unverifiedStepConfirmation: second });
+    const cards = [];
+    const answer = (type, data) => {
+      if (type !== 'clarify') return;
+      cards.push(data.unverifiedStepConfirmation.guardId);
+      agent.submitClarifyResponse(tab, data.clarifyId, 'once', 'option');
+    };
+    agent._beginUnverifiedStepScope(tab);
+    const advisories = [];
+    const resolved = await agent._resolveUnverifiedStepConfirmation(tab, await checks(), answer, checks, advisories);
+    agent._settleUnverifiedStepScope(tab);
+    assert.equal(resolved, null);
+    assert.deepEqual(cards, ['steer-prior-submission-target-unresolved', second.guardId], 'each guard asks once');
+    assert.deepEqual(advisories.map(item => item.guard), cards);
+    // Both answers were spent with that call: the next one asks again.
+    agent._beginUnverifiedStepScope(tab);
+    const next = await checks();
+    agent._settleUnverifiedStepScope(tab);
+    assert.equal(next.unverifiedStepConfirmation.guardId, 'steer-prior-submission-target-unresolved');
   });
 
   // ── steer-prior-submission-target-unresolved ───────────────────────────
@@ -998,6 +1095,63 @@ test('chrome: an approved repeat click releases its lock only when it is sent', 
   } finally {
     api.tabs.sendMessage = sendMessage;
   }
+});
+
+// Two guards ask about one click (after a correction, an unidentified
+// control that is also locked by an earlier unverified click): each card is
+// asked once, the click goes out once, and both answers are spent with it.
+test('chrome: a click two guards ask about is asked once per guard and sent once', async () => {
+  const { Agent } = builds.find(item => item.build === 'chrome');
+  const provider = { name: 'lock test', model: 'test', promptTier: 'full', contextWindow: 128000,
+    supportsTools: true, supportsVision: false, chat: async () => ({ content: '' }) };
+  const agent = new Agent({ getActive: () => provider, getProvider: () => provider, getVisionProvider: async () => null });
+  agent.clarifyTimeoutSec = 30;
+  agent._persist = () => {};
+  agent._persistNow = async () => ({ ok: true });
+  const tab = nextTab++;
+  agent._taskTokens.set(tab, `task-${tab}`);
+  agent._planExecutionGuards.set(tab, { enabled: false, taskKey: `key-${tab}`, steeringPriorSubmission: { actionSequence: 3 } });
+  agent._lastAxScopes.set(tab, { documentToken: 'doc-1', pageUrl: 'https://shop.example/cart' });
+  agent._currentUrl = async () => 'https://shop.example/cart';
+  agent._rememberTaskClickLock(tab, 'doc-1|ref_buy');
+  agent._rememberTaskClickLock(tab, 'native-button-pending:doc-1|ref_buy');
+  agent._skipPermissionGate = true;
+  agent._ensureGateSetting = async () => true;
+  for (const name of ['_chromeProtectedPageFailure', '_captchaMutationPreflight', '_messageRecipientGuardBlock',
+    '_detectLikelySubmitAction', '_socialPublicationPreSubmitBlock']) agent[name] = async () => null;
+  agent._adoptLiveSocialPublishWorkflow = async () => false;
+  agent._captureFormValidationState = async () => [];
+  agent._waitForFormValidationFailure = async () => null;
+  agent._auditRichTextToolbarTarget = async () => {};
+  agent._shouldAutoScreenshot = () => false;
+  agent._refreshPageFeedbackForCall = async () => false;
+  const dispatched = [];
+  agent._dispatchClickAxImpl = async (_tab, args, _scope, _binding, _context, _deadline, _upstream, dispatchState) => {
+    dispatched.push(args.ref_id);
+    dispatchState.started = true;
+    return { success: true, dispatched: true, verified: true };
+  };
+  const cards = [];
+  const run = async id => {
+    const messages = [];
+    await agent._executeToolBatch(tab, [call(id, 'click_ax', { ref_id: 'ref_buy' })], messages, (type, data) => {
+      if (type !== 'clarify') return;
+      cards.push(data.unverifiedStepConfirmation.guardId);
+      setTimeout(() => agent.submitClarifyResponse(tab, data.clarifyId, 'once', 'option'), 10);
+    }, provider, null, new Set(['click_ax', 'done']), 1, {});
+    return resultFor(messages, id);
+  };
+  const first = await run('buy-1');
+  assert.deepEqual(cards, ['steer-prior-submission-target-unresolved', 'clickax-task-click-lock'], 'each guard asks once');
+  assert.equal(first.success, true, JSON.stringify(first));
+  assert.deepEqual(dispatched, ['ref_buy'], 'one click');
+  assert.deepEqual(first.guardAdvisories.map(item => item.guard).sort(),
+    ['clickax-task-click-lock', 'steer-prior-submission-target-unresolved']);
+  // The click went out and released its lock; the correction's answer was
+  // spent with it, so the next click on the control asks again.
+  await run('buy-2');
+  assert.deepEqual(cards.slice(2), ['steer-prior-submission-target-unresolved']);
+  assert.deepEqual(dispatched, ['ref_buy', 'ref_buy']);
 });
 
 // ── side panel ───────────────────────────────────────────────────────────

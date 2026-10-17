@@ -67,11 +67,14 @@ When a guard cannot verify a consequential step and its `onCannotDecide` is
   plain text, at most about 1,500 characters. That text is page content: the
   side panel renders it with `textContent` only, and it never reaches the
   model. When there is nothing to show, the card says to check the page.
-- **Answers.** Two fixed values, "Go ahead" (`once`) and "Don't" (`deny`). An
-  answer covers this one step and the content the user saw: changed content
-  is asked about again, and a declined step with the same content is not.
-  When the checks after a "Go ahead" reach another guard's question about the
-  same action, that card is asked in turn and the first answer stands.
+- **Answers.** Two fixed values, "Go ahead" (`once`) and "Don't" (`deny`). A
+  "Go ahead" covers one tool call and the content the user saw: every check
+  that call runs sees it, and it is spent when the call ends, sent or not, so
+  the next attempt (a repeated commit or post included) asks again. Changed
+  content is asked about again, and a declined step with the same content is
+  not. When the checks after a "Go ahead" reach another guard's question
+  about the same action, that card is asked in turn and the first answer
+  stands.
 - **Timeout.** A quality guard's card follows Settings → General: the clarify
   timeout (Off waits, Instant answers at once) and "When a question times
   out" (`finish` goes ahead, `safe` does not). A hard-class card never times

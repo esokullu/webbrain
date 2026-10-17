@@ -1141,6 +1141,7 @@ export class Agent extends LoopDetector {
     this.planReviewConfidenceThreshold = PLAN_REVIEW_CONFIDENCE_DEFAULT;
     this._pendingPlans = new Map(); // tabId → (planId → { resolve, ts })
     this._planExecutionGuards = new Map(); // tabId → current run's plan-only terminal recovery state
+    this._unverifiedStepScopes = new Map(); // tabId → { used: Set } 'once' answers the current tool call relies on
     this._continuationExecutionEvidence = new Map(); // tabId → app-owned evidence carried only by continueProcessing()
     this._continuationResponseLanguagePolicies = new Map(); // tabId -> trusted policy carried only by continueProcessing()
     // Stale click detection: per-tab last clicked element identity.
@@ -2969,7 +2970,8 @@ export class Agent extends LoopDetector {
   // and the commit asks again.
   async _refreshGithubUnverifiedEditorApproval(tabId, pageUrl) {
     const candidate = this._githubUnverifiedEditorCandidate(tabId, pageUrl);
-    const approval = candidate && this._unverifiedStepApproval(tabId, 'github-commit-evidence-binding', candidate.stepKey);
+    const approval = candidate && this._unverifiedStepApproval(tabId, 'github-commit-evidence-binding', candidate.stepKey,
+      { peek: true });
     if (!approval) return;
     let live = null;
     try { live = candidate.target ? await this._textMutationValueDigest(tabId, candidate.target) : null; } catch { live = null; }
@@ -3324,7 +3326,7 @@ export class Agent extends LoopDetector {
       // commits at all. When a commit click would be allowed now (the file
       // and message binding is in place, verified or approved by the user),
       // the user decides on WebBrain's card, which shows the editor's text.
-      // One answer covers this one action (_unverifiedStepApproval consume).
+      // One answer covers this one tool call (_unverifiedStepApproval).
       if (inconclusiveSubmitCapable
           && this._guardOutcome('github-commit-split-write-required', { decided: false }) === 'ask') {
         const pageUrl = await this._currentUrl(tabId);
@@ -6002,6 +6004,7 @@ export class Agent extends LoopDetector {
   }
 
   _releaseRunEntry(tabId) {
+    this._settleUnverifiedStepScope(tabId);
     const feedbackRun = this._pageFeedbackRuns?.get(tabId);
     if (feedbackRun?.monitoringRetry && !feedbackRun.monitoringRetry.started) {
       this._restoreFailureRecoveryStart(tabId, feedbackRun.monitoringRetry.requestId, feedbackRun.onUpdate, feedbackRun.monitoringRetry);
@@ -14776,6 +14779,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       }
       throw error;
     } finally {
+      this._settleUnverifiedStepScope(tabId);
       // Each child owns its nonce boundary and trusted notes. Never re-wrap.
       if (parentCalls.length) {
         const folded = foldBrowserBatchMessages(messages, { repairPending: true });
@@ -15034,6 +15038,8 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       }
       const callState = { index: toolIndex, invoked: false, consequential: false, result: null, dispatchState: null, guardAdvisories: [] };
       cancellationState.active = callState;
+      // The user's 'once' answers this call relies on are spent with it.
+      this._beginUnverifiedStepScope(tabId);
       // Abort check before each tool call.
       if (this._checkAbort(tabId)) {
         const value = '[Stopped by user before executing requested tool calls.]';
@@ -30331,33 +30337,59 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
   /**
    * The 'once' that covers this guard's step, or null. `contentSha256`, when
    * given, must be the content the user was shown. A guard whose own refresh
-   * found the content changed marks the answer stale; `consume` uses up a
-   * one-step answer, so the next such action is asked about again.
+   * found the content changed marks the answer stale. A 'once' covers one
+   * tool call: inside a call, every check it runs (again after another
+   * guard's card, too) sees the answer, and the answer is spent when the call
+   * ends, whether or not the step went out (_settleUnverifiedStepScope), so
+   * the next such action, a repeated commit or post included, is asked about
+   * again. Outside a call, `consume` spends it now. `peek` only looks.
    */
-  _unverifiedStepApproval(tabId, guardId, stepKey, { contentSha256 = null, consume = false } = {}) {
+  _unverifiedStepApproval(tabId, guardId, stepKey, { contentSha256 = null, consume = false, peek = false } = {}) {
     if (!stepKey) return null;
     const entry = this._unverifiedStepDecisions(tabId).findLast(item => item.guardId === guardId && item.stepKey === stepKey
       && (contentSha256 === null || item.contentSha256 === contentSha256));
     if (!entry || entry.choice !== 'once' || entry.stale === true || entry.consumed === true) return null;
-    if (consume) entry.consumed = true;
+    if (!peek) this._useUnverifiedStepApproval(tabId, entry, consume);
     return entry;
   }
 
+  _useUnverifiedStepApproval(tabId, entry, consume = false) {
+    const scope = this._unverifiedStepScopes.get(tabId);
+    if (scope) scope.used.add(entry);
+    else if (consume) entry.consumed = true;
+  }
+
+  // Each tool call of a batch is one scope for the user's 'once' answers:
+  // the answers it relied on are spent when the next call starts, when the
+  // batch ends, or when the run ends.
+  _beginUnverifiedStepScope(tabId) {
+    this._settleUnverifiedStepScope(tabId);
+    this._unverifiedStepScopes.set(tabId, { used: new Set() });
+  }
+
+  _settleUnverifiedStepScope(tabId) {
+    const scope = this._unverifiedStepScopes.get(tabId);
+    if (!scope) return;
+    this._unverifiedStepScopes.delete(tabId);
+    for (const entry of scope.used) entry.consumed = true;
+  }
+
   /**
-   * Use up the one-step 'once' for `ask` only while the page still shows the
+   * Use the one-step 'once' for `ask` only while the page still shows the
    * content the user saw on the card: the same target is read again now, and
    * its text must match the answer's digest and length. The user's latest
    * answer for the step decides; changed or unreadable content returns
-   * false, so the caller asks again with what the page holds now.
+   * false, so the caller asks again with what the page holds now. The answer
+   * is spent with the call that used it (_unverifiedStepApproval).
    */
   async _consumeContentBoundApproval(tabId, ask) {
-    const approval = this._unverifiedStepApproval(tabId, ask?.guardId, ask?.stepKey);
+    const approval = this._unverifiedStepApproval(tabId, ask?.guardId, ask?.stepKey, { peek: true });
     if (!approval) return false;
     const reading = await this._unverifiedStepReading(tabId, ask);
     if (!reading.readable || !approval.contentSha256 || reading.sha256 !== approval.contentSha256
         || reading.length !== approval.contentLength) return false;
     if (approval.consumed === true || approval.stale === true) return false;
-    approval.consumed = true;
+    this._useUnverifiedStepApproval(tabId, approval, true);
     return true;
   }
 
