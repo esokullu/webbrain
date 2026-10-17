@@ -437,6 +437,23 @@ for (const browser of ['chrome', 'firefox']) {
       `${index}: ${usages[index].prompt_tokens} tokens held for ${bytes(text)} bytes`));
     assert.equal(usages[0].completion_tokens, 10);
     assert.equal(agent._costHolds?.size || 0, 0);
+    // Every field a provider forwards counts, not only the content: a long
+    // model-supplied tool_call_id, a name, the tool calls themselves.
+    const id = 'call_' + '市'.repeat(2000);
+    const metadata = [
+      { role: 'assistant', content: null, tool_calls: [{ id, type: 'function', function: { name: 'click_ax', arguments: '{}' } }] },
+      { role: 'tool', tool_call_id: id, name: 'click_ax', content: 'ok' },
+    ];
+    assert.ok(agent._promptTokenUpperBound(metadata) >= 2 * bytes(id), 'the tool_call_id is held where it is sent');
+    // An image counts its allowance, never its data; the text beside it counts.
+    const data = 'data:image/png;base64,' + 'A'.repeat(200000);
+    const imageBlocks = agent._promptTokenUpperBound([{ role: 'user', content: [
+      { type: 'text', text: 'look' }, { type: 'image_url', image_url: { url: data } }] }]);
+    const imageInline = agent._promptTokenUpperBound([{ role: 'user', content: `look ${data}` }]);
+    for (const held of [imageBlocks, imageInline]) {
+      assert.ok(held >= 2 * Math.ceil(Agent.IMAGE_CHAR_COST / 4), `${held}: the image allowance`);
+      assert.ok(held < 200000, `${held}: the image data itself is not counted`);
+    }
   });
 
   test(`${browser}: a consequential click a card or the permission gate stops still records predispatch_timing`, async () => {
