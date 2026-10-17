@@ -86540,7 +86540,9 @@ test('submit detector source covers submit controls, Enter, set_field, iframes, 
     assert.match(agent, /const labelControlFor = \(el\) => \{[\s\S]*String\(el\.tagName \|\| ''\)\.toUpperCase\(\) !== 'LABEL'[\s\S]*el\.htmlFor[\s\S]*doc\.getElementById\(el\.htmlFor\)[\s\S]*button,input,textarea,select/, `${label}: submit probe should resolve labels to associated controls`);
     assert.match(agent, /const target = labelControlFor\(el\) \|\| el;[\s\S]*const candidate = target\.closest\?\.\('button,input,\[role="button"\],\[onclick\],\[data-action\]'\)/, `${label}: submit-control detection should inspect label-backed controls`);
     assert.match(agent, /const submitControlEvidence = \(el\) => \{/, `${label}: custom submit controls should classify preflight evidence strength`);
-    assert.match(agent, /if \(!form\) return socialPublishControlEvidence\(candidate\);/, `${label}: form-less social publish controls should still reach the submit probe`);
+    assert.match(agent, /if \(!form\) return linkedInSharePublishEvidence\(candidate\) \|\| socialPublishControlEvidence\(candidate\);/, `${label}: form-less social publish controls should still reach the submit probe`);
+    assert.match(agent, /const linkedInShareComposeFor = \(candidate\) => \{[\s\S]*\[data-sdui-screen\$="\.sharing\.ShareCompose"\]/, `${label}: the probe should recognize LinkedIn's share composer by its screen`);
+    assert.match(agent, /\|\| linkedInShareComposeFor\(candidate\)/, `${label}: LinkedIn's share composer should stand in for the missing form when summarizing the post`);
     assert.match(agent, /const socialPublishAdapterName = \(\) => \{[\s\S]*x\.com[\s\S]*twitter\.com[\s\S]*bsky\.app/, `${label}: the probe should recognize the X and Bluesky publish surfaces`);
     assert.match(agent, /\^tweetButton\(\?:Inline\)\?\$/, `${label}: the X Post control should be recognized by its app-owned test id`);
     assert.match(agent, /\^composerPublish\(\?:Btn\|Button\)\$/, `${label}: the Bluesky publish control should be recognized by its app-owned test id`);

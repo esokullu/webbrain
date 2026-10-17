@@ -28681,9 +28681,14 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       const publishWorkflowAuthorized = guard?.siteWorkflow?.adapterName === 'linkedin'
         && guard?.siteWorkflow?.job?.id === 'publish-post';
       // A public Post control is not a message send, but it is still a
-      // consequential action. Only the explicit LinkedIn publish workflow can
-      // bypass recipient dispatch binding for that control.
-      if (!linkedInPublicPost || publishWorkflowAuthorized) return null;
+      // consequential action. The explicit LinkedIn publish workflow
+      // authorizes it, and so does a plan that requires a submission without
+      // naming a private message to send: a task that started on another
+      // site has no LinkedIn workflow yet. The normal submission gates still
+      // apply to the post.
+      const planAuthorizesPublication = !!guard && guard.requiresSubmission === true
+        && guard.requiresStateChange === true && !target;
+      if (!linkedInPublicPost || publishWorkflowAuthorized || planAuthorizesPublication) return null;
       return {
         success: false,
         blocked: true,
@@ -28691,7 +28696,9 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
         dispatched: false,
         messageRecipientGuard: true,
         reasonCode: 'public_post_not_authorized',
-        error: 'LinkedIn Post blocked because this task authorizes a private message, not a public post.',
+        error: target
+          ? 'LinkedIn Post blocked because this task authorizes a private message, not a public post.'
+          : 'LinkedIn Post blocked because this task does not ask to publish anything, so nothing was posted. Do not post; report what is ready instead.',
       };
     }
     // Gmail reply editors can be collapsed when planning begins. Allow only a
@@ -30253,7 +30260,41 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
         ? { isSubmit: true, strong: publishTestId }
         : { isSubmit: false, strong: false };
     };
+    // LinkedIn's share composer is server-driven UI: its controls carry only
+    // generated class names, but the screen itself is marked
+    // (data-sdui-screen ending in ".sharing.ShareCompose") whatever the
+    // page's language. It counts only with one editor of its own and outside
+    // every messaging scope, as in the recipient guard.
+    const linkedInShareComposeFor = (candidate) => {
+      if (!/(?:^|\.)linkedin\.com$/.test(String(host || '').toLowerCase().replace(/\.$/, ''))
+          || !candidate || candidate.nodeType !== 1) return null;
+      try {
+        const screen = candidate.closest?.('[data-sdui-screen$=".sharing.ShareCompose"]');
+        if (!screen || !isVisible(screen)) return null;
+        const messaging = 'form,[role="log"],[data-message-id],[data-thread-id],[data-conversation-id],'
+          + '.msg-form,.msg-overlay-conversation-bubble,.msg-convo-wrapper,[class*="msg-"],[class*="messaging"],'
+          + '[id*="messaging"],[data-messaging],[data-test-messaging]';
+        if (candidate.closest?.(messaging) || screen.closest?.(messaging)) return null;
+        const editors = [...screen.querySelectorAll('[contenteditable="true"],textarea')].filter(isVisible);
+        return editors.length === 1 ? screen : null;
+      } catch {
+        return null;
+      }
+    };
+    // In that composer, a button whose captions a model read as publishing
+    // or committing ("Post", or "Gönder" in Turkish) publishes the post. A
+    // control that opens a menu or a picker (the audience selector reads
+    // "Post to Anyone") only edits the draft.
+    const linkedInSharePublishEvidence = (candidate) => {
+      if (!linkedInShareComposeFor(candidate)) return null;
+      if (String(candidate.tagName || '').toLowerCase() !== 'button'
+          || candidate.hasAttribute?.('aria-haspopup') || candidate.hasAttribute?.('aria-expanded')) return null;
+      return commitReading(captionsReading(controlCaptions(candidate))) ? { isSubmit: true, strong: true } : null;
+    };
     const socialPublicationControlFor = (root, el) => {
+      // LinkedIn's share composer: its post control publishes.
+      const shareTarget = labelControlFor(el) || el;
+      if (linkedInSharePublishEvidence(shareTarget?.closest?.('button,input,[role="button"],[onclick],[data-action]') || shareTarget)) return true;
       if (!socialPublishAdapterName() || !el) return undefined;
       const target = labelControlFor(el) || el;
       const control = target.closest?.('button,input,[role="button"],[onclick],[data-action]') || target;
@@ -30322,7 +30363,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       const hasActivationHandler = candidate.hasAttribute?.('onclick') || candidate.hasAttribute?.('data-action');
       const form = candidate.form || candidate.closest?.('form');
       if (!form && nativeConfirmationCommit(candidate)) return { isSubmit: true, strong: true };
-      if (!form) return socialPublishControlEvidence(candidate);
+      if (!form) return linkedInSharePublishEvidence(candidate) || socialPublishControlEvidence(candidate);
       const inlineHandler = String(candidate.getAttribute?.('onclick') || '');
       // A button-typed control submits its form only by script: a handler
       // that calls requestSubmit or submit, or a caption or action name a
@@ -30409,6 +30450,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       return candidate?.form
         || candidate?.closest?.('form')
         || socialPublishComposerFor(candidate)
+        || linkedInShareComposeFor(candidate)
         || null;
     };
     const isFormField = (el) => {

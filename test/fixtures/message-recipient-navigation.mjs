@@ -822,6 +822,86 @@ export function registerMessageRecipientNavigationFixtures({
       }
     });
 
+    // LinkedIn's server-driven share composer, as it renders today: only the
+    // screen carries a stable marker; its controls have generated classes
+    // and no data-control-name.
+    const composeShareScreen = (page, { postLabel = 'Post', editors = 1, scope = '' } = {}) => page.evaluate(
+      ({ postLabel, editors, scope }) => {
+        document.getElementById('share-dialog')?.remove();
+        const dialog = document.createElement('dialog');
+        dialog.id = 'share-dialog';
+        dialog.setAttribute('data-testid', 'dialog');
+        dialog.setAttribute('aria-labelledby', 'dialog-header');
+        dialog.innerHTML = `<div><div data-testid="dialog-content" ${scope}>
+            <div data-sdui-screen="com.linkedin.sdui.flagshipnav.sharing.ShareCompose">
+              <header id="dialog-header"><div id="audience" role="button" tabindex="0" aria-expanded="false">Post to Anyone</div></header>
+              ${'<div class="i0lme8" contenteditable="true" role="textbox">Announcement</div>'.repeat(editors)}
+              <button id="emoji" class="i0lmel" type="button" aria-label="Show Emoji Picker" aria-haspopup="dialog" aria-expanded="false">☺</button>
+              <button id="publish" class="i0lmel i0lmek" type="button" componentkey="e70cd7cc-0374-459c-b8c9-4c6b56099738"><span>${postLabel}</span></button>
+            </div></div></div>
+          <button id="dismiss" type="button" aria-label="Dismiss">×</button>`;
+        document.body.append(dialog);
+        dialog.showModal();
+        document.getElementById('chat').hidden = true;
+      }, { postLabel, editors, scope });
+
+    register(`${kind}: LinkedIn's server-driven share composer posts in any language, and its other controls only edit the draft`, async (page) => {
+      const { agent, guard, probe } = await setup(page);
+      await page.evaluate(() => history.replaceState({}, '', '/sharing/compose'));
+      const plan = (overrides = {}) => agent._startPlanExecutionGuard(1, 'act', {
+        requestKind: 'execute', requiresStateChange: true, requiresSubmission: true, ...overrides });
+      // The submit probe, run as the agent runs it: it decides the submit
+      // card, the submission receipt and the record of a possible post.
+      const submitProbe = (tool, args) => probeWithReadings((name, passArgs) => page.evaluate(({ source, tool, args }) =>
+        Function('return (' + source + ')')()(tool, args), { source: AgentClass._submitActionProbe.toString(), tool: name, args: passArgs }),
+      tool, args);
+      // The task started on another site: no LinkedIn workflow, and no
+      // private message named. Its plan requires the submission.
+      plan();
+      for (const postLabel of ['Post', 'Gönder']) {
+        await composeShareScreen(page, { postLabel });
+        const ref = await page.evaluate(() => window.__wb_ax_ref(document.querySelector('#publish span')));
+        for (const [tool, args] of [['click', { selector: '#publish' }], ['click', { text: postLabel }], ['click_ax', { ref_id: ref }]]) {
+          const observed = await probe(tool, args);
+          assert.equal(observed.publicPost, true, JSON.stringify({ postLabel, tool, args, observed }));
+          assert.equal(observed.messageSend, false);
+          assert.equal(await guard(tool, args), null, `${postLabel} ${tool}: the planned post goes through`);
+          const submit = await submitProbe(tool, args);
+          assert.equal(submit?.isSubmit, true, `${postLabel} ${tool}: the post is a submission ${JSON.stringify(submit)}`);
+          assert.equal(submit.publicationControl, true, `${postLabel} ${tool}: the post is a publication`);
+        }
+      }
+      // The draft's other controls are not sends, and not the post.
+      await composeShareScreen(page);
+      for (const selector of ['#emoji', '#audience', '[contenteditable="true"]']) {
+        const observed = await probe('click', { selector });
+        assert.equal(observed.conclusive, true, selector);
+        assert.equal(observed.messageSend, false, selector);
+        assert.notEqual(observed.publicPost, true, selector);
+        assert.equal(await guard('click', { selector }), null, selector);
+        assert.notEqual((await submitProbe('click', { selector }))?.publicationControl, true, selector);
+      }
+      // A task that names a private message to send, or asks for no
+      // submission at all, does not post.
+      plan({ messaging: { target_kind: 'named', recipients: [{ identity: 'Alice', role: 'to' }] } });
+      const messageTask = await guard('click', { selector: '#publish' });
+      assert.equal(messageTask?.reasonCode, 'public_post_not_authorized');
+      assert.match(messageTask.error, /authorizes a private message, not a public post/);
+      plan({ requiresSubmission: false, requiresStateChange: false });
+      const readTask = await guard('click', { selector: '#publish' });
+      assert.equal(readTask?.reasonCode, 'public_post_not_authorized');
+      assert.match(readTask.error, /does not ask to publish anything/);
+      // Without the screen's own evidence (a second editor, or a messaging
+      // scope around it), the composer keeps the old refusal.
+      plan();
+      for (const variant of [{ editors: 2 }, { scope: 'data-conversation-id="alice"' }]) {
+        await composeShareScreen(page, variant);
+        assert.equal((await guard('click', { selector: '#publish' }))?.noDispatch, true, JSON.stringify(variant));
+        assert.notEqual((await submitProbe('click', { selector: '#publish' }))?.publicationControl, true, JSON.stringify(variant));
+      }
+      await page.evaluate(() => document.getElementById('share-dialog')?.remove());
+    });
+
     register(`${kind}: LinkedIn post entry classification rejects send and publish lookalikes`, async (page) => {
       const { guard, probe } = await setup(page);
       await addPostEntry(page);

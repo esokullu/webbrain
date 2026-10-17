@@ -6938,6 +6938,31 @@
         } catch { return false; }
       };
 
+      // LinkedIn's current share composer is server-driven UI: its controls
+      // carry only generated class names and no data-control-name, but the
+      // screen itself is marked (data-sdui-screen ending in
+      // ".sharing.ShareCompose") whatever the page's language. Nothing in
+      // that screen sends a private message. It counts only with one editor
+      // of its own and outside every messaging scope.
+      const linkedInShareComposeScreen = (clicked) => {
+        if (params.adapterName !== 'linkedin') return null;
+        const screen = _composedClosestElement(clicked, '[data-sdui-screen$=".sharing.ShareCompose"]');
+        if (!screen || !visible(screen)) return null;
+        const messageScope = 'form,[role="log"],[data-message-id],[data-thread-id],[data-conversation-id],'
+          + '.msg-form,.msg-overlay-conversation-bubble,.msg-convo-wrapper';
+        // The messaging apps' own containers, as the composer check below
+        // reads them.
+        const messagingSurface = (el) => {
+          try {
+            return !!el?.closest?.('[class*="msg-"],[class*="messaging"],[id*="messaging"],[data-messaging],[data-test-messaging],[role="log"]');
+          } catch { return false; }
+        };
+        if (_composedClosestElement(clicked, messageScope) || _composedClosestElement(screen, messageScope)
+            || messagingSurface(clicked) || messagingSurface(screen)) return null;
+        const editors = Array.from(screen.querySelectorAll('[contenteditable="true"],textarea')).filter(visible);
+        return editors.length === 1 ? screen : null;
+      };
+
       const verifiedLinkedInPublicPostControl = (clicked) => {
         if (params.adapterName !== 'linkedin') return false;
         const button = _composedClosestElement(clicked, 'button,[role="button"]');
@@ -7300,6 +7325,29 @@
           // Public publication still goes through the normal submission gates;
           // a private-message recipient is irrelevant to this composer.
           return { success: true, messageSend: false, conclusive: true, publicPost: true, identityCandidates: [] };
+        }
+        if (linkedInShareComposeScreen(target)) {
+          // In the share composer, a control whose name, read in any
+          // language, says it publishes or sends ("Gönder" posts in Turkish)
+          // is its post action: a public post, which still goes through the
+          // normal submission gates. The editor and every other control
+          // (author, audience, emoji, media, schedule) only work on the
+          // draft. A name nobody has read yet is read first.
+          if (editable(target) || editable(control)) {
+            return { success: true, messageSend: false, conclusive: true, nonMessagingTarget: true,
+              reasonCode: 'non_messaging_target', identityCandidates: [] };
+          }
+          const shareReading = _messageControlReading(compact(
+            control.getAttribute?.('aria-label') || control.innerText || control.textContent, 120));
+          if (shareReading === null) {
+            return { success: true, messageSend: null, conclusive: false, composerAvailable: false,
+              reasonCode: 'message_control_unread', identityCandidates: [] };
+          }
+          if (shareReading === 'publish' || shareReading === 'send') {
+            return { success: true, messageSend: false, conclusive: true, publicPost: true, identityCandidates: [] };
+          }
+          return { success: true, messageSend: false, conclusive: true, nonMessagingTarget: true,
+            reasonCode: 'non_messaging_target', identityCandidates: [] };
         }
         const linkedInNavigation = classifyLinkedInNavigation(target, modal);
         if (linkedInNavigation === 'navigation') {
