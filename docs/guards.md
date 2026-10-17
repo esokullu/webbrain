@@ -43,8 +43,8 @@ the action is wrong (`onDecided`) and when it cannot tell (`onCannotDecide`):
     way, but it ends a batch: the next action is planned once the model has
     seen it.
   - A quality guard whose `onCannotDecide` is `ask` asks the user when it
-    cannot verify a consequential step, such as a commit or a post. Where
-    that guard has no card, it refuses.
+    cannot verify a consequential step, such as a commit or a post (see
+    "Asking instead of refusing"). Where that guard has no card, it refuses.
 - **Not guards.** These keep their behavior: the user's own permissions,
   modes and budgets (`permission_gate`); same-site, frame and task-authority
   boundaries, CAPTCHA and access walls, and a person acting in the same tab
@@ -56,6 +56,48 @@ the action is wrong (`onDecided`) and when it cannot tell (`onCannotDecide`):
   turns and the failure-only `done`.
 - **Unregistered ids** keep blocking, so a refusal that was never registered
   is not silently relaxed.
+
+## Asking instead of refusing
+
+When a guard cannot verify a consequential step and its `onCannotDecide` is
+`ask`, WebBrain asks the user on its own card instead of refusing.
+
+- **The card.** A question ("Commit this on github.com?"), why the step could
+  not be verified, and what the page shows now: the editor or composer text,
+  plain text, at most about 1,500 characters. That text is page content: the
+  side panel renders it with `textContent` only, and it never reaches the
+  model. When there is nothing to show, the card says to check the page.
+- **Answers.** Two fixed values, "Go ahead" (`once`) and "Don't" (`deny`). An
+  answer covers this one step and the content the user saw: changed content
+  is asked about again, and a declined step with the same content is not.
+- **Timeout.** A quality guard's card follows Settings → General: the clarify
+  timeout (Off waits, Instant answers at once) and "When a question times
+  out" (`finish` goes ahead, `safe` does not). A hard-class card never times
+  out and never goes ahead on its own, like the recipient and deletion cards.
+- **Unattended scheduled runs** cannot show a card: a quality guard follows
+  the timeout policy at once, a hard-class guard refuses.
+- **Authority.** A timeout, Instant or unattended answer is WebBrain's, not the
+  user's: it is never recorded as task authority or memory.
+- **Strict checks.** Quality guards keep their refusal and show no card.
+  Hard-class asks apply in both modes, because they replace a dead end with
+  the user's explicit decision.
+- **After `once`.** The tool result carries a note for the model. A commit or
+  post made this way is marked `publishesUnverifiedContent: true` on its submit
+  receipt; the checks after the submit (GitHub's committed raw-file check, the
+  published-post check) stay the authority.
+
+| Guard | Asks when | The card shows |
+|---|---|---|
+| `github-commit-evidence-binding` | The file editor was replaced but could not be read back exactly (CodeMirror), and path, branch and commit message bind | The editor's text |
+| `github-commit-split-write-required` | A script, Enter or `set_field` submit that may or may not commit, when a commit click would be allowed | The editor's text |
+| `social-publication-draft-quality` | The X/Bluesky draft's body or media does not read back as requested, or the composer could not be read, when the user asked to publish (the publication audit still runs) | The composer's text |
+| `steer-prior-submission-target-unresolved` | After a correction, a submit-capable control the probe could not identify | Nothing (check the page) |
+| `clickax-task-click-lock` (hard, Chrome) | An earlier trusted click on the same target may have landed and was never verified | Nothing (check the page) |
+
+Code: `_promptUnverifiedStepConfirmation` and `_resolveUnverifiedStepConfirmation`
+in `agent.js`, `agent/unverified-step.js` (shared by the agent, scheduler
+persistence and restored cards), and the `unverifiedStepConfirmation` branch
+of `renderClarifyCard` in `ui/sidepanel.js`. Tests: `test/guard-ask-cards.mjs`.
 
 ## What still refuses, and why
 

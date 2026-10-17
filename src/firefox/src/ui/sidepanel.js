@@ -10714,7 +10714,7 @@ function renderClarifyCard(data) {
   card.dataset.memorySource = scheduledJobId
     ? 'scheduled_clarification'
     : data.workflowHealing || data.pendingReconciliation === true || data.recipientConfirmation
-      || data.mutationConfirmation
+      || data.mutationConfirmation || data.unverifiedStepConfirmation
       ? ''
       : data.submitConfirmation
         ? 'form_confirmation'
@@ -10941,6 +10941,63 @@ function renderClarifyCard(data) {
     return;
   }
 
+  // Unverifiable step: one of WebBrain's checks could not verify a commit,
+  // publish or submit, so it asks instead of refusing. The text is what the
+  // page showed when WebBrain asked: page content, shown as text only
+  // (textContent, never markup). Fixed choices return stable values
+  // ('once'/'deny') with no free-text input, so nothing is parsed. A quality
+  // check's card counts down to the answer the user's timeout setting
+  // picks; a hard check's card has no countdown.
+  if (data.unverifiedStepConfirmation) {
+    card.dataset.unverifiedStepConfirmation = '1';
+    const step = data.unverifiedStepConfirmation || {};
+    const stepHost = String(step.host || '').slice(0, 300) || 'this site';
+    const stepAction = ['commit', 'submit', 'publish', 'click'].includes(step.action) ? step.action : 'submit';
+    qEl.textContent = t(`sp.unverified.question.${stepAction}`, { host: stepHost });
+    const stepReason = ['editor_unverified', 'draft_unverified', 'draft_unobserved',
+      'submit_unclear', 'target_unresolved', 'repeat_unverified'].includes(step.reason) ? step.reason : 'step_unverified';
+    const reasonEl = document.createElement('div');
+    reasonEl.className = 'clarify-reason';
+    reasonEl.textContent = t(`sp.unverified.reason.${stepReason}`);
+    card.appendChild(reasonEl);
+    const stepText = String(step.content || '').slice(0, 1501);
+    const stepLabel = ['editor', 'composer'].includes(step.contentLabel) ? step.contentLabel : 'page';
+    const labelEl = document.createElement('div');
+    labelEl.className = 'clarify-reason';
+    labelEl.textContent = stepText ? t(`sp.unverified.content.${stepLabel}`) : t('sp.unverified.check_page');
+    card.appendChild(labelEl);
+    if (stepText) {
+      const textEl = document.createElement('div');
+      textEl.className = 'clarify-subject clarify-content';
+      textEl.textContent = stepText;
+      card.appendChild(textEl);
+    }
+    const optionsEl = document.createElement('div');
+    optionsEl.className = 'clarify-options';
+    for (const [value, label] of [['once', t('sp.unverified.go_ahead')], ['deny', t('sp.unverified.dont')]]) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'clarify-option';
+      b.textContent = String(label).slice(0, 200);
+      b.dataset.value = value;
+      b.addEventListener('click', () => {
+        card.dataset.answerLabel = b.textContent;
+        submitClarify(card, tabId, clarifyId, value, 'option');
+      });
+      optionsEl.appendChild(b);
+    }
+    card.appendChild(optionsEl);
+    // The agent's timer decides; this countdown shows it and backs it up.
+    const stepTimeoutAnswer = ['once', 'deny'].includes(data.timeoutAnswer) ? data.timeoutAnswer : '';
+    if (step.hard !== true && stepTimeoutAnswer && data.timeoutSec > 0 && data.deadlineTs) {
+      card.dataset.firstOption = stepTimeoutAnswer;
+      startClarifyCountdown(card, { tabId, clarifyId, deadlineTs: Number(data.deadlineTs), firstOption: stepTimeoutAnswer });
+    }
+    content.appendChild(card);
+    scrollToBottom({ force: true });
+    return;
+  }
+
   // Permission-prompt mode: localized question + fixed choices that
   // return a stable VALUE ('once'/'always'/'deny'), and NO free-text input —
   // so there's nothing to parse and no English/locale dependency.
@@ -11114,13 +11171,15 @@ function startClarifyCountdown(card, { tabId, clarifyId, deadlineTs, firstOption
     // with no named option lets the run continue on its own.
     const timeoutAnswer = String(card.dataset.firstOption || firstOption || '');
     const continues = card.dataset.timeoutContinues === '1';
-    const named = !continues && Array.from(card.querySelectorAll('.clarify-option'))
-      .some(button => button.textContent === timeoutAnswer);
+    // A WebBrain card's buttons carry a stable value ('once'/'deny') under a
+    // localized label; the countdown names the label.
+    const namedButton = continues ? null : Array.from(card.querySelectorAll('.clarify-option'))
+      .find(button => button.textContent === timeoutAnswer || (!!button.dataset.value && button.dataset.value === timeoutAnswer));
     timerEl.textContent = typeof t === 'function'
       ? (continues
         ? t('sp.clarify.auto_timeout_continue', { seconds: remainingSec })
-        : named
-          ? t('sp.clarify.auto_timeout_answer', { answer: timeoutAnswer.slice(0, 80), seconds: remainingSec })
+        : namedButton
+          ? t('sp.clarify.auto_timeout_answer', { answer: namedButton.textContent.slice(0, 80), seconds: remainingSec })
           : t('sp.clarify.auto_timeout', { seconds: remainingSec }))
       : `Auto-selects in ${remainingSec}s`;
     if (remainingMs <= 0) {
@@ -11216,6 +11275,9 @@ function lockClarifyCardFromAuto(data) {
   for (const card of document.querySelectorAll('.clarify-card')) {
     if (String(card.dataset.clarifyId || '') !== clarifyId) continue;
     if (card.classList.contains('clarify-answered')) return;
+    // WebBrain's own cards never time out, except the unverified-step card
+    // of a quality check: it locks on the timeout's answer like a question.
+    const unverifiedStep = card.dataset.unverifiedStepConfirmation === '1';
     if (card.dataset.permission === '1' || card.dataset.submitConfirmation === '1'
       || card.dataset.recipientConfirmation === '1' || card.dataset.mutationConfirmation === '1') return;
     clearClarifyCountdown(card);
@@ -11228,9 +11290,13 @@ function lockClarifyCardFromAuto(data) {
     const prefix = source === 'auto'
       ? (typeof t === 'function' ? t('sp.clarify.auto_selected_instant') : 'Auto-selected (Instant):')
       : (typeof t === 'function' ? t('sp.clarify.auto_selected') : 'Auto-selected (timed out):');
+    // Its answer is a stable value; show the button's label.
+    const answerLabel = unverifiedStep
+      ? Array.from(card.querySelectorAll('.clarify-option')).find(button => button.dataset.value === answer)?.textContent || answer
+      : answer;
     answered.textContent = data?.continues === true || card.dataset.timeoutContinues === '1'
       ? (typeof t === 'function' ? t('sp.clarify.continued') : 'No reply — WebBrain continued the task')
-      : `${prefix} ${answer}`;
+      : `${prefix} ${answerLabel}`;
     card.appendChild(answered);
     placeAnsweredClarifyCardInTimeline(card);
     scrollToBottom();
@@ -11590,9 +11656,16 @@ function submitClarify(card, tabId, clarifyId, answer, source) {
     } else {
       prefix = typeof t === 'function' ? t('sp.clarify.your_answer') : 'Your answer:';
     }
+    // A WebBrain card sends a stable value; its backup timeout submit has no
+    // clicked label, so the unverified-step card names the matching button.
+    const answerLabel = card.dataset.answerLabel
+      || (card.dataset.unverifiedStepConfirmation === '1'
+        ? Array.from(card.querySelectorAll('.clarify-option')).find(button => button.dataset.value === answer)?.textContent
+        : '')
+      || answer;
     answered.textContent = source === 'timeout' && card.dataset.timeoutContinues === '1'
       ? (typeof t === 'function' ? t('sp.clarify.continued') : 'No reply — WebBrain continued the task')
-      : `${prefix} ${card.dataset.answerLabel || answer}`;
+      : `${prefix} ${answerLabel}`;
     card.appendChild(answered);
     placeAnsweredClarifyCardInTimeline(card);
     scrollToBottom();

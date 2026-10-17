@@ -9551,6 +9551,10 @@
           if ((el.isContentEditable && el.classList?.contains('cm-content') && readCodeMirrorText(el) === null))
             return { success: false, verified: false, error: 'The CodeMirror editor shows only part of its document (a viewport gap or folded text), so its exact text cannot be read.' };
           const value = String(el.isContentEditable ? _editableTextValue(el) : (el.value || ''));
+          // The start of the same text the digest hashes, for WebBrain's own
+          // "go ahead?" card about an unverified field (shown as plain text).
+          const previewChars = Number.isInteger(msg.params?.preview) && msg.params.preview > 0
+            ? Math.min(msg.params.preview, 4000) : 0;
           if (!globalThis.crypto?.subtle) return { success: false, error: 'SHA-256 is unavailable' };
           const digest = await globalThis.crypto.subtle.digest('SHA-256', new TextEncoder().encode(value));
           const valueSha256 = [...new Uint8Array(digest)]
@@ -9570,6 +9574,7 @@
             readbackExact: reader !== 'rendered',
             fieldMeta: _fieldMeta(el),
             stableSelector: _stableFieldSelector(el),
+            ...(previewChars ? { valuePreview: value.slice(0, previewChars) } : {}),
           };
         } catch (error) {
           if (error?.code === 'page_feedback_pending') throw error;

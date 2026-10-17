@@ -4201,6 +4201,12 @@ html[dir="rtl"] .composer-toolbar .provider-picker-menu {
   overflow-wrap: anywhere;
 }
 
+/* What the page shows on WebBrain's "go ahead?" card about a step it could
+   not verify (a file editor or a post draft): longer than a list item. */
+.clarify-subject.clarify-content {
+  max-height: 220px;
+}
+
 .clarify-research-request {
   max-height: 180px;
   overflow: auto;
