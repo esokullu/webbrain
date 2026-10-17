@@ -20868,10 +20868,11 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
 
   _invalidateSocialPublicationContract(guard) {
     // A contract compiled in the background before a correction is never
-    // installed after it, so its request is cancelled too.
-    this._socialPublicationContractPrefetches?.get(guard)?.abort?.controller.abort();
-    this._socialPublicationContractPrefetches?.delete(guard);
+    // installed after it, so its request is cancelled too, and so is a
+    // background audit against the contract the correction replaces.
+    this._dropSocialPublicationContractPrefetch(guard);
     const social = guard.socialPublication;
+    this._dropSocialPublicationAuditPrefetch(social);
     if (!social) return;
     social.needsRecompile = true;
     // Never erase an attempted publication's outcomes to obtain a fresh set
@@ -21054,22 +21055,24 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
         // Checked again: the sources may have changed while it ran.
         return this._ensureSocialPublicationContract(tabId, provider, { background, wait, binding });
       }
-      prefetches.delete(guard);
-      if (prefetch.compiled && !this._checkAbort(tabId) && !this._hasPendingSteering(tabId)) {
+      // An audit of the compiled state stays only when that state is
+      // installed as the run's own.
+      const install = !!prefetch.compiled && !this._checkAbort(tabId) && !this._hasPendingSteering(tabId);
+      this._dropSocialPublicationContractPrefetch(guard, prefetch, { keepAudit: install });
+      if (install) {
         guard.socialPublication = prefetch.compiled;
         return prefetch.compiled;
       }
     } else if (prefetch && !background) {
       // A background compile of another input is never installed: cancel it.
-      prefetch.abort?.controller.abort();
-      prefetches.delete(guard);
+      this._dropSocialPublicationContractPrefetch(guard, prefetch);
     }
     const state = { key, sources, context, contract: null, outcomes: {}, actionId: null, dispatch: null, error: '' };
     if (background) {
       if (!provider?.chat || JSON.stringify(sources).length > 120000) return null;
-      // A background compile of another input still running can never be
-      // installed: cancel its request before this one starts.
-      if (prefetch && !prefetch.settled) prefetch.abort?.controller.abort();
+      // A background compile of another input can never be installed:
+      // cancel its request (and an audit of what it compiled) first.
+      if (prefetch) this._dropSocialPublicationContractPrefetch(guard, prefetch);
       const abort = this._socialPublicationBackgroundAbort(binding);
       const call = this._socialPublicationBackgroundCall(tabId, guard, binding, abort);
       const entry = { previous, state, settled: false, compiled: null, done: null, abort };
@@ -21079,7 +21082,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
         .then(compiled => {
           entry.settled = true;
           entry.compiled = abort.signal.aborted ? null : (compiled || null);
-          if (!entry.compiled && prefetches.get(guard) === entry) prefetches.delete(guard);
+          if (!entry.compiled) this._dropSocialPublicationContractPrefetch(guard, entry);
           return entry.compiled;
         });
       return entry.done;
@@ -21608,7 +21611,10 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       awaited = true;
       await running.done;
     }
-    if (running && audits.get(social) === running) audits.delete(social);
+    // An audit of another draft (the user edited it or switched accounts
+    // since the last write) can no longer be used: cancel its request before
+    // this click runs its own audit.
+    if (running) this._dropSocialPublicationAuditPrefetch(social, running);
     const stored = social.prefetchedAudit?.key === key ? social.prefetchedAudit : null;
     delete social.prefetchedAudit;
     if (!stored) return null;
@@ -21752,10 +21758,10 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     // neither spends tokens nor holds a serialized provider queue ahead of
     // this one.
     if (running?.key === key && running.runSignal === binding.signal && !running.abort.signal.aborted) return running.done;
-    running?.abort.controller.abort();
+    if (running) this._dropSocialPublicationAuditPrefetch(social, running);
     const abort = this._socialPublicationBackgroundAbort(binding);
     const call = this._socialPublicationBackgroundCall(tabId, guard, binding, abort);
-    const entry = { key, done: null, abort, runSignal: binding.signal };
+    const entry = { key, done: null, abort, runSignal: binding.signal, settled: false };
     audits.set(social, entry);
     entry.done = this._socialPublicationBackgroundSettle(abort, (async () => {
       try {
@@ -21776,8 +21782,33 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       } finally {
         if (audits.get(social) === entry) audits.delete(social);
       }
-    })(), 'changed');
+    })(), 'changed').finally(() => { entry.settled = true; });
     return entry.done;
+  }
+
+  // Drops the background audit kept for `social` (only `entry`, when given).
+  // A request still running is cancelled first, so it neither spends the
+  // run's allowance nor holds a serialized provider queue ahead of the
+  // click's own audit. A settled one only leaves the map.
+  _dropSocialPublicationAuditPrefetch(social, entry = null) {
+    const audits = this._socialPublicationAuditPrefetches;
+    const kept = social ? audits?.get(social) : null;
+    if (!kept || (entry && kept !== entry)) return;
+    audits.delete(social);
+    if (!kept.settled && !kept.abort.signal.aborted) kept.abort.controller.abort();
+  }
+
+  // Drops the background contract compile kept for `guard` (only `entry`,
+  // when given), cancelling it while it runs. An audit of the state it
+  // compiled is dropped with it, unless that state is being installed as the
+  // run's own (`keepAudit`).
+  _dropSocialPublicationContractPrefetch(guard, entry = null, { keepAudit = false } = {}) {
+    const prefetches = this._socialPublicationContractPrefetches;
+    const kept = guard ? prefetches?.get(guard) : null;
+    if (!kept || (entry && kept !== entry)) return;
+    prefetches.delete(guard);
+    if (!kept.settled && !kept.abort?.signal.aborted) kept.abort?.controller.abort();
+    if (!keepAudit && kept.compiled) this._dropSocialPublicationAuditPrefetch(kept.compiled);
   }
 
   // A background publication check's own abort: the Stop of the run that

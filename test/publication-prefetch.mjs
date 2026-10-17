@@ -421,6 +421,92 @@ for (const browser of ['chrome', 'firefox']) {
     assert.equal(again.named('social_publication_authorization').length, 1, 'one audit for the same draft');
   });
 
+  test(`${browser}: a click on a draft changed without a new write cancels the old background audit before its own`, async () => {
+    for (const change of ['draft', 'account']) {
+      // A composed body lets the changed draft pass the click's preflight, so
+      // only the binding key tells it apart from the draft being audited.
+      let abortedWhenOwnAuditRan = null;
+      const f = setup({ request: 'Tweet about my blog post',
+        contract: rawContract([rawAction('p1', 'twitter', 'about my blog post', 'compose')]),
+        authorize: input => {
+          if (f.stale && input.key !== f.stale.key) abortedWhenOwnAuditRan = f.stale.aborted;
+          return true;
+        } });
+      const audit = f.hold('social_publication_authorization');
+      const prefetch = f.write();
+      await until(() => audit.started, `${change}: the background audit started`);
+      [f.stale] = f.named('social_publication_authorization');
+      // The composer changes without another write (the user edited the draft
+      // or switched accounts), so no newer prefetch supersedes the audit.
+      if (change === 'draft') f.detected.publicationSnapshot.posts[0].bodyText = 'A different post about the blog';
+      if (change === 'account') f.detected.publicationSnapshot.account = 'twitter:bob';
+      let result;
+      try {
+        result = await within(f.click(), `${change}: the click runs its own audit`);
+      } finally {
+        audit.release();
+      }
+      assert.equal(result, null, change);
+      assert.equal(abortedWhenOwnAuditRan, true, `${change}: the stale request was cancelled before the click audited`);
+      assert.equal(f.stale.aborted, true, change);
+      assert.equal(await within(prefetch, `${change}: the dropped prefetch settles`), 'changed', change);
+      const audits = f.named('social_publication_authorization');
+      assert.equal(audits.length, 2, `${change}: the cancelled audit and the click's own`);
+      assert.notEqual(audits[1].key, f.stale.key, change);
+      assert.equal(f.guard.socialPublication.dispatch.key, audits[1].key, `${change}: the click bound the draft it probed`);
+      assert.equal(f.guard.socialPublication.prefetchedAudit, undefined, `${change}: no stale verdict was stored`);
+    }
+    // A correction replaces the contract the audit checks against: the audit
+    // is cancelled with the background compile that produced that contract.
+    const corrected = setup();
+    const held = corrected.hold('social_publication_authorization');
+    const prefetch = corrected.write();
+    await until(() => held.started, 'the background audit started');
+    const [stale] = corrected.named('social_publication_authorization');
+    try {
+      corrected.applySteering('Actually post Goodbye instead');
+      assert.equal(stale.aborted, true, 'the correction cancelled the audit request');
+      assert.equal(await within(prefetch, 'the corrected prefetch settles'), 'changed');
+    } finally {
+      held.release();
+    }
+    // So does a clarification, when the audit checks the run's own contract.
+    const bound = setup();
+    bound.guard.siteWorkflow = resolveAdapterWorkflowJob('https://x.com/compose/post', 'publish-post');
+    bound.guard.siteWorkflowUrl = 'https://x.com/compose/post';
+    const installed = await bound.agent._ensureSocialPublicationContract(bound.tabId, bound.provider);
+    const boundHeld = bound.hold('social_publication_authorization');
+    const boundPrefetch = bound.write();
+    await until(() => boundHeld.started, 'the background audit of the run\'s contract started');
+    const [boundStale] = bound.named('social_publication_authorization');
+    try {
+      bound.agent._recordSocialPublicationClarification(bound.tabId, bound.guard, 'Which account?', 'alice', 'user');
+      assert.equal(installed.needsRecompile, true);
+      assert.equal(boundStale.aborted, true, 'the clarification cancelled the audit of the replaced contract');
+      assert.equal(await within(boundPrefetch, 'the prefetch settles'), 'changed');
+    } finally {
+      boundHeld.release();
+    }
+    // A click whose sources differ from a settled background compile drops it
+    // and compiles its own: an audit still running against the dropped
+    // contract is cancelled with it.
+    const g = setup();
+    const audit = g.hold('social_publication_authorization');
+    const background = g.write();
+    await until(() => audit.started, 'the background audit of the prefetched contract started');
+    const [orphan] = g.named('social_publication_authorization');
+    assert.ok(g.pending()?.compiled, 'the background compile settled');
+    g.agent.conversations.get(g.tabId).push({ role: 'assistant', content: 'Draft: Hello' });
+    try {
+      assert.equal(await within(g.click(), 'the click compiles and audits its own'), null);
+      assert.equal(orphan.aborted, true, 'the audit of the dropped contract was cancelled');
+      assert.equal(await within(background, 'the dropped prefetch settles'), 'changed');
+    } finally {
+      audit.release();
+    }
+    assert.equal(g.guard.socialPublication.sources.draft0, 'Draft: Hello');
+  });
+
   test(`${browser}: a correction or a compile of other sources cancels a background compile in flight`, async () => {
     const f = setup();
     const contract = f.hold('social_publication_contract');
