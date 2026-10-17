@@ -24684,7 +24684,8 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       const hint = name === 'upload_file' ? hints.get(guard) || null : this._socialPublicationPrefetchHint(name, args);
       if (!hint) return null;
       hints.set(guard, hint);
-      return this._socialPublicationPrefetchRun(tabId, guard, provider, hint).catch(() => null);
+      return this._trackSocialPublicationBackgroundRun(tabId,
+        this._socialPublicationPrefetchRun(tabId, guard, provider, hint).catch(() => null));
     } catch {
       return null;
     }
@@ -24704,7 +24705,8 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
           || (social && (this._socialPublicationCompiles?.get(social)
             || !social.needsRecompile || Object.keys(social.outcomes || {}).length))
           || (pending && pending.previous === social)) return null;
-      return this._socialPublicationPrefetchRun(tabId, guard, provider, hint, { contractOnly: true }).catch(() => null);
+      return this._trackSocialPublicationBackgroundRun(tabId,
+        this._socialPublicationPrefetchRun(tabId, guard, provider, hint, { contractOnly: true }).catch(() => null));
     } catch {
       return null;
     }
@@ -24887,6 +24889,37 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     };
     open?.get(tabId).add(abort);
     return abort;
+  }
+
+  // A background prefetch kept per tab until it settles, so its run can wait
+  // for it before closing the trace (_settleSocialPublicationBackground).
+  _trackSocialPublicationBackgroundRun(tabId, run) {
+    const runs = (this._socialPublicationBackgroundRuns ||= new Map());
+    let open = runs.get(tabId);
+    if (!open) runs.set(tabId, (open = new Set()));
+    open.add(run);
+    run.finally(() => {
+      open.delete(run);
+      if (!open.size && runs.get(tabId) === open) runs.delete(tabId);
+    });
+    return run;
+  }
+
+  // Before a run's trace closes: its background publication checks are
+  // cancelled and briefly awaited, so a request that answers late is not
+  // counted after the run's totals, and each check's last note lands before
+  // the trace ends. A check that does not settle in time is cancelled anyway
+  // and records nothing more that matters to this run.
+  async _settleSocialPublicationBackground(tabId, timeoutMs = 2000) {
+    this._cancelSocialPublicationBackground(tabId);
+    const open = this._socialPublicationBackgroundRuns?.get(tabId);
+    if (!open?.size) return;
+    let timer = null;
+    await Promise.race([
+      Promise.allSettled([...open]),
+      new Promise(resolve => { timer = setTimeout(resolve, timeoutMs); }),
+    ]);
+    clearTimeout(timer);
   }
 
   // The run on `tabId` ended, however it ended: the background publication
@@ -25184,6 +25217,8 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
    * Shared by the streaming and non-streaming message paths. (#9)
    */
   async _endTraceRun(tabId, runId, status, finalContent, { provider = null, messages = null, mode = '', shareRequest = null, shareResponse = null, hadProviderCompletion = false } = {}) {
+    // The run's background checks end before its trace and diagnostics do.
+    await this._settleSocialPublicationBackground(tabId);
     if (String(provider?.config?.providerName || '').toLowerCase() === 'webbrain-cloud') {
       try {
         const sessionId = this.conversationIds.get(tabId) || null;

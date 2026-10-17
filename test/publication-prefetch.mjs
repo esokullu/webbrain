@@ -651,6 +651,28 @@ for (const browser of ['chrome', 'firefox']) {
     }
   });
 
+  test(`${browser}: a run's background checks end before its trace closes`, async () => {
+    for (const stage of ['social_publication_contract', 'social_publication_authorization']) {
+      const f = setup();
+      const { agent, tabId } = f;
+      agent._runAbortStates.set(tabId, { controller: new AbortController(), dispose() {} });
+      const held = f.hold(stage);
+      let settled = false;
+      const prefetch = f.write().then(status => { settled = true; return status; });
+      await until(() => held.started, `${stage}: the background check started`);
+      const [request] = f.named(stage);
+      // _endTraceRun flushes its last records right before trace.endRun.
+      let atTraceEnd = null;
+      agent._flushAdapterMatchTraceRun = async () => { atTraceEnd = { aborted: request.aborted, settled }; };
+      await within(agent._endTraceRun(tabId, 'run-A', 'done', 'Posted.'), `${stage}: the trace closes`);
+      assert.deepEqual(atTraceEnd, { aborted: true, settled: true },
+        `${stage}: the check was still running when its run's trace closed`);
+      held.release();
+      assert.notEqual(await prefetch, 'authorized', stage);
+      assert.equal(agent._socialPublicationBackgroundRuns?.get(tabId)?.size || 0, 0, `${stage}: nothing is left running`);
+    }
+  });
+
   test(`${browser}: a prefetch that reaches the draft the click is auditing defers to the click`, async () => {
     const f = setup();
     // The click compiles the contract and audits the draft itself; its audit
