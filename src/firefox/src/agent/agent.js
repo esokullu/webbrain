@@ -27536,9 +27536,11 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
    * the same page. Returns null when the action may proceed (its note for
    * the model goes into `advisories`), otherwise the result for the model.
    * With no card to show (no update channel), or nothing to show where the
-   * guard requires it, the guard's refusal stands as before.
+   * guard requires it, the guard's refusal stands as before. When the re-run
+   * reaches another guard's question about the same action, that card is
+   * asked in turn (`depth` bounds the chain) and the first answer stands.
    */
-  async _resolveUnverifiedStepConfirmation(tabId, block, onUpdate, rerunChecks, advisories = null) {
+  async _resolveUnverifiedStepConfirmation(tabId, block, onUpdate, rerunChecks, advisories = null, depth = 0) {
     const ask = block?.unverifiedStepConfirmation;
     if (!ask || typeof ask !== 'object') return block;
     const { unverifiedStepConfirmation: _ask, ...refusal } = block;
@@ -27564,7 +27566,21 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     const decision = this._rememberUnverifiedStepDecision(tabId, ask, reading, choice, receipt.source);
     if (choice !== 'once') return this._unverifiedStepDeclined(refusal, ask.guardId, receipt.source);
     const next = await rerunChecks();
-    if (next?.unverifiedStepConfirmation) {
+    const nextAsk = next?.unverifiedStepConfirmation;
+    if (nextAsk && nextAsk.guardId !== ask.guardId && depth < 3) {
+      // The answer was accepted, and another guard asks about the same
+      // action (a GitHub commit click can also meet the repeat-click lock):
+      // ask that card too. The first answer stays recorded either way.
+      const nextAdvisories = [];
+      const resolved = await this._resolveUnverifiedStepConfirmation(tabId, next, onUpdate, rerunChecks,
+        nextAdvisories, depth + 1);
+      if (resolved) return resolved;
+      if (Array.isArray(advisories)) {
+        advisories.push(guardAdvisory(ask.guardId, this._unverifiedStepNote(ask.guardId, receipt.source)), ...nextAdvisories);
+      }
+      return null;
+    }
+    if (nextAsk) {
       // The re-run did not accept the answer: what the page shows changed.
       if (decision) decision.stale = true;
       const { unverifiedStepConfirmation: _changed, ...changed } = next;

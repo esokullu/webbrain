@@ -703,6 +703,50 @@ for (const { build, Agent, adapters, Scheduler } of builds) {
     for (const f of [media, both, partial]) assert.equal(f.audits.length, 0, 'nothing reached the publication audit');
   });
 
+  // ── a second guard after an approval ───────────────────────────────────
+  test(`${build}: a second guard's card after an approval is asked in turn, and the first answer stands`, async () => {
+    const setupTab = () => {
+      const agent = new Agent({});
+      const tab = nextTab++;
+      agent._persist = () => {};
+      agent.clarifyTimeoutSec = 30;
+      agent.conversations.set(tab, [{ role: 'system', content: 'system' }, { role: 'user', content: 'Post Hello on X' }]);
+      agent._startPlanExecutionGuard(tab, 'act', { requestKind: 'execute', requiresStateChange: true, requiresSubmission: true });
+      return { agent, tab };
+    };
+    const refusal = { success: false, dispatched: false, noDispatch: true, error: 'refused' };
+    const draftAsk = { guardId: 'social-publication-draft-quality', hard: false, action: 'publish', reason: 'draft_unverified',
+      host: 'x.com', contentLabel: 'composer', text: 'Helo', stepKey: 'draft-step' };
+    const targetAsk = { guardId: 'steer-prior-submission-target-unresolved', hard: false, action: 'click',
+      reason: 'target_unresolved', host: 'x.com', contentLabel: 'page', stepKey: 'steer-step' };
+    const answerOnce = (agent, tab, cards) => (type, data) => {
+      if (type !== 'clarify') return;
+      cards.push(data.unverifiedStepConfirmation.guardId);
+      agent.submitClarifyResponse(tab, data.clarifyId, 'once', 'option');
+    };
+    // Another guard asks about the same action after the first answer.
+    const { agent, tab } = setupTab();
+    let reruns = 0;
+    const cards = [];
+    const advisories = [];
+    const resolved = await agent._resolveUnverifiedStepConfirmation(tab, { ...refusal, unverifiedStepConfirmation: draftAsk },
+      answerOnce(agent, tab, cards), async () => (++reruns === 1 ? { ...refusal, unverifiedStepConfirmation: targetAsk } : null), advisories);
+    assert.equal(resolved, null, `${build}: both answers let the action go ahead`);
+    assert.deepEqual(cards, [draftAsk.guardId, targetAsk.guardId], `${build}: each guard asked its own card`);
+    assert.deepEqual(advisories.map(item => item.guard), [draftAsk.guardId, targetAsk.guardId]);
+    assert.notEqual(agent._unverifiedStepDecisions(tab).find(entry => entry.guardId === draftAsk.guardId)?.stale, true,
+      `${build}: the first answer is not stale`);
+    // The same guard asking again for another step still means the page changed.
+    const same = setupTab();
+    const sameCards = [];
+    const changed = await same.agent._resolveUnverifiedStepConfirmation(same.tab, { ...refusal, unverifiedStepConfirmation: draftAsk },
+      answerOnce(same.agent, same.tab, sameCards), async () => ({ ...refusal, unverifiedStepConfirmation: { ...draftAsk, stepKey: 'other-step' } }), []);
+    assert.deepEqual(sameCards, [draftAsk.guardId], `${build}: the changed step is not asked in the same breath`);
+    assert.match(changed.error, /What the page shows changed/);
+    assert.equal(changed.unverifiedStepConfirmation, undefined);
+    assert.equal(same.agent._unverifiedStepDecisions(same.tab).find(entry => entry.guardId === draftAsk.guardId)?.stale, true);
+  });
+
   // ── steer-prior-submission-target-unresolved ───────────────────────────
   test(`${build}: after a correction, an unidentified control asks instead of refusing`, async () => {
     for (const strict of [false, true]) {
