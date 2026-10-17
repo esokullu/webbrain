@@ -1497,6 +1497,7 @@ Key points:
 - No additional auth: the agent IS the user's browser session
 - Ask is read-only; Act and Dev are action modes. Dev adds source/style/page-debugging tools and is blocked for Compact-tier providers.
 - Plan before Act can require human approval before any action-mode tool call
+- An unanswered `clarify` question follows Settings → General → "When a question times out": finish the task (default) or play it safe. Questions about deletion, money, credentials, the recipient, or an unrequested publication always time out to the safe answer (see `docs/security-model.md`).
 - The persistent **Always allow API mutations** setting (on by default) or the conversation's `/allow-api` override waives permission prompts for write-method `fetch_url` / `research_url` calls
 - Tool results capped at 8 KB to limit prompt-injection surface
 - `strictSecretMode` instructs the model not to quote credentials in summaries, redacts known credential values (including short numeric PIN/CVV values) out of everything a cloud run publishes, and fails closed to scalar redaction if its bounded secret registry fills

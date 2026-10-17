@@ -11536,8 +11536,12 @@ function renderClarifyCard(data) {
   card.appendChild(row);
 
   // Countdown for auto-select (agent is authoritative; UI is display + backup).
-  const firstOption = options[0] || '(no response — timed out)';
+  // The agent says which answer the user's timeout setting picks.
+  const firstOption = typeof data.timeoutAnswer === 'string' && data.timeoutAnswer
+    ? data.timeoutAnswer
+    : (options[0] || '(no response — timed out)');
   if (firstOption) card.dataset.firstOption = String(firstOption).slice(0, 200);
+  if (data.timeoutContinues === true) card.dataset.timeoutContinues = '1';
   if (data.timeoutSec > 0 && data.deadlineTs) {
     startClarifyCountdown(card, {
       tabId,
@@ -11587,8 +11591,18 @@ function startClarifyCountdown(card, { tabId, clarifyId, deadlineTs, firstOption
     const activeDeadlineTs = Number(card.dataset.deadlineTs) || deadlineTs;
     const remainingMs = Math.max(0, activeDeadlineTs - Date.now());
     const remainingSec = Math.ceil(remainingMs / 1000);
+    // Name the answer when it is one of the buttons; a 'finish' timeout
+    // with no named option lets the run continue on its own.
+    const timeoutAnswer = String(card.dataset.firstOption || firstOption || '');
+    const continues = card.dataset.timeoutContinues === '1';
+    const named = !continues && Array.from(card.querySelectorAll('.clarify-option'))
+      .some(button => button.textContent === timeoutAnswer);
     timerEl.textContent = typeof t === 'function'
-      ? t('sp.clarify.auto_timeout', { seconds: remainingSec })
+      ? (continues
+        ? t('sp.clarify.auto_timeout_continue', { seconds: remainingSec })
+        : named
+          ? t('sp.clarify.auto_timeout_answer', { answer: timeoutAnswer.slice(0, 80), seconds: remainingSec })
+          : t('sp.clarify.auto_timeout', { seconds: remainingSec }))
       : `Auto-selects in ${remainingSec}s`;
     if (remainingMs <= 0) {
       clearClarifyCountdown(card);
@@ -11691,7 +11705,9 @@ function lockClarifyCardFromAuto(data) {
     const prefix = source === 'auto'
       ? (typeof t === 'function' ? t('sp.clarify.auto_selected_instant') : 'Auto-selected (Instant):')
       : (typeof t === 'function' ? t('sp.clarify.auto_selected') : 'Auto-selected (timed out):');
-    answered.textContent = `${prefix} ${answer}`;
+    answered.textContent = data?.continues === true || card.dataset.timeoutContinues === '1'
+      ? (typeof t === 'function' ? t('sp.clarify.continued') : 'No reply — WebBrain continued the task')
+      : `${prefix} ${answer}`;
     card.appendChild(answered);
     placeAnsweredClarifyCardInTimeline(card);
     scrollToBottom();
@@ -11920,7 +11936,9 @@ function submitClarify(card, tabId, clarifyId, answer, source) {
     } else {
       prefix = typeof t === 'function' ? t('sp.clarify.your_answer') : 'Your answer:';
     }
-    answered.textContent = `${prefix} ${card.dataset.answerLabel || answer}`;
+    answered.textContent = source === 'timeout' && card.dataset.timeoutContinues === '1'
+      ? (typeof t === 'function' ? t('sp.clarify.continued') : 'No reply — WebBrain continued the task')
+      : `${prefix} ${card.dataset.answerLabel || answer}`;
     card.appendChild(answered);
     placeAnsweredClarifyCardInTimeline(card);
     scrollToBottom();

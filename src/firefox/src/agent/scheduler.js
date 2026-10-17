@@ -111,6 +111,12 @@ function normalizePendingClarify(data, now = Date.now()) {
   if (Number.isFinite(deadlineTs) && deadlineTs > 0) {
     pending.deadlineTs = Math.floor(deadlineTs);
   }
+  // The answer the user's timeout setting picks, so a restored card counts
+  // down to (and backs up) the same answer the agent will apply.
+  if (typeof obj.timeoutAnswer === 'string' && obj.timeoutAnswer) {
+    pending.timeoutAnswer = obj.timeoutAnswer.slice(0, 200);
+  }
+  if (obj.timeoutContinues === true) pending.timeoutContinues = true;
   const permission = asObject(obj.permission);
   if (permission.capability || permission.host) {
     pending.permission = {

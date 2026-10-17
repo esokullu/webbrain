@@ -116,6 +116,7 @@ const requestTimeoutRange = document.getElementById('range-request-timeout');
 const requestTimeoutValueLabel = document.getElementById('timeout-value');
 const clarifyTimeoutRange = document.getElementById('range-clarify-timeout');
 const clarifyTimeoutValueLabel = document.getElementById('clarify-timeout-value');
+const clarifyTimeoutPolicySelect = document.getElementById('select-clarify-timeout-policy');
 const costSessionLimitInput = document.getElementById('input-cost-session-limit');
 const costTotalLimitInput = document.getElementById('input-cost-total-limit');
 const costSpentValueLabel = document.getElementById('cost-spent-value');
@@ -630,7 +631,7 @@ async function init() {
   chrome.storage.local.remove(['authToken', 'authEmail', 'authDefaultModel']).catch(() => {});
 
   // Load display settings
-  const stored = await chrome.storage.local.get([...DECISION_SETTINGS_KEYS, 'verboseMode', 'composerDeliveryMode', 'selectionShortcutEnabled', 'pdfViewerEnabled', AUTO_GROUP_TABS_KEY, 'helpImproveWebBrain', 'screenshotFallback', 'maxAgentSteps', 'autoScreenshot', 'useSiteAdapters', 'researchEscalationEnabled', 'researchEscalationEngine', 'voiceInputEnabled', 'alwaysAllowApiMutations', 'apiMutationObserverEnabled', 'webMcpEnabled', 'openaiAskStreamingEnabled', 'planBeforeActMode', 'planBeforeAct', 'planReviewMode', 'planReviewConfidenceThreshold', DOWNLOAD_DIRECTORY_STORAGE_KEY, 'notifySound', 'completionConfetti', 'completionFlashTab', 'tracingEnabled', 'feedbackDiagnosticsEnabled', 'losslessTrace', 'strictSecretMode', 'agentAllowLocalNetwork', 'scheduledTasksEnabled', 'scheduledRequireConsequentialConfirmation', 'systemOneEnabled', 'systemOneWatchEnabled', 'systemOneCompletionEnabled', 'systemOneFastClassifications', 'systemOneFastBrowser', 'systemOneWatchThreshold', 'systemOneCompletionThreshold', 'typesafeApiKey', 'providerFilter', 'requestTimeoutMs', 'clarifyTimeoutSec', 'clarifyTimeoutSemanticsV2', 'costAllowanceSessionUsd', 'costAllowanceTotalUsd', 'meteredProviderCostSpentUsd', 'screenshotRedaction', 'imageDetail', 'maxScreenshotsPerTurn', 'maxImageDimension']);
+  const stored = await chrome.storage.local.get([...DECISION_SETTINGS_KEYS, 'verboseMode', 'composerDeliveryMode', 'selectionShortcutEnabled', 'pdfViewerEnabled', AUTO_GROUP_TABS_KEY, 'helpImproveWebBrain', 'screenshotFallback', 'maxAgentSteps', 'autoScreenshot', 'useSiteAdapters', 'researchEscalationEnabled', 'researchEscalationEngine', 'voiceInputEnabled', 'alwaysAllowApiMutations', 'apiMutationObserverEnabled', 'webMcpEnabled', 'openaiAskStreamingEnabled', 'planBeforeActMode', 'planBeforeAct', 'planReviewMode', 'planReviewConfidenceThreshold', DOWNLOAD_DIRECTORY_STORAGE_KEY, 'notifySound', 'completionConfetti', 'completionFlashTab', 'tracingEnabled', 'feedbackDiagnosticsEnabled', 'losslessTrace', 'strictSecretMode', 'agentAllowLocalNetwork', 'scheduledTasksEnabled', 'scheduledRequireConsequentialConfirmation', 'systemOneEnabled', 'systemOneWatchEnabled', 'systemOneCompletionEnabled', 'systemOneFastClassifications', 'systemOneFastBrowser', 'systemOneWatchThreshold', 'systemOneCompletionThreshold', 'typesafeApiKey', 'providerFilter', 'requestTimeoutMs', 'clarifyTimeoutSec', 'clarifyTimeoutSemanticsV2', 'clarifyTimeoutPolicy', 'costAllowanceSessionUsd', 'costAllowanceTotalUsd', 'meteredProviderCostSpentUsd', 'screenshotRedaction', 'imageDetail', 'maxScreenshotsPerTurn', 'maxImageDimension']);
   if (typeof stored.providerFilter === 'string' && ['all','active','local','cloud','router'].includes(stored.providerFilter)) {
     providerFilter = stored.providerFilter;
   }
@@ -678,6 +679,10 @@ async function init() {
     }
     clarifyTimeoutRange.value = cSec;
     clarifyTimeoutValueLabel.textContent = formatClarifyTimeoutLabel(cSec);
+  }
+  // What a timeout answers: 'finish' (default) keeps the task moving.
+  if (clarifyTimeoutPolicySelect) {
+    clarifyTimeoutPolicySelect.value = stored.clarifyTimeoutPolicy === 'safe' ? 'safe' : 'finish';
   }
   autoScreenshotSelect.value = stored.autoScreenshot || 'state_change';
   imageDetailSelect.value = stored.imageDetail || 'auto';
@@ -1380,6 +1385,11 @@ if (clarifyTimeoutRange) {
     await chrome.storage.local.set({ clarifyTimeoutSec: sec, clarifyTimeoutSemanticsV2: true }).catch(() => {});
   });
 }
+
+clarifyTimeoutPolicySelect?.addEventListener('change', async () => {
+  const policy = clarifyTimeoutPolicySelect.value === 'safe' ? 'safe' : 'finish';
+  await chrome.storage.local.set({ clarifyTimeoutPolicy: policy }).catch(() => {});
+});
 
 autoScreenshotSelect.addEventListener('change', async () => {
   await chrome.storage.local.set({ autoScreenshot: autoScreenshotSelect.value }).catch(() => {});

@@ -397,7 +397,8 @@ async function chatInputFixture(browser) {
     assertNoActiveTabRun:() => { effects.run++; throw reached; },
   };
   for (const key of ['planBeforeActReady','planReviewReady','customSkillsReady','userMemoryReady','imageGenConfigReady','browserBatchEnabledReady',
-    'alwaysAllowApiMutationsReady','strictSecretModeReady','webMcpEnabledReady','screenshotRedactionReady','imageBudgetReady','researchEscalationReady']) context[key] = Promise.resolve();
+    'alwaysAllowApiMutationsReady','strictSecretModeReady','webMcpEnabledReady','screenshotRedactionReady','imageBudgetReady','researchEscalationReady',
+    'clarifyTimeoutReady']) context[key] = Promise.resolve();
   const functions = ['assertChatRequestInput', 'handleMessage'].map(name => chatInputFunction(source,name)).join('\n');
   chatInputVM.runInNewContext(functions + '\nglobalThis.request = handleMessage;', context);
   return { effects, reached, request:msg => context.request({ tabId:73, ...msg }, {}) };

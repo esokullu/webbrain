@@ -155,6 +155,7 @@ import { generateImage, readMediaConfig } from './generative-media.js';
 import { GENERATIVE_MEDIA_SETUP_NOTE, isImageGenConfigured, mediaPermissionUrl, validateMediaConfig } from './media-config.js';
 import { extractFirstJsonObject } from './json-extract.js';
 import { repairAssistantDisplayText, repairClarifyText, sanitizeText as sanitizePlannerText } from './text-sanitize.js';
+import { clarifyQuestionIsHard, clarifyTimedAnswer, clarifyTimeoutChoice, normalizeClarifyConsequence, normalizeClarifyTimeoutPolicy } from './clarify-timeout.js';
 import { emptyOutputFailureMessage, modelOutputDiagnostics } from './model-output-diagnostics.js';
 import { stepLimitUserMessage, terminalGuardUserMessage } from './terminal-messages.js';
 import { buildCustomSkillsPrompt, buildSkillLoaderDefinition, buildSkillToolDefinitions, buildSkillToolRegistry, getEligibleCustomSkills, getEligibleSkillCatalog, normalizeCustomSkills } from './skills.js';
@@ -659,6 +660,9 @@ export class Agent extends LoopDetector {
     // Permission/form-submit prompts are never timed out.
     // Loaded from browser.storage.local in background.js (default 60).
     this.clarifyTimeoutSec = 60;
+    // Settings → General → "When a question times out": 'finish' (default)
+    // keeps the task moving, 'safe' takes the safe default. See clarify-timeout.js.
+    this.clarifyTimeoutPolicy = 'finish';
     this.maxContextMessages = 50; // minimum soft cap; larger provider windows scale this up
     this._debugLog = []; // ring buffer for deep verbose (LLM requests/responses)
     this._debugLogMax = 200; // max entries before oldest are dropped
@@ -6306,7 +6310,7 @@ export class Agent extends LoopDetector {
     }));
     const display = record(data, ['promptKind', 'clarifyId', 'question', 'reason',
       'requireExplicitAnswer', 'pendingReconciliation', 'scheduledJobId',
-      'scheduledTabId', 'forceNewScheduledCard'], 6000);
+      'scheduledTabId', 'forceNewScheduledCard', 'timeoutAnswer', 'timeoutPolicy', 'timeoutContinues'], 6000);
     display.options = Array.isArray(data.options) ? data.options.slice(0, 5).map(value => String(value).slice(0, 600)) : [];
     if (data.permission) {
       display.permission = record(data.permission, ['capability', 'host', 'grouped']);
@@ -17309,16 +17313,23 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     return await this._recordClarificationAuthorization(tabId, 'timeout', false, { freshAttempt });
   }
 
-  async _recordClarificationAuthorization(tabId, source, safeFirst = false, { freshAttempt = false } = {}) {
+  async _recordClarificationAuthorization(tabId, source, timeoutAuthorized = false, { freshAttempt = false } = {}) {
     const normalizedSource = source === 'timeout' ? 'timeout' : (source === 'auto' ? 'auto' : 'user');
     const conversationId = this.conversationIds.get(tabId) || null;
     const previous = this._clarificationAuthorizationGuards.get(tabId);
     const priorTimeoutGuard = previous?.source === 'timeout'
       && previous?.authorized === false
       && (!previous?.conversationId || previous.conversationId === conversationId);
-    const timedOutAffirmative = normalizedSource === 'timeout' && safeFirst === true && !priorTimeoutGuard;
+    // A timed-out answer authorizes only when the user's timeout setting
+    // made it the answer (clarify-timeout.js). An armed guard from an
+    // earlier unauthorized timeout survives, so re-asking cannot clear it.
+    // Instant (source=auto) answers by the same policy as a waited timeout:
+    // it only decides when the answer is applied, never whether a safe or
+    // consequence question authorizes anything.
+    const automatic = normalizedSource === 'timeout' || normalizedSource === 'auto';
+    const timedOutAffirmative = automatic && timeoutAuthorized === true && !priorTimeoutGuard;
     const wasArmed = this._clarificationAuthorizationArmed(tabId);
-    if (normalizedSource === 'timeout' && !timedOutAffirmative) {
+    if (automatic && !timedOutAffirmative) {
       const blockedAttempts = priorTimeoutGuard && !freshAttempt
         ? Math.max(0, Number(previous.blockedAttempts) || 0)
         : 0;
@@ -17342,7 +17353,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     // the structural authorization guard. Await deletions too so an explicit
     // response cannot revive a stale guard after restart.
     if (this.conversations.has(tabId)) await this._persistNow(tabId);
-    return normalizedSource !== 'timeout' || timedOutAffirmative;
+    return !automatic || timedOutAffirmative;
   }
 
   _prepareClarificationAuthorizationForRun(tabId, runOptions = null) {
@@ -17467,6 +17478,10 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
    * wait forever). Invalid values fall back to the product default of 60s.
    * Stored slider values above 1200 mean Off.
    */
+  _normalizeClarifyTimeoutPolicy(value) {
+    return normalizeClarifyTimeoutPolicy(value);
+  }
+
   _normalizeClarifyTimeoutSec(value) {
     const n = Number(value);
     if (!Number.isFinite(n) || n < 0) return 60;
@@ -37556,6 +37571,11 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
         ? normalizedOptions
         : [];
       const safeFirst = args?.safe_first === true && options.length > 0;
+      const finishOptionArg = typeof args?.finish_option === 'string'
+        ? repairClarifyText(args.finish_option.trim()).slice(0, 200)
+        : '';
+      const finishOption = finishOptionArg && options.includes(finishOptionArg) ? finishOptionArg : '';
+      const consequence = normalizeClarifyConsequence(args?.consequence);
       const reason = args?.reason ? repairClarifyText(String(args.reason)).slice(0, 300) : null;
       const purpose = args?.purpose === 'research_escalation'
         ? 'research_escalation'
@@ -37563,6 +37583,17 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
           ? 'recipient_change'
           : (args?.purpose === 'message_recipient' ? 'message_recipient' : null));
       const explicitRecipientQuestion = purpose === 'message_recipient' || purpose === 'recipient_change';
+      // What a timeout answers is fixed when the question is asked. A
+      // question about deleting data, money, credentials, the recipient
+      // or an unrequested publication always takes the safe default, and so
+      // does one the model did not classify as consequence 'none'.
+      const timeoutChoice = clarifyTimeoutChoice({
+        policy: this.clarifyTimeoutPolicy,
+        options,
+        safeFirst,
+        finishOption,
+        hardQuestion: clarifyQuestionIsHard(consequence) || explicitRecipientQuestion,
+      });
       const technicalRecipientReasons = new Set(['recipient_identity_unavailable', 'message_body_unverified',
         'message_body_baseline_unavailable', 'recipient_dispatch_binding_unavailable']);
       const technicalRecipientReason = technicalRecipientReasons.has(clarificationGuard?.messageRecipientTechnicalBlock)
@@ -37616,6 +37647,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
           restartTimeout: null,
           onUpdate,
           safeFirst,
+          timeoutAuthorized: timeoutChoice.authorized,
           // Resolving this standalone meta-tool cannot dispatch a page action
           // before _executeToolBatch reaches the next handoff boundary.
           handoffSafe: true,
@@ -37627,14 +37659,16 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
           const autoSource = timeoutSec === 0 ? 'auto' : 'timeout';
           const autoSelect = () => {
             entry.timer = null;
-            // Prefer the first suggested option; free-text-only prompts get a
-            // clear timeout marker so the agent can continue without hanging.
-            const answer = options.length > 0
-              ? options[0]
-              : (autoSource === 'auto' ? '(no options — auto-selected)' : '(no response — timed out)');
+            // The user's timeout setting chose this answer when the question
+            // was asked; free-text-only prompts get a clear marker so the agent
+            // can continue without hanging.
+            const answer = clarifyTimedAnswer(timeoutChoice, autoSource);
             try {
               if (typeof onUpdate === 'function') {
-                onUpdate('clarify_auto', { clarifyId, answer, source: autoSource, timeoutSec: waitSec });
+                onUpdate('clarify_auto', {
+                  clarifyId, answer, source: autoSource, timeoutSec: waitSec,
+                  ...(timeoutChoice.chosen === 'continue' ? { continues: true } : {}),
+                });
               }
             } catch { /* UI emit must never break the run */ }
             this._settleClarification(entry, { answer, source: autoSource });
@@ -37661,6 +37695,11 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
             options,
             reason,
             timeoutSec: waitSec,
+            ...(timeoutSec >= 0 ? {
+              timeoutAnswer: clarifyTimedAnswer(timeoutChoice, timeoutSec === 0 ? 'auto' : 'timeout'),
+              timeoutPolicy: timeoutChoice.policy,
+              ...(timeoutChoice.chosen === 'continue' ? { timeoutContinues: true } : {}),
+            } : {}),
             requireExplicitAnswer,
             ...(isResearchEscalation ? {
               researchEscalation: {
@@ -37675,7 +37714,9 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
 
       const response = await responsePromise;
       const settledEntry = tabPending.get(clarifyId);
-      const entrySafeFirst = settledEntry?.safeFirst === true;
+      const entryTimeoutAuthorized = settledEntry
+        ? settledEntry.timeoutAuthorized === true
+        : timeoutChoice.authorized === true;
       this._clearClarifyTimer(settledEntry);
       tabPending.delete(clarifyId);
       if (tabPending.size === 0) this._pendingClarifications.delete(tabId);
@@ -37683,9 +37724,13 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       if (response && response.cancelled) {
         return { success: false, cancelled: true, reason: response.reason || 'clarify cancelled' };
       }
-      const answer = String(response?.answer || '').trim();
       const source = response?.source || 'user';
-      const authorized = await this._recordClarificationAuthorization(tabId, source, entrySafeFirst);
+      // A timeout is WebBrain's choice, not a reply. Whichever timer fired
+      // (the agent's or the side panel's backup), the decided answer applies.
+      const answer = source === 'timeout' || source === 'auto'
+        ? clarifyTimedAnswer(timeoutChoice, source)
+        : String(response?.answer || '').trim();
+      const authorized = await this._recordClarificationAuthorization(tabId, source, entryTimeoutAuthorized);
       this._recordSocialPublicationClarification(tabId, clarificationGuard, question, answer, source);
       this._recordTaskClarification(tabId, question, answer, source, clarificationOwner);
       const explicitResearchApproval = isResearchEscalation
@@ -37700,13 +37745,23 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
           )
         : null;
       let note;
-      if (source === 'timeout') {
+      const automaticAnswer = source === 'timeout' || source === 'auto';
+      const answeredBy = source === 'auto'
+        ? 'Clarify timeout is set to Instant (source=auto)'
+        : 'No reply came before the clarify timeout (source=timeout)';
+      if (automaticAnswer && authorized && timeoutChoice.chosen === 'continue') {
+        note = `${answeredBy}, and the user's timeout setting is to keep the task moving. Continue with the choice that best completes the task as they asked, say which choice you made in your final summary, and do not ask the same question again.`;
+      } else if (automaticAnswer && authorized && timeoutChoice.chosen === 'finish_option') {
+        note = `${answeredBy}. The user's timeout setting is to keep the task moving, so your finish_option was selected and applies as their answer. Continue the task with it, mention the choice in your final summary, and do not ask the same question again.`;
+      } else if (source === 'timeout') {
         note = authorized
           ? 'This answer was auto-selected because the clarify timeout elapsed with no user reply (source=timeout). The selected affirmative answer applies; continue the task without re-asking the same question.'
           : 'This answer was AUTO-SELECTED because the clarify timeout elapsed with no user reply (source=timeout). It is NOT a real user confirmation. Continue only with the safe default path; do NOT treat this as approval for irreversible, costly, or destructive actions — re-ask via clarify or stop if the next step is high-risk. Put the safe/default choice first in options next time.';
       } else if (source === 'auto') {
-        // Settings Instant auto-approve (headless / unattended). User policy — proceed.
-        note = 'This answer was auto-selected because Clarify timeout is set to Instant (source=auto). The user intentionally configured unattended auto-approve; treat this answer as the chosen default and continue the task. Do not re-ask the same question. Put the intended default first in options when Instant mode may be on.';
+        note = authorized
+          // Settings Instant auto-approve (headless / unattended). User policy — proceed.
+          ? 'This answer was auto-selected because Clarify timeout is set to Instant (source=auto). The user intentionally configured unattended auto-approve; treat this answer as the chosen default and continue the task. Do not re-ask the same question. Put the intended default first in options when Instant mode may be on.'
+          : 'This answer was auto-selected immediately because Clarify timeout is set to Instant (source=auto), but this question takes the safe answer (its consequence is not "none", or the timeout setting is "Play it safe"). It is NOT a real user confirmation: continue only with the safe default path and do not take irreversible, costly, or destructive actions based on it.';
       } else {
         note = explicitRecipientQuestion
           ? 'This is a direct reply from the user; continue the task with it in mind. It does not approve a recipient by itself: if a send would reach someone other than the recipient named for the task, WebBrain asks the user on its own card before sending. Do not ask about the recipient again.'

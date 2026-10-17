@@ -35,6 +35,7 @@ export const DEFAULT_CONFIG_SETTINGS = Object.freeze({
   requestTimeoutMs: 120_000,
   clarifyTimeoutSec: 60,
   clarifyTimeoutSemanticsV2: true,
+  clarifyTimeoutPolicy: 'finish',
   autoScreenshot: 'state_change',
   useSiteAdapters: true,
   researchEscalationEnabled: false,
@@ -184,6 +185,7 @@ const NUMBER_KEYS = new Set([
 ]);
 const STRING_KEYS = new Set([
   'composerDeliveryMode',
+  'clarifyTimeoutPolicy',
   'wbLocale',
   'themeMode',
   'autoScreenshot',
