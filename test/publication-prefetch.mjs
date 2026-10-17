@@ -377,6 +377,22 @@ for (const browser of ['chrome', 'firefox']) {
     assert.deepEqual(f.calls.map(call => call.name), ['social_publication_contract', 'social_publication_authorization']);
   });
 
+  test(`${browser}: every predispatch stage the agent records survives the trace projection`, async () => {
+    const fs = await import('node:fs/promises');
+    const source = await fs.readFile(new URL(`../src/${browser}/src/agent/agent.js`, import.meta.url), 'utf8');
+    const stages = new Set();
+    for (const pattern of [/predispatch\.(?:lap|add)\('([A-Za-z]+Ms)'/g, /timedCheck\('([A-Za-z]+Ms)'/g,
+      /_predispatchStage\(tabId, '([A-Za-z]+Ms)'/g, /'(publicationAudit(?:Awaited|Reused)Ms)'/g]) {
+      for (const match of source.matchAll(pattern)) stages.add(match[1]);
+    }
+    assert.ok(stages.has('unverifiedStepCardMs'), 'the wait on an unverified-step card is a stage');
+    assert.ok(stages.size >= 20, `only ${stages.size} stages found`);
+    const extra = Object.fromEntries([...stages].map(stage => [stage, 5]));
+    const projected = projectTraceEventData('note', { step: 1, note: 'predispatch_timing',
+      extra: { ...extra, tool: 'click_ax', outcome: 'dispatched' } });
+    for (const stage of stages) assert.equal(projected.extra[stage], 5, `${stage} is dropped from durable traces`);
+  });
+
   test(`${browser}: a background check is traced to the run that started it, and not at all once that run moved on`, async () => {
     // Bound: a repair attempt is traced to the starting run even when the
     // tab's run id changed while the first attempt ran.
