@@ -422,6 +422,23 @@ for (const browser of ['chrome', 'firefox']) {
     assert.equal(gates.length, 3);
   });
 
+  test(`${browser}: a held request counts its prompt by its bytes, so dense text is not under-reserved`, async () => {
+    const agent = new Agent({});
+    const usages = [];
+    agent._isCostMeteredProvider = () => true;
+    agent._estimateUsageCostUsd = (_provider, usage) => { usages.push(usage); return 0.01; };
+    const bytes = text => new TextEncoder().encode(text).length;
+    const texts = ['市場'.repeat(500), '😀'.repeat(500), 'a'.repeat(1000)];
+    for (const text of texts) {
+      agent._holdCostAllowance({ config: {} }, [{ role: 'user', content: text }], { maxTokens: 10 }, null).release();
+    }
+    // No tokenizer spends less than one byte of text per token.
+    texts.forEach((text, index) => assert.ok(usages[index].prompt_tokens >= bytes(text),
+      `${index}: ${usages[index].prompt_tokens} tokens held for ${bytes(text)} bytes`));
+    assert.equal(usages[0].completion_tokens, 10);
+    assert.equal(agent._costHolds?.size || 0, 0);
+  });
+
   test(`${browser}: a consequential click a card or the permission gate stops still records predispatch_timing`, async () => {
     const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
     const run = async (name, args, { submitChoice = 'once', permissionChoice = 'deny' } = {}) => {

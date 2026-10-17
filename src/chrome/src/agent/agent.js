@@ -8685,14 +8685,55 @@ export class Agent extends LoopDetector {
     }
   }
 
+  // A bound on a request's prompt tokens that holds for any tokenizer: no
+  // token covers less than one byte of UTF-8 text (a byte-level fallback
+  // spends one token per byte, as CJK or emoji text can), plus framing per
+  // message and a generous allowance per image. _estimateContextChars stays
+  // the average estimate that context management uses; admission against
+  // the cost allowance uses this bound (_holdCostAllowance).
+  _promptTokenUpperBound(messages, extra = '') {
+    const list = Array.isArray(messages) ? messages : [];
+    try {
+      const encoder = new TextEncoder();
+      const bytes = value => (typeof value === 'string' ? encoder.encode(value).length : 0);
+      const json = value => bytes(JSON.stringify(value ?? ''));
+      const IMG_DATA_URL = /data:image\/[a-zA-Z0-9+.-]+;base64,[A-Za-z0-9+/=\\]+/g;
+      const imageTokens = 2 * Math.ceil(Agent.IMAGE_CHAR_COST / 4);
+      let tokens = bytes(extra);
+      for (const msg of list) {
+        tokens += 16;
+        if (Array.isArray(msg?.content)) {
+          for (const block of msg.content) {
+            if (block && (block.type === 'image_url' || block.type === 'image')) tokens += imageTokens;
+            else if (typeof block?.text === 'string') tokens += bytes(block.text);
+            else tokens += json(block);
+          }
+        } else if (typeof msg?.content === 'string') {
+          const images = msg.content.match(IMG_DATA_URL) || [];
+          tokens += images.length * imageTokens + bytes(images.length ? msg.content.replace(IMG_DATA_URL, '') : msg.content);
+        } else {
+          tokens += json(msg?.content);
+        }
+        if (msg?.tool_calls) tokens += json(msg.tool_calls);
+        if (msg?.response_items) tokens += json(msg.response_items);
+        if (typeof msg?.reasoning_content === 'string') tokens += bytes(msg.reasoning_content);
+        const replay = msg?._reasoning_replay?.providerState?.content;
+        if (Array.isArray(replay)) tokens += json(replay);
+      }
+      return Math.max(1, tokens);
+    } catch {
+      // A UTF-16 code unit takes at most three bytes of UTF-8.
+      return Math.max(1, 3 * (this._estimateContextChars(list) + String(extra).length) + 16 * list.length);
+    }
+  }
+
   // Holds what a request in flight can cost at most (its prompt, tools and
   // whole completion budget, priced like recorded usage) until it settles.
   _holdCostAllowance(provider, messages, options, costState, { background = false } = {}) {
     if (!this._isCostMeteredProvider(provider)) return null;
-    let toolChars = 0;
-    try { toolChars = JSON.stringify(options?.tools || []).length; } catch {}
-    const promptTokens = Math.max(1, Math.ceil(
-      (this._estimateContextChars(Array.isArray(messages) ? messages : []) + toolChars) / 4));
+    let tools = '';
+    try { tools = JSON.stringify(options?.tools || []); } catch {}
+    const promptTokens = this._promptTokenUpperBound(messages, tools);
     const completionTokens = Number.isFinite(options?.maxTokens) && options.maxTokens > 0 ? options.maxTokens : 4096;
     const usd = this._estimateUsageCostUsd(provider, { prompt_tokens: promptTokens, completion_tokens: completionTokens });
     if (!(usd > 0)) return null;
