@@ -23746,8 +23746,9 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     return parsePublicationJson(response?.content);
   }
 
-  async _socialPublicationCheckerFailure(tabId, phase, attempt, error, validation = false) {
-    const runId = this.currentRunId.get(tabId);
+  // `runId` is the run the check belongs to: a background check passes the
+  // run that started it, never the tab's current one.
+  async _socialPublicationCheckerFailure(tabId, phase, attempt, error, validation = false, runId = this.currentRunId.get(tabId)) {
     if (!runId) return;
     if (!validation) {
       await this._tracePlannerAttemptFailure(runId, phase, attempt, error, 'publication_checker_failed');
@@ -23934,16 +23935,19 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     for (let attempt = 0; attempt < 2; attempt++) {
       const requestMessages = attempt ? this._socialPublicationRepairMessages(messages) : messages;
       const options = this._socialPublicationChatOptions(provider, attempt > 0, portable);
-      const runId = this.currentRunId.get(tabId);
+      // A background compile is traced to the run that started it.
+      const runId = background ? call.runId : this.currentRunId.get(tabId);
       const startedAt = Date.now();
       let received = false;
       try {
+        // In the background, checked before the request is traced and again
+        // right before inference: the run that started the compile may have
+        // stopped or been replaced meanwhile. Its request is traced to that
+        // run and carries that run's signal and allowance, never a later
+        // run's.
+        if (background && (call.signal.aborted || !call.current() || replaced())) return null;
         await this._tracePlannerAttemptRequest(runId, 0, provider, requestMessages,
           'social_publication_contract', attempt + 1, this._effectiveRunMode(tabId), options);
-        // In the background, checked again right before inference: the run
-        // that started the compile may have stopped or been replaced while
-        // the request was traced. Its request carries that run's signal and
-        // allowance, never a later run's.
         if (background && (call.signal.aborted || !call.current() || replaced())) return null;
         const response = await this._chatWithCostAllowance(provider, requestMessages,
           background ? { ...options, signal: call.signal } : options,
@@ -23974,7 +23978,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
           if (background) return null;
           throw error;
         }
-        await this._socialPublicationCheckerFailure(tabId, 'social_publication_contract', attempt + 1, error, received);
+        await this._socialPublicationCheckerFailure(tabId, 'social_publication_contract', attempt + 1, error, received, runId);
         if (this._planExecutionGuards.get(tabId) !== guard || replaced() || this._hasPendingSteering(tabId)) return null;
         if (!background) {
           state.error = 'Failed while reading the publication request. The checker could not return a complete result; the draft was not published.';
@@ -24356,14 +24360,16 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     for (let attempt = 0; attempt < 2; attempt++) {
       const requestMessages = attempt ? this._socialPublicationRepairMessages(messages) : messages;
       const options = this._socialPublicationChatOptions(provider, attempt > 0, portable, true);
-      const runId = this.currentRunId.get(tabId);
+      // A background audit is traced to the run that started it.
+      const runId = background ? background.runId : this.currentRunId.get(tabId);
       const startedAt = Date.now();
       let received = false;
       try {
+        // In the background, checked before the request is traced and again
+        // right before inference (see _socialPublicationCompile).
+        if (background && (background.signal.aborted || !background.current() || !isCurrent())) return { status: 'changed' };
         await this._tracePlannerAttemptRequest(runId, 0, provider, requestMessages,
           'social_publication_authorization', attempt + 1, this._effectiveRunMode(tabId), options);
-        // In the background, checked again right before inference (see
-        // _socialPublicationCompile).
         if (background && (background.signal.aborted || !background.current() || !isCurrent())) return { status: 'changed' };
         const response = await this._chatWithCostAllowance(provider, requestMessages,
           background ? { ...options, signal: background.signal } : options,
@@ -24395,7 +24401,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
         // Cancelled: its run stopped, or an audit of a newer draft replaced it.
         if (background?.signal.aborted) return { status: 'changed' };
         if (this._isCostAllowanceError(error) || this._checkAbort(tabId)) throw error;
-        await this._socialPublicationCheckerFailure(tabId, 'social_publication_authorization', attempt + 1, error, received);
+        await this._socialPublicationCheckerFailure(tabId, 'social_publication_authorization', attempt + 1, error, received, runId);
         if (this._planExecutionGuards.get(tabId) !== guard || !isCurrent()
             || social.needsRecompile || this._hasPendingSteering(tabId)
             || guard.taskKey !== taskKey) {
@@ -24518,7 +24524,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     const current = () => this._planExecutionGuards.get(tabId) === guard && guard.taskKey === taskKey
       && !this._checkAbort(tabId) && !this._hasPendingSteering(tabId)
       && this._runAbortSignal(tabId) === runSignal && !runSignal?.aborted;
-    const binding = { signal: runSignal, costState: this.currentCostState.get(tabId) || null, current };
+    const binding = { signal: runSignal, costState: this.currentCostState.get(tabId) || null, current, runId };
     let status = 'skipped';
     try {
       const pageUrl = await this._currentUrl(tabId);
@@ -24653,6 +24659,8 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     return {
       signal: abort.signal,
       costState: binding ? binding.costState : (this.currentCostState.get(tabId) || null),
+      // The run whose trace gets the check's requests, responses and failures.
+      runId: binding ? (binding.runId || null) : (this.currentRunId.get(tabId) || null),
       current: binding?.current || (() => this._planExecutionGuards.get(tabId) === guard && !this._checkAbort(tabId)),
     };
   }

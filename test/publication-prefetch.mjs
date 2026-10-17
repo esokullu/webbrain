@@ -360,6 +360,63 @@ for (const browser of ['chrome', 'firefox']) {
     assert.equal(f.pending()?.compiled?.prefetchedAudit, undefined, 'a cancelled audit stores no verdict');
   });
 
+  test(`${browser}: a background check is traced to the run that started it, and not at all once that run moved on`, async () => {
+    // Bound: a repair attempt is traced to the starting run even when the
+    // tab's run id changed while the first attempt ran.
+    {
+      const f = setup();
+      const { agent, tabId } = f;
+      agent._runAbortStates.set(tabId, { controller: new AbortController(), dispose() {} });
+      agent.currentRunId.set(tabId, 'run-A');
+      const traced = [];
+      agent._tracePlannerAttemptRequest = async (runId, _step, _provider, _messages, phase, attempt) => {
+        traced.push([phase, attempt, runId]);
+      };
+      const chat = agent._chatWithCostAllowance;
+      let invalid = true;
+      agent._chatWithCostAllowance = async (...args) => {
+        if (invalid && args[4].generationName === 'social_publication_contract') {
+          invalid = false;
+          agent.currentRunId.set(tabId, 'run-X');
+          return { content: 'not a contract' };
+        }
+        return chat(...args);
+      };
+      assert.equal(await within(f.write(), 'the bound prefetch ends'), 'authorized');
+      assert.deepEqual(traced, [
+        ['social_publication_contract', 1, 'run-A'],
+        ['social_publication_contract', 2, 'run-A'],
+        ['social_publication_authorization', 1, 'run-A'],
+      ]);
+    }
+    // Moved on: when the next run takes the tab right before a request, the
+    // request is neither traced nor sent.
+    for (const stage of ['social_publication_contract', 'social_publication_authorization']) {
+      const f = setup();
+      const { agent, tabId } = f;
+      agent._runAbortStates.set(tabId, { controller: new AbortController(), dispose() {} });
+      agent.currentRunId.set(tabId, 'run-A');
+      const traced = [];
+      agent._tracePlannerAttemptRequest = async (runId, _step, _provider, _messages, phase) => { traced.push({ runId, phase }); };
+      const chatOptions = agent._socialPublicationChatOptions;
+      let replaced = false;
+      agent._socialPublicationChatOptions = function (...args) {
+        if (!replaced && (args[3] === true) === (stage === 'social_publication_authorization')) {
+          replaced = true;
+          agent._runAbortStates.set(tabId, { controller: new AbortController(), dispose() {} });
+          agent.currentRunId.set(tabId, 'run-B');
+          agent._startPlanExecutionGuard(tabId, 'act', { requestKind: 'execute', requiresStateChange: true, requiresSubmission: true });
+        }
+        return chatOptions.apply(this, args);
+      };
+      await within(f.write(), `${stage}: the stale prefetch ends`);
+      assert.equal(replaced, true, stage);
+      assert.equal(traced.some(entry => entry.runId === 'run-B'), false, `${stage}: nothing was traced to the next run`);
+      assert.equal(traced.some(entry => entry.phase === stage), false, `${stage}: the abandoned request was not traced`);
+      assert.equal(f.named(stage).length, 0, `${stage}: the abandoned request was not sent`);
+    }
+  });
+
   test(`${browser}: a newer draft cancels the background audit of the older one, and a click awaiting it audits on its own`, async () => {
     const f = setup();
     const audit = f.hold('social_publication_authorization');
