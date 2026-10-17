@@ -112719,7 +112719,9 @@ test('Chrome Web Store release uses an always-on protected-page guard and opt-in
   assert.match(getActiveAdapterFx(dashboard)?.notes || '', /Continue manually in the dashboard/);
 
   const chromeAgentSource = fs.readFileSync(path.join(ROOT, 'src/chrome/src/agent/agent.js'), 'utf8');
-  const guardIndex = chromeAgentSource.indexOf('const protectedPageFailure = await this._chromeProtectedPageFailure(tabId, fnName);');
+  // Declared before the call's timer starts (its stages may report a stop
+  // first); assigned here, ahead of every preparation and dispatch below.
+  const guardIndex = chromeAgentSource.indexOf('protectedPageFailure = await this._chromeProtectedPageFailure(tabId, fnName);');
   const webMcpPreparationIndex = chromeAgentSource.indexOf('const webMcpPreparation = protectedPageFailure', guardIndex);
   const toolbarPreflightIndex = chromeAgentSource.indexOf('const pipelineToolbarPreflight = await this._preflightRichTextToolbarTarget(', webMcpPreparationIndex);
   const chatPreflightIndex = chromeAgentSource.indexOf('const genericChatBlock = pipelineToolbarPreflight.block || socialDispatchBlock ? null', toolbarPreflightIndex);
