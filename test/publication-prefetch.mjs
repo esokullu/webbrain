@@ -102,7 +102,7 @@ for (const browser of ['chrome', 'firefox']) {
       }
       return detected;
     };
-    agent._readPageTexts = async (_tabId, kind, texts) => { f.readings.push({ kind, texts: [...texts] }); };
+    agent._readPageTexts = async (_tabId, kind, texts, _context, options = {}) => { f.readings.push({ kind, texts: [...texts], options }); };
     f.hold = name => { const gate = deferred(); f.holds[name] = gate; return gate; };
     f.named = name => f.calls.filter(call => call.name === name);
     f.write = (args = { ref_id: 'ref_7', text: 'Hello', clear: true }) => agent._socialPublicationPrefetch(
@@ -833,6 +833,74 @@ for (const browser of ['chrome', 'firefox']) {
     // x.com/compose/post is a page whose sends the recipient guard checks.
     assert.deepEqual(f.readings.map(reading => reading.kind).sort(), ['control_effect', 'message_control']);
     for (const reading of f.readings) assert.deepEqual(reading.texts, ['Post', 'Close', 'Choose audience']);
+  });
+
+  test(`${browser}: the prefetch's caption reads belong to the run that started it`, async () => {
+    const f = setup();
+    const { agent, tabId } = f;
+    agent._runAbortStates.set(tabId, { controller: new AbortController(), dispose() {} });
+    agent.currentRunId.set(tabId, 'run-A');
+    const costState = { spentUsd: 0 };
+    agent.currentCostState.set(tabId, costState);
+    f.detected.publicationPrefetchCaptions = ['Post', 'Close'];
+    // Both reads stay in flight (awaiting settings or a model).
+    const reads = [];
+    agent._readPageTexts = (_tabId, kind, texts, _context, options = {}) => new Promise(resolve => {
+      reads.push({ kind, texts: [...texts], background: options.background, resolve });
+    });
+    const prefetch = f.write();
+    await until(() => reads.length === 2, 'both caption reads started');
+    for (const { kind, background } of reads) {
+      assert.ok(background, `${kind}: a background read`);
+      assert.equal(background.costState, costState, `${kind}: charged to the run that started it`);
+      assert.equal(background.runId, 'run-A', `${kind}: traced to that run`);
+      assert.equal(background.current(), true, `${kind}: that run still owns the tab`);
+      assert.equal(background.signal.aborted, false, kind);
+    }
+    // The run finishes normally (no Stop): its caption reads end with it.
+    agent._releaseRunEntry(tabId);
+    for (const { kind, background } of reads) {
+      assert.equal(background.signal.aborted, true, `${kind}: cancelled when its run ended`);
+      assert.equal(background.current(), false, kind);
+    }
+    await within(prefetch, 'the prefetch does not wait for the cancelled reads');
+    assert.equal(agent._socialPublicationBackgroundAborts?.get(tabId)?.size || 0, 0, 'nothing is left to cancel');
+    for (const read of reads) read.resolve();
+  });
+
+  test(`${browser}: a background caption read is charged to its run as a background request, and none starts once that run moved on`, async () => {
+    const agent = new Agent({});
+    const tabId = 979;
+    const provider = { name: 'checker', model: 'checker', chat: async () => ({ content: '{}' }) };
+    agent._jevSettings = async () => null; // no decision model: the active model reads
+    const sent = [];
+    agent._chatWithCostAllowance = async (_provider, _messages, options, costState, context) => {
+      sent.push({ costState, context, signal: options?.signal });
+      return { content: '{}' };
+    };
+    agent.currentRunId.set(tabId, 'run-B');
+    agent.currentCostState.set(tabId, { spentUsd: 0.25 }); // the allowance of a later run
+    const traced = [];
+    agent.recordSystemOneVerdict = (_tabId, metadata, context) => traced.push(context);
+    const runCost = { spentUsd: 0 };
+    let live = true;
+    const controller = new AbortController();
+    const background = { signal: controller.signal, costState: runCost, runId: 'run-A', current: () => live };
+    await agent._semanticDecisions(tabId, 'control_effect', { items: [{ text: 'Post' }] }, { provider, background });
+    assert.equal(sent.length, 1);
+    assert.equal(sent[0].costState, runCost, 'charged to the run that started it, not the tab\'s current run');
+    assert.equal(sent[0].context.background, true, 'held as a background request');
+    // The run moved on: nothing is sent, and the read is not counted as unanswered.
+    live = false;
+    await agent._readPageTexts(tabId, 'control_effect', ['Close'], {}, { background });
+    assert.equal(sent.length, 1, 'no request once its run moved on');
+    assert.equal(agent._unansweredPageTexts?.size || 0, 0, 'a read cut short is asked again later');
+    // A cancelled one: likewise.
+    live = true;
+    controller.abort();
+    await agent._semanticDecisions(tabId, 'control_effect', { items: [{ text: 'Choose audience' }] }, { provider, background });
+    assert.equal(sent.length, 1, 'no request once its run ended');
+    assert.equal(traced.every(context => context?.runId === 'run-A'), true, 'traced only to the run that started it');
   });
 
   test(`${browser}: an upload into the composer last written audits the draft again`, async () => {

@@ -8702,7 +8702,11 @@ export class Agent extends LoopDetector {
    * choice is null where no sure answer was available. Each item's answer is
    * remembered on its own, so a later batch asks only about new items.
    */
-  async _semanticDecisions(tabId, kind, { request = '', items = [] } = {}, { provider = this._activeProvider(tabId), signal = null, mainModel = true, mainTimeoutMs = 15000 } = {}) {
+  // `background`: a background check's binding (_socialPublicationBackgroundCall),
+  // its signal, the allowance and trace of the run that started it, and
+  // whether that run still owns the tab. Its requests are background ones
+  // (_checkCostAllowance), and none starts once that run ended or moved on.
+  async _semanticDecisions(tabId, kind, { request = '', items = [] } = {}, { provider = this._activeProvider(tabId), signal = null, mainModel = true, mainTimeoutMs = 15000, background = null } = {}) {
     const spec = semanticQuestion(kind);
     const trusted = String(request ?? '').slice(0, 6000);
     const data = (Array.isArray(items) ? items : []).map(item => boundedSemanticData(item));
@@ -8718,14 +8722,17 @@ export class Agent extends LoopDetector {
       while (this._semanticDecisionCache.size > 512) this._semanticDecisionCache.delete(this._semanticDecisionCache.keys().next().value);
     };
     const pending = () => results.map((result, index) => (result ? -1 : index)).filter(index => index >= 0);
-    const runSignal = signal || this._runAbortSignal(tabId);
-    const context = this.systemOneContext(tabId);
+    const runSignal = background ? background.signal : (signal || this._runAbortSignal(tabId));
+    const stopped = () => (background ? background.signal.aborted || !background.current() : this._checkAbort(tabId));
+    const runContext = this.systemOneContext(tabId);
+    const context = background ? { ...runContext, background: true, runId: background.runId,
+      costState: background.costState || this._newCostRunState(), isCurrent: () => runContext.isCurrent() && !stopped() } : runContext;
     let open = pending();
     if (open.length) {
       try {
         const settings = await this._jevSettings(tabId, provider);
         for (const chunk of settings ? semanticBatchChunks(open.map(index => data[index]), SEMANTIC_BATCH_LIMITS.decision) : []) {
-          if (this._checkAbort(tabId)) break;
+          if (stopped()) break;
           const indexes = chunk.map(position => open[position]);
           const verdict = await this.evaluateSystemOne(tabId, createSystemOneJudge({ timeoutMs: 4000, maxRetries: 0 }), {
             config: settings.decisionConfig, apiKey: settings.typesafeApiKey, signal: runSignal,
@@ -8743,13 +8750,14 @@ export class Agent extends LoopDetector {
             reason: sure === indexes.length ? kind : `${kind}_low_confidence`, model: verdict.model }, context);
         }
       } catch (error) {
-        if (this._isCostAllowanceError(error) || this._checkAbort(tabId)) throw error;
+        if (this._isCostAllowanceError(error) || stopped()) throw error;
         this.recordSystemOneVerdict(tabId, { decision: 'fallback', reason: `${kind}_${systemOneFailureReason(error)}` }, context);
       }
     }
     open = pending();
-    if (open.length && mainModel && provider?.chat && !this._checkAbort(tabId)) {
+    if (open.length && mainModel && provider?.chat && !stopped()) {
       for (const chunk of semanticBatchChunks(open.map(index => data[index]), SEMANTIC_BATCH_LIMITS.main)) {
+        if (background && stopped()) break;
         const indexes = chunk.map(position => open[position]);
         try {
           const messages = semanticBatchDecisionMessages(kind, trusted, indexes.map(index => data[index]),
@@ -8758,7 +8766,8 @@ export class Agent extends LoopDetector {
             await Promise.resolve();
             this._throwIfAborted(completionSignal);
             return this._chatWithCostAllowance(provider, messages, { temperature: 0, maxTokens: 120 + 60 * indexes.length, signal: completionSignal },
-              this.currentCostState.get(tabId) || null, { tabId, generationName: `semantic_${kind}` });
+              background ? background.costState : (this.currentCostState.get(tabId) || null),
+              { tabId, generationName: `semantic_${kind}`, ...(background ? { background: true } : {}) });
           }, runSignal, mainTimeoutMs);
           const accepted = acceptSemanticBatchAnswers(kind,
             this._socialPublicationResponseObject(response, { maxTokens: 120 + 60 * indexes.length }), trusted,
@@ -8767,7 +8776,7 @@ export class Agent extends LoopDetector {
             if (accepted[position]) remember(index, { ...accepted[position], source: 'main_model' });
           });
         } catch (error) {
-          if (this._isCostAllowanceError(error) || this._checkAbort(tabId)) throw error;
+          if (this._isCostAllowanceError(error) || stopped()) throw error;
         }
       }
     }
@@ -8787,7 +8796,7 @@ export class Agent extends LoopDetector {
   // so the readings handed to a check in the page (the most recent of each
   // question) include it however long ago it was read.
   async _readPageTexts(tabId, kind, texts, context = {}, { maxChars = 300, mainTimeoutMs, mainModel = true,
-    retryUnansweredAfterMs = 0 } = {}) {
+    retryUnansweredAfterMs = 0, background = null } = {}) {
     this._pageTextReadings ??= new Map();
     this._unansweredPageTexts ??= new Map();
     const now = Date.now();
@@ -8808,13 +8817,15 @@ export class Agent extends LoopDetector {
     if (!pending.length) return;
     const askMain = mainModel && !this._workflowReplayTabs?.has(tabId);
     const readings = await this._semanticDecisions(tabId, kind, { items: pending.map(text => ({ ...context, text })) },
-      { ...(mainTimeoutMs ? { mainTimeoutMs } : {}), mainModel: askMain });
+      { ...(mainTimeoutMs ? { mainTimeoutMs } : {}), mainModel: askMain, ...(background ? { background } : {}) });
     // A text counts as unanswered only once the active model had its turn
     // too: a read by the decision model alone, a stopped run or a provider
-    // that cannot answer leaves it for the next read.
+    // that cannot answer leaves it for the next read. So does a background
+    // read whose run ended or moved on.
     let mainHadTurn = false;
     try {
-      mainHadTurn = askMain && typeof this._activeProvider(tabId)?.chat === 'function' && !this._checkAbort(tabId);
+      mainHadTurn = askMain && typeof this._activeProvider(tabId)?.chat === 'function'
+        && (background ? !background.signal.aborted && background.current() : !this._checkAbort(tabId));
     } catch {}
     const answeredAt = Date.now();
     pending.forEach((text, index) => {
@@ -9059,7 +9070,8 @@ export class Agent extends LoopDetector {
   }
 
   recordSystemOneVerdict(tabId, metadata, context = {}) {
-    const runId = context.runId || this.currentRunId.get(tabId);
+    // A background check is traced only to the run that started it.
+    const runId = context.background === true ? context.runId : (context.runId || this.currentRunId.get(tabId));
     if (runId) try { trace.recordNote(runId, 0, 'system_one', metadata); } catch {}
   }
 
@@ -21808,7 +21820,8 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       // that holds the post editor written (found by the app's own markers).
       const detected = await this._detectLikelySubmitAction(tabId, 'click_ax', { __wbPublicationPrefetch: hint }, { captionPass: 'final' });
       if (!current() || detected?.isSubmit !== true || detected.publicationControl !== true) return status;
-      const readings = this._socialPublicationPrefetchReadings(tabId, detected.publicationPrefetchCaptions, pageUrl);
+      const readings = this._socialPublicationPrefetchReadings(tabId, detected.publicationPrefetchCaptions, pageUrl,
+        guard, binding);
       try {
         const social = await this._ensureSocialPublicationContract(tabId, provider, { background: true, binding });
         status = contractOnly
@@ -21978,7 +21991,11 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
   // whose sends the recipient guard checks, whether activating them sends a
   // message. Readings are kept per caption, so asking earlier changes no
   // answer; a caption that differs at the click is read there as before.
-  _socialPublicationPrefetchReadings(tabId, captions, pageUrl) {
+  // Like the contract and the audit, these reads are background checks of
+  // the run that started the prefetch (`binding`): its Stop or end cancels
+  // them, they are charged to its allowance as background requests and
+  // traced to it, and they stop once another run owns the tab.
+  _socialPublicationPrefetchReadings(tabId, captions, pageUrl, guard = null, binding = null) {
     const list = [...new Set((Array.isArray(captions) ? captions : [])
       .map(caption => String(caption ?? '').replace(/\s+/g, ' ').trim())
       .filter(caption => caption && caption.length <= 200))];
@@ -21986,22 +22003,25 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     const reading = this._socialPublicationPrefetchReading ||= new Set();
     const unread = kind => list.filter(caption => this._pageTextReading(kind, caption) === null
       && !reading.has(kind + '\u0000' + caption));
+    const effects = unread('control_effect').slice(0, 24);
+    let guarded = false;
+    try { guarded = getMessageRecipientGuardPolicy(pageUrl)?.verifyActiveRecipient === true; } catch {}
+    const controls = guarded ? unread('message_control').slice(0, 48) : [];
+    if (!effects.length && !controls.length) return Promise.resolve([]);
+    const abort = this._socialPublicationBackgroundAbort(binding, tabId);
+    const background = this._socialPublicationBackgroundCall(tabId, guard, binding, abort);
     const read = (kind, texts, request) => {
       for (const text of texts) reading.add(kind + '\u0000' + text);
       return Promise.resolve().then(request)
         .finally(() => { for (const text of texts) reading.delete(kind + '\u0000' + text); });
     };
     const reads = [];
-    const effects = unread('control_effect').slice(0, 24);
-    if (effects.length) reads.push(read('control_effect', effects, () => this._readControlEffects(tabId, effects)));
-    let guarded = false;
-    try { guarded = getMessageRecipientGuardPolicy(pageUrl)?.verifyActiveRecipient === true; } catch {}
-    const controls = guarded ? unread('message_control').slice(0, 48) : [];
+    if (effects.length) reads.push(read('control_effect', effects, () => this._readControlEffects(tabId, effects, { background })));
     if (controls.length) {
       reads.push(read('message_control', controls, () => this._readPageTexts(tabId, 'message_control', controls, {},
-        { maxChars: 400, mainTimeoutMs: CONTROL_READING_TIMEOUT_MS })));
+        { maxChars: 400, mainTimeoutMs: CONTROL_READING_TIMEOUT_MS, background })));
     }
-    return Promise.allSettled(reads);
+    return this._socialPublicationBackgroundSettle(abort, Promise.allSettled(reads), []);
   }
 
   _socialPublishedContractMatches(binding, guard, pageState) {
@@ -25655,15 +25675,18 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
   // Reads, in any language, the captions the submit probe reported unread
   // (the decision model first, the active model within four seconds). A
   // caption no model could read stays unread and decides nothing.
-  async _readControlEffects(tabId, captions = []) {
+  // `background` binds a background read to the run that started it
+  // (_socialPublicationPrefetchReadings); its failures stay its own.
+  async _readControlEffects(tabId, captions = [], { background = null } = {}) {
     const list = [...new Set((Array.isArray(captions) ? captions : [])
       .map(caption => String(caption ?? '').replace(/\s+/g, ' ').trim())
       .filter(caption => caption && caption.length <= 200))].slice(0, 24);
     if (!list.length) return;
     try {
-      await this._readPageTexts(tabId, 'control_effect', list, {}, { maxChars: 200, mainTimeoutMs: CONTROL_READING_TIMEOUT_MS });
+      await this._readPageTexts(tabId, 'control_effect', list, {}, { maxChars: 200, mainTimeoutMs: CONTROL_READING_TIMEOUT_MS,
+        ...(background ? { background } : {}) });
     } catch (error) {
-      if (this._checkAbort(tabId)) throw error;
+      if (!background && this._checkAbort(tabId)) throw error;
     }
   }
 
