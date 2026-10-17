@@ -422,6 +422,57 @@ for (const browser of ['chrome', 'firefox']) {
     assert.equal(gates.length, 3);
   });
 
+  test(`${browser}: a consequential click a card or the permission gate stops still records predispatch_timing`, async () => {
+    const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
+    const run = async (name, args, { submitChoice = 'once', permissionChoice = 'deny' } = {}) => {
+      const f = setup();
+      const { agent, tabId, provider } = f;
+      assert.equal(await f.write(), 'authorized');
+      agent.currentRunId.set(tabId, 'prefetch-run');
+      agent._skipPermissionGate = false;
+      agent._ensureGateSetting = async () => false;
+      agent.permissions.hydrate = async () => {};
+      agent.permissions.check = () => ({ allowed: false, needsPrompt: true });
+      agent.permissions.record = async () => {};
+      agent._promptSubmitConfirmation = async () => { await wait(15); return submitChoice; };
+      agent._promptPermission = async () => { await wait(15); return permissionChoice; };
+      agent._recordProgressObservation = async () => null;
+      agent._autoRecordProgressAction = () => null;
+      agent._progressWarningForAction = () => '';
+      agent._captureFormValidationState = async () => [];
+      agent._waitForFormValidationFailure = async () => null;
+      agent._readCompletionResult = async () => null;
+      agent._messageRecipientGuardBlock = async () => null;
+      agent._captchaMutationPreflight = async () => null;
+      const dispatched = [];
+      agent.executeTool = async (_tabId, tool) => { dispatched.push(tool); return { success: true, dispatched: true }; };
+      const notes = [];
+      agent._recordPredispatchTiming = (_tabId, step, timing) => notes.push({ step, timing });
+      const messages = [];
+      await agent._executeToolBatch(tabId, [{ id: 'post', function: { name, arguments: JSON.stringify(args) } }],
+        messages, () => {}, provider, '', new Set([name]), 5);
+      return { dispatched, notes, result: String(messages.at(-1)?.content || '') };
+    };
+    // The Post click's own confirmation card, declined.
+    const declined = await run('click_ax', { ref_id: 'ref_9' }, { submitChoice: 'deny' });
+    // The permission gate after the card: the frame's host denied, and a
+    // frame whose host cannot be identified.
+    const denied = await run('iframe_click', { urlFilter: 'x.com', selector: '[data-testid="tweetButton"]' });
+    const unidentified = await run('iframe_click', { urlFilter: '', selector: '[data-testid="tweetButton"]' });
+    for (const [label, outcome, stage] of [[`${browser} card declined`, declined, 'submitConfirmationMs'],
+      [`${browser} permission denied`, denied, 'permissionMs'], [`${browser} host unidentified`, unidentified, 'permissionMs']]) {
+      assert.deepEqual(outcome.dispatched, [], `${label}: nothing was sent`);
+      assert.equal(outcome.notes.length, 1, `${label}: the blocked click records its timing (${outcome.result.slice(0, 160)})`);
+      const [{ step, timing }] = outcome.notes;
+      assert.equal(step, 5, label);
+      assert.equal(timing.outcome, 'blocked', label);
+      assert.equal(typeof timing[stage], 'number', `${label}: ${stage}`);
+      assert.equal(typeof timing.totalMs, 'number', label);
+    }
+    assert.ok(declined.notes[0].timing.submitConfirmationMs >= 10, 'the wait on the confirmation card is recorded');
+    assert.ok(denied.notes[0].timing.permissionMs >= 10, 'the wait on the permission card is recorded');
+  });
+
   test(`${browser}: every predispatch stage the agent records survives the trace projection`, async () => {
     const fs = await import('node:fs/promises');
     const source = await fs.readFile(new URL(`../src/${browser}/src/agent/agent.js`, import.meta.url), 'utf8');

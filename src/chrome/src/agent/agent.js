@@ -15881,6 +15881,13 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
         || this._taskClickLockAsk(tabId, fnName, fnArgs, callState);
       const predispatchConsequential = () => missingResponseOutcomeUnknown
         || detectedSubmitAction?.isSubmit === true || detectedSubmitAction?.publicationControl === true;
+      // A consequential call that a confirmation card or the permission gate
+      // stops still records where its time went, the wait on the card
+      // included.
+      const predispatchBlocked = stage => {
+        predispatch.lap(stage);
+        if (predispatchConsequential()) predispatch.emit(step, { tool: fnName, outcome: 'blocked' });
+      };
       let workflowPreSubmitBlock = await runWorkflowPreSubmitChecks();
       if (workflowPreSubmitBlock?.mutationConfirmation
           && this.scheduledRunPolicies.get(tabId)?.requireConsequentialConfirmation !== false) {
@@ -16093,6 +16100,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
               }),
             });
             onUpdate('warning', { message: canGroupSearch ? 'Low-risk search blocked until the user allows the grouped actions.' : 'Form submission blocked until the user confirms.' });
+            predispatchBlocked('submitConfirmationMs');
             if (interruptFailedBrowserAction(toolIndex, fnName)) { navNotices.length = 0; break; }
             continue;
           }
@@ -16155,6 +16163,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
                 }),
               });
               onUpdate('warning', { message: 'Low-risk search blocked until the user allows the grouped actions.' });
+              predispatchBlocked('submitConfirmationMs');
               if (interruptFailedBrowserAction(toolIndex, fnName)) { navNotices.length = 0; break; }
               continue;
             }
@@ -16235,6 +16244,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
                   }),
                 });
                 onUpdate('warning', { message: 'Low-risk search blocked until the user allows the grouped actions.' });
+                predispatchBlocked('permissionMs');
                 if (interruptFailedBrowserAction(toolIndex, fnName)) { navNotices.length = 0; break; }
                 continue;
               }
@@ -16304,6 +16314,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
               error: `Cannot run ${fnName}: the target frame/host couldn't be identified, so it can't be permission-checked. Pass a urlFilter naming the iframe's domain (read it first with iframe_read / get_accessibility_tree) and retry.`,
             }),
           });
+          predispatchBlocked('permissionMs');
           if (interruptFailedBrowserAction(toolIndex, fnName)) { navNotices.length = 0; break; }
           continue;
         }
@@ -16317,6 +16328,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
               error: `The user denied permission to ${CAPABILITY_LABEL[blocked.capability]} ${blocked.host}. Do NOT retry this action on that site. Continue with what you can without it, or ask the user how to proceed.`,
             }),
           });
+          predispatchBlocked('permissionMs');
           if (interruptFailedBrowserAction(toolIndex, fnName)) { navNotices.length = 0; break; }
           continue;
         }
