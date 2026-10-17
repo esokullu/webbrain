@@ -27443,6 +27443,14 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     return entry;
   }
 
+  // The answers a trusted Continue of the same task keeps: the user's own,
+  // newest last. An answer WebBrain chose (timeout, Instant, unattended, no
+  // card) is not carried; the continued run lets the user answer.
+  _carriedUnverifiedStepDecisions(guard) {
+    return (Array.isArray(guard?.unverifiedStepDecisions) ? guard.unverifiedStepDecisions : [])
+      .filter(entry => entry?.source === 'user' && entry.taskKey === guard.taskKey).slice(-32);
+  }
+
   _rememberUnverifiedStepDecision(tabId, ask, reading, choice, source) {
     const guard = this._planExecutionGuards.get(tabId);
     if (!guard) return null;
@@ -35055,6 +35063,13 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       // The user's answers on WebBrain's deletion card hold for the same task.
       deletionDecisions: carryMatches && Array.isArray(carried.deletionDecisions)
         ? structuredClone(carried.deletionDecisions.slice(-32)) : [],
+      // So do the user's own answers on its unverified-step card. They are
+      // authorization, not execution evidence, so they need only the same task
+      // scope: a "Don't" is not asked again for the same step and content, and
+      // a one-use "Go ahead" keeps its consumed state. The task token still
+      // binds them (_unverifiedStepDecisions).
+      unverifiedStepDecisions: carryScopeMatches && Array.isArray(carried.unverifiedStepDecisions)
+        ? structuredClone(carried.unverifiedStepDecisions.slice(-32)) : [],
       approvedPlan: this._hasApprovedExecutionPlan(this.conversations.get(tabId) || []),
       // Only the app-owned Continue action can carry verified evidence from
       // the immediately preceding run; ordinary user turns always start at 0.
@@ -35539,6 +35554,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       || guard.verifiedSubmissionEvidence === true
       || !!guard.steeringPriorSubmission
       || (guard.deletionDecisions || []).length > 0
+      || this._carriedUnverifiedStepDecisions(guard).length > 0
       || !!guard.workflowTerminalEvidence
       || !!guard.workflowLedgerReconciliation
       || !!guard.workflowInventoryEvidence
@@ -35589,6 +35605,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
         steeringPriorSubmissionReconciliation: structuredClone(guard.steeringPriorSubmissionReconciliation || null),
         resourceMutationDispatches: structuredClone(guard.resourceMutationDispatches || []),
         deletionDecisions: structuredClone((guard.deletionDecisions || []).slice(-32)),
+        unverifiedStepDecisions: structuredClone(this._carriedUnverifiedStepDecisions(guard)),
         socialPublication: guard.socialPublication ? structuredClone(guard.socialPublication) : null,
         socialPublicationClarifications: structuredClone(guard.socialPublicationClarifications || []),
         socialPublicationSteering: guard.socialPublicationSteering ? structuredClone(guard.socialPublicationSteering) : null,

@@ -371,6 +371,98 @@ for (const { build, Agent, adapters, Scheduler } of builds) {
     assert.equal(dispatched.length, 0);
   });
 
+  // A trusted Continue (the app's Continue after the step limit) starts a new
+  // run of the same task: a new plan guard, built from what the last run
+  // carried. The planner resolves the commit's metadata in each run; the
+  // fixture's requirements stand in for it.
+  function planGuard(agent, tab, { trustedContinuation = false } = {}) {
+    const previous = agent._planExecutionGuards.get(tab);
+    const guard = agent._startPlanExecutionGuard(tab, 'act', { requestKind: 'execute', siteWorkflow: previous.siteWorkflow,
+      requiresStateChange: true, requiresSubmission: true }, trustedContinuation ? { trustedContinuation: true } : {});
+    Object.assign(guard, { workflowMetadataRequirements: previous.workflowMetadataRequirements.map(item => ({ ...item })),
+      workflowMetadataRequirementsResolved: true, workflowMetadataRequirementsIncomplete: false });
+    return guard;
+  }
+  const continueTask = (agent, tab) => {
+    agent._storeContinuationExecutionEvidence(tab);
+    return planGuard(agent, tab, { trustedContinuation: true });
+  };
+
+  test(`${build}: a denied commit stays denied after Continue of the same task, even when a timeout would go ahead`, async () => {
+    const { agent, tab, provider, page } = await githubFixture();
+    const first = planGuard(agent, tab);
+    const denied = pipeline(agent, provider, 'deny');
+    await denied.run(tab, [call('commit-1', 'click_ax', { ref_id: 'ref_7' })]);
+    assert.equal(denied.cards.length, 1);
+    assert.equal(denied.dispatched.length, 0);
+    const continued = continueTask(agent, tab);
+    assert.notEqual(continued, first, 'the continued run has its own plan guard');
+    assert.deepEqual(continued.unverifiedStepDecisions.map(entry => [entry.choice, entry.source]), [['deny', 'user']]);
+    // Nobody answers now, and the timeout setting would let a card go ahead.
+    agent.clarifyTimeoutPolicy = 'finish';
+    agent.clarifyTimeoutSec = 1;
+    const unanswered = pipeline(agent, provider, null);
+    const { messages } = await unanswered.run(tab, [call('commit-2', 'click_ax', { ref_id: 'ref_7' })]);
+    assert.equal(unanswered.cards.length, 0, 'the declined text is not asked about again');
+    assert.equal(unanswered.dispatched.length, 0, 'the commit never goes ahead');
+    const refused = resultFor(messages, 'commit-2');
+    assert.equal(refused.unverifiedStepDeclined, true);
+    assert.match(refused.error, /The user already chose not to go ahead/);
+    // Different editor text is a different step to ask about.
+    page.editor = `${POST_BODY}Late edit.\n`;
+    const changed = pipeline(agent, provider, 'once');
+    await changed.run(tab, [call('commit-3', 'click_ax', { ref_id: 'ref_7' })]);
+    assert.equal(changed.cards.length, 1, 'changed content is asked about again');
+    assert.equal(changed.cards[0].unverifiedStepConfirmation.content, page.editor);
+    assert.equal(changed.dispatched.length, 1);
+  });
+
+  test(`${build}: a denial is not carried into a run that is not a Continue, and a timeout's answer is not carried at all`, async () => {
+    // An ordinary new run (not the app's Continue) builds its guard afresh.
+    const fresh = await githubFixture();
+    planGuard(fresh.agent, fresh.tab);
+    await pipeline(fresh.agent, fresh.provider, 'deny').run(fresh.tab, [call('commit-1', 'click_ax', { ref_id: 'ref_7' })]);
+    fresh.agent._storeContinuationExecutionEvidence(fresh.tab);
+    const next = planGuard(fresh.agent, fresh.tab);
+    assert.deepEqual(next.unverifiedStepDecisions, []);
+    const asked = pipeline(fresh.agent, fresh.provider, 'once');
+    await asked.run(fresh.tab, [call('commit-2', 'click_ax', { ref_id: 'ref_7' })]);
+    assert.equal(asked.cards.length, 1, 'a new run asks the user again');
+    assert.equal(asked.dispatched.length, 1);
+    // An unanswered card under "Play it safe" is WebBrain's answer, not the
+    // user's: the continued run asks the user instead of refusing for them.
+    const timed = await githubFixture();
+    planGuard(timed.agent, timed.tab);
+    timed.agent.clarifyTimeoutPolicy = 'safe';
+    timed.agent.clarifyTimeoutSec = 1;
+    const unanswered = pipeline(timed.agent, timed.provider, null);
+    await unanswered.run(timed.tab, [call('commit-1', 'click_ax', { ref_id: 'ref_7' })]);
+    assert.equal(unanswered.dispatched.length, 0);
+    assert.equal(timed.agent._planExecutionGuards.get(timed.tab).unverifiedStepDecisions[0].source, 'timeout');
+    const continued = continueTask(timed.agent, timed.tab);
+    assert.deepEqual(continued.unverifiedStepDecisions, []);
+    const answered = pipeline(timed.agent, timed.provider, 'once');
+    await answered.run(timed.tab, [call('commit-2', 'click_ax', { ref_id: 'ref_7' })]);
+    assert.equal(answered.cards.length, 1, 'the user is asked again after Continue');
+    assert.equal(answered.dispatched.length, 1);
+  });
+
+  test(`${build}: a one-use answer carried by Continue stays one-use`, async () => {
+    const { agent, tab } = await githubFixture();
+    planGuard(agent, tab);
+    const remember = (stepKey, choice) => agent._rememberUnverifiedStepDecision(tab,
+      { guardId: 'github-commit-split-write-required', stepKey }, { sha256: '', length: null }, choice, 'user');
+    remember('step-used', 'once');
+    assert.ok(agent._unverifiedStepApproval(tab, 'github-commit-split-write-required', 'step-used', { consume: true }));
+    remember('step-unused', 'once');
+    continueTask(agent, tab);
+    assert.equal(agent._unverifiedStepApproval(tab, 'github-commit-split-write-required', 'step-used', { consume: true }), null,
+      'an approval used before Continue is not usable again');
+    assert.ok(agent._unverifiedStepApproval(tab, 'github-commit-split-write-required', 'step-unused', { consume: true }),
+      'an approval not yet used covers its one action');
+    assert.equal(agent._unverifiedStepApproval(tab, 'github-commit-split-write-required', 'step-unused', { consume: true }), null);
+  });
+
   test(`${build}: an unanswered commit card goes ahead under 'finish' and not under 'safe'`, async () => {
     for (const [policy, goesAhead] of [['finish', true], ['safe', false]]) {
       const { agent, tab, provider } = await githubFixture();
