@@ -27,7 +27,7 @@ The resolved mode is recorded:
 Auto turns lean mode on only when all of these hold (`src/*/src/agent/lean-mode.js`):
 
 1. **The run is in Act mode.**
-2. **The provider is a cloud or router provider.** A provider whose category is local, and llama.cpp, Ollama, LM Studio and WebGPU in any configuration, never get lean mode under Auto, whatever model they serve. A provider of unknown category does not either.
+2. **The provider is a cloud or router provider.** The category WebBrain gives the provider decides, so Ollama Cloud is a cloud provider. A local provider never gets lean mode under Auto, whatever model it serves, and a provider of unknown category does not either. A provider config that names no category is local when it is llama.cpp, Ollama, LM Studio or WebGPU.
 3. **The provider's prompt tier is Full.** A provider the user set to Compact or Mid keeps its tier's tools and prompt.
 4. **The model id is on the strong-model list:**
    - Claude Opus and Sonnet, generation 4 and later, and Claude Fable and Mythos (`claude-sonnet-4-5`, `claude-opus-4-1-…`, `claude-fable-5-1`, `anthropic/claude-sonnet-4.5`, Bedrock ids);
@@ -36,7 +36,7 @@ Auto turns lean mode on only when all of these hold (`src/*/src/agent/lean-mode.
    - Gemini 2.5 Pro and newer Pro or Ultra models;
    - Grok 4 and later.
 
-   Ids are matched in lower case anywhere in the string, so router prefixes, regional prefixes and dated snapshots match. Haiku, Flash, GPT-4o, Claude 3.x and the WebBrain Cloud default model are not on the list, so Auto leaves them off.
+   The id is the model the provider calls: with the model setting left blank, that is the provider's default (Anthropic's is `claude-sonnet-5`). Ids are matched in lower case anywhere in the string, so router prefixes, regional prefixes and dated snapshots match. Haiku, Flash, GPT-4o, Claude 3.x and the WebBrain Cloud default model are not on the list, so Auto leaves them off.
 
 The list is `LEAN_STRONG_MODEL_RULES` in `lean-mode.js`. That file is identical in both builds (a test checks it); add a family there when it has proven itself, and add a case to `test/lean-mode.mjs`.
 

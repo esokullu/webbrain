@@ -161,6 +161,15 @@ for (const build of ['chrome', 'firefox']) {
       [{ category: 'local', type: 'llamacpp', model: 'claude-sonnet-4-5', promptTier: 'full' }, false, 'local_provider'],
       [{ type: 'webgpu', model: 'gpt-5' }, false, 'local_provider'],
       [{ providerId: 'lmstudio', model: 'gpt-5' }, false, 'local_provider'],
+      [{ providerId: 'ollama', model: 'gpt-5', promptTier: 'full' }, false, 'local_provider'],
+      // An explicit category decides before the type and id lists: Ollama
+      // Cloud is a cloud provider although its id starts with "ollama-".
+      [{ category: 'cloud', type: 'openai', providerId: 'ollama-cloud', model: 'gemini-3-pro-preview', promptTier: 'full' }, true, 'strong_cloud_model'],
+      [{ category: 'local', providerId: 'custom-cloud', model: 'gpt-5', promptTier: 'full' }, false, 'local_provider'],
+      // A blank configured model is unset: the provider's own model decides.
+      [{ config: { category: 'cloud', model: '' }, model: 'claude-sonnet-5' }, true, 'strong_cloud_model'],
+      [{ config: { category: 'cloud', model: '   ' }, model: 'gpt-5' }, true, 'strong_cloud_model'],
+      [{ category: 'cloud', model: '', promptTier: 'full' }, false, 'model_not_listed'],
       // A provider of unknown category is not assumed to be a cloud one.
       [{ model: 'gpt-5', promptTier: 'full' }, false, 'unknown_provider'],
     ];
@@ -203,6 +212,35 @@ for (const build of ['chrome', 'firefox']) {
     assert.equal(agent._leanModeActive(tab, anthropic), false);
     agent.leanMode = 'on';
     assert.equal(agent._leanModeActive(tab, llama), true);
+  });
+
+  test(`${build}: Auto follows the built-in provider's category and the model it actually calls`, async () => {
+    const { ProviderManager } = await import(`../src/${build}/src/providers/manager.js`);
+    const manager = new ProviderManager();
+    const defaults = manager._defaultConfigs();
+    // Built the way the extension builds them, from the shipped defaults.
+    const built = (id, overrides) => manager._createProvider(id, { ...defaults[id], ...overrides });
+    // Ollama Cloud is category 'cloud'; a local Ollama stays local whatever
+    // model it serves.
+    assert.equal(defaults['ollama-cloud'].category, 'cloud');
+    assert.deepEqual(lean.resolveLeanMode('auto', { provider: built('ollama-cloud', { model: 'gemini-3-pro-preview', apiKey: 'test' }) }),
+      { active: true, setting: 'auto', reason: 'strong_cloud_model', family: 'gemini' });
+    assert.equal(lean.resolveLeanMode('auto', { provider: built('ollama', { model: 'gpt-5' }) }).reason, 'local_provider');
+    // A cleared model setting means the provider's default, which for
+    // Anthropic is claude-sonnet-5.
+    const anthropic = built('anthropic', { model: '', apiKey: 'test' });
+    assert.equal(anthropic.model, 'claude-sonnet-5');
+    assert.deepEqual(lean.resolveLeanMode('auto', { provider: anthropic }),
+      { active: true, setting: 'auto', reason: 'strong_cloud_model', family: 'claude' });
+    // Auto agrees with ProviderManager.categoryFor on every built-in, and a
+    // built-in whose default URL is on this machine is local.
+    for (const [id, config] of Object.entries(defaults)) {
+      const category = ProviderManager.categoryFor(id, config);
+      const info = lean.leanProviderInfo({ config: { ...config, category, _providerId: id } });
+      assert.equal(info.local, category === 'local', `${id} is ${category}`);
+      assert.equal(info.cloud, category !== 'local', `${id} is ${category}`);
+      if (/^https?:\/\/(?:localhost|127\.0\.0\.1|\[::1\])[:/]/.test(String(config.baseUrl || ''))) assert.ok(info.local, `${id} runs locally`);
+    }
   });
 
   // ── Tool list and prompt ────────────────────────────────────────────────

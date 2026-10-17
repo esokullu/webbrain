@@ -54,24 +54,46 @@ export function strongModelFamily(modelId) {
 }
 
 // Providers that run on the user's machine or in the browser. Auto never
-// turns lean mode on for them, whatever model they serve.
+// turns lean mode on for them, whatever model they serve. The type and id
+// lists only classify a provider whose config names no category.
 const LOCAL_PROVIDER_TYPES = Object.freeze(['llamacpp', 'webgpu']);
 const LOCAL_PROVIDER_ID = /^(?:llamacpp|ollama|lmstudio|webgpu)(?:$|[_-])/;
 
+// The first value that is a non-blank string, read lazily: a provider's
+// getters can throw, and a blank configured value (model: '') means "not
+// set", so the provider's own default applies.
+function firstText(...reads) {
+  for (const read of reads) {
+    let value;
+    try { value = read(); } catch { continue; }
+    if (value == null) continue;
+    const text = String(value);
+    if (text.trim()) return text;
+  }
+  return '';
+}
+
 /**
  * What Auto needs to know about a provider. Accepts a provider instance (its
- * `config` and `promptTier`) or a plain description for tests and tools.
+ * `config`, `promptTier` and effective `model`) or a plain description for
+ * tests and tools.
  */
 export function leanProviderInfo(provider) {
   const config = provider?.config && typeof provider.config === 'object' ? provider.config : provider || {};
-  const category = String(config.category ?? provider?.category ?? '').toLowerCase();
-  const type = String(config.type ?? provider?.type ?? '').toLowerCase();
-  const providerId = String(config._providerId ?? provider?.providerId ?? '').toLowerCase();
-  const model = String(config.model ?? provider?.model ?? '');
-  let promptTier = '';
-  try { promptTier = String(provider?.promptTier ?? config.promptTier ?? '').toLowerCase(); } catch {}
-  const local = category === 'local' || LOCAL_PROVIDER_TYPES.includes(type) || LOCAL_PROVIDER_ID.test(providerId);
-  const cloud = !local && (category === 'cloud' || category === 'router');
+  const category = firstText(() => config.category, () => provider?.category).trim().toLowerCase();
+  const type = firstText(() => config.type, () => provider?.type).trim().toLowerCase();
+  const providerId = firstText(() => config._providerId, () => provider?.providerId).trim().toLowerCase();
+  // A blank configured model is unset: the provider's model getter returns
+  // the model it actually calls (AnthropicProvider defaults to its own).
+  const model = firstText(() => config.model, () => provider?.model).trim();
+  const promptTier = firstText(() => provider?.promptTier, () => config.promptTier).trim().toLowerCase();
+  // An explicit category decides, as ProviderManager.categoryFor does: the
+  // built-in Ollama Cloud is 'cloud' although its id starts with "ollama-".
+  // The type and id lists only classify a config written without one.
+  const remote = category === 'cloud' || category === 'router';
+  const local = category === 'local'
+    || (!remote && (LOCAL_PROVIDER_TYPES.includes(type) || LOCAL_PROVIDER_ID.test(providerId)));
+  const cloud = !local && remote;
   return { category, type, providerId, model, promptTier, local, cloud };
 }
 
