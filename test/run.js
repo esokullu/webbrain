@@ -18526,7 +18526,8 @@ test('a reading older than the ones handed to the page still reaches it when the
     const wall = 'Bu içerik abonelere özeldir Okumaya devam etmek için abone olun. Abone ol';
     const agent = new AgentClass({});
     const asked = stubPageTextReadings(agent, (kind, item) => (kind === 'page_blocker'
-      ? (item.text === wall ? 'subscription' : 'other') : kind === 'message_control' ? 'other' : null));
+      ? (item.text === wall ? 'subscription' : 'other') : kind === 'message_control' ? 'other'
+        : kind === 'control_effect' ? (item.text === 'Paylaş' ? 'publish' : 'view') : null));
     await agent._readPageTexts(1, 'page_blocker', [wall], {}, { maxChars: 400 });
     // Many texts read since push it out of the readings a page read carries.
     await agent._readPageTexts(1, 'page_blocker', Array.from({ length: 450 }, (_, index) => `Bülten kutusu ${index}`), {}, { maxChars: 400 });
@@ -18550,6 +18551,14 @@ test('a reading older than the ones handed to the page still reaches it when the
     assert.equal(agent._messagingPageReadings().message_control['Gönder'], undefined);
     assert.equal(await agent._readUnreadPageTexts(1, [{ kind: 'message_control', text: 'Gönder' }]), true);
     assert.equal(agent._messagingPageReadings().message_control['Gönder'], 'other', `${build}: a held control reading did not reach the page`);
+    // So does what a clicked control does, which the submit probe reads.
+    await agent._readPageTexts(1, 'control_effect', ['Paylaş'], {}, { maxChars: 200 });
+    await agent._readPageTexts(1, 'control_effect', Array.from({ length: 450 }, (_, index) => `Sekme ${index}`), {}, { maxChars: 200 });
+    assert.equal(agent._controlEffectReadingsForProbe()['Paylaş'], undefined);
+    asked.length = 0;
+    await agent._readControlEffects(1, ['Paylaş']);
+    assert.equal(agent._controlEffectReadingsForProbe()['Paylaş'], 'publish', `${build}: a held caption reading did not reach the submit probe`);
+    assert.deepEqual(asked, [], `${build}: a held caption reading was asked of a model again`);
     // Overlay and article-block texts stay out of the dialog-title readings
     // the CAPTCHA scans carry, which are at most 200 characters.
     const window = `${'Önizleme paragrafı. '.repeat(12)}Okumaya devam etmek için abone olun.`;
@@ -112719,7 +112728,9 @@ test('Chrome Web Store release uses an always-on protected-page guard and opt-in
   assert.match(getActiveAdapterFx(dashboard)?.notes || '', /Continue manually in the dashboard/);
 
   const chromeAgentSource = fs.readFileSync(path.join(ROOT, 'src/chrome/src/agent/agent.js'), 'utf8');
-  const guardIndex = chromeAgentSource.indexOf('const protectedPageFailure = await this._chromeProtectedPageFailure(tabId, fnName);');
+  // Declared before the call's timer starts (its stages may report a stop
+  // first); assigned here, ahead of every preparation and dispatch below.
+  const guardIndex = chromeAgentSource.indexOf('protectedPageFailure = await this._chromeProtectedPageFailure(tabId, fnName);');
   const webMcpPreparationIndex = chromeAgentSource.indexOf('const webMcpPreparation = protectedPageFailure', guardIndex);
   const toolbarPreflightIndex = chromeAgentSource.indexOf('const pipelineToolbarPreflight = await this._preflightRichTextToolbarTarget(', webMcpPreparationIndex);
   const chatPreflightIndex = chromeAgentSource.indexOf('const genericChatBlock = pipelineToolbarPreflight.block || socialDispatchBlock ? null', toolbarPreflightIndex);
