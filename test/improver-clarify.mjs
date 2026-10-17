@@ -642,13 +642,15 @@ for (const { build, Agent, tools, args, research, Scheduler, planner } of builds
       const answer = await agent.processMessage(tabId, scheduledMessage, () => {}, 'act', [], scheduledRunOptions(finishes));
       assert.match(answer, /Which account should I check\?/);
       assert.deepEqual(agent.plannerCalls, [plannerMode === 'off' ? 'planner_intent' : 'planner'], 'the real planner gate ran');
-      assert.deepEqual(finishes, [['clarify', { needsUserInput: true }]]);
+      // The end details also say whether the run was lean (lean-mode.js);
+      // this owned provider is not a strong cloud model, so it was not.
+      assert.deepEqual(finishes, [['clarify', { needsUserInput: true, leanMode: false }]]);
 
       // The streaming entry point reports the same way.
       const streamAgent = plannerAgent(Agent, plannerResult('clarify', 'Which account should I check?'), plannerMode);
       const streamFinishes = [];
       await streamAgent.processMessageStream(tabId, scheduledMessage, () => {}, 'act', { onRunFinished: (...args) => streamFinishes.push(args) });
-      assert.deepEqual(streamFinishes, [['clarify', { needsUserInput: true }]]);
+      assert.deepEqual(streamFinishes, [['clarify', { needsUserInput: true, leanMode: false }]]);
     });
   }
 
@@ -671,7 +673,7 @@ for (const { build, Agent, tools, args, research, Scheduler, planner } of builds
     const finishes = [];
     const answer = await agent.processMessage(tabId, scheduledMessage, () => {}, 'act', [], scheduledRunOptions(finishes));
     assert.match(answer, /could not pin the currently open conversation to one verified recipient/);
-    assert.deepEqual(finishes, [['active_recipient_unverified', { needsUserInput: true }]]);
+    assert.deepEqual(finishes, [['active_recipient_unverified', { needsUserInput: true, leanMode: false }]]);
   });
 
   test(`${build}: other planner endings do not claim the user is needed`, async () => {
@@ -684,7 +686,7 @@ for (const { build, Agent, tools, args, research, Scheduler, planner } of builds
       const agent = plannerAgent(Agent, plan, plannerMode);
       const finishes = [];
       await agent.processMessage(6703, scheduledMessage, () => {}, 'act', [], scheduledRunOptions(finishes));
-      assert.deepEqual(finishes, [[status, { needsUserInput: false }]], plannerMode);
+      assert.deepEqual(finishes, [[status, { needsUserInput: false, leanMode: false }]], plannerMode);
     }
   });
 

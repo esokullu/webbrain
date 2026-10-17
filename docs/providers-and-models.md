@@ -665,6 +665,8 @@ Provider tier and conversation mode are separate knobs:
 
 Ask mode ignores provider tier and stays read-only. Act mode uses the selected tier's normal tools. Dev mode requires Mid or Full, uses the selected Act prompt, appends `SYSTEM_PROMPT_DEV_APPENDIX`, and adds Dev-only source/style tools plus Dev-extended shadow/frame inspection for Mid-tier debugging. Compact Dev is blocked before an LLM request is sent.
 
+**Lean mode** (Settings → General → Lean mode; Auto by default) replaces the tier's Act tools and prompt with a 17-tool set and a short prompt, and skips WebBrain's quality checks. Under Auto it applies only to a strong model on a cloud or router provider whose tier is Full; Compact and Mid tiers and local providers keep their tier. See [lean-mode.md](lean-mode.md).
+
 ### Vision Detection
 
 | Provider            | Mechanism                                                                                                                                         |
