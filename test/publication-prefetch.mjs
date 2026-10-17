@@ -630,6 +630,28 @@ for (const browser of ['chrome', 'firefox']) {
     }
   });
 
+  test(`${browser}: a prefetch that reaches the draft the click is auditing defers to the click`, async () => {
+    const f = setup();
+    // The click compiles the contract and audits the draft itself; its audit
+    // is still in flight.
+    const audit = f.hold('social_publication_authorization');
+    const click = f.click();
+    await until(() => audit.started, 'the click\'s own audit started');
+    try {
+      // A write's prefetch, slower than the click, reaches the same draft now.
+      assert.equal(await within(f.write(), 'the prefetch does not wait for the click'), 'cached', 'the prefetch defers to the click');
+      assert.equal(f.named('social_publication_authorization').length, 1, 'no second checker request for the same draft');
+    } finally {
+      audit.release();
+    }
+    assert.equal(await within(click, 'the click finishes'), null);
+    assert.equal(f.named('social_publication_authorization').length, 1);
+    // Once the click decided, a prefetch of another draft audits as before.
+    f.detected.frameDocumentIdentity = 'https://x.com/compose/post|fixture-document-2';
+    assert.equal(await f.write(), 'authorized');
+    assert.equal(f.named('social_publication_authorization').length, 2);
+  });
+
   test(`${browser}: a newer draft cancels the background audit of the older one, and a click awaiting it audits on its own`, async () => {
     const f = setup();
     const audit = f.hold('social_publication_authorization');

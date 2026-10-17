@@ -21616,26 +21616,37 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     if (social.dispatch?.key !== key) {
       if (!bypassMatches) {
         const auditStarted = Date.now();
-        // A background prefetch audited this exact key (or still is): its
-        // verdict decides once, exactly as this audit would have. Any other
-        // key, or no verdict, runs the audit now.
-        const prefetched = await this._socialPublicationPrefetchedVerdict(tabId, guard, social, key, taskKey);
-        if (prefetched?.changed) return blocked('Publication context changed during authorization.');
-        if (prefetched) {
-          this._predispatchStage(tabId, prefetched.awaited ? 'publicationAuditAwaitedMs' : 'publicationAuditReusedMs', Date.now() - auditStarted);
-          if (!prefetched.authorized) {
-            social.deniedAuditKey = key;
-            social.deniedAudit = { status: 'denied', reason: prefetched.reason };
-            return auditBlocked();
+        // The click decides this draft's audit from here on: a background
+        // prefetch of the same draft that reaches its own check meanwhile
+        // defers to it instead of sending a second request
+        // (_socialPublicationPrefetchAudit).
+        const foreground = this._socialPublicationForegroundAudits ||= new WeakMap();
+        const auditing = { key };
+        foreground.set(social, auditing);
+        try {
+          // A background prefetch audited this exact key (or still is): its
+          // verdict decides once, exactly as this audit would have. Any other
+          // key, or no verdict, runs the audit now.
+          const prefetched = await this._socialPublicationPrefetchedVerdict(tabId, guard, social, key, taskKey);
+          if (prefetched?.changed) return blocked('Publication context changed during authorization.');
+          if (prefetched) {
+            this._predispatchStage(tabId, prefetched.awaited ? 'publicationAuditAwaitedMs' : 'publicationAuditReusedMs', Date.now() - auditStarted);
+            if (!prefetched.authorized) {
+              social.deniedAuditKey = key;
+              social.deniedAudit = { status: 'denied', reason: prefetched.reason };
+              return auditBlocked();
+            }
+            delete social.deniedAudit;
+            delete social.deniedAuditKey;
+          } else {
+            const outcome = await this._socialPublicationAuditRun(tabId, provider || this._activeProvider(tabId),
+              guard, social, action, snapshot, key, taskKey, { record: true });
+            this._predispatchStage(tabId, 'publicationAuditMs', Date.now() - auditStarted);
+            if (outcome.status === 'changed') return blocked('Publication context changed during authorization.');
+            if (outcome.status !== 'authorized') return auditBlocked();
           }
-          delete social.deniedAudit;
-          delete social.deniedAuditKey;
-        } else {
-          const outcome = await this._socialPublicationAuditRun(tabId, provider || this._activeProvider(tabId),
-            guard, social, action, snapshot, key, taskKey, { record: true });
-          this._predispatchStage(tabId, 'publicationAuditMs', Date.now() - auditStarted);
-          if (outcome.status === 'changed') return blocked('Publication context changed during authorization.');
-          if (outcome.status !== 'authorized') return auditBlocked();
+        } finally {
+          if (foreground.get(social) === auditing) foreground.delete(social);
         }
       }
       social.dispatch = { key, actionId: action.id, snapshot: JSON.parse(JSON.stringify(snapshot)), pageUrl,
@@ -21901,6 +21912,9 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     const frameId = Number.isInteger(detected.frameId) ? detected.frameId : 0;
     const key = this._sha256TextSync(JSON.stringify({ contract: social.key, action, snapshot, pageUrl, documentIdentity, frameId }));
     if (social.dispatch?.key === key || social.deniedAuditKey === key || social.prefetchedAudit?.key === key) return 'cached';
+    // The click is already deciding this draft's audit itself: its verdict
+    // decides, and a second request would bill the same check twice.
+    if (this._socialPublicationForegroundAudits?.get(social)?.key === key) return 'cached';
     const audits = this._socialPublicationAuditPrefetches ||= new WeakMap();
     const running = audits.get(social);
     // The same draft is already being audited for this run: join it. An
