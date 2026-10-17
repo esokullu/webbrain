@@ -889,6 +889,12 @@ export class OpenAICompatibleProvider extends BaseLLMProvider {
     error.isAskStreamTerminalError = !!stream && !error.isResponsesStreamFallbackSafe;
     error.incomplete = true;
     error.incompleteReason = reason;
+    // What the model wrote before it stopped, for callers that can show a partial answer.
+    const partial = Array.isArray(response?.output) ? this._responseText(response.output) : '';
+    if (partial) error.partialContent = partial;
+    // The call was billed even though it ended in an error; callers that meter cost read this.
+    const billedUsage = this._normalizeResponsesUsage(response?.usage);
+    if (billedUsage) error.billedUsage = billedUsage;
     return error;
   }
 

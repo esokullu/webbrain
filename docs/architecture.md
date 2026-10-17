@@ -516,6 +516,80 @@ other run, event, screenshot, deep-debug, or lossless fields follow the current
 privacy mode documented in [Privacy & Data Flow](privacy-and-data-flow.md). Treat
 trace and diagnostic exports as privacy-sensitive data.
 
+### Page selection bar and inline cards
+
+Selecting text on a page shows a bar (Translate, Explain, Proofread, More…) drawn by a
+content script in a closed Shadow DOM, in the top frame and in the PDF viewer page.
+**More…** opens the full popup; its actions (Summarize, Quiz me, Humanize, with the three
+the bar already offers left out) and question box queue a side-panel prompt as
+described above. Translate, Explain and Proofread answer in place instead: the script sends
+one `WB_SELECTION_SHORTCUT_INLINE` message and the background builds the same allowlisted
+selection prompt (the selection inside its untrusted boundary, `selection_only` grounding)
+behind a short fixed system message, then makes a single tool-less model call through the
+cost allowance (90 s timeout) and returns the text. The output budget is sized to the
+selection (at least 2,000 tokens; Translate and Proofread grow to about two tokens per
+character, up to 8,000) and never exceeds the provider's own output ceiling or the room its
+context window leaves after the prompt (estimated on the high side, since the provider's tokenizer
+is not available: a whole token per ASCII character, as dense text such as minified code or hashes can need, four per other character, the most a byte-level fallback spends on one code point (accented letters, CJK, emoji),
+plus a reserve), so a small local window is not sent a request it would reject. When the prompt
+leaves less than 256 tokens for the answer, the background makes no call and answers with a plain
+context-window error (not the cut-off shape: the side panel sizes its reply to the same window and
+would refuse the same selection, so the card must not offer it as a way to finish). If the reply
+still stopped at the cap (finish reason, Anthropic `stop_reason` or Responses
+`incomplete_details`, or token usage at the budget when no reason is reported; OpenAI
+Responses reports the limit as an error, which the background treats the same way and
+answers with whatever text the provider returned) the response
+is flagged `truncated`, and the card says so and offers **Continue in side panel** instead
+of passing a cut-off translation off as complete. An answer is held to 64,000 characters, a limit enforced rather than inferred from the token budget (tokens are not a fixed number of characters): the background cuts a longer one there (never inside a surrogate pair) and flags it `truncated`, and the card applies the same limit to whatever it receives, so a follow-up or a continuation carries exactly the text the card shows and nothing is silently shortened afterwards. The call that reaches the configured cost allowance still returns its answer (the
+background passes the allowance's own message as `notice`, from the result or, for a Responses
+cut-off, the error), and the card shows it under that answer, since the next card would otherwise
+fail with no warning. Continue sends the unfinished text as
+`continueFrom`; the background wraps it inside the selection's untrusted block (whole, up to the
+most a card holds, because the side panel shows that block to the user) with a trusted request to resume from where it stops, because running the action again
+would meet the same output limit. The card keeps the whole unfinished answer to show, but once the active provider's context window is known the background sends only its tail (`buildContinuationSelectionPrompt`'s `contextWindow` option, marked with a leading ellipsis): it keeps what the window leaves after the rest of the prompt, the side panel's own prompt (`SIDE_PANEL_SELECTION_SYSTEM_TOKENS`, which a test holds above the real prompt) and a reply of up to 2,048 tokens, or only the 256-token minimum when the window is tight, so a long answer produced on a small local model is not refused as too long when it is continued. A card follow-up is sized the same way, but keeps the start of the earlier answer and says that the rest was left out (`buildFollowUpSelectionText`'s `contextWindow`, `question` and `language` options; a follow-up that brings the page as context manages its own context and is left alone). The estimate counts a system message, which is WebBrain's own prose and never page text, at a token per three characters instead of the worst case used for everything else, because otherwise the side panel's own prompt alone fills a 4k window. A window that cannot take the rest of the prompt and that minimum (about 2k) keeps the whole text and is refused, with the reason, when it runs. The side-panel reply to a continuation or a card follow-up carries the earlier answer as well as the selection, and a selection-only run skips context management, so that reply is sized to the room the model's context window leaves (the same worst-case estimate, `fitAnswerToContext`) rather than asking for the provider's full output ceiling; when the window leaves no room it says the selection is too long for the model and sends nothing. A resumed Proofread gets its own instruction, without the ordinary request for one complete corrected version, so a model asked for only the remainder is not also asked to write the corrected text again. A side-panel reply that is cut off again says so (the
+response-only path appends a notice when the provider reports a length finish, WebGPU
+reports `outputTruncated`, or OpenAI Responses raises the limit as an error carrying
+`partialContent`, whose text is then shown), so a long remainder never passes as complete
+and can be continued by asking. The call that reaches the cost allowance says so under the reply, whether it finished or was recovered from that error, so the next continuation does not fail unexplained. Each call carries a job id, and a card
+that is closed, retried or retargeted sends `WB_SELECTION_SHORTCUT_INLINE_CANCEL` so the
+background aborts the paid request it no longer needs (a page that unloads mid-answer sends the
+same cancel from `pagehide`, since it can no longer close the card itself; for the in-browser WebGPU models the
+provider also sends `webgpu-chat-cancel`, and the offscreen worker interrupts the running
+generation or drops a queued one, and the offscreen host remembers a cancel that arrives while the request is still being routed to a worker, so the generation never starts, and the Bonsai 2 Vision worker re-checks for a cancel before each prefill slice so a long prompt stops at the next slice boundary; those workers report `outputTruncated` when an answer used
+its token budget, since they have no finish reason); the card also claims its request id
+before it waits for the language bundle, so a double click starts only one call, and **More…** takes a newer id on the same wait, so an action clicked just before it never reaches the model. Selections
+over 4,000 characters skip the card and use the side-panel flow. The card draws the answer as DOM
+nodes (paragraphs, lists, bold, italic and code), never as HTML, and takes the source
+language from the browser's own detector, with no network call. If the language bundle cannot be
+loaded, the card runs on its built-in English text and still lists the translation targets. A follow-up typed in a card
+continues in the side panel as a custom question. In Chrome the background opens the panel
+only when none is showing in that window: re-running `sidePanel.setOptions()` + `open()` on an
+open panel closes it, so each panel reports its visibility over a long-lived port
+(`sidepanel-presence.js`) and the background reads that synchronously, before the user
+gesture can lapse, then hands an already-open panel the prompt by message. A panel whose port
+was dropped by a background restart reconnects at once (only a port that is refused straight
+away backs off), so the restarted worker is not left unaware of a panel that is still showing.
+A new panel reports as soon as it knows its window, ahead of its other start-up awaits, so an
+action arriving while it is still opening does not open it a second time.
+A panel the browser carries to another window (the tab dragged out) keeps its document; the window scope
+notices on its next live `windows.getCurrent()` lookup and the reporter (`setWindowId()`) names the new
+window, so the background does not treat the old window as occupied and the new one as empty.
+The PDF viewer does the same for the window id it sends with a selection: `pdf-viewer-window.js`
+takes the new window straight from `tabs.onAttached` for its own tab (no lookup to race a click that
+follows the drop, and a lookup begun before the move is discarded), re-reads `windows.getCurrent()`
+when the window gains focus and at the start of every pointer gesture as a backstop, and the selection
+script reads those fields when it sends, not once at load.
+A selection made in the bundled PDF viewer, whose message carries only a tab id, brings the
+window too (Chrome's `sender.tab` for that tab, else the window the viewer reported from
+`windows.getCurrent()`), so the same check applies there; that path opens the panel once in the
+click and queues the verified prompt with `panelOpened`, because a panel that is still starting
+up has not reported in yet and a second `open()` would close it. The card's
+answer travels inside the selection's untrusted boundary, labelled as an earlier answer that
+may contain mistakes and
+capped at 64,000 characters (the most a card is ever held to), so model output derived from page text never becomes trusted
+instruction. The selection and the answer go to the configured provider like any other
+model call.
+
 ### Step 6: Tool Execution
 
 `executeTool(tabId, name, args, onUpdate)` dispatches by name:

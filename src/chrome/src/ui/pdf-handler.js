@@ -1,5 +1,6 @@
 import { normalizePdfOcrResult, renderPdfOcrTextLayer } from '../agent/pdf-ocr.js';
 import { readPdfResponseBytes } from '../agent/pdf-stream.js';
+import { trackViewerWindow } from './pdf-viewer-window.js';
 
 const api = globalThis.browser || globalThis.chrome;
 const elements = Object.fromEntries([
@@ -694,12 +695,17 @@ async function initialize() {
   state.streamInfo = streamInfo;
   if (streamInfo.embedded === true) document.body.dataset.embedded = 'true';
   elements['pdf-title'].textContent = String(streamInfo.originalUrl || 'WebBrain PDF');
+  // The window this viewer is in. The background needs it before its first await to
+  // tell whether WebBrain's side panel is already showing there (re-opening it closes it).
+  // The tab can be dragged into another window later, so it is kept up to date.
+  const submitFields = {
+    tabId: streamInfo.tabId,
+    originalUrl: String(streamInfo.originalUrl || ''),
+  };
+  await trackViewerWindow({ api, target: window, fields: submitFields, tabId: streamInfo.tabId }).refresh();
   globalThis.__webbrainSelectionShortcutConfig = {
     submitMessage: 'WB_PDF_SELECTION_SHORTCUT_SUBMIT',
-    submitFields: {
-      tabId: streamInfo.tabId,
-      originalUrl: String(streamInfo.originalUrl || ''),
-    },
+    submitFields,
     allowNestedFrame: true,
   };
   await import(api.runtime.getURL('src/content/selection-shortcut.js'));

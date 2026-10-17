@@ -16,15 +16,25 @@ export function createSidePanelWindowScope({
   getRenderedTabId,
   switchToTab,
   settleWindowTransfer = () => new Promise(resolve => setTimeout(resolve, 0)),
+  // Told when a live lookup finds the panel in a different window than the last one
+  // announced, so whoever else keys on the window (the presence reporter) can follow.
+  onWindowChanged = () => {},
 }) {
   let ownWindowId = initialWindowId;
+  let announcedWindowId = initialWindowId;
   let tabTransfer = null;
   let syncGeneration = 0;
 
   async function refreshOwnWindowId() {
     try {
       const ownWindow = await browserApi.windows.getCurrent();
-      if (ownWindow?.id != null) ownWindowId = ownWindow.id;
+      if (ownWindow?.id != null) {
+        ownWindowId = ownWindow.id;
+        if (ownWindowId !== announcedWindowId) {
+          announcedWindowId = ownWindowId;
+          try { onWindowChanged(ownWindowId); } catch { /* a listener must not break tab sync */ }
+        }
+      }
     } catch {
       // Keep the last confirmed ID. A transient windows API failure should
       // not make an unrelated window eligible to control this panel.

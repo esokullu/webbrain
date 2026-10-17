@@ -9,6 +9,7 @@ import { appendGeneratedMedia, restoreGeneratedMedia } from './generated-media-v
  */
 
 import { createQuotaController } from './compass-quota.js';
+import { reportSidePanelPresence } from '../sidepanel-presence.js';
 import { t, getLocale, setLocale, LANGUAGES, applyDOMTranslations, translationsForKey } from './i18n.js';
 import { CAPABILITY_LABEL } from '../agent/permission-gate.js';
 import { sanitizeMarkdownLinks } from './markdown-link.js';
@@ -5065,6 +5066,14 @@ function clearScratchpad(tabId = currentTabId) {
 async function init() {
   const initialWindow = await chrome.windows.getCurrent().catch(() => null);
   const initialWindowId = initialWindow?.id ?? null;
+  // Lets the background reuse this panel instead of re-opening it (which closes it). It
+  // is reported as soon as the window is known, ahead of the awaits below, so an action
+  // that arrives while the panel is still starting up does not open it a second time.
+  const presenceReportedEarly = !isBtwWindow && initialWindowId != null;
+  let presenceReporter = null;
+  if (presenceReportedEarly) {
+    presenceReporter = reportSidePanelPresence({ runtime: chrome.runtime, doc: document, windowId: initialWindowId });
+  }
   const [tab] = await chrome.tabs.query(initialWindowId != null
     ? { active: true, windowId: initialWindowId }
     : { active: true, currentWindow: true });
@@ -5099,7 +5108,14 @@ async function init() {
     getCurrentTabId: () => currentTabId,
     getRenderedTabId: () => renderedTabId,
     switchToTab,
+    // The browser may carry this panel to another window; the background must follow.
+    onWindowChanged: (windowId) => presenceReporter?.setWindowId(windowId),
   });
+
+  // The window could not be read up front; fall back to the active tab's.
+  if (!isBtwWindow && !presenceReportedEarly) {
+    presenceReporter = reportSidePanelPresence({ runtime: chrome.runtime, doc: document, windowId: tab?.windowId ?? null });
+  }
 
   if (windowScope) {
     chrome.tabs.onActivated.addListener(async (info) => {

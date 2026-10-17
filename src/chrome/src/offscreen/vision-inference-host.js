@@ -438,14 +438,35 @@ async function disposeOtherTextRuntime(keepRuntime) {
   }
 }
 
+// A chat is not in any worker's table until the worker receives it, and getting
+// it there can take a while (starting a worker, unloading the other runtime). A
+// cancel that arrives in that window is remembered here and checked right before
+// the request is handed over, so an abandoned card never starts a generation.
+const routingChatKeys = new Set();
+const cancelledChatKeys = new Set();
+const CHAT_REQUEST_KEY_PATTERN = /^[a-z0-9-]{8,64}$/i;
+
+function throwIfChatCancelled(requestKey) {
+  if (!requestKey || !cancelledChatKeys.has(requestKey)) return;
+  const error = new Error('The generation was cancelled.');
+  error.name = 'AbortError';
+  error.code = 'webgpu_chat_cancelled';
+  throw error;
+}
+
 async function sendTextWorkerMessage(modelId, type, payload = {}, { exclusive = false, runtime } = {}) {
+  const requestKey = typeof payload.requestKey === 'string' ? payload.requestKey : '';
   if (isBitgpuTextModel(modelId, runtime) || isBitgpuTextModel(payload.modelId, payload.runtime)) {
     if (exclusive) await disposeOtherTextRuntime('bitgpu');
+    throwIfChatCancelled(requestKey);
     await ensureBonsaiWorker();
+    throwIfChatCancelled(requestKey);
     return sendBonsaiWorkerMessage(type, payload);
   }
   if (exclusive) await disposeOtherTextRuntime('onnx');
+  throwIfChatCancelled(requestKey);
   await ensureVisionWorker();
+  throwIfChatCancelled(requestKey);
   return sendVisionWorkerMessage(type, payload);
 }
 
@@ -538,6 +559,7 @@ async function ensureVisionWorker() {
 
 const WEBGPU_MESSAGE_TYPES = new Set([
   'webgpu-chat',
+  'webgpu-chat-cancel',
   'webgpu-download-start',
   'webgpu-download-pause',
   'webgpu-download-stop',
@@ -555,11 +577,23 @@ const WEBGPU_MESSAGE_TYPES = new Set([
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (!WEBGPU_MESSAGE_TYPES.has(message?.type)) return false;
+  // Registered before anything is awaited, so a cancel that follows can always find the chat.
+  const chatKey = message.type === 'webgpu-chat' && CHAT_REQUEST_KEY_PATTERN.test(message.requestKey || '')
+    ? message.requestKey
+    : '';
+  if (chatKey) routingChatKeys.add(chatKey);
+  // A cancel is recorded synchronously for the same reason: it must not queue behind a
+  // worker start-up, and a chat still being routed has no worker-side request to stop yet.
+  const cancelKey = message.type === 'webgpu-chat-cancel' && typeof message.requestKey === 'string'
+    ? message.requestKey
+    : '';
+  if (cancelKey && routingChatKeys.has(cancelKey)) cancelledChatKeys.add(cancelKey);
   (async () => {
     try {
       // Bonsai is GGUF/bitgpu. Never boot Transformers.js for those messages —
       // that runtime always fetches config.json, which the GGUF repo does not have.
-      if (!isBitgpuTextModel(message.model, message.runtime)) {
+      // A cancel only talks to workers that already exist, so it never starts one either.
+      if (message.type !== 'webgpu-chat-cancel' && !isBitgpuTextModel(message.model, message.runtime)) {
         await ensureVisionWorker();
       }
       if (message.type === 'webgpu-vision-preload') {
@@ -716,6 +750,17 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         sendResponse(disposed[0] || { ok: true, disposed: true });
         return;
       }
+      if (message.type === 'webgpu-chat-cancel') {
+        // Stop a text generation its caller no longer wants. Both workers are asked
+        // because the host does not know which model the request was routed to.
+        const requestKey = typeof message.requestKey === 'string' ? message.requestKey : '';
+        const cancels = [];
+        if (visionWorker) cancels.push(sendVisionWorkerMessage('cancel-text', { requestKey }).catch(() => null));
+        if (bonsaiWorker) cancels.push(sendBonsaiWorkerMessage('cancel-text', { requestKey }).catch(() => null));
+        await Promise.all(cancels);
+        sendResponse({ ok: true });
+        return;
+      }
       if (message.type === 'webgpu-chat') {
         const workerMessageType = message.runtime === 'onnx-vl'
           ? 'multimodal-text-chat'
@@ -725,6 +770,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           device: message.device,
           dtype: message.dtype,
           requireTools: message.requireTools === true,
+          requestKey: typeof message.requestKey === 'string' ? message.requestKey : '',
           messages: message.messages || [],
           options: message.options || {},
         }, { exclusive: true, runtime: message.runtime }));
@@ -746,6 +792,11 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         code: error?.code || 'webgpu_request_failed',
         recovery: error?.code === 'vision_inference_timeout' ? 'cancellation_requested' : undefined,
       });
+    } finally {
+      if (chatKey) {
+        routingChatKeys.delete(chatKey);
+        cancelledChatKeys.delete(chatKey);
+      }
     }
   })();
   return true;

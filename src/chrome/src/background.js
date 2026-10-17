@@ -11,6 +11,10 @@ import { probeDecisionVision } from './agent/decision-vision-probe.js';
 import { installSafeSocialBackground } from './safesocial/background.js';
 import { createFeedbackHandoff } from './feedback-handoff.js';
 const feedbackHandoff = createFeedbackHandoff(chrome);
+import { createSidePanelPresence } from './sidepanel-presence.js';
+// Which side panels are on screen; see openSidePanelForContextMenu().
+const sidePanelPresence = createSidePanelPresence(chrome);
+chrome.runtime.onConnect.addListener((port) => { sidePanelPresence.attach(port); });
 import { ProviderManager } from './providers/manager.js';
 import {
   WEBGPU_COMPASS_TINY_V2_MODEL_ID,
@@ -69,7 +73,15 @@ import {
   SELECTION_ONLY_SOURCE_GROUNDING,
   SELECTION_TRANSLATION_LANGUAGES,
   buildContextMenuPrompt,
+  buildContinuationSelectionPrompt,
+  INLINE_CONTINUE_PARTIAL_MAX_CHARS,
+  capInlineAnswer,
+  buildFollowUpSelectionText,
   buildFullContextSelectionPrompt,
+  buildInlineSelectionMessages,
+  inlineAnswerWasCut,
+  inlineErrorWasCut,
+  inlineSelectionMaxTokens,
   buildSelectionPrompt,
   normalizeSelectionAction,
   normalizeSelectionSourceGrounding,
@@ -1717,16 +1729,24 @@ function notifySidePanelOfContextMenuPrompt(payload) {
   pendingContextMenuNotifications.set(tabId, timerId);
 }
 
-function openSidePanelForContextMenu(tab) {
+function openSidePanelForContextMenu(tab, { open = true } = {}) {
   if (!tab?.id) return;
   panelTabs.add(tab.id);
   savePanelTabs();
-  chrome.sidePanel.setOptions({
-    tabId: tab.id,
-    path: 'src/ui/sidepanel.html',
-    enabled: true,
-  });
-  chrome.sidePanel.open({ tabId: tab.id });
+  // A panel that is already showing in this window needs nothing here: callers hand it
+  // the prompt by message. Running setOptions + open again on an open panel makes
+  // Chrome tear it down, which is how a follow-up used to close the sidebar. This check
+  // must stay synchronous: open() loses the user's gesture across an await. A caller
+  // that has just opened the panel itself passes open: false, since a panel that is
+  // still starting up has not reported in yet and would be opened a second time.
+  if (open && !sidePanelPresence.isVisibleInWindow(tab.windowId)) {
+    chrome.sidePanel.setOptions({
+      tabId: tab.id,
+      path: 'src/ui/sidepanel.html',
+      enabled: true,
+    });
+    chrome.sidePanel.open({ tabId: tab.id });
+  }
   ensureWebBrainGroup(tab).catch(() => {});
 }
 
@@ -1798,10 +1818,103 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   sendResponse({ ok: true, ...getSelectionShortcutLocalization(msg.locale) });
 });
 
+// Translate, Explain and Proofread in the page card answer in place, so they
+// take one tool-less model call here instead of a side-panel run. Only the
+// selection content script and the PDF viewer page can send this message; the
+// prompt builder keeps the selection inside the untrusted boundary and caps its
+// length, and the call goes through the normal cost allowance.
+const INLINE_SELECTION_TIMEOUT_MS = 90_000;
+// Calls still in flight, keyed by the card's job id, so a card that is closed,
+// retried or retargeted can cancel the paid request it no longer needs.
+const inlineSelectionJobs = new Map();
+const INLINE_JOB_ID_PATTERN = /^[a-z0-9]{8,64}$/;
+
+// The allowance notice a call carries when it was the one to reach the limit.
+function inlineCostNotice(source) {
+  return typeof source?.costAllowanceMessage === 'string' ? source.costAllowanceMessage.slice(0, 300) : '';
+}
+
+async function answerInlineSelection(msg) {
+  const messages = buildInlineSelectionMessages(msg.selectionText, msg.action, msg.language);
+  if (!messages) return { ok: false, error: 'Invalid selection request.' };
+  const controller = new AbortController();
+  const jobId = typeof msg.jobId === 'string' && INLINE_JOB_ID_PATTERN.test(msg.jobId) ? msg.jobId : '';
+  if (jobId) inlineSelectionJobs.set(jobId, controller);
+  const timer = setTimeout(
+    () => controller.abort(new Error('The model took too long to answer.')),
+    INLINE_SELECTION_TIMEOUT_MS,
+  );
+  try {
+    if (providerManager.providers.size === 0) await providerManager.load();
+    const provider = providerManager.getActive();
+    // Sized to the selection and never above what the provider accepts, prompt
+    // included; an answer that still hits the ceiling is flagged so the card can offer the side panel
+    // instead of presenting a cut-off translation as complete.
+    const maxTokens = inlineSelectionMaxTokens(msg.selectionText, msg.action, provider?.maxOutputTokens, {
+      contextWindow: provider?.contextWindow,
+      messages,
+    });
+    // The prompt alone fills the model's context window: no call could answer. This is a plain
+    // error, not a cut-off: the side panel sizes its reply to the same window and would refuse
+    // the same selection, so the card must not offer it as a way to finish the answer.
+    if (maxTokens === 0) {
+      return { ok: false, error: 'This selection is too long for the model\'s context window.' };
+    }
+    const result = await agent._chatWithCostAllowance(
+      provider,
+      messages,
+      { maxTokens, temperature: 0, signal: controller.signal },
+      agent._newCostRunState(),
+    );
+    const { text, cut } = capInlineAnswer(String(result?.content || '').trim());
+    if (!text) {
+      const notice = inlineCostNotice(result);
+      return { ok: false, error: 'The model returned an empty answer.', ...(notice ? { notice } : {}) };
+    }
+    // The call that reaches the cost allowance still returns its answer; the card is told
+    // so it can say the next one will not run.
+    const notice = inlineCostNotice(result);
+    const answer = { ok: true, text, ...(notice ? { notice } : {}) };
+    return cut || inlineAnswerWasCut(result, maxTokens) ? { ...answer, truncated: true } : answer;
+  } catch (error) {
+    if (inlineErrorWasCut(error)) {
+      // The provider reported the output limit as an error. Show what it wrote, if
+      // anything, and let the card hand the rest to the side panel.
+      const partial = capInlineAnswer(String(error.partialContent || '').trim()).text;
+      const notice = inlineCostNotice(error);
+      return partial
+        ? { ok: true, text: partial, truncated: true, ...(notice ? { notice } : {}) }
+        : {
+          ok: false,
+          truncated: true,
+          error: 'The answer was cut off before any text was produced.',
+          ...(notice ? { notice } : {}),
+        };
+    }
+    return { ok: false, error: String(error?.message || error).slice(0, 300) };
+  } finally {
+    clearTimeout(timer);
+    if (jobId && inlineSelectionJobs.get(jobId) === controller) inlineSelectionJobs.delete(jobId);
+  }
+}
+
+chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+  if (msg?.type !== 'WB_SELECTION_SHORTCUT_INLINE') return;
+  answerInlineSelection(msg).then(sendResponse);
+  return true;
+});
+
+chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+  if (msg?.type !== 'WB_SELECTION_SHORTCUT_INLINE_CANCEL') return;
+  const jobId = typeof msg.jobId === 'string' ? msg.jobId : '';
+  inlineSelectionJobs.get(jobId)?.abort(new Error('The card was closed.'));
+  sendResponse({ ok: true });
+});
+
 // Selection-shortcut clicks originate in a content script. Keep this listener
 // synchronous until sidePanel.open() so Chrome preserves the originating user
 // gesture; prompt recovery storage can finish afterward.
-function queueSelectionShortcutPrompt(msg, tab, sendResponse) {
+async function queueSelectionShortcutPromptAfterProviders(msg, tab, sendResponse, { panelOpened = false } = {}) {
   const selectionAction = normalizeSelectionAction(msg.action);
   const includePageContext = selectionAction === 'custom' && msg.includePageContext === true;
   const sourceGrounding = includePageContext
@@ -1809,10 +1922,34 @@ function queueSelectionShortcutPrompt(msg, tab, sendResponse) {
     : selectionAction === 'custom'
       ? SELECTION_CONTEXT_SOURCE_GROUNDING
       : SELECTION_ONLY_SOURCE_GROUNDING;
-  const text = includePageContext
-    ? buildFullContextSelectionPrompt(msg.selectionText, msg.question)
-    : buildSelectionPrompt(
+  // A follow-up typed in a page card carries that card's answer as context.
+  // The provider metadata was loaded before this prompt was built, so its context
+  // window can trim the handoff before the side-panel run starts.
+  const contextWindow = providerManager.providers.size > 0 ? providerManager.getActive()?.contextWindow : undefined;
+  const selectionText = selectionAction === 'custom'
+    ? buildFollowUpSelectionText(
       msg.selectionText,
+      msg.priorAction,
+      msg.priorAnswer,
+      { contextWindow, question: msg.question, language: msg.language },
+    )
+    : msg.selectionText;
+  // A cut-off card answer resumes where it stopped instead of running the action again,
+  // which would meet the same output limit.
+  const resumesCutOffAnswer = selectionAction !== 'custom'
+    && typeof msg.continueFrom === 'string' && msg.continueFrom.trim() !== '';
+  const text = resumesCutOffAnswer
+    ? buildContinuationSelectionPrompt(
+      msg.selectionText,
+      selectionAction,
+      msg.continueFrom.slice(-INLINE_CONTINUE_PARTIAL_MAX_CHARS),
+      msg.language,
+      { contextWindow },
+    )
+    : includePageContext
+    ? buildFullContextSelectionPrompt(selectionText, msg.question)
+    : buildSelectionPrompt(
+      selectionText,
       msg.action,
       msg.question,
       msg.language,
@@ -1834,7 +1971,7 @@ function queueSelectionShortcutPrompt(msg, tab, sendResponse) {
     createdAt: Date.now(),
   };
 
-  openSidePanelForContextMenu(tab);
+  openSidePanelForContextMenu(tab, { open: !panelOpened });
   (async () => {
     try {
       await contextMenuStorage.save(tab.id, payload);
@@ -1842,6 +1979,23 @@ function queueSelectionShortcutPrompt(msg, tab, sendResponse) {
     notifySidePanelOfContextMenuPrompt(payload);
     return { ok: true, queued: true, requiresManualOpen: false };
   })().then(sendResponse).catch((error) => {
+    sendResponse({ ok: false, queued: false, requiresManualOpen: false, error: error?.message || String(error) });
+  });
+  return true;
+}
+
+function queueSelectionShortcutPrompt(msg, tab, sendResponse, { panelOpened = false } = {}) {
+  if (!tab?.id) {
+    sendResponse({ ok: false, queued: false, requiresManualOpen: false, error: 'Invalid selection shortcut request.' });
+    return false;
+  }
+  // This must stay in the message handler's synchronous turn, but prompt construction
+  // waits below for provider context-window metadata so handoffs are trimmed correctly.
+  openSidePanelForContextMenu(tab, { open: !panelOpened });
+  (async () => {
+    if (providerManager.providers.size === 0) await providerManager.load();
+    return queueSelectionShortcutPromptAfterProviders(msg, tab, sendResponse, { panelOpened: true });
+  })().catch((error) => {
     sendResponse({ ok: false, queued: false, requiresManualOpen: false, error: error?.message || String(error) });
   });
   return true;
@@ -1869,12 +2023,18 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
   // sidePanel.open() must run synchronously in this handler to preserve the
   // click gesture; chrome.tabs.get() would lose it. Open for the claimed tab
-  // now (stub is enough for setOptions/open), then verify the live tab.
+  // now (stub is enough for setOptions/open), then verify the live tab. The stub
+  // carries the window too, known without an await, so a side panel that is already
+  // showing there is left alone instead of being closed by a second open(): Chrome's
+  // own sender.tab when it is this tab, otherwise the window the viewer reports.
+  const windowId = sender?.tab?.id === tabId && Number.isInteger(sender.tab.windowId)
+    ? sender.tab.windowId
+    : (Number.isInteger(msg.windowId) ? msg.windowId : undefined);
   try {
-    openSidePanelForContextMenu({ id: tabId });
+    openSidePanelForContextMenu(windowId === undefined ? { id: tabId } : { id: tabId, windowId });
   } catch {}
   chrome.tabs.get(tabId)
-    .then(tab => queueSelectionShortcutPrompt(msg, tab, sendResponse))
+    .then(tab => queueSelectionShortcutPrompt(msg, tab, sendResponse, { panelOpened: true }))
     .catch(error => sendResponse({
       ok: false,
       queued: false,

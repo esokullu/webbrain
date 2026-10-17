@@ -153,6 +153,27 @@ for (const browser of ['chrome', 'firefox']) {
     }
   });
 
+  test(`${browser}: textless response-only cutoffs retain their allowance notice`, async () => {
+    const f = fixture(); f.agent._persist = () => {};
+    const notice = 'Cloud cost allowance reached: total cloud/router usage is $5.00 against the $5.00 limit.';
+    f.agent._completionEvidenceMessages = (_tab, messages) => messages;
+    f.agent._pruneOldImages = messages => messages;
+    f.agent._providerMaxOutputTokens = () => 100;
+    f.agent._chatWithCostAllowance = async () => {
+      throw Object.assign(new Error('Output limit reached'), {
+        incompleteReason: 'max_output_tokens',
+        partialContent: '',
+        costAllowanceMessage: notice,
+      });
+    };
+    const provider = { contextWindow: 128000 };
+    const answer = await f.agent._generateContextOnlyResponse(f.tab, f.messages, provider, {}, null, {
+      phase: 'response_only', step: 1,
+    });
+    assert.match(answer, /output limit and was cut off/i);
+    assert.match(answer, /cost allowance reached/i);
+  });
+
   test(`${browser}: a stopped interaction offers Retry without replaying tools or overriding publication audit`, async () => {
     const f = fixture(); f.agent._persist = () => {};
     f.agent._generateContextOnlyResponse = async () => '';

@@ -123,6 +123,26 @@ export function modelOutputDiagnostics(result, { requestedMaxTokens = null, reco
   };
 }
 
+// A finish reason that means the reply stopped because it ran out of output budget.
+const CUT_OFF_FINISH_RE = /^(?:length|max_tokens|max_output_tokens|max_completion_tokens|output_limit)$/i;
+
+export const RESPONSE_CUT_OFF_NOTICE = '\n\n[This reply reached the model\'s output limit and was cut off. Ask WebBrain to continue to get the rest.]';
+
+// True when the provider says the reply was stopped by its output limit. In-browser
+// WebGPU models have no finish reason, so they report `outputTruncated` instead.
+export function outputWasCutOff(result) {
+  if (result?.outputTruncated === true) return true;
+  return CUT_OFF_FINISH_RE.test(finishReasonFor(result));
+}
+
+// Some providers (OpenAI Responses) report the output limit as an error rather than a
+// result, with what the model wrote attached. Returns that text, or '' when the error
+// is not a cut-off or carries nothing to show.
+export function cutOffPartialFromError(error) {
+  if (!CUT_OFF_FINISH_RE.test(String(error?.incompleteReason ?? '').trim())) return '';
+  return String(error?.partialContent ?? '').trim();
+}
+
 export function emptyOutputFailureMessage(diagnostics = {}) {
   switch (diagnostics.emptyReason) {
     case 'output_limit':

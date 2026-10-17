@@ -16,6 +16,22 @@ const CACHE_NAME = 'bitgpu-models-v1';
 const TEXT_DOWNLOAD_EVENT = 'text-download-state';
 const WEBGPU_BONSAI27_MAX_NEW_TOKENS = 2048;
 const WEBGPU_BONSAI27_THINK_BUDGET = 128;
+// Text generations that carry a requestKey can be cancelled by their caller; the
+// controller's signal is handed to the runtime, which stops decoding when it fires.
+const textRequestControllers = new Map();
+const TEXT_REQUEST_KEY_PATTERN = /^[a-z0-9-]{8,64}$/i;
+
+function textRequestKey(payload) {
+  const key = typeof payload?.requestKey === 'string' ? payload.requestKey : '';
+  return TEXT_REQUEST_KEY_PATTERN.test(key) ? key : '';
+}
+
+function throwIfTextCancelled(signal) {
+  if (!signal?.aborted) return;
+  const error = new Error('The generation was cancelled.');
+  error.name = 'AbortError';
+  throw error;
+}
 const WEBGPU_BONSAI27_MAX_SEQ_LEN = 4096;
 const OOM_HINT = 'This machine cannot hold Bonsai 27B in GPU memory. Use LFM2.5 2.6B instead.';
 
@@ -828,12 +844,14 @@ function normalizeBitgpuToolCalls(toolCalls) {
   }).filter(Boolean);
 }
 
-async function runText(payload) {
+async function runText(payload, signal = null) {
+  throwIfTextCancelled(signal);
   const modelId = assertBonsaiModel(payload?.modelId);
   if (!await isTextModelReady(modelId, payload?.dtype || WEBGPU_BONSAI27_DTYPE)) {
     throw new Error(`${modelId} is not downloaded. Open Settings > Providers > WebGPU or Apocalypse Mode > WebGPU to download it before chatting.`);
   }
   const runtime = await getTextRuntime({ localFilesOnly: true });
+  throwIfTextCancelled(signal);
   const requestedTokens = Number(payload?.options?.maxTokens);
   const maxTokens = Number.isFinite(requestedTokens)
     ? Math.max(1, Math.min(WEBGPU_BONSAI27_MAX_NEW_TOKENS, Math.round(requestedTokens)))
@@ -849,10 +867,13 @@ async function runText(payload) {
       topP: 0.85,
       topK: 20,
       tools: tools.length ? tools : undefined,
+      ...(signal ? { signal } : {}),
     });
   } catch (error) {
+    if (signal?.aborted) throwIfTextCancelled(signal);
     throw mapGpuError(error);
   }
+  throwIfTextCancelled(signal);
   const content = String(result?.text || '').trim();
   const reasoningContent = String(result?.thinkText || '').trim() || null;
   const toolCalls = normalizeBitgpuToolCalls(result?.toolCalls);
@@ -860,7 +881,14 @@ async function runText(payload) {
     throw new Error(`${modelId} used its generation budget before finishing reasoning. Retry with a shorter prompt.`);
   }
   if (!content && !toolCalls.length) throw new Error('The WebGPU model returned no generated text or tool calls.');
-  return { content, reasoningContent, toolCalls };
+  // The runtime reports why decoding stopped, so a cut-off answer is not mistaken for a finished one.
+  const finishReason = typeof result?.finishReason === 'string' ? result.finishReason : '';
+  return {
+    content,
+    reasoningContent,
+    toolCalls,
+    ...(finishReason ? { outputTruncated: finishReason === 'length' } : {}),
+  };
 }
 
 async function probeRuntime() {
@@ -950,14 +978,28 @@ self.addEventListener('message', async (event) => {
       self.postMessage({ id, ok: true, disposed: true });
       return;
     }
+    if (type === 'cancel-text') {
+      const requestKey = typeof payload?.requestKey === 'string' ? payload.requestKey : '';
+      const controller = textRequestControllers.get(requestKey);
+      controller?.abort();
+      self.postMessage({ id, ok: true, cancelled: !!controller });
+      return;
+    }
     if (type === 'text-chat') {
-      const result = await enqueueModelOperation(() => runText(payload));
-      self.postMessage({
-        id,
-        ok: true,
-        ...result,
-        raw: { model: payload?.modelId || WEBGPU_BONSAI27_MODEL_ID },
-      });
+      const requestKey = textRequestKey(payload);
+      const controller = requestKey ? new AbortController() : null;
+      if (controller) textRequestControllers.set(requestKey, controller);
+      try {
+        const result = await enqueueModelOperation(() => runText(payload, controller?.signal || null));
+        self.postMessage({
+          id,
+          ok: true,
+          ...result,
+          raw: { model: payload?.modelId || WEBGPU_BONSAI27_MODEL_ID },
+        });
+      } finally {
+        if (controller && textRequestControllers.get(requestKey) === controller) textRequestControllers.delete(requestKey);
+      }
       return;
     }
     throw new Error(`Unknown Bonsai WebGPU worker message: ${type || 'missing type'}`);
