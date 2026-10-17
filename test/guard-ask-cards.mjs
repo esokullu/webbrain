@@ -782,8 +782,10 @@ test('chrome: a click that may repeat an unverified earlier click asks on a hard
     agent._auditRichTextToolbarTarget = async () => {};
     agent._shouldAutoScreenshot = () => false;
     agent._refreshPageFeedbackForCall = async () => false;
-    agent._executeToolWithLifecycleInner = async (_tab, name, args) => {
-      dispatched.push({ name, args });
+    // The click itself: _dispatchClickAx releases an approved target's locks around it.
+    agent._dispatchClickAxImpl = async (_tab, args, _scope, _binding, _context, _deadline, _upstream, dispatchState) => {
+      dispatched.push({ name: 'click_ax', args });
+      dispatchState.started = true;
       return { success: true, dispatched: true, verified: true };
     };
     const run = async (id, ref, answer) => {
@@ -822,6 +824,108 @@ test('chrome: a click that may repeat an unverified earlier click asks on a hard
     assert.equal(cards.length, 2);
     assert.match(unattended.error, /This unattended run cannot ask the user about clicking this control again/);
     assert.equal(dispatched.length, 1);
+  }
+});
+
+// The user's 'once' covers one click that is actually sent. A correction
+// that arrives just after the answer hands the turn to the corrected task
+// before dispatch: no click, the target stays locked, and the next click on
+// it asks again. The real click path runs (its lock fence included) with
+// the page's content script stubbed.
+test('chrome: an approved repeat click releases its lock only when it is sent', async () => {
+  const { Agent } = builds.find(item => item.build === 'chrome');
+  const provider = { name: 'lock test', model: 'test', promptTier: 'full', contextWindow: 128000,
+    supportsTools: true, supportsVision: false, chat: async () => ({ content: '' }) };
+  const agent = new Agent({ getActive: () => provider, getProvider: () => provider, getVisionProvider: async () => null });
+  agent.clarifyTimeoutSec = 0;
+  agent._persist = () => {};
+  agent._persistNow = async () => ({ ok: true });
+  const tab = nextTab++;
+  agent._taskTokens.set(tab, `task-${tab}`);
+  agent._planExecutionGuards.set(tab, { enabled: false, taskKey: `key-${tab}` });
+  agent._lastAxScopes.set(tab, { documentToken: 'doc-1', pageUrl: 'https://shop.example/cart' });
+  agent._currentUrl = async () => 'https://shop.example/cart';
+  for (const ref of ['ref_buy', 'ref_pay']) {
+    agent._rememberTaskClickLock(tab, `doc-1|${ref}`);
+    agent._rememberTaskClickLock(tab, `native-button-pending:doc-1|${ref}`);
+  }
+  const tried = ['doc-1|ref_buy', 'native-button-pending:doc-1|ref_buy', 'native-button:doc-1|ref_buy|snapshot-1'];
+  agent._clickAxCdpFallbacks.set(tab, new Set(tried));
+  const locked = ref => ['doc-1|', 'native-button-pending:doc-1|'].map(prefix => agent._taskClickLockKeys(tab).has(prefix + ref));
+  agent._skipPermissionGate = true;
+  agent._ensureGateSetting = async () => true;
+  for (const name of ['_chromeProtectedPageFailure', '_captchaMutationPreflight', '_messageRecipientGuardBlock',
+    '_detectLikelySubmitAction', '_socialPublicationPreSubmitBlock']) agent[name] = async () => null;
+  agent._adoptLiveSocialPublishWorkflow = async () => false;
+  agent._captureFormValidationState = async () => [];
+  agent._waitForFormValidationFailure = async () => null;
+  agent._auditRichTextToolbarTarget = async () => {};
+  agent._shouldAutoScreenshot = () => false;
+  agent._refreshPageFeedbackForCall = async () => false;
+  agent._isPdfTab = async () => false;
+  agent._captureClickAxObservation = async (_tab, snapshot, sideEffectWatch, startedAt) => ({ startedAt, snapshot, sideEffectWatch });
+  agent._maybeFallbackClickAxWithCdp = async (_tab, _args, response) => response;
+  // The content script's click: what it reports for each target.
+  const clicks = [];
+  const content = { ref_buy: () => ({ success: true, dispatched: true, verified: true }),
+    ref_pay: () => ({ success: false, dispatched: false, noDispatch: true, fallbackAttempted: false,
+      error: 'The element is no longer in the page.' }) };
+  const sendMessage = api.tabs.sendMessage;
+  api.tabs.sendMessage = async (tabId, message, options) => {
+    if (message?.action !== 'click_ax') return sendMessage(tabId, message, options);
+    const report = content[message.params.ref_id]();
+    if (report.dispatched) clicks.push(message.params.ref_id);
+    return report;
+  };
+  // A correction sent just after the user's answer, before the click.
+  let correctAfterAnswer = false;
+  const remember = agent._rememberUnverifiedStepDecision.bind(agent);
+  agent._rememberUnverifiedStepDecision = (...args) => {
+    const entry = remember(...args);
+    if (correctAfterAnswer && entry?.choice === 'once') {
+      agent._steeringRuns.set(tab, { messages: [{ role: 'user', content: 'Check the cart total first.' }] });
+    }
+    return entry;
+  };
+  const cards = [];
+  const run = async (id, ref) => {
+    const messages = [];
+    await agent._executeToolBatch(tab, [call(id, 'click_ax', { ref_id: ref })], messages, (type, data) => {
+      if (type !== 'clarify') return;
+      cards.push(data);
+      setTimeout(() => agent.submitClarifyResponse(tab, data.clarifyId, 'once', 'option'), 20);
+    }, provider, null, new Set(['click_ax', 'done']), 1, {});
+    return resultFor(messages, id);
+  };
+  try {
+    correctAfterAnswer = true;
+    const corrected = await run('buy-1', 'ref_buy');
+    correctAfterAnswer = false;
+    agent._steeringRuns.delete(tab);
+    assert.equal(cards.length, 1);
+    assert.equal(cards[0].unverifiedStepConfirmation.hard, true);
+    assert.equal(corrected.skipped, true, JSON.stringify(corrected));
+    assert.match(corrected.error, /the user steered the current task/);
+    assert.deepEqual(clicks, [], 'no click was sent');
+    assert.deepEqual(locked('ref_buy'), [true, true], 'the target stays locked');
+    assert.deepEqual([...agent._clickAxCdpFallbacks.get(tab)], tried, 'its trusted attempts stay recorded');
+    // The answer was used up: the next click asks again, and 'once' sends it.
+    const approved = await run('buy-2', 'ref_buy');
+    assert.equal(cards.length, 2, 'the next attempt asks again');
+    assert.equal(approved.success, true, JSON.stringify(approved));
+    assert.deepEqual(clicks, ['ref_buy'], 'exactly one click');
+    assert.deepEqual(locked('ref_buy'), [false, false], 'the lock is released by the click that was sent');
+    assert.deepEqual([...agent._clickAxCdpFallbacks.get(tab)], []);
+    // A click that the page refuses before dispatch locks its target again.
+    const refused = await run('pay-1', 'ref_pay');
+    assert.equal(cards.length, 3);
+    assert.equal(refused.noDispatch, true, JSON.stringify(refused));
+    assert.deepEqual(clicks, ['ref_buy']);
+    assert.deepEqual(locked('ref_pay'), [true, true], 'an unsent click gets its lock back');
+    await run('pay-2', 'ref_pay');
+    assert.equal(cards.length, 4, 'and the next attempt asks again');
+  } finally {
+    api.tabs.sendMessage = sendMessage;
   }
 });
 

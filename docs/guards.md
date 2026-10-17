@@ -84,7 +84,10 @@ When a guard cannot verify a consequential step and its `onCannotDecide` is
 - **After `once`.** The tool result carries a note for the model. A commit or
   post made this way is marked `publishesUnverifiedContent: true` on its submit
   receipt; the checks after the submit (GitHub's committed raw-file check, the
-  published-post check) stay the authority.
+  published-post check) stay the authority. A `clickax-task-click-lock` answer
+  covers one click that is actually sent: the target's lock is released only
+  as that click is dispatched, so a correction, Stop or refusal before it
+  keeps the lock, and the next click on the target asks again.
 
 | Guard | Asks when | The card shows |
 |---|---|---|

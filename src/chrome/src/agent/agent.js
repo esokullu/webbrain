@@ -15546,7 +15546,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
         || await this._workflowPreSubmitDispatchBlock(
         tabId, fnName, fnArgs, detectedSubmitAction, provider, callState.guardAdvisories,
       )
-        || this._taskClickLockAsk(tabId, fnName, fnArgs);
+        || this._taskClickLockAsk(tabId, fnName, fnArgs, callState);
       let workflowPreSubmitBlock = await runWorkflowPreSubmitChecks();
       if (workflowPreSubmitBlock?.mutationConfirmation
           && this.scheduledRunPolicies.get(tabId)?.requireConsequentialConfirmation !== false) {
@@ -16348,6 +16348,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
                 guardAdvisories: callState.guardAdvisories,
                 dispatchBinding: pipelineToolbarPreflight.probe?.dispatchBinding || null,
                 ...messageRecipientExecutionContext,
+                taskClickLockRelease: callState.taskClickLockRelease || null,
                 iframeTargetUnresolved: pipelineToolbarPreflight.iframeTargetUnresolved === true,
                 richTextToolbarWrongTargetAdvised: pipelineToolbarPreflight.wrongTargetAdvised === true,
                 imageGenConfig,
@@ -19848,6 +19849,10 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     traceStep = null,
   ) {
     const dispatchState = upstreamDispatchState || { started: false };
+    // The user's 'once' for a repeat of an unreconciled click releases this
+    // target's locks only now, for this click, and they return if it is not sent.
+    const approvedRepeat = this._releaseApprovedTaskClickLock(tabId, args, axScope,
+      messageRecipientContext?.taskClickLockRelease);
     const timing = {
       startedAt: this._clickAxClockNow(),
       startedAtEpoch: Date.now(),
@@ -19895,6 +19900,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       }
       return result;
     } finally {
+      if (approvedRepeat) this._restoreUnsentTaskClickLock(tabId, approvedRepeat, result, dispatchState);
       timing.clickPathMs = Math.max(0, this._clickAxClockNow() - timing.startedAt);
       timing.outcomeUnknown = result?.outcomeUnknown === true
         || (!timing.syntheticDispatched && !timing.trustedInputEvents
@@ -42576,19 +42582,61 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     this._taskClickLocks?.get(tabId)?.keys.delete(key);
   }
 
+  // The user's 'once' on the clickax-task-click-lock card reaches the click
+  // as a grant for its exact task and document|ref (_taskClickLockAsk). Only
+  // here, as that click is dispatched, are the target's task locks and its
+  // per-run trusted attempts released; what was released is returned so
+  // _restoreUnsentTaskClickLock can put it back if the click is not sent.
+  _releaseApprovedTaskClickLock(tabId, args, axScope, grant) {
+    const taskToken = this._taskTokens?.get(tabId);
+    if (!grant || typeof taskToken !== 'string' || !taskToken || grant.taskToken !== taskToken
+        || !axScope?.documentToken || typeof args?.ref_id !== 'string'
+        || grant.target !== `${axScope.documentToken}|${args.ref_id}`) return null;
+    const entry = this._taskClickLocks?.get(tabId);
+    const locks = entry?.taskToken === taskToken ? entry.keys : null;
+    const attempted = this._clickAxCdpFallbacks.get(tabId) || null;
+    const release = { entry, attempted, locks: [], attempts: [] };
+    for (const key of [`native-button-pending:${grant.target}`, grant.target]) {
+      if (locks?.delete(key)) release.locks.push(key);
+      if (attempted?.delete(key)) release.attempts.push(key);
+    }
+    for (const key of [...(attempted || [])]) {
+      if (key.startsWith(`native-button:${grant.target}|`) && attempted.delete(key)) release.attempts.push(key);
+    }
+    return release;
+  }
+
+  // A click that was not sent (refused, vetoed, timed out or stopped before
+  // dispatch) leaves the earlier click unreconciled and the approved repeat
+  // undone, so the target is locked again; the answer is used up, and the
+  // next click on it asks again. A click that may have been sent keeps the
+  // release; its own trusted paths lock it again if its input is unresolved.
+  _restoreUnsentTaskClickLock(tabId, release, result, dispatchState) {
+    if (dispatchState?.started === true && result?.dispatched !== false && result?.noDispatch !== true) return;
+    if (release.locks.length && this._taskClickLocks?.get(tabId) === release.entry
+        && release.entry?.taskToken === this._taskTokens?.get(tabId)) {
+      for (const key of release.locks) this._rememberTaskClickLock(tabId, key);
+    }
+    for (const key of release.attempts) release.attempted?.add(key);
+  }
+
   /**
    * clickax-task-click-lock (a hard class: a repeat of a click that may
    * already have taken effect) cannot decide: an earlier trusted click on this
    * exact document|ref may have landed and was never verified. Instead of
    * refusing for the rest of the task, WebBrain asks the user on its card,
    * which never times out and never goes ahead on its own (an unattended run
-   * is refused). Only the user's 'once' releases this target's locks, for
-   * this one click. This applies with Strict checks too: it replaces a dead
-   * end with the user's explicit decision. The lock in _dispatchClickAxImpl
-   * stays the final fence. Chrome only: Firefox sends no trusted click
-   * fallback, so it has no such lock.
+   * is refused). The user's 'once' covers one click on this target that is
+   * actually sent: it becomes this call's grant (`callState`), and
+   * _dispatchClickAx releases the target's locks only as that click is
+   * dispatched, and restores them if it is not sent. A correction, Stop or
+   * any other refusal before dispatch leaves the locks in place, and the
+   * next click on this target asks again. This applies with Strict checks
+   * too: it replaces a dead end with the user's explicit decision. The lock
+   * in _dispatchClickAxImpl stays the final fence. Chrome only: Firefox
+   * sends no trusted click fallback, so it has no such lock.
    */
-  _taskClickLockAsk(tabId, name, args = {}) {
+  _taskClickLockAsk(tabId, name, args = {}, callState = null) {
     if (name !== 'click_ax' || typeof args?.ref_id !== 'string' || !args.ref_id) return null;
     const scope = this._lastAxScopes.get(tabId);
     const documentToken = scope?.documentToken;
@@ -42598,16 +42646,12 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     const keys = [`native-button-pending:${target}`, target];
     if (!keys.some(key => locks.has(key))
         || this._guardOutcome('clickax-task-click-lock', { decided: false }) !== 'ask') return null;
-    const stepKey = this._sha256TextSync(JSON.stringify(['clickax-task-click-lock', this._taskTokens.get(tabId) || '', target]));
-    if (this._unverifiedStepApproval(tabId, 'clickax-task-click-lock', stepKey, { consume: true })) {
-      const attempted = this._clickAxCdpFallbacks.get(tabId);
-      for (const key of keys) {
-        this._releaseTaskClickLock(tabId, key);
-        attempted?.delete(key);
-      }
-      for (const key of [...(attempted || [])]) {
-        if (key.startsWith(`native-button:${target}|`)) attempted.delete(key);
-      }
+    const taskToken = this._taskTokens.get(tabId) || '';
+    // The checks can run again before dispatch; this call already holds the answer.
+    if (callState?.taskClickLockRelease?.target === target && callState.taskClickLockRelease.taskToken === taskToken) return null;
+    const stepKey = this._sha256TextSync(JSON.stringify(['clickax-task-click-lock', taskToken, target]));
+    if (callState && this._unverifiedStepApproval(tabId, 'clickax-task-click-lock', stepKey, { consume: true })) {
+      callState.taskClickLockRelease = { taskToken, target };
       return null;
     }
     return { success: false, dispatched: false, noDispatch: true, retryable: false, repeatBlocked: true,
@@ -49756,7 +49800,8 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
           nativeTelegramReadRepairOwner: dispatchContext.nativeTelegramReadRepairOwner,
           nativeTelegramReadRepairRef: dispatchContext.nativeTelegramReadRepairRef,
           nativeTelegramReadRepairBinding: dispatchContext.nativeTelegramReadRepairBinding,
-          nativeWhatsappReadRepairOwner: dispatchContext.nativeWhatsappReadRepairOwner },
+          nativeWhatsappReadRepairOwner: dispatchContext.nativeWhatsappReadRepairOwner,
+          taskClickLockRelease: dispatchContext.taskClickLockRelease || null },
         earlyCdpAbortSignal,
         earlyCdpDispatchState,
         dispatchContext.traceStep,
