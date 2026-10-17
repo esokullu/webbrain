@@ -23887,7 +23887,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     }
     const state = { key, sources, context, contract: null, outcomes: {}, actionId: null, dispatch: null, error: '' };
     if (background) {
-      if (!provider?.chat || JSON.stringify(sources).length > 120000) return null;
+      if (!this._socialPublicationBackgroundProvider(provider) || JSON.stringify(sources).length > 120000) return null;
       // A background compile of another input can never be installed:
       // cancel its request (and an audit of what it compiled) first.
       if (prefetch) this._dropSocialPublicationContractPrefetch(guard, prefetch);
@@ -24460,7 +24460,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
   _socialPublicationPrefetch(tabId, name, args = {}, result = null, provider = null) {
     try {
       const guard = this._planExecutionGuards.get(tabId);
-      if (!this._socialPublicationPrefetchAllowed(guard) || !provider?.chat
+      if (!this._socialPublicationPrefetchAllowed(guard) || !this._socialPublicationBackgroundProvider(provider)
           || this._checkAbort(tabId) || this._hasPendingSteering(tabId)
           || !result || typeof result !== 'object' || result.success !== true
           || result.noDispatch === true || result.outcomeUnknown === true) return null;
@@ -24483,7 +24483,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       const hint = this._socialPublicationPrefetchHint(name, args);
       const social = guard?.socialPublication;
       const pending = this._socialPublicationContractPrefetches?.get(guard);
-      if (!hint || !this._socialPublicationPrefetchAllowed(guard) || !provider?.chat
+      if (!hint || !this._socialPublicationPrefetchAllowed(guard) || !this._socialPublicationBackgroundProvider(provider)
           || this._checkAbort(tabId) || this._hasPendingSteering(tabId)
           || (social && (this._socialPublicationCompiles?.get(social)
             || !social.needsRecompile || Object.keys(social.outcomes || {}).length))
@@ -24492,6 +24492,15 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     } catch {
       return null;
     }
+  }
+
+  // Background checks run only where a superseded one can be cancelled. An
+  // in-browser model (WebGPU) runs one request at a time and ignores the
+  // request's signal, so a stale background check would hold its queue ahead
+  // of the replacement check and of the agent's next turn. With it, the click
+  // checks on its own, as before.
+  _socialPublicationBackgroundProvider(provider) {
+    return typeof provider?.chat === 'function' && provider.name !== 'webgpu';
   }
 
   // A write may prepare the click on Post only in a run that executes a plan

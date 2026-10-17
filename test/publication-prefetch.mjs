@@ -360,6 +360,23 @@ for (const browser of ['chrome', 'firefox']) {
     assert.equal(f.pending()?.compiled?.prefetchedAudit, undefined, 'a cancelled audit stores no verdict');
   });
 
+  test(`${browser}: an in-browser model that cannot cancel a request gets no background checks`, async () => {
+    // WebGPU runs one request at a time and ignores the request's signal: a
+    // superseded background check would hold its queue ahead of the
+    // replacement and of the agent's next turn.
+    const f = setup();
+    const { agent, tabId, provider } = f;
+    provider.name = 'webgpu';
+    assert.equal(agent._socialPublicationContractPrefetch(tabId, 'type_ax', { ref_id: 'ref_7', text: 'Hello' }, provider), null,
+      'no background compile when the write starts');
+    assert.equal(f.write(), null, 'no background compile or audit after the write');
+    await settle();
+    assert.equal(f.calls.length, 0, 'nothing was sent in the background');
+    assert.equal(f.pending(), null);
+    assert.equal(await f.click(), null, 'the click checks on its own');
+    assert.deepEqual(f.calls.map(call => call.name), ['social_publication_contract', 'social_publication_authorization']);
+  });
+
   test(`${browser}: a background check is traced to the run that started it, and not at all once that run moved on`, async () => {
     // Bound: a repair attempt is traced to the starting run even when the
     // tab's run id changed while the first attempt ran.
