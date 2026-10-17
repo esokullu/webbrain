@@ -22,7 +22,7 @@ import { AGENT_TOOLS, AGENT_TOOL_NAMES, RESERVED_AGENT_TOOL_NAMES, RETIRED_AGENT
 import { rejectedCompletionRecovery } from './completion-recovery.js';
 import { FailureRecoveryRegistry, modelFailureRecovery } from './failure-recovery.js';
 import { validateToolArguments } from './tool-arguments.js';
-import { BATCH_INTERMEDIATE_RESULT_CHARS, BATCH_TRAILING_OBSERVATION_TOOLS, expandBrowserBatchCalls, foldBrowserBatchMessages, digestBrowserBatch, browserBatchResultStatus } from './browser-batch.js';
+import { BATCH_INTERMEDIATE_RESULT_CHARS, BATCH_TRAILING_OBSERVATION_TOOLS, expandBrowserBatchCalls, foldBrowserBatchMessages, digestBrowserBatch, browserBatchResultStatus, textWriteRefuted } from './browser-batch.js';
 import { calculateExpression, calculationResultInText } from './calculator.js';
 import { isLiteralCalculationTask, literalCalculationSummaryFormatMatches, isPassivePageFeedback } from './page-feedback-policy.js';
 import { chatRecoveryDisplayText, terminalRecoveryFinalText } from './chat-recovery-text.js';
@@ -75,7 +75,7 @@ import {
   workflowRequiredRowsAreProcessed,
 } from './adapter-workflow-evidence.js';
 import { messageTargetMatchesObservedIdentities, messageRecipientUploadSourceKey, normalizeMessageTarget, normalizeRecipientIdentity } from './message-recipient-guard.js';
-import { advanceChatSession, chatRunEndedNotice, createOwnedNativeChatReadRepair, createChatSession, decideChatSend, markChatSendPending, normalizeChatSession, normalizeChatSnapshot, normalizeNativeOpaqueBaseline, serializeChatSession } from './chat-workflow.js';
+import { advanceChatSession, chatRunEndedNotice, createOwnedNativeChatReadRepair, createChatSession, decideChatSend, markChatSendPending, normalizeChatSession, normalizeChatSnapshot, normalizeNativeOpaqueBaseline, serializeChatSession, WAIVABLE_CHAT_SEND_REASONS } from './chat-workflow.js';
 import {
   fetchUrl,
   executeHttpSkillTool,
@@ -164,6 +164,7 @@ import { GENERATIVE_MEDIA_SETUP_NOTE, isImageGenConfigured, mediaPermissionUrl, 
 import { extractFirstJsonObject } from './json-extract.js';
 import { repairAssistantDisplayText, repairClarifyText, sanitizeText as sanitizePlannerText } from './text-sanitize.js';
 import { clarifyQuestionIsHard, clarifyTimedAnswer, clarifyTimeoutChoice, normalizeClarifyConsequence, normalizeClarifyTimeoutPolicy } from './clarify-timeout.js';
+import { guardAdvisory, guardEntry, guardOutcome, withGuardAdvisories } from './guard-policy.js';
 import { emptyOutputFailureMessage, modelOutputDiagnostics } from './model-output-diagnostics.js';
 import { stepLimitUserMessage, terminalGuardUserMessage } from './terminal-messages.js';
 import { buildCustomSkillsPrompt, buildSkillLoaderDefinition, buildSkillToolDefinitions, buildSkillToolRegistry, getEligibleCustomSkills, getEligibleSkillCatalog, normalizeCustomSkills } from './skills.js';
@@ -301,6 +302,9 @@ const PAGE_BLOCKER_RETRY_MS = 30_000;
 // at most this long, before the single press.
 const NATIVE_BUTTON_HOVER_SETTLE_MS = 600;
 const NATIVE_BUTTON_HOVER_POLL_MS = 50;
+// jev-target-changed advice: the fast path planned this call against an
+// observation the page no longer matches.
+const JEV_TARGET_CHANGED_NOTE = 'The page changed after WebBrain\'s fast path planned this action, so its target could not be confirmed as the one it observed. It was sent to the element its ref or selector resolves to now; read the page before relying on the result.';
 const ASK_MODE_HANDOFF_TIMEOUT_MS = 5_000;
 const CONTENT_ACTION_SIGNAL_DEADLINES = new WeakMap();
 // A completed focus click is a browser dispatch, but need not be a text write.
@@ -490,6 +494,35 @@ function selectionScopedResponseLanguagePolicy(locale) {
     _framing_locale_is_fallback: true,
   };
 }
+
+// Completion guards whose decided case means the task as claimed is not
+// done. A success accepted over one of them ends the run as partial.
+//   completion-verifier-not-done: the completion judge's sure verdict.
+//   plan-unauthorized-mutation-recorded: a forbidden submit or blocked repair.
+//   progress-success-claim-checks: missing, skipped or failed items.
+//   progress-ledger-unresolved: items still pending or acted on.
+//   read-coverage-incomplete: pages of a requested whole read never read
+//     (an unconfirmed Gmail expansion is its undecided case).
+//   done-rich-text-toolbar-obligation: text typed into a toolbar.
+// Left out, because their decided case can be wrong about a finished task
+// or says nothing about it:
+//   completion-page-warning: the open dialog or form error may be unrelated.
+//   done-summary-meta-only, plan-done-summary-shape: the summary's wording.
+//   pure-calculation-done-checks: how the summary writes the result.
+//   exact-table-done: a rowCount that disagrees with rows that may be complete.
+//   plain-final-done-protocol, plan-plain-final-protocol,
+//   plain-final-unusable-output: how the answer ended, not the task.
+//   incomplete-task-redirect: it only sees partial or failed endings.
+//   done-invariant-shape-checks: a missing outcome already counts as partial.
+//   github-committed-file-verification: never decided; an unread raw blob
+//     and a mismatched one both reach it as missing evidence.
+const OUTCOME_DOWNGRADING_GUARDS = new Set(['completion-verifier-not-done', 'plan-unauthorized-mutation-recorded',
+  'progress-success-claim-checks', 'progress-ledger-unresolved', 'read-coverage-incomplete',
+  'done-rich-text-toolbar-obligation']);
+
+// What the user is told when a run ends with plain text after the "end with
+// done" note was given once (Strict checks off).
+const PLAIN_FINAL_PROTOCOL_CAVEAT = 'The task ended with a plain answer instead of a checked completion.';
 
 function defaultPlanExecutionBlockNudge({
   viaDone = false,
@@ -959,6 +992,10 @@ export class Agent extends LoopDetector {
     // Settings → General → "When a question times out": 'finish' (default)
     // keeps the task moving, 'safe' takes the safe default. See clarify-timeout.js.
     this.clarifyTimeoutPolicy = 'finish';
+    // Settings → General → "Strict checks" (off by default): quality
+    // guards advise instead of refusing. See guard-policy.js.
+    this.strictGuards = false;
+    this._guardRunStates = new Map();
     this.maxContextMessages = 50; // minimum soft cap; larger provider windows scale this up
     this._debugLog = []; // ring buffer for deep verbose (LLM requests/responses)
     this._debugLogMax = 200; // max entries before oldest are dropped
@@ -1113,6 +1150,10 @@ export class Agent extends LoopDetector {
     this._lastAxScopes = new Map(); // tabId -> { documentToken, pageUrl }, captured by the latest AX read
     this._uncertainTextMutations = new Map(); // tabId -> Map(target -> unresolved, potentially applied text write; no raw text)
     this._verifiedTextReplacements = new Map(); // tabId -> exact replacement digest bound to the live document
+    // tabId -> Map(target -> latest write that went out but could not be
+    // verified; no raw text). Default mode keeps this instead of debt and
+    // never blocks on it; see _unverifiedTextWriteRecord.
+    this._unverifiedTextWrites = new Map();
     // tabId -> recent document tokens (bounded) whose mutation records are
     // retained so a back-forward cache return restores their guards.
     this._recentTextMutationDocuments = new Map();
@@ -1358,24 +1399,41 @@ export class Agent extends LoopDetector {
   }
 
   async _resolveExactTableDone(tabId, args, onUpdate = null) {
+    // exact-table-done: by default each refusal below is given once per
+    // run; the next done is accepted with what can be delivered and a
+    // caveat for the user.
     if (typeof args?.data_ref !== 'string' || !args.data_ref) {
       const error = structuredTableAnswerBlock(this.readCompletenessStates.get(tabId), args?.summary);
-      return error ? { success: false, blockedDone: true, exactTableUnverified: true, error } : null;
+      return error && this._exactTableAnswerRefuses(tabId, error)
+        ? { success: false, blockedDone: true, exactTableUnverified: true, error } : null;
     }
     const state = this.readCompletenessStates.get(tabId);
     const record = state?.exactTableExports?.get(args.data_ref);
     const owner = this._exactTableOwner(tabId);
     if (!record || !record.owner.current() || !owner?.current() || record.runToken !== owner.runToken) {
-      return { success: false, blockedDone: true, exactTableUnverified: true,
-        error: 'Unknown, expired, or superseded table data_ref. Extract the table in this current task first.' };
+      // Accepted, it delivers only the model's own summary, never rows
+      // another task or run extracted.
+      return this._guardRefusesOnce(tabId, 'exact-table-done', { decided: false,
+        caveat: 'The table reference had expired, so the exact table could not be delivered.' })
+        ? { success: false, blockedDone: true, exactTableUnverified: true,
+          error: 'Unknown, expired, or superseded table data_ref. Extract the table in this current task first.' }
+        : null;
     }
     onUpdate?.('tool_call', { name: 'extract_data', args: record.args, verification: true });
     const verified = await this.executeTool(tabId, 'extract_data', record.args, onUpdate,
       { _exactTableVerificationRecord: record });
     onUpdate?.('tool_result', { name: 'extract_data', result: verified, verification: true });
     if (!owner.current() || verified?.verifiedExactTable !== true) {
-      return { success: false, blockedDone: true, exactTableUnverified: true,
-        error: verified?.error || 'Table freshness could not be verified in the owning task. Extract again.' };
+      if (this._guardRefusesOnce(tabId, 'exact-table-done', { decided: false,
+        caveat: 'The table on the page may have changed after it was extracted.' })) {
+        return { success: false, blockedDone: true, exactTableUnverified: true,
+          error: verified?.error || 'Table freshness could not be verified in the owning task. Extract again.' };
+      }
+      // Accepted: the stored snapshot is delivered while its task still owns
+      // it, unless Strict secret mode now applies (the snapshot predates it,
+      // and its re-projection may be what failed).
+      if (owner.current() && this.strictSecretMode !== true) args.summary = record.summary;
+      return null;
     }
     args.summary = record.summary;
     return null;
@@ -2552,12 +2610,12 @@ export class Agent extends LoopDetector {
       pageUrl, currentUrl: submit.currentUrl }, text => this._sha256TextSync(text));
   }
 
-  _completionDoneBlock(tabId, name, args, batchStartState = null) {
+  _completionDoneBlock(tabId, name, args, batchStartState = null, { skip = null } = {}) {
     const mode = this._effectiveRunMode(tabId);
     if (!this._isActionMode(mode)) return null;
     const outcome = name === 'done_json' ? 'success' : String(args?.outcome || '').trim().toLowerCase();
     const toolbarObligation = this._richTextToolbarGuard.completionAction(tabId);
-    if (outcome === 'success' && toolbarObligation) {
+    if (outcome === 'success' && toolbarObligation && skip?.has?.('rich_text_toolbar_target_unresolved') !== true) {
       return {
         reason: 'rich_text_toolbar_target_unresolved',
         error: 'Success is blocked because the last text-entry attempt targeted a rich-text formatting toolbar. Enter the requested content in the editor body, verify that non-toolbar edit on a fresh turn, then complete; otherwise report a partial or failed outcome.',
@@ -2565,12 +2623,15 @@ export class Agent extends LoopDetector {
       };
     }
     const state = this.completionInvariants.get(tabId);
-    const block = completionDoneBlock(state, name, args);
+    const block = completionDoneBlock(state, name, args, { skip });
     if (block) return block;
-    if (outcome !== 'success' || !batchStartState) return null;
+    if (outcome !== 'success' || !batchStartState || skip?.has?.('prior_turn_verification_required') === true) return null;
     const batchStartSequence = Number(batchStartState.sequence || 0);
     const lastActionSequence = Number(state?.lastAction?.sequence || 0);
-    if (batchStartState.verificationDebt || lastActionSequence > batchStartSequence) {
+    // Debt carried into this batch that was just accepted over its note
+    // (verification_required) is the same concern, not a second one.
+    const carriedDebtAccepted = skip?.has?.('verification_required') === true && state?.verificationDebt === true;
+    if ((batchStartState.verificationDebt && !carriedDebtAccepted) || lastActionSequence > batchStartSequence) {
       return {
         reason: 'prior_turn_verification_required',
         error: 'A success completion cannot rely on action or observation results from the same assistant tool batch. Let this batch finish, inspect the returned evidence on the next model turn, then call done again; otherwise use outcome="partial" or outcome="failed".',
@@ -3010,7 +3071,7 @@ export class Agent extends LoopDetector {
     };
   }
 
-  async _conditionalGithubCommitTransition(tabId, name, args = {}, detectedSubmit = null) {
+  async _conditionalGithubCommitTransition(tabId, name, args = {}, detectedSubmit = null, advisories = null) {
     const guard = this._planExecutionGuards.get(tabId);
     if (!guard?.enabled || !guard.scheduledResume || guard.siteWorkflow
         || guard.requiresStateChange !== false || guard.requiresSubmission !== false) return null;
@@ -3061,6 +3122,14 @@ export class Agent extends LoopDetector {
     await this._ensureWorkflowMetadataRequirements(tabId, {
       provider: this._activeProvider(tabId), costState: this.currentCostState.get(tabId) || null,
     }, guard.taskText, pageUrl);
+    // github-conditional-commit-rearm (quality): the contract is armed above,
+    // before this first write, so its proof and every later commit already
+    // bind to it. Without Strict checks the action is sent now under that
+    // contract, and the note tells the model what the rebuilt prompt requires.
+    if (this._guardAdvisesFor(advisories, 'github-conditional-commit-rearm',
+      'WebBrain switched this resumed task to its conditional file-edit-and-commit contract before this action. Success now needs a verified file edit, a commit, and a readback of the exact committed file; verify the editor change before committing.')) {
+      return null;
+    }
     return {
       success: false, noDispatch: true, dispatched: false, retryable: true,
       workflowRearmed: true, workflowJob: 'edit-file-and-commit',
@@ -3068,7 +3137,7 @@ export class Agent extends LoopDetector {
     };
   }
 
-  async _workflowPreSubmitDispatchBlock(tabId, name, args = {}, detectedSubmit = null, provider = this._activeProvider(tabId)) {
+  async _workflowPreSubmitDispatchBlock(tabId, name, args = {}, detectedSubmit = null, provider = this._activeProvider(tabId), advisories = null) {
     const socialBlock = await this._socialPublicationPreSubmitBlock(tabId, name, args, detectedSubmit, provider);
     if (socialBlock) return socialBlock;
     await this._captureMastodonPublicationAttempt(tabId, name, args, detectedSubmit, provider);
@@ -3120,7 +3189,25 @@ export class Agent extends LoopDetector {
     // authorize bytes that were never hashed, so only a non-mutating final
     // activation may use an existing binding. Anything else must split into
     // a plain write (verified on its own) followed by a separate click.
+    // github-commit-split-write-required (quality): when the action does look
+    // like the commit and the verified file and message binding a commit click
+    // would need is in place, Strict checks off lets it run with a note; the
+    // committed raw file is then checked against that binding after the commit.
+    // An inconclusive detection is the cannot-decide case and keeps refusing,
+    // and so does a missing binding (github-commit-evidence-binding).
     if (name !== 'click' && name !== 'click_ax' && name !== 'iframe_click') {
+      if (looksLikeSubmit && this._guardAdvises('github-commit-split-write-required')) {
+        const pageUrl = await this._currentUrl(tabId);
+        await this._refreshGithubTextReplacementProofs(tabId, pageUrl);
+        const binding = this._workflowSubmitBindingForAttempt(tabId, pageUrl, {}, detectedSubmit);
+        if (binding?.metadataRequirementsIncomplete !== true && binding?.githubFileCommit
+            && this._guardAdvisesFor(advisories, 'github-commit-split-write-required',
+              name === 'execute_js'
+                ? 'This script may change the editor or commit message while it commits, so the earlier verified file and message proofs do not cover it. It ran anyway; read the committed file and commit message back before reporting success.'
+                : 'This action can change field values while it submits the commit, so the earlier verified file and message proofs do not cover it. It ran anyway; read the committed file and commit message back before reporting success.')) {
+          return null;
+        }
+      }
       return {
         success: false,
         dispatched: false,
@@ -5199,6 +5286,329 @@ export class Agent extends LoopDetector {
     };
   }
 
+  // Completion guards under the default policy (Settings → General →
+  // "Strict checks" off; see guard-policy.js). A completion guard refuses a
+  // done or a plain final at most once per run, and that refusal is the
+  // model's note. The next completion the same guard would refuse is
+  // accepted, and its final answer tells the user what was not verified.
+  // Strict checks keep every refusal, its budget and its forced turns.
+
+  // Only an accepted completion ends a run, so a caveat a completion guard
+  // recorded while an earlier attempt was still refused by another guard is
+  // stale. A guard that fires again records it again during this attempt.
+  // Caveats of other guard families are kept.
+  _beginCompletionGuardAttempt(tabId) {
+    const state = this._guardRunState(tabId);
+    for (const id of [...state.caveats.keys()]) {
+      if (guardEntry(id)?.family === 'completion') state.caveats.delete(id);
+    }
+    state.outcomeDowngrades?.clear();
+  }
+
+  // True once guard `id` advises and has used its one refusal in this run.
+  _guardHasAdvised(tabId, id, { decided = true } = {}) {
+    return this._guardAdvises(id, { decided }) && this._guardRunState(tabId).advised.has(id);
+  }
+
+  // A completion accepted over a check that KNOWS the task is not done
+  // (OUTCOME_DOWNGRADING_GUARDS) ends the run as partial. The done tool
+  // downgrades its own outcome; a plain final has no outcome of its own, so
+  // its run reports partial (trace status, run_status, onRunFinished).
+  _completionOutcomeDowngraded(tabId) {
+    return (this._guardRunState(tabId).outcomeDowngrades?.size || 0) > 0;
+  }
+
+  // native-chat-receipt-not-durable for a plain final. A plain final in an
+  // Act or Dev run is the model's own success claim, and without Strict
+  // checks it can end a run where done would have run this check: a chat
+  // message sent in this run is read back in the conversation and its
+  // receipt saved first, or a resumed run could send it again. Returns the
+  // refusal when the receipt cannot be saved, otherwise null. A send the
+  // conversation cannot confirm is left to the evidence checks, as for done.
+  async _plainFinalChatReceiptBlock(tabId) {
+    if (!this._isActionMode(this._effectiveRunMode(tabId))) return null;
+    if (!this.completionInvariants.get(tabId)?.lastAction?.chatDeliveryBinding
+        && !this.chatSessions.get(tabId)?.completionReceipt) return null;
+    let pageUrl = '';
+    try { pageUrl = await this._currentUrl(tabId); } catch {}
+    const evidence = await this._freshNativeChatTerminalEvidence(tabId, pageUrl || '');
+    if (!evidence) return null;
+    const guard = this._planExecutionGuards.get(tabId);
+    if (guard) guard.nativeChatDeliveryEvidence = evidence;
+    const saved = await this._persistNow(tabId);
+    if (saved === true || saved?.ok === true) return null;
+    return { receiptNotDurable: true,
+      error: 'The verified chat delivery receipt could not be saved. Do not send the message again. Retry once storage is available by calling done; if it still cannot be saved, finish with outcome "partial" and say so.' };
+  }
+
+  // A plain final the receipt check refused twice (or at the step limit)
+  // ends the run as partial: the model's text and why it is not a success.
+  _chatReceiptPartialFinal(content) {
+    const base = repairAssistantDisplayText(String(content || '')).trimEnd();
+    const why = 'WebBrain could not save the record that the message was delivered, so this run did not end as a success. Check the conversation before sending it again.';
+    return base ? `${base}\n\n${why}` : why;
+  }
+
+  // Adds the "WebBrain could not verify everything" line, if any, to the
+  // answer of an accepted completion. _guardRunState first drops a previous
+  // run's caveats.
+  // The line a completion accepted over a guard's advice ends with, or ''.
+  _completionCaveatLine(tabId) {
+    return (this._guardRunState(tabId) && this._guardCaveatLine(tabId)) || '';
+  }
+
+  // Whether a done summary is the exact table its data_ref delivered: the
+  // complete JSON the data_ref contract promises, to which nothing is added.
+  _isExactTablePayload(tabId, args, summary) {
+    if (typeof args?.data_ref !== 'string' || !args.data_ref || typeof summary !== 'string') return false;
+    const record = this.readCompletenessStates.get(tabId)?.exactTableExports?.get(args.data_ref);
+    return typeof record?.summary === 'string' && record.summary === summary;
+  }
+
+  _withCompletionCaveat(tabId, text) {
+    const line = this._completionCaveatLine(tabId);
+    if (!line) return text;
+    const base = String(text ?? '').trimEnd();
+    return base ? `${base}\n\n${line}` : line;
+  }
+
+  // The guard behind a completion-invariant refusal, with the sentence the
+  // user sees when a completion is accepted over it.
+  _completionInvariantGuard(tabId, reason) {
+    if (reason === 'rich_text_toolbar_target_unresolved') {
+      return { id: 'done-rich-text-toolbar-obligation', decided: true,
+        caveat: 'The last text may have gone into a formatting toolbar instead of the editor.' };
+    }
+    if (reason === 'iframe_form_verification_required') {
+      return { id: 'done-iframe-form-unverified', decided: false,
+        caveat: 'The form fields edited inside an embedded frame were not read back.' };
+    }
+    if (reason === 'verification_required') {
+      return { id: 'done-verification-debt', decided: false,
+        caveat: this.completionInvariants.get(tabId)?.lastAction?.downloadAction === true
+          ? 'The download was not checked after it started.'
+          : 'The page was not checked again after the last action.' };
+    }
+    if (reason === 'prior_turn_verification_required') {
+      return { id: 'done-invariant-shape-checks', decided: false,
+        caveat: 'Success was reported in the same step as the last action, before its result was seen.' };
+    }
+    if (reason === 'missing_outcome') {
+      return { id: 'done-invariant-shape-checks', decided: true,
+        caveat: 'The final report did not say whether the task succeeded, so it counts as partial.' };
+    }
+    return null;
+  }
+
+  _completionInvariantRefuses(tabId, block) {
+    const guard = this._completionInvariantGuard(tabId, block?.reason);
+    return !guard || this._guardRefusesOnce(tabId, guard.id, { decided: guard.decided, caveat: guard.caveat });
+  }
+
+  // A plain final in an Act/Dev run that acted. The "end with done, not
+  // plain text" note is given once per run, shared with the plan guard's
+  // plain-final protocol.
+  _completionPlainFinalRefuses(tabId) {
+    const state = this.completionInvariants.get(tabId);
+    // Every applicable invariant gets its note in priority order: one
+    // that already advised is accepted and the next one is checked.
+    const guards = [];
+    if (this._richTextToolbarGuard.hasPending(tabId)) guards.push(this._completionInvariantGuard(tabId, 'rich_text_toolbar_target_unresolved'));
+    if (state?.iframeFormVerificationDebt) guards.push(this._completionInvariantGuard(tabId, 'iframe_form_verification_required'));
+    if (state?.verificationDebt) guards.push(this._completionInvariantGuard(tabId, 'verification_required'));
+    if (guards.length) {
+      return guards.some(guard => this._guardRefusesOnce(tabId, guard.id, { decided: guard.decided, caveat: guard.caveat }));
+    }
+    const refuses = this._guardRefusesOnce(tabId, 'plain-final-done-protocol', { decided: true, caveat: PLAIN_FINAL_PROTOCOL_CAVEAT });
+    const planProtocolRefuses = this._guardRefusesOnce(tabId, 'plan-plain-final-protocol', {
+      caveat: PLAIN_FINAL_PROTOCOL_CAVEAT,
+    });
+    return refuses && planProtocolRefuses;
+  }
+
+  // progress-ledger-unresolved: rows still pending or acted (any outcome).
+  // progress-success-claim-checks: success over missing, incomplete,
+  // duplicate, skipped or failed rows.
+  _progressGuardRefuses(tabId) {
+    const rows = this._currentTaskLedgerRows(tabId);
+    if (ledgerDoneBlock(rows, { limit: 1 })) {
+      const counts = progressCounts(rows);
+      return this._guardRefusesOnce(tabId, 'progress-ledger-unresolved', {
+        caveat: `${counts.unresolved} of ${counts.total} items in the task's progress list were not finished.`,
+      });
+    }
+    return this._guardRefusesOnce(tabId, 'progress-success-claim-checks', {
+      caveat: 'Some items in the task\'s progress list are missing, incomplete, skipped or failed.',
+    });
+  }
+
+  // read-coverage-incomplete: pages of a requested whole-thread read are
+  // missing (it knows), or Gmail's expansion was not confirmed (it cannot
+  // tell). Ask mode cannot expand Gmail messages, so by default that
+  // limitation reaches the user through this caveat.
+  _readCoverageGuardRefuses(tabId) {
+    const state = this.readCompletenessStates.get(tabId);
+    const expansionUnverified = state?.requiresExpansionEvidence === true
+      && state.treeCoverageComplete === true && state.expansionConfirmed !== true;
+    return this._guardRefusesOnce(tabId, 'read-coverage-incomplete', {
+      decided: !expansionUnverified,
+      caveat: !expansionUnverified ? 'Not every part of the conversation was confirmed as read.'
+        : this._isActionMode(this._effectiveRunMode(tabId))
+          ? 'Some Gmail messages may have stayed collapsed, so the whole conversation was not confirmed as read.'
+          : 'Ask mode cannot expand collapsed Gmail messages, so some messages in the conversation may be missing.',
+    });
+  }
+
+  // exact-table-done for table JSON given without the app's data_ref.
+  _exactTableAnswerRefuses(tabId, error) {
+    const rowCountMismatch = /^The JSON rowCount /.test(String(error || ''));
+    return this._guardRefusesOnce(tabId, 'exact-table-done', {
+      decided: rowCountMismatch,
+      caveat: rowCountMismatch ? 'The table\'s row count does not match its rows.'
+        : 'The table was not checked against the exact rows on the page.',
+    });
+  }
+
+  // The checks a plain final passes before the plan guard. By default each
+  // one drops out once its guard has refused in this run.
+  _plainFinalGuardBlocks(tabId, content) {
+    const progressFinalBlock = this._plainFinalProgressBlock(tabId);
+    const completionFinalBlock = this._completionPlainFinalBlock(tabId);
+    const readFinalBlock = this._readCompletenessBlock(tabId);
+    const exactTableFinalBlock = structuredTableAnswerBlock(this.readCompletenessStates.get(tabId), content);
+    return {
+      progressFinalBlock: progressFinalBlock && this._progressGuardRefuses(tabId) ? progressFinalBlock : null,
+      completionFinalBlock: completionFinalBlock && this._completionPlainFinalRefuses(tabId) ? completionFinalBlock : null,
+      readFinalBlock: readFinalBlock && this._readCoverageGuardRefuses(tabId) ? readFinalBlock : null,
+      exactTableFinalBlock: exactTableFinalBlock && this._exactTableAnswerRefuses(tabId, exactTableFinalBlock)
+        ? exactTableFinalBlock : null,
+    };
+  }
+
+  // Strict checks: the third plain final under a completion block ends the
+  // run as partial. By default each block refuses once and the next plain
+  // final is accepted, so the run never needs this stop.
+  _plainFinalTwoStrikeEnds() {
+    return !this._guardAdvises('plain-final-two-strike-partial');
+  }
+
+  // completion-verifier-not-done: the completion judge's sure pending or
+  // failed verdict. completion-evidence-freshness: the judged evidence
+  // changed while it was being judged (engine 'freshness').
+  _completionVerdictRefuses(tabId, decision) {
+    const freshness = decision?.engine === 'freshness';
+    return this._guardRefusesOnce(tabId, freshness ? 'completion-evidence-freshness' : 'completion-verifier-not-done', {
+      decided: !freshness,
+      caveat: freshness ? 'The page changed while the result was being checked.'
+        : decision?.outcome === 'failed' ? 'An independent check of the page suggested that the task did not succeed.'
+          : 'An independent check of the page could not confirm that the task had finished.',
+    });
+  }
+
+  _iframeResultStaleRefuses(tabId) {
+    return this._guardRefusesOnce(tabId, 'completion-evidence-freshness', { decided: false,
+      caveat: 'The submitted form inside an embedded frame could not be read again at the end.' });
+  }
+
+  _calculationRefreshRefuses(tabId) {
+    return this._guardRefusesOnce(tabId, 'completion-evidence-freshness', { decided: false,
+      caveat: 'The calculation could not be checked again against the current page.' });
+  }
+
+  // completion-page-warning: an open dialog or a failed validation the page
+  // shows (it knows), or a visible form or edit route without a verified
+  // submit (it cannot tell).
+  _completionPageWarningRefuses(tabId, key) {
+    const text = String(key || '');
+    const known = /\|dialog\|\d+$/.test(text) || text.endsWith('|submit-validation-failed');
+    const caveat = /\|dialog\|\d+$/.test(text) ? 'A dialog was still open on the page at the end.'
+      : text.endsWith('|submit-validation-failed') ? 'The form showed a validation error after it was submitted.'
+        : text.includes('|pending-form|') ? 'The form still looked unsubmitted at the end.'
+          : 'The page was still on an edit screen with no sign that the change was saved.';
+    return this._guardRefusesOnce(tabId, 'completion-page-warning', { decided: known, caveat });
+  }
+
+  _completionPageWarningSuffix(blocks) {
+    return this._guardAdvises('completion-page-warning')
+      ? ' (If the task is complete and this form or dialog is unrelated to it, say so in the done summary.)'
+      : ` (block attempt ${blocks}/2 — if you genuinely believe the task is complete and the visible form/dialog is unrelated, re-call done with summary explicitly acknowledging this, e.g. "already-existing product, no submit needed".)`;
+  }
+
+  // incomplete-task-redirect: the judge's continue_now or wait_then_check
+  // reading of an honest partial or failed ending. A block without
+  // `recovery` is incomplete-task-check-stale (the task or page changed
+  // while it was read): a host check that always stands.
+  _incompleteRedirectRefuses(tabId, block) {
+    if (!block?.recovery) return true;
+    return this._guardRefusesOnce(tabId, 'incomplete-task-redirect', {
+      caveat: 'WebBrain judged that more of the task could still be done.',
+    });
+  }
+
+  // The guards behind a plan-execution refusal, each with the sentence the
+  // user sees when a completion is accepted over it.
+  _planGuardFindings(state, flags) {
+    const findings = [];
+    const add = (id, decided, caveat) => {
+      const prior = findings.find(finding => finding.id === id);
+      if (prior) prior.caveat = `${prior.caveat} ${caveat}`;
+      else findings.push({ id, decided, caveat });
+    };
+    if (!flags.viaDone) add('plan-plain-final-protocol', true, PLAIN_FINAL_PROTOCOL_CAVEAT);
+    else if (flags.looksPlanOnly) {
+      add('plan-done-summary-shape', true, flags.runtimeModeContradiction
+        ? 'The final answer blamed a read-only mode that was not in use.'
+        : 'The final answer looked like a plan rather than a result.');
+    }
+    if (flags.forbiddenSubmission) {
+      add('plan-unauthorized-mutation-recorded', true, 'The form was submitted even though the task was to leave it unsubmitted.');
+    } else if (state.conditionalMutationBlocked) {
+      add('plan-unauthorized-mutation-recorded', true, 'The planned repair was not made because no matching workflow allowed it.');
+    }
+    if (flags.missingRequiredSchedulingTool) add('plan-required-evidence-missing', false, 'I couldn\'t confirm that the scheduled task was created.');
+    if (flags.missingRequiredDownload) add('plan-required-evidence-missing', false, 'I couldn\'t confirm that the file was downloaded.');
+    if (flags.missingJobEvidence) add('plan-required-evidence-missing', false, 'The result was not checked the way this kind of task requires.');
+    if (flags.missingDraftEvidence) add('plan-required-evidence-missing', false, 'I couldn\'t confirm that the draft was saved with every requested field.');
+    if (flags.missingRequiredLedger) add('plan-required-evidence-missing', false, 'I couldn\'t confirm that every item was handled.');
+    if (flags.missingSocialPublishTargets.length) {
+      add('plan-publication-evidence-missing', false, `I couldn't confirm the post on ${flags.missingSocialPublishTargets
+        .map(name => name === 'twitter' ? 'X' : name === 'bluesky' ? 'Bluesky' : name).join(', ')}.`);
+    }
+    if (flags.missingRequiredSubmission && this._workflowVerificationKind(state.siteWorkflow) === 'published_resource') {
+      // The byte-exact raw-blob check stays the evidence for a GitHub file
+      // commit; only its refusal is advised.
+      const githubFile = state.siteWorkflow?.adapterName === 'github' && state.siteWorkflow?.job?.id === 'edit-file-and-commit';
+      const caveat = githubFile ? 'I couldn\'t confirm that the committed file matches the requested text.'
+        : 'I couldn\'t confirm that the published result matches the request.';
+      add('plan-publication-evidence-missing', false, caveat);
+      if (githubFile) add('github-committed-file-verification', false, caveat);
+    } else if (flags.missingRequiredSubmission && !flags.missingSocialPublishTargets.length) {
+      add('plan-submission-evidence-missing', false, 'I couldn\'t confirm that the submission went through.');
+    }
+    if (flags.missingEvidence && findings.every(finding => ['plan-plain-final-protocol', 'plan-done-summary-shape'].includes(finding.id))) {
+      add('plan-execution-evidence-missing', false, state.requiresStateChange === false
+        ? 'No successful page read or tool result backs this answer.'
+        : 'I couldn\'t confirm that the requested change was made.');
+    }
+    return findings;
+  }
+
+  // Default mode for the plan-execution guard: each finding gives its note
+  // once per run and is then accepted with its caveat, so this guard never
+  // ends the run itself. null keeps the strict path: Strict checks, a
+  // drifted task (a host check), and the two endings that hold no answer to
+  // accept, a planner or policy object and a stale cancellation echo.
+  _planGuardAdvisory(tabId, state, flags) {
+    if (state.taskDrifted || flags.staleCancellation || flags.structuredPlan) return null;
+    const findings = this._planGuardFindings(state, flags);
+    if (!findings.length || findings.some(finding => !this._guardAdvises(finding.id, finding))) return null;
+    let refuses = false;
+    for (const finding of findings) {
+      if (this._guardRefusesOnce(tabId, finding.id, finding)) refuses = true;
+    }
+    return refuses ? 'refuse' : 'accept';
+  }
+
   _completionPlainFinalBlock(tabId) {
     const mode = this._effectiveRunMode(tabId);
     if (!this._isActionMode(mode)) return null;
@@ -5210,6 +5620,11 @@ export class Agent extends LoopDetector {
 
   _completionRecoveryPolicy(tabId, tools, { verification = false, done = false, failure = false } = {}) {
     if (!this._isActionMode(this._effectiveRunMode(tabId))) return null;
+    // By default a refused completion only leaves its note: the model keeps
+    // every tool and may still report success. Strict checks restore the
+    // forced read-only turn, the done-only turn and the failure-only done.
+    if (this._guardAdvises('completion-recovery-forced-turns', { decided: false })
+        && this._guardAdvises('completion-failure-only-done', { decided: false })) return null;
     const state = this.completionInvariants.get(tabId);
     const available = Array.isArray(tools) ? tools : [];
     const failureOnlyTerminalTool = () => {
@@ -6905,7 +7320,7 @@ export class Agent extends LoopDetector {
           this._throwIfAborted(this._runAbortSignal(tabId));
           if (!current()) return null;
         }
-        return { content: result.value, status: 'done' };
+        return { content: result.value, status: result.endStatus || 'done' };
       }
     } catch (error) {
       if (this._checkAbort(tabId) || error?.name === 'AbortError' || this._isCostAllowanceError(error)) throw error;
@@ -9183,6 +9598,7 @@ export class Agent extends LoopDetector {
       for (const [owner, map] of [
         [this._uncertainTextMutations, this._uncertainTextMutations.get(tabId)],
         [this._verifiedTextReplacements, this._verifiedTextReplacements.get(tabId)],
+        [this._unverifiedTextWrites, this._unverifiedTextWrites?.get(tabId)],
       ]) {
         if (!(map instanceof Map)) continue;
         for (const [key, entry] of map) {
@@ -9239,6 +9655,18 @@ export class Agent extends LoopDetector {
   async _richTextToolbarToolBlock(tabId, toolName, args = {}, executionContext = null) {
     if (!this._richTextToolbarGuard.hasPending(tabId)) return null;
     if (!RICH_TEXT_TOOLBAR_GUARDED_TOOLS.has(toolName)) return null;
+    // The preflight already advised this exact call and recorded its
+    // obligation; checking it again would only repeat that note.
+    if (executionContext?.richTextToolbarWrongTargetAdvised === true) return null;
+    // rich-text-toolbar-recovery-obligation (quality): while an earlier text
+    // entry into a formatting toolbar is unresolved, a call on that toolbar,
+    // or one whose target cannot be checked, is refused only in Strict
+    // checks. Otherwise it runs unbound with a note; the obligation stays
+    // until a verified editor-body edit releases it.
+    const advises = (note, decided) => this._guardAdvisesFor(executionContext?.guardAdvisories,
+      'rich-text-toolbar-recovery-obligation', note, { decided });
+    const toolbarNote = 'This target belongs to the rich-text formatting toolbar that received the earlier text entry, not the editor body. It was used anyway; the requested content still has to be entered in the editor body and verified there.';
+    const uncheckedNote = 'An earlier text entry went into a rich-text formatting toolbar, and WebBrain could not check that this target is not that toolbar. It was sent anyway; enter the requested content in the editor body and verify it there.';
     const probe = await this._probeRichTextToolbarRetryTarget(tabId, toolName, args);
     if (!probe?.resolved) {
       const knownRefBlock = this._richTextToolbarGuard.blockRef(
@@ -9247,7 +9675,9 @@ export class Agent extends LoopDetector {
         args,
         this._lastAxScopes.get(tabId)?.documentToken || '',
       );
-      if (knownRefBlock) return knownRefBlock;
+      if (knownRefBlock) return advises(toolbarNote, true) ? null : knownRefBlock;
+      // A selector matching several frames has no single target to send to.
+      if (DISPATCH_BINDING_TOOLS.has(toolName) && probe?.ambiguous !== true && advises(uncheckedNote, false)) return null;
       return DISPATCH_BINDING_TOOLS.has(toolName)
         ? {
             success: false,
@@ -9281,7 +9711,7 @@ export class Agent extends LoopDetector {
     }
     if (evaluation.block) {
       await this._releaseRichTextToolbarProbeTarget(tabId, probe);
-      return evaluation.block;
+      return advises(toolbarNote, true) ? null : evaluation.block;
     }
     if (evaluation.guarded !== true) {
       await this._releaseRichTextToolbarProbeTarget(tabId, probe);
@@ -9292,6 +9722,7 @@ export class Agent extends LoopDetector {
       && !richTextToolbarDispatchBindingReady(toolName, args, probe.dispatchBinding)
     ) {
       await this._releaseRichTextToolbarProbeTarget(tabId, probe);
+      if (advises(uncheckedNote, false)) return null;
       return {
         success: false,
         dispatched: false,
@@ -9347,7 +9778,10 @@ export class Agent extends LoopDetector {
     return true;
   }
 
-  _applyRichTextToolbarWrongTarget(tabId, toolName, args, result, candidate, decision, audit, identity = {}) {
+  // The recovery obligation is evidence that the requested content may not be
+  // in the editor body, so it is recorded whether the entry is refused or
+  // (Strict checks off) sent with a note.
+  _recordRichTextToolbarWrongTarget(tabId, toolName, args, candidate, decision, audit, identity = {}, { advised = false } = {}) {
     const recorded = this._richTextToolbarGuard.recordWrongTarget(tabId, {
       toolName,
       args,
@@ -9355,6 +9789,25 @@ export class Agent extends LoopDetector {
       decision,
       identity,
     });
+    const runId = this.currentRunId.get(tabId);
+    if (runId) {
+      trace.recordNote(runId, null, 'rich_text_toolbar_wrong_target', {
+        toolName,
+        refId: typeof args?.ref_id === 'string' ? args.ref_id : '',
+        targetKind: recorded.obligation.targetKind,
+        source: decision.source,
+        confidence: audit?.confidence ?? null,
+        blockedRefCount: recorded.blockedRefCount,
+        persistentRecoveryObligation: true,
+        recoveryTargetUnknown: !recorded.hasExactRecoveryTarget,
+        ...(advised ? { advised: true } : {}),
+      });
+    }
+    return recorded;
+  }
+
+  _applyRichTextToolbarWrongTarget(tabId, toolName, args, result, candidate, decision, audit, identity = {}) {
+    const recorded = this._recordRichTextToolbarWrongTarget(tabId, toolName, args, candidate, decision, audit, identity);
     const obligation = recorded.obligation;
     const associatedEditorRef = typeof candidate?.associatedEditorRef === 'string'
       && /^ref_\d+$/.test(candidate.associatedEditorRef)
@@ -9382,19 +9835,6 @@ export class Agent extends LoopDetector {
         ? `This edit was blocked before dispatch because the target is a rich-text formatting toolbar control, not the editor body. Do not retry this ref or another font-family, font-size, style, color, or link control in the same toolbar. Use the associated editor body ${associatedEditorRef}, enter the requested content there, and verify that exact editor edit.`
         : 'This edit was blocked before dispatch because the target is a rich-text formatting toolbar control, not the editor body. Do not retry this ref or another font-family, font-size, style, color, or link control in the same toolbar. Re-read the tree, focus the associated editor body, enter the requested content there, and verify that exact editor edit.',
     });
-    const runId = this.currentRunId.get(tabId);
-    if (runId) {
-      trace.recordNote(runId, null, 'rich_text_toolbar_wrong_target', {
-        toolName,
-        refId: typeof args?.ref_id === 'string' ? args.ref_id : '',
-        targetKind: obligation.targetKind,
-        source: decision.source,
-        confidence: audit?.confidence ?? null,
-        blockedRefCount: recorded.blockedRefCount,
-        persistentRecoveryObligation: true,
-        recoveryTargetUnknown: !recorded.hasExactRecoveryTarget,
-      });
-    }
   }
 
   async _classifyRichTextToolbarTarget(tabId, provider, dataUrl) {
@@ -9456,13 +9896,21 @@ export class Agent extends LoopDetector {
     if (!['set_field', 'type_ax', 'type_text', 'iframe_type'].includes(toolName)) {
       return { block: null, shot: null };
     }
+    const advisories = captureOptions?.guardAdvisories || null;
+    // rich-text-toolbar-target-unresolved (quality, cannot decide): when this
+    // safety preflight cannot resolve or keep the typing target, Strict checks
+    // off skips the toolbar check and lets the tool resolve its target itself
+    // (an iframe goes to the handler's own single-target census).
+    const unresolvedAdvises = note => this._guardAdvisesFor(advisories, 'rich-text-toolbar-target-unresolved',
+      note, { decided: false });
+    const unresolvedNote = 'WebBrain could not resolve this typing target for its rich-text toolbar check, so it could not confirm the text goes into the editor body rather than a formatting control. It was sent anyway; read the field back to verify.';
     // The trusted selector resolver scrolls its target into view, and the
     // page-feedback fence refuses that scroll while the page is changing.
     const pageChangedSelectorMessage = 'The page changed while WebBrain was locating this selector\'s target, so nothing was typed. '
       + 'On a page that keeps updating, typing by selector is refused the same way each time: type into the field with type_ax and its ref_id from get_accessibility_tree instead.';
     // A target the observed certificate cannot bind (such as a selector that
     // names several elements) gets that answer before any probe of it.
-    const unbindable = await this._pageFeedbackUnbindableResult?.(tabId, toolName, args);
+    const unbindable = await this._pageFeedbackUnbindableResult?.(tabId, toolName, args, advisories);
     if (unbindable) return { block: unbindable, shot: null };
     const selectorBackedType = toolName === 'type_text'
       && typeof args?.selector === 'string'
@@ -9478,7 +9926,16 @@ export class Agent extends LoopDetector {
     if (!probe?.resolved) {
       const ambiguousIframeTarget = toolName === 'iframe_type' && probe?.ambiguous === true;
       const pageChanged = selectorBackedType && probe?.pageChangedDuringResolve === true;
-      return ambiguousIframeTarget || (toolName === 'iframe_type' && recoveryPending) || selectorBackedType || focusedType
+      const refusable = ambiguousIframeTarget || (toolName === 'iframe_type' && recoveryPending) || selectorBackedType || focusedType;
+      // A selector the page-feedback fence kept from resolving (the page is
+      // changing) is that host check's refusal, not this guard's: the tool's
+      // own resolver would meet the same fence, so it keeps its answer. An
+      // iframe selector naming several elements has no single target to send
+      // to and keeps its answer too.
+      if (refusable && !pageChanged && !ambiguousIframeTarget && unresolvedAdvises(unresolvedNote)) {
+        return { block: null, shot: null, iframeTargetUnresolved: toolName === 'iframe_type' };
+      }
+      return refusable
         ? {
             block: {
               success: false,
@@ -9520,6 +9977,11 @@ export class Agent extends LoopDetector {
       // time, so do not invite a retry that cannot succeed.
       const resolverUnavailable = selectorBackedType && probe.trustedResolverUnavailable === true;
       const pageChanged = selectorBackedType && !resolverUnavailable && probe.pageChangedDuringResolve === true;
+      // Advised: the released probe is not passed on, so the tool resolves
+      // its own target without a preserved identity. A resolver that cannot
+      // attach, or that the page-feedback fence stopped, would fail the same
+      // way in the tool, so those keep their precise answer.
+      if (!resolverUnavailable && !pageChanged && unresolvedAdvises(unresolvedNote)) return { block: null, shot: null };
       return {
         block: {
           success: false,
@@ -9552,9 +10014,15 @@ export class Agent extends LoopDetector {
       || (!Number.isInteger(probe.frameId) || probe.frameId === 0 ? probe.rect : null);
     const visionAvailable = !!(await this._resolveVisionRoute(tabId, provider)).provider;
     const visualAuditAllowanceAvailable = this._canTakeToolbarAuditScreenshot(tabId);
-    const visualAuditEligible = this._shouldAutoScreenshot(toolName)
+    let visualAuditEligible = this._shouldAutoScreenshot(toolName)
       && visualAuditAllowanceAvailable
       && visionAvailable;
+    // Advised: the visual check is skipped and the page-structure score below
+    // decides alone, as it does when no vision model is configured.
+    if (visualAuditEligible && toolName === 'iframe_type' && !annotationRect
+        && unresolvedAdvises('The matching iframe target could not be brought into view for WebBrain\'s visual toolbar check, so it was classified by page structure only. Read the field back to verify the text went into the editor body.')) {
+      visualAuditEligible = false;
+    }
     if (visualAuditEligible && toolName === 'iframe_type' && !annotationRect) {
       await this._releaseRichTextToolbarProbeTarget(tabId, probe);
       return {
@@ -9654,6 +10122,15 @@ export class Agent extends LoopDetector {
       audit,
     );
     if (decision.wrongTarget) {
+      // rich-text-toolbar-wrong-target (quality): Strict checks off types into
+      // the probed target with a note instead of refusing. The obligation is
+      // still recorded, so later toolbar calls and completion know the
+      // requested content may not be in the editor body.
+      if (this._guardAdvisesFor(advisories, 'rich-text-toolbar-wrong-target',
+        'WebBrain\'s check reads this target as a rich-text formatting toolbar control (font, size, style, color or link), not the editor body. The text was typed there anyway; enter the requested content in the editor body and verify it there.')) {
+        this._recordRichTextToolbarWrongTarget(tabId, toolName, args, candidate, decision, audit, probe, { advised: true });
+        return { block: null, shot, audit, decision, traceCapture, probe, wrongTargetAdvised: true };
+      }
       const block = {};
       this._applyRichTextToolbarWrongTarget(tabId, toolName, args, block, candidate, decision, audit, probe);
       await this._releaseRichTextToolbarProbeTarget(tabId, probe);
@@ -11474,6 +11951,14 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     const label = offlineAnswerText(locale, 'oa.unverified.label');
     const caution = offlineAnswerText(locale, gap.health ? 'oa.unverified.caution_health' : 'oa.unverified.caution');
     return `**${label}** ${gap.reason} ${caution}\n\n${text}`;
+  }
+
+  // An on-device standalone answer that ends mid-sentence is retried once;
+  // by default the next one is shown with a caveat instead of an error.
+  _standaloneTruncationRefuses(tabId) {
+    return this._guardRefusesOnce(tabId, 'plain-final-unusable-output', {
+      caveat: 'The on-device answer may be cut off.',
+    });
   }
 
   _isClearlyIncompleteStandaloneAnswer(content, runOptions = {}) {
@@ -13830,12 +14315,27 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     return { gate: publicGate, loopCheck };
   }
 
+  // A text write that went out but could not be read back exactly is an
+  // advisory result (success + unverifiedWrite + a note), not a reason to
+  // replan the rest of the batch. Failures, refusals and unknown outcomes
+  // still interrupt; so does a write an exact reader read back as a
+  // different value, since the rest of the batch would build on a value
+  // WebBrain knows is wrong, and every unverified result under Strict checks.
+  _advisoryTextWriteContinuesBatch(toolName, toolResult) {
+    return ['set_field', 'type_ax', 'type_text'].includes(toolName)
+      && toolResult?.success === true && toolResult.unverifiedWrite === true && !toolResult.error
+      && !textWriteRefuted(toolResult)
+      && this._guardAdvises('browser-batch-fresh-turn-interrupt', { decided: true });
+  }
+
   _browserActionFreshTurnReason(tier, toolName, toolResult, batch = null) {
+    const advisoryWrite = this._advisoryTextWriteContinuesBatch(toolName, toolResult);
     if (batch) {
       // Reads and waits can also be prerequisites of the next batched action.
       if (toolResult?.success === false || toolResult?.error || toolResult?.noProgress
           || toolResult?.ambiguous || toolResult?.outcomeUnknown || toolResult?.stale) return 'action_failed';
-      if (toolResult?.inconclusive || toolResult?.verified === false || toolResult?.remoteStateVerified === false) return 'action_unverified';
+      if (!advisoryWrite && (toolResult?.inconclusive || toolResult?.verified === false
+          || toolResult?.remoteStateVerified === false)) return 'action_unverified';
       if (batch.submit && batch.hasRemaining) return 'submit_boundary';
       if (batch.navigationChanged && batch.hasRemaining
           && (!batch.sameNext || !batch.remainingObservations)) return 'navigation_changed';
@@ -13868,9 +14368,11 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       return 'action_failed';
     }
     if (
-      toolResult?.inconclusive
-      || toolResult?.verified === false
-      || toolResult?.remoteStateVerified === false
+      !advisoryWrite && (
+        toolResult?.inconclusive
+        || toolResult?.verified === false
+        || toolResult?.remoteStateVerified === false
+      )
     ) {
       return 'action_unverified';
     }
@@ -14141,6 +14643,10 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
 
   _pureCalculationToolPolicy(tabId, expectedScope = null) {
     const guard = this._planExecutionGuards.get(tabId);
+    // A task whose arithmetic-only scope was released (see
+    // _releasePureCalculationScope) is an ordinary task for the rest of its
+    // plan guard; a new task gets a fresh guard and its own scope.
+    if (guard?.pureCalculationScopeReleased === true) return null;
     const scope = this._pageFeedbackCalculationResponseScope?.(tabId);
     const capturedScope = expectedScope || guard?.pureCalculationToolScope || null;
     if (capturedScope && (!scope || capturedScope.owner !== scope.owner
@@ -14187,6 +14693,15 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
         this._planExecutionGuards.get(tabId)?.pureCalculationReceipt?.fraction);
     const prematureCompletion = !policy.stale && name === 'done' && !completed && !policy.attempted;
     if (!policy.stale && policy.names.includes(name) && matchesInput && !missingResult && !missingFormat && !prematureCompletion) return null;
+    // A done these arithmetic checks refuse is advised once per run by
+    // default, then accepted with a caveat. A stale task authority is a
+    // host check and keeps refusing.
+    if (!policy.stale && name === 'done' && !this._guardRefusesOnce(tabId, 'pure-calculation-done-checks', {
+      decided: !prematureCompletion,
+      caveat: prematureCompletion ? 'The result was not computed with the calculator.'
+        : missingResult ? 'The answer may not show the calculator\'s exact result.'
+          : 'The answer may not use the exact format you asked for.',
+    })) return null;
     return { success: false, skipped: true, denied: true, dispatched: false, noDispatch: true,
       ...(prematureCompletion ? { blockedDone: true } : {}),
       outcomeUnknown: false, errorCode: 'pure_calculation_tool_denied',
@@ -14203,6 +14718,39 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
           : 'This genuine task only authorizes its literal calculation. Call calculate with that exact expression, then done with the result and an explicit outcome. No browser action or different calculation was dispatched.' };
   }
 
+  /**
+   * pure-calculation-tool-scope (quality): with Strict checks off, a call
+   * outside an owned literal-arithmetic task's scope (another tool, another
+   * expression, a calculation repeated after its verified result) runs with
+   * a note instead of being refused. Returns true when the caller must let
+   * the call proceed. The stale-authority refusal (a host check) and the
+   * done checks are not this guard and keep refusing.
+   */
+  _pureCalculationScopeAdvises(tabId, name, args, expectedScope, advisories) {
+    if (!name || name === 'done' || name === 'done_json') return false;
+    const policy = this._pureCalculationToolPolicy(tabId, expectedScope);
+    if (!policy || policy.stale) return false;
+    const expression = String(policy.scope?.expression || '').slice(0, 80);
+    const note = name !== 'calculate'
+      ? `This task only asks for its literal calculation (${expression}); no browser action or other tool was requested. ${name} ran anyway. The answer still needs calculate with that exact expression; report it with done.`
+      : policy.names.includes('calculate')
+        ? `This calculate is not the task's literal calculation (${expression}), so its result is not the task's verified answer. It ran anyway; the answer needs calculate with that exact expression.`
+        : 'The task\'s literal calculation was already verified; this repeated calculate ran anyway. The verified result stands: report it with done.';
+    return this._guardAdvisesFor(advisories, 'pure-calculation-tool-scope', note);
+  }
+
+  // A page action that runs on an arithmetic-only task (advised above) makes
+  // its captured scope permanently stale: the scope requires a run with no
+  // action, so every later call, done included, would be refused as a changed
+  // authority and the tool list would empty. The task is no longer
+  // arithmetic-only, so its scope is released for the rest of this plan guard.
+  _releasePureCalculationScope(tabId) {
+    const guard = this._planExecutionGuards.get(tabId);
+    if (!guard) return;
+    guard.pureCalculationScopeReleased = true;
+    guard.pureCalculationToolScope = null;
+  }
+
   async _executeToolBatchInner(tabId, toolCalls, messages, onUpdate, provider, partialAssistantText, allowedToolNames, step, runOptions, toolSchemas, cancellationState) {
     // Capture the request's private authority, not a later same-wording task.
     // Recommended/fast batches also pass this shared boundary.
@@ -14216,6 +14764,12 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     const promptTier = this._resolvePromptTier(provider);
     const readLimits = this._readWindowLimits();
     const completionBatchStartState = this.completionInvariants.get(tabId) || null;
+    // A batch holding a done is a new completion attempt (see
+    // _beginCompletionGuardAttempt). A read batch that a tool handler runs
+    // on its own keeps the caveats.
+    if (toolCalls.some(call => ['done', 'done_json'].includes(call?.function?.name))) {
+      this._beginCompletionGuardAttempt(tabId);
+    }
     // Set of tools whose side effect can navigate the page. We snapshot the
     // URL before these and re-check after, so we can warn the model when an
     // unintended navigation happens (the most common cause of "model keeps
@@ -14311,12 +14865,14 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       const previous = toolCalls[toolIndex - 1];
       if (previous?._browserBatch) {
         const priorResult = messages.findLast(message => message.role === 'tool' && message.tool_call_id === previous.id);
-        if (browserBatchResultStatus(priorResult).failed && this._interruptToolBatchForFreshTurn(
+        if (browserBatchResultStatus(priorResult, {
+          advisoryWritesContinue: this._guardAdvises('browser-batch-fresh-turn-interrupt', { decided: true }),
+        }).failed && this._interruptToolBatchForFreshTurn(
           tabId, toolCalls, toolIndex, messages, onUpdate, step,
           { tier: promptTier, triggeringTool: previous.function.name, reason: 'action_failed', navNotices },
         )) { navNotices.length = 0; break; }
       }
-      const callState = { index: toolIndex, invoked: false, consequential: false, result: null, dispatchState: null };
+      const callState = { index: toolIndex, invoked: false, consequential: false, result: null, dispatchState: null, guardAdvisories: [] };
       cancellationState.active = callState;
       // Abort check before each tool call.
       if (this._checkAbort(tabId)) {
@@ -14354,7 +14910,8 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       if (!this._hasPendingSteering(tabId)) {
         const calculationArgs = this._parseToolCallArgs(tc).args;
         const calculationBlock = this._pureCalculationToolBlock(tabId, tc.function?.name || '', calculationArgs, calculationRequestScope);
-        if (calculationBlock) {
+        if (calculationBlock && !this._pureCalculationScopeAdvises(tabId, tc.function?.name || '', calculationArgs,
+            calculationRequestScope, callState.guardAdvisories)) {
           const recovery = await recordPreparationFailure(toolIndex, tc.function?.name || '', calculationArgs || {}, calculationBlock);
           if (recovery) return recovery;
           if (tc._browserBatch && interruptFailedBrowserAction(toolIndex, tc.function?.name)) { navNotices.length = 0; break; }
@@ -14596,7 +15153,10 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       }
 
       const mediaTargetGuard = await this._downloadPublicMediaExplicitUrlGuard(tabId, fnName, fnArgs);
-      if (mediaTargetGuard) {
+      // A feed/profile URL may save a different item than the one the model
+      // means. Without Strict checks the download runs with that warning.
+      if (mediaTargetGuard && !this._guardAdvisesFor(callState.guardAdvisories, 'media-download-target-binding',
+        'The download URL is a feed or profile page, not one media item\'s permalink, so the saved file may be a different item than the one you meant. Check the downloaded file (list_downloads) before reporting it.')) {
         messages.push({
           role: 'tool',
           tool_call_id: tc.id,
@@ -14822,9 +15382,9 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       }
       const runWorkflowPreSubmitChecks = async () => await this._resourceMutationPreSubmitBlock(tabId, fnName, fnArgs, detectedSubmitAction, provider)
         || this._steeringPriorSubmissionBlock(tabId, fnName, fnArgs, detectedSubmitAction)
-        || await this._conditionalGithubCommitTransition(tabId, fnName, fnArgs, detectedSubmitAction)
+        || await this._conditionalGithubCommitTransition(tabId, fnName, fnArgs, detectedSubmitAction, callState.guardAdvisories)
         || await this._workflowPreSubmitDispatchBlock(
-        tabId, fnName, fnArgs, detectedSubmitAction, provider,
+        tabId, fnName, fnArgs, detectedSubmitAction, provider, callState.guardAdvisories,
       );
       let workflowPreSubmitBlock = await runWorkflowPreSubmitChecks();
       if (workflowPreSubmitBlock?.mutationConfirmation
@@ -14887,7 +15447,12 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
           correctedPriorValidationFailure = true;
         } else {
           const retryActionKey = this._formValidationActionKey(fnName, fnArgs);
-          if (retryActionKey && retryActionKey === validationBlock.actionKey) {
+          // The earlier submit failed validation, so repeating it cannot
+          // duplicate an effect. Without Strict checks it is sent again with
+          // a note; a repeated rejection reports the page's messages itself.
+          if (retryActionKey && retryActionKey === validationBlock.actionKey
+              && !this._guardAdvisesFor(callState.guardAdvisories, 'form-validation-unchanged-repeat',
+                this._formValidationRepeatNote(validationBlock))) {
             const blockedResult = this._formValidationRetryBlockResult(validationBlock);
             onUpdate('tool_call', { name: fnName, args: fnArgs });
             onUpdate('tool_result', { name: fnName, result: blockedResult });
@@ -15087,10 +15652,19 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
           formValidationBefore = await captureFormValidationWithDeadline(formValidationAllFrames);
         } catch (error) {
           if (error?.code !== 'content_action_timeout') throw error;
-          const loopStop = await recordPagePreparationTimeout(error, 'form-validation snapshot');
-          if (loopStop) return loopStop;
-          if (interruptFailedBrowserAction(toolIndex, fnName)) { navNotices.length = 0; break; }
-          continue;
+          // The before-snapshot only gives post-submit validation detection
+          // its baseline; the action itself does not need it. Without Strict
+          // checks the call proceeds with an empty baseline and a note.
+          if (this._guardAdvisesFor(callState.guardAdvisories, 'preparation-timeout-generic',
+            'The form-validation snapshot did not finish before this action, so WebBrain has no baseline to tell new validation errors from old ones. Read the form after it to confirm the page accepted it.',
+            { decided: false })) {
+            formValidationBefore = [];
+          } else {
+            const loopStop = await recordPagePreparationTimeout(error, 'form-validation snapshot');
+            if (loopStop) return loopStop;
+            if (interruptFailedBrowserAction(toolIndex, fnName)) { navNotices.length = 0; break; }
+            continue;
+          }
         }
       }
       if (capabilities.length && !bypassesConsequentialGates) {
@@ -15225,7 +15799,18 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       }
 
       if (fnName === 'done' || fnName === 'done_json') {
-        const invariantBlock = this._completionDoneBlock(tabId, fnName, fnArgs, completionBatchStartState);
+        // Each completion invariant gets its own note: one that already advised
+        // in this run is accepted, and the next applicable one is checked.
+        let invariantBlock = null;
+        const acceptedInvariants = new Set();
+        for (;;) {
+          const block = this._completionDoneBlock(tabId, fnName, fnArgs, completionBatchStartState, { skip: acceptedInvariants });
+          if (!block) break;
+          if (this._completionInvariantRefuses(tabId, block)) { invariantBlock = block; break; }
+          acceptedInvariants.add(block.reason);
+          // Accepted over advice. A done that names no outcome claims no success.
+          if (block.reason === 'missing_outcome') fnArgs = { ...fnArgs, outcome: 'partial' };
+        }
         if (invariantBlock) {
           const blockedResult = {
             success: false,
@@ -15264,8 +15849,11 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
           };
         }
 
+        // By default the model's answer is kept: the whole-thread check below
+        // gives the model one note about the Ask-mode limitation and the final
+        // answer carries it. Strict checks replace the answer and end the run.
         const readLimitation = this._readCompletenessLimitation(tabId);
-        if (readLimitation) {
+        if (readLimitation && !this._guardAdvises('read-coverage-ask-limitation', { decided: false })) {
           const limitationResult = {
             success: false,
             done: true,
@@ -15297,7 +15885,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
         }
 
         const readBlock = this._readCompletenessBlock(tabId);
-        if (readBlock) {
+        if (readBlock && this._readCoverageGuardRefuses(tabId)) {
           const blockedResult = {
             success: false,
             blockedDone: true,
@@ -15333,7 +15921,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
         const progressBlock = this._shouldBlockDoneForProgress(tabId)
           ? this._progressDoneBlock(tabId, doneOutcome)
           : null;
-        if (progressBlock) {
+        if (progressBlock && this._progressGuardRefuses(tabId)) {
           const blockedResult = {
             success: false,
             blockedDone: true,
@@ -15511,7 +16099,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
               fnName,
               fnArgs,
               provider,
-              { onUpdate },
+              { onUpdate, guardAdvisories: callState.guardAdvisories },
             );
             this._throwIfAborted(abortSignal);
             const socialDispatchBlock = pipelineToolbarPreflight.block ? null
@@ -15521,7 +16109,8 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
             // Recheck after all preparation, before marking or invoking dispatch.
             if (this._hasPendingSteering(tabId) || await this._refreshPageFeedbackForCall(tabId, tc, onUpdate)) return { steered: true };
             const genericChatBlock = pipelineToolbarPreflight.block || socialDispatchBlock ? null
-              : await this._prepareGenericChatDispatch(tabId, fnName, fnArgs, messageRecipientExecutionContext, abortSignal);
+              : await this._prepareGenericChatDispatch(tabId, fnName, fnArgs, messageRecipientExecutionContext, abortSignal,
+                callState.guardAdvisories);
             this._throwIfAborted(abortSignal);
             if (!pipelineToolbarPreflight.block && !socialDispatchBlock && !genericChatBlock) {
               // Save the task's record with this action's sites before it can be
@@ -15536,10 +16125,18 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
                 return { steered: true };
               }
             }
-            const calculationDispatchBlock = this._pureCalculationToolBlock(tabId, fnName, fnArgs, calculationRequestScope);
+            let calculationDispatchBlock = this._pureCalculationToolBlock(tabId, fnName, fnArgs, calculationRequestScope);
+            if (calculationDispatchBlock && this._pureCalculationScopeAdvises(tabId, fnName, fnArgs,
+                calculationRequestScope, callState.guardAdvisories)) {
+              calculationDispatchBlock = null;
+              callState.pureCalculationScopeAdvised = true;
+            }
             if (!pipelineToolbarPreflight.block && !socialDispatchBlock && !genericChatBlock && !calculationDispatchBlock) {
               if (detectedSubmitAction?.isSubmit === true && detectedSubmitAction.publicationControl === true) {
                 messageRecipientExecutionContext.socialPublicationAuditRetryConsumed = this._consumeSocialPublicationAuditRetry(tabId);
+              }
+              if (callState.pureCalculationScopeAdvised === true && isCompletionActionTool(fnName, fnArgs)) {
+                this._releasePureCalculationScope(tabId);
               }
               if (fnName === 'calculate') this._rememberPureCalculationAttempt(tabId, fnArgs, calculationRequestScope);
               callState.invoked = true;
@@ -15556,9 +16153,11 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
                 jevBinding: jevPending?.call.binding,
                 detectedSubmitAction,
                 promptTier,
+                guardAdvisories: callState.guardAdvisories,
                 dispatchBinding: pipelineToolbarPreflight.probe?.dispatchBinding || null,
                 ...messageRecipientExecutionContext,
                 iframeTargetUnresolved: pipelineToolbarPreflight.iframeTargetUnresolved === true,
+                richTextToolbarWrongTargetAdvised: pipelineToolbarPreflight.wrongTargetAdvised === true,
                 imageGenConfig,
                 _contentActionAbortSignal: abortSignal,
                 _contentActionDispatchState: actionDispatchState,
@@ -15951,7 +16550,10 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
 
       if (toolResult?.blockedDone) {
         const completionNeedsRead = toolResult.completionDecision || toolResult.completionPageBlock;
-        if (completionNeedsRead) { const state = this.completionInvariants.get(tabId); if (state) this.completionInvariants.set(tabId, { ...state, verificationDebt: true }); }
+        // Strict checks: a negative verdict or page warning reopens verification
+        // debt for a forced read-only turn. By default the model only gets the
+        // note, and the debt guard does not refuse the next done for it.
+        if (completionNeedsRead && !this._guardAdvises('done-verification-debt', { decided: false })) { const state = this.completionInvariants.get(tabId); if (state) this.completionInvariants.set(tabId, { ...state, verificationDebt: true }); }
         messages.push({ role: 'tool', tool_call_id: tc.id, content: this._wrapUntrusted(fnName, this._limitToolResult(toolResult)) });
         if (attachedImage) {
           messages.push({ role: 'user', transientCompletionVerification: true, content: [
@@ -16067,7 +16669,9 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
             status: planOnlyDecision.status || 'plan_only_output' };
         }
         let rawDoneSummary = toolResult.summary || partialAssistantText || 'Task completed.';
-        if (!scheduledResume && summaryKind === 'meta_only') {
+        if (!scheduledResume && summaryKind === 'meta_only' && this._guardRefusesOnce(tabId, 'done-summary-meta-only', {
+          caveat: 'The final answer may only say that an answer was given, without the answer itself.',
+        })) {
           const blockedResult = {
             success: false,
             blockedDone: true,
@@ -16091,6 +16695,22 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
           return { action: 'continue' };
         }
         if (!scheduledResume) await cancelPendingResumes();
+        // done_json is always a success claim; its result carries no outcome.
+        const claimsSuccess = toolResult.outcome === 'success' || (fnName === 'done_json'
+          && toolResult.doneJson === true && toolResult.cloudFailed !== true && toolResult.outcome === undefined);
+        let doneEndStatus = null;
+        if (!scheduledResume && claimsSuccess && this._completionOutcomeDowngraded(tabId)) {
+          // Accepted over a guard that knows the claim is wrong: end the run,
+          // but as partial so schedules, watches and Cloud runs do not count a
+          // success. Before the chat ending below, so a chat run gets the
+          // same partial contract (runEnded, no auto-resume, the notice).
+          toolResult.outcome = 'partial';
+          // The run itself ends as partial too (trace status, run_status,
+          // onRunFinished), as a plain final over such a guard does. Not a
+          // batch status: a correction that arrived meanwhile still reopens
+          // this done like any other.
+          doneEndStatus = 'partial';
+        }
         if (!scheduledResume && runOptions?.scheduledRun !== true && this.chatSessions.has(tabId)
             && ['partial', 'failed'].includes(toolResult.outcome)) {
           toolResult.runEnded = true;
@@ -16100,18 +16720,30 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
             toolResult.summary = (toolResult.summary || partialAssistantText || '') + '\n\n' + notice;
           }
         }
+        // An exact table delivered from its data_ref stays the complete JSON
+        // its contract promises: a caveat travels beside it, on the done
+        // result and as a warning, never inside the payload.
+        const exactTablePayload = !scheduledResume && this._isExactTablePayload(tabId, fnArgs, toolResult.summary);
+        const payloadCaveat = exactTablePayload ? this._completionCaveatLine(tabId) : '';
+        if (payloadCaveat) toolResult.completionCaveat = payloadCaveat;
         onUpdate('tool_result', { name: fnName, result: toolResult });
         this._doneBlockCount.delete(tabId);
         rawDoneSummary = toolResult.summary || rawDoneSummary;
         const repairedDoneSummary = fnArgs.data_ref ? rawDoneSummary : repairAssistantDisplayText(rawDoneSummary);
-        const finalResponse = fnArgs.data_ref ? repairedDoneSummary
+        const deliveredSummary = fnArgs.data_ref ? repairedDoneSummary
           : this._appendProgressLedgerToFinal(tabId, repairedDoneSummary);
+        // A completion accepted over a guard's advice tells the user what was
+        // not verified. A scheduled resume is a pause, not a completion.
+        const finalResponse = scheduledResume || exactTablePayload ? deliveredSummary : this._withCompletionCaveat(tabId, deliveredSummary);
         if (repairedDoneSummary !== rawDoneSummary) {
           // Streaming providers may already have rendered the malformed summary
           // before the done call. Replace it so the visible bubble matches the
           // repaired terminal value returned by this batch.
           onUpdate('text', { content: finalResponse, replace: true });
+        } else if (finalResponse !== deliveredSummary) {
+          onUpdate('text', { content: finalResponse, replace: true });
         }
+        if (payloadCaveat) onUpdate('warning', { message: payloadCaveat });
         messages.push({
           role: 'tool',
           tool_call_id: tc.id,
@@ -16141,7 +16773,8 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
         // rawSummary is the model-authored done text before the progress
         // ledger is appended for display; research sharing stores it as the
         // response instead of mislabeling local presentation as provider output.
-        return { action: 'return', value: finalResponse, rawSummary: rawDoneSummary };
+        return { action: 'return', value: finalResponse, rawSummary: rawDoneSummary,
+          ...(doneEndStatus ? { endStatus: doneEndStatus } : {}) };
       }
 
       // Loop detection — exact calls, semantic AX reads, and coordinates run
@@ -19328,10 +19961,21 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     const normalized = value => String(value || '').replace(/\s+/g, ' ').trim().toLowerCase();
     const expectedName = normalized(messageRecipientContext.expectedName);
     const expectedRole = normalized(messageRecipientContext.expectedRole);
-    if (
-      (expectedName && normalized(target?.name) !== expectedName)
-      || (expectedRole && normalized(target?.role) !== expectedRole)
-    ) {
+    const intentMismatch = (expectedName && normalized(target?.name) !== expectedName)
+      || (expectedRole && normalized(target?.role) !== expectedRole);
+    // click-coordinate-intent (quality): the model's own expected_name /
+    // expected_role no longer matches what the point resolves to. Without
+    // Strict checks the raw point is clicked, exactly as a coordinate click
+    // without those hints would be; recipient, deletion and publication checks
+    // still apply to that click.
+    if (intentMismatch && this._guardAdvisesFor(messageRecipientContext.guardAdvisories, 'click-coordinate-intent',
+      'The point no longer resolves to the expected_name/expected_role you gave, so WebBrain could not confirm it hits the intended control. The point was clicked anyway; read the page to check what it activated.')) {
+      return {
+        result: null,
+        diagnostic: this._coordinateReconciliationDiagnostic(point, resolution, 'coordinate-fallback', 'intent-mismatch'),
+      };
+    }
+    if (intentMismatch) {
       return {
         result: {
           success: false,
@@ -20302,6 +20946,78 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
    * wait forever). Invalid values fall back to the product default of 60s.
    * Stored slider values above 1200 mean Off.
    */
+  // Settings → General → "Strict checks": every quality guard blocks again.
+  _guardStrict() {
+    return this.strictGuards === true;
+  }
+
+  /**
+   * What guard `id` does now: 'block' | 'ask' | 'advise' (guard-policy.js).
+   * decided=false when the guard fires because it cannot decide.
+   */
+  _guardOutcome(id, { decided = true } = {}) {
+    return guardOutcome(id, { decided, strict: this._guardStrict() });
+  }
+
+  /** True when the guard advises instead of refusing in the current mode. */
+  _guardAdvises(id, { decided = true } = {}) {
+    return this._guardOutcome(id, { decided }) === 'advise';
+  }
+
+  /**
+   * An action guard that advises lets the action proceed and leaves its note
+   * on this call's tool result. Returns true when the caller must not refuse.
+   * `advisories` is the call's list (executionContext.guardAdvisories or the
+   * batch call state).
+   */
+  _guardAdvisesFor(advisories, id, message, { decided = true } = {}) {
+    if (!this._guardAdvises(id, { decided })) return false;
+    if (Array.isArray(advisories)) advisories.push(guardAdvisory(id, message));
+    return true;
+  }
+
+  _guardRunState(tabId) {
+    // Untraced runs (the default) have no currentRunId; the task token
+    // _startTraceRun mints for every run bounds them instead.
+    const runId = this.currentRunId?.get?.(tabId) ?? this._taskTokens?.get?.(tabId) ?? null;
+    let state = this._guardRunStates.get(tabId);
+    if (!state || state.runId !== runId) {
+      state = { runId, advised: new Set(), caveats: new Map() };
+      this._guardRunStates.set(tabId, state);
+    }
+    return state;
+  }
+
+  /**
+   * Completion guards advise once per run: the first refusal is the note the
+   * model gets (it can verify, fix or report honestly), and the next
+   * completion the same guard would refuse goes through with a caveat for
+   * the user. Returns true when this call should still refuse: the first
+   * time, or always when the guard blocks in the current mode.
+   */
+  _guardRefusesOnce(tabId, id, { decided = true, caveat = '' } = {}) {
+    if (this._guardOutcome(id, { decided }) !== 'advise') return true;
+    const state = this._guardRunState(tabId);
+    if (!state.advised.has(id)) {
+      state.advised.add(id);
+      return true;
+    }
+    const text = String(caveat || '').replace(/\s+/g, ' ').trim().slice(0, 300);
+    if (text) state.caveats.set(id, text);
+    // A guard that KNOWS the task is not done (not one that only lacked
+    // evidence) lets the completion end the run, but not as a success.
+    if (decided === true && OUTCOME_DOWNGRADING_GUARDS.has(id)) (state.outcomeDowngrades ||= new Set()).add(id);
+    return false;
+  }
+
+  /** One short line for the user about completions accepted over advice. */
+  _guardCaveatLine(tabId) {
+    const state = this._guardRunStates.get(tabId);
+    if (!state?.caveats?.size) return '';
+    const items = [...new Set(state.caveats.values())].filter(Boolean).slice(0, 4);
+    return items.length ? `WebBrain could not verify everything: ${items.join(' ')}` : '';
+  }
+
   _normalizeClarifyTimeoutPolicy(value) {
     return normalizeClarifyTimeoutPolicy(value);
   }
@@ -27052,7 +27768,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     return toolResult;
   }
 
-  _applyVerifyFormRecovery(tabId, result, currentStates) {
+  _applyVerifyFormRecovery(tabId, result, currentStates, advisories = null) {
     const block = this._formValidationBlocks.get(tabId);
     if (!block || !result || typeof result !== 'object') return result;
     const stateKey = this._formValidationStateKey(currentStates);
@@ -27118,13 +27834,24 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       uncheckedCheckboxes,
       instruction: `The form state is unchanged. Do not call verify_form again and do not toggle any checkbox. Use ${recoveryCalls}; Chrome will use one trusted selector-backed click when a state change is needed.`,
     };
-    if (block.verifyFormCount > 1) {
+    // A repeated read of an unchanged form is reported as a failure only in
+    // Strict checks; otherwise the read keeps its result and the note says
+    // nothing changed since the last one.
+    if (block.verifyFormCount > 1 && !this._guardAdvisesFor(advisories, 'form-validation-unchanged-repeat',
+      'The form is unchanged since the last verify_form, so this read shows nothing new. Correct the reported checkbox with set_checked before verifying or submitting again.')) {
       result.success = false;
       result.noProgress = true;
       result.blockedValidationVerifyRepeat = true;
       result.error = 'Blocked repeated verify_form because the form state has not changed. Correct the reported checkbox with set_checked before verifying or submitting again.';
     }
     return result;
+  }
+
+  // Page validation text is untrusted, so the note only counts the fields;
+  // a repeated rejection reports its messages in the result itself.
+  _formValidationRepeatNote(block) {
+    const count = Array.isArray(block?.invalidFields) ? block.invalidFields.length : 0;
+    return `This is the same submit that failed validation before, and the form still shows the same invalid field${count === 1 ? '' : 's'}. It was sent again; if the page rejects it, fix the reported fields before submitting.`;
   }
 
   _formValidationRetryBlockResult(block) {
@@ -27903,7 +28630,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     return result;
   }
 
-  async _prepareGenericChatDispatch(tabId, name, args, context, abortSignal = null) {
+  async _prepareGenericChatDispatch(tabId, name, args, context, abortSignal = null, advisories = null) {
     if (!context?.messageRecipientGuardRequired || name === 'upload_file'
         || !['click', 'click_ax', 'press_keys', 'set_field'].includes(name)
         || (!context.messageRecipientNativeChatBaseline && !this.chatSessions.has(tabId))) return null;
@@ -27919,16 +28646,31 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
         && observed.snapshot.threadKey !== context.messageRecipientNativeChatBaseline.threadKey) {
       return blocked('thread_unverified', 'The observed chat changed after recipient verification. Nothing was sent.');
     }
+    // chat-send-preconditions (quality): without Strict checks an unread
+    // incoming message and a missing composer send with a note. The
+    // recipient, user-input (credentials, payment, a new user decision),
+    // terminal-session, native-baseline, duplicate and draft checks are not
+    // waivable and keep refusing below (chat-workflow.js says why).
+    const advise = note => this._guardAdvisesFor(advisories, 'chat-send-preconditions', note);
     if (previous && observed.newMessages.some(message => message.direction === 'incoming')
-        && !observed.session.pendingOutbound && !observed.session.userInput?.required) {
+        && !observed.session.pendingOutbound && !observed.session.userInput?.required
+        && !advise('A new incoming message appeared since your last chat observation; this reply was sent without considering it. Read the conversation (chat_observe) before the next reply.')) {
       return blocked('chat_observe_required',
         'A new incoming message appeared before this send. Call chat_observe and consider that delta before replying.');
     }
     // The recipient probe has already bound this exact draft/body to its one-use
     // dispatch token. It is the intended outbound, not an unrelated user draft.
-    const decision = decideChatSend(observed.session, {
-      ...before, composer: { ...before.composer, empty: true },
-    }, context.messageRecipientBody);
+    const decisionSnapshot = { ...before, composer: { ...before.composer, empty: true } };
+    const waive = new Set();
+    let decision = decideChatSend(observed.session, decisionSnapshot, context.messageRecipientBody);
+    const waiverNotes = {
+      composer_unavailable: 'WebBrain could not find the conversation composer before this send. Read the conversation to confirm the message was actually sent.',
+    };
+    while (!decision.ok && WAIVABLE_CHAT_SEND_REASONS.includes(decision.reason) && !waive.has(decision.reason)
+        && waiverNotes[decision.reason] && advise(waiverNotes[decision.reason])) {
+      waive.add(decision.reason);
+      decision = decideChatSend(observed.session, decisionSnapshot, context.messageRecipientBody, Date.now(), { waive });
+    }
     if (!decision.ok) return { ...decision, ...blocked(decision.reason, decision.error) };
     if (!this._captureNativeWhatsappPending(tabId, decision, before, context.messageRecipientNativeChatBaseline)) {
       return blocked('native_chat_baseline_unavailable', 'The current native WhatsApp message baseline could not be saved safely. Nothing was sent.');
@@ -27985,7 +28727,15 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     const prior = this.chatSessions.get(tabId) || createChatSession();
     const observed = advanceChatSession(prior, before);
     const workflow = () => this._chatWorkflowView(observed);
-    if (observed.newMessages.some(message => message.direction === 'incoming')) {
+    // chat-send-preconditions (quality), as in the generic dispatch: without
+    // Strict checks an unread incoming message sends with a note, which this
+    // call's result carries (a refusal later in the call drops it). A
+    // pending outbound or a required user input keeps refusing below
+    // (decideChatSend).
+    if (observed.newMessages.some(message => message.direction === 'incoming')
+        && !observed.session.pendingOutbound && !observed.session.userInput?.required
+        && !this._guardAdvisesFor(executionContext?.guardAdvisories, 'chat-send-preconditions',
+          'A new incoming message appeared since your last chat observation; this reply was sent without considering it. Read the conversation (chat_observe) before the next reply.')) {
       return {
         success: false,
         noDispatch: true,
@@ -32938,6 +33688,8 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       void this._steeringJournal.discard(tabId);
     }
     this._verifiedTextReplacements.delete(tabId);
+    // Task-scoped like the proofs it sits beside; it never guarded anything.
+    this._unverifiedTextWrites?.delete(tabId);
     this._lastCdpClickIdent?.delete(tabId);
     this._lastClickProgress?.delete(tabId);
     this._clickAxCdpFallbacks?.delete(tabId);
@@ -33160,6 +33912,8 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
         valueLength: response.valueLength,
         valueSha256: String(response.valueSha256).toLowerCase(),
         verified: response.verified === true,
+        // false: the digest hashes the rendered text (innerText fallback).
+        ...(typeof response.readbackExact === 'boolean' ? { readbackExact: response.readbackExact } : {}),
         fieldMeta: response.fieldMeta || null,
         // Element-derived revalidation locator (unique, content-checked);
         // consumed for focused proofs whose focus moves before submit.
@@ -33202,7 +33956,19 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       const documentToken = String(response?.documentToken || '');
       const pageUrl = String(response?.refScopeUrl || '');
       if (!documentToken && !pageUrl) return null;
-      return { documentToken, pageUrl };
+      // A ref/selector probe also digests the field. An unverified write's
+      // record keeps it, so no second probe is needed (see
+      // _recordUnverifiedTextWrite).
+      const digest = response?.success === true && Number.isInteger(response.valueLength) && response.valueLength >= 0
+        && /^[0-9a-f]{64}$/i.test(String(response.valueSha256 || ''))
+        ? {
+            valueLength: response.valueLength,
+            valueSha256: String(response.valueSha256).toLowerCase(),
+            ...(typeof response.readbackExact === 'boolean' ? { readbackExact: response.readbackExact } : {}),
+            fieldMeta: response.fieldMeta || null,
+          }
+        : null;
+      return { documentToken, pageUrl, ...(digest ? { digest } : {}) };
     } catch {
       return null;
     }
@@ -33487,8 +34253,222 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     return liveScope;
   }
 
-  async _uncertainTextMutationBlock(tabId, name, args = {}) {
+  /**
+   * The latest text write to one editor that went out but could not be
+   * verified. Default mode keeps this record instead of text-write debt and
+   * never blocks on it (Strict checks record debt instead). It sits next to
+   * the proof map so a commit or publication gate can show the user the
+   * content and ask instead of refusing. No raw text is stored; the gate can
+   * re-digest the live field and compare. Returns a copy, or null.
+   *
+   * Shape: {
+   *   key,              // same key as the debt/proof maps: 'ax:<document>:<ref>', 'selector:…', 'focused:…'
+   *   locatorType,      // 'ax' | 'selector' | 'focused'
+   *   refId, selector,  // the write's locator (null when unused)
+   *   documentToken, pageUrl,          // the document the write went to
+   *   tool, replacesValue,             // set_field | type_ax | type_text; false for an append
+   *   expectedLength, expectedSha256,  // the requested text (args.text)
+   *   observedLength, observedSha256,  // live readback digest right after the write, or null
+   *   readbackExact,    // false: that readback was the rendered-text (innerText) fallback; null: unknown
+   *   reason,           // 'readback_mismatch' | 'readback_unproven' | 'element_replaced' | 'readback_unavailable'
+   *                     // | 'page_handled_input' | 'paste_not_consumed' | 'input_unconfirmed' | 'outcome_unknown'
+   *                     // | 'not_inserted' | 'trusted_retry_failed'
+   *   textSent,         // true when the text went out (the result reported success)
+   *   fieldMeta,        // field identity (id, name, labels, contentEditable, codeMirror, …)
+   *   taskToken, recordedAt,           // the task that wrote it; epoch ms
+   * }
+   * `key` selects one editor. Without it, the newest record on `pageUrl`
+   * (any page when empty) that passes `match(record)` wins. Records written
+   * by another task are ignored.
+   */
+  _unverifiedTextWriteRecord(tabId, { key = '', pageUrl = '', match = null } = {}) {
+    const records = this._unverifiedTextWrites?.get(tabId);
+    if (!(records instanceof Map) || records.size === 0) return null;
+    const taskToken = this._taskTokens?.get(tabId) || null;
+    const candidates = key ? [records.get(key)] : [...records.values()].reverse();
+    for (const record of candidates) {
+      if (!record || (record.taskToken || null) !== taskToken) continue;
+      if (pageUrl && this._normalizeUrl(record.pageUrl || '') !== this._normalizeUrl(pageUrl)) continue;
+      if (typeof match === 'function' && match(record) !== true) continue;
+      return { ...record, fieldMeta: record.fieldMeta ? { ...record.fieldMeta } : null };
+    }
+    return null;
+  }
+
+  /**
+   * Which converted guard speaks for an uncertain text write in the current
+   * mode (guard-policy.js), or null when Strict checks keep today's debt and
+   * lock. `textSent`: the text went out and only its settled value is in
+   * doubt, so the write is reported as an unverified success. Anything else
+   * (an unknown outcome, a replacement that was not inserted) stays a
+   * failure report, but locks nothing.
+   */
+  _textWriteAdvisory(name, args, result) {
+    if (!this._guardAdvises('text-write-debt-arm', { decided: false })) return null;
+    const unverified = result?.unverified && typeof result.unverified === 'object' ? result.unverified : null;
+    const textSent = result.noDispatch !== true && (result.success === true || !!unverified);
+    let guard = 'content-action-outcome-unknown';
+    let reason = 'outcome_unknown';
+    let decided = false;
+    if (textSent) {
+      guard = 'text-write-readback-unverified';
+      reason = String(unverified?.reason || 'readback_unproven');
+      // Only an exact reader that read a different value knows it is wrong.
+      decided = reason === 'readback_mismatch' && result.readbackExact === true;
+    } else if (result.verified === true) {
+      // The value verified; a later step (a guarded or vetoed Enter) did not
+      // complete. That step's own report stands; only the write lock goes.
+      guard = 'text-write-debt-arm';
+      reason = 'value_verified_step_incomplete';
+    } else if (/no replacement text was inserted|could not be proven (?:empty|fully selected)/i.test(String(result.error || ''))) {
+      guard = 'text-write-preinsert-unproven';
+      reason = 'not_inserted';
+    } else if (result.trustedFallbackAttempted === true) {
+      guard = 'trusted-field-retry-guards';
+      reason = 'trusted_retry_failed';
+    }
+    if (!this._guardAdvises(guard, { decided })) return null;
+    return { guard, reason, decided, textSent };
+  }
+
+  // The model's note for an advised text write: what is unconfirmed and
+  // what to check. It never asks for a blind retry; appends are warned
+  // about duplicates because their text may already have landed.
+  _textWriteAdvisoryNote(name, args, result, advisory) {
+    const append = !this._textMutationReplacesValue(name, args);
+    const duplicate = append ? ' This was an append: repeating it can add the text twice, so fix the field with one full replacement.' : '';
+    if (advisory.textSent) {
+      const lead = {
+        element_replaced: 'Text sent, but the field re-rendered before it could be read back.',
+        readback_unavailable: 'Text sent, but the editor could not be read back.',
+        page_handled_input: 'The page applied the text itself; the result could not be read back exactly.',
+        paste_not_consumed: 'Text pasted, but the editor did not confirm it handled the paste.',
+        input_unconfirmed: 'Text reads back correctly, but the page did not confirm the input finished.',
+      }[advisory.reason] || (result.readbackExact === false
+        ? 'Text sent, but this editor only reads back its rendered layout (blank lines can show doubled, off-screen lines missing), so it is unconfirmed. Do not rewrite it to match that readback.'
+        : result.readbackExact === true
+          ? 'Text sent, but the field reads back a different value.'
+          : 'Text sent, but its final value could not be read back exactly.');
+      const submit = result.submitSkipped === 'value_unverified'
+        ? ' The field was written but its submit was NOT sent; submit separately once the value is right.' : '';
+      return `${lead} Check the field before relying on it.${submit}${append && !submit ? duplicate : ''}`;
+    }
+    if (advisory.reason === 'value_verified_step_incomplete') {
+      return 'The field value was verified, but the step after it did not complete (see error). Nothing is locked: observe the page before acting again.';
+    }
+    if (advisory.guard === 'text-write-preinsert-unproven') {
+      return 'The field could not be proven empty or fully selected, so the new text was not inserted and part of the old value may be gone. Nothing is locked: re-read the field before writing it.';
+    }
+    if (advisory.guard === 'trusted-field-retry-guards') {
+      return `Trusted typing could not finish (see error), so the field may or may not have changed. Nothing is locked: re-read it before writing again.${duplicate}`;
+    }
+    return `This write may or may not have reached the page. Nothing is locked: re-read the field before writing again.${duplicate}`;
+  }
+
+  // Default-mode shape of an uncertain text write. The lock labels go
+  // (default mode arms no lock), and so does the content failureScope, so
+  // the loop detector does not count the write as a failed target. A write
+  // whose text went out reports success with unverifiedWrite and a note.
+  _advisoryTextWriteResult(name, args, result, advisory, { expectedLength, expectedSha256 }) {
+    const out = { ...result };
+    delete out.repeatBlocked;
+    if (out.recoveryRequired === 'verify_or_restore_field') delete out.recoveryRequired;
+    delete out.failureScope;
+    delete out._expectedValue;
+    if (advisory.textSent) {
+      for (const field of ['error', 'noDispatch', 'outcomeUnknown', 'mutationMayHaveOccurred', 'retryable', 'trustedTypeRequired']) {
+        delete out[field];
+      }
+      // `verified` stays as the readback reported it: false when it read a
+      // different value, absent when it could not prove one (an unproven
+      // write is not a refuted one; see cdp-client verifyTextEntry).
+      Object.assign(out, { success: true, dispatched: true, unverifiedWrite: true });
+      out.unverified = result.unverified && typeof result.unverified === 'object'
+        ? result.unverified : { reason: advisory.reason, reader: 'unknown' };
+      if (advisory.reason === 'page_handled_input') {
+        // The page cancelled the native input and applied it itself; this is
+        // not a cancelled action.
+        delete out.cancelled;
+        out.pageHandledBeforeInput = true;
+      }
+      // The bundled submit was withheld for the unverified value (content and
+      // trusted paths both send Enter only after exact verification).
+      if (name === 'set_field' && args?.submit === true && out.submitted !== true) {
+        out.submitted = false;
+        out.submitSkipped = 'value_unverified';
+      }
+    } else {
+      Object.assign(out, { success: false, outcomeUnknown: true, mutationMayHaveOccurred: true });
+    }
+    out.expectedLength = expectedLength;
+    out.expectedSha256 = expectedSha256;
+    const advisories = [];
+    this._guardAdvisesFor(advisories, advisory.guard, this._textWriteAdvisoryNote(name, args, out, advisory),
+      { decided: advisory.decided });
+    return withGuardAdvisories(out, advisories);
+  }
+
+  // Default mode: record an uncertain write without a lock (see
+  // _unverifiedTextWriteRecord) and return its advisory result. The caller
+  // has already invalidated proofs exactly as Strict checks do, so an
+  // unverified readback never stands in for a verified one.
+  async _recordUnverifiedTextWrite(tabId, name, args, result, advisory,
+    { target, replacesValue, text, expectedSha256, enrich, liveDigest = null }) {
+    let observed = liveDigest;
+    if (!observed && target.locatorType === 'focused') {
+      try {
+        observed = await enrich(() => this._textMutationValueDigest(tabId, { locatorType: 'focused', ambiguous: false }));
+      } catch { observed = null; }
+    }
+    if (!this._unverifiedTextWrites) this._unverifiedTextWrites = new Map();
+    let records = this._unverifiedTextWrites.get(tabId);
+    if (!(records instanceof Map)) {
+      records = new Map();
+      this._unverifiedTextWrites.set(tabId, records);
+    }
+    records.delete(target.key);
+    records.set(target.key, {
+      key: target.key,
+      locatorType: target.locatorType,
+      refId: target.refId ?? null,
+      selector: target.selector ?? null,
+      documentToken: target.documentToken || '',
+      pageUrl: target.pageUrl || '',
+      tool: name,
+      replacesValue,
+      expectedLength: text.length,
+      expectedSha256,
+      observedLength: Number.isInteger(observed?.valueLength) ? observed.valueLength : null,
+      observedSha256: typeof observed?.valueSha256 === 'string' ? observed.valueSha256 : null,
+      readbackExact: typeof result.readbackExact === 'boolean' ? result.readbackExact
+        : typeof observed?.readbackExact === 'boolean' ? observed.readbackExact : null,
+      reason: advisory.reason,
+      textSent: advisory.textSent,
+      fieldMeta: result.fieldMeta || observed?.fieldMeta || null,
+      taskToken: this._taskTokens?.get(tabId) || null,
+      recordedAt: Date.now(),
+    });
+    // Bounded: one entry per edited field; the oldest field yields first.
+    while (records.size > 32) records.delete(records.keys().next().value);
+    return this._advisoryTextWriteResult(name, args, result, advisory, { expectedLength: text.length, expectedSha256 });
+  }
+
+  // Default mode: a write to a field whose last write went out unverified
+  // proceeds. Only an append is noted, because its earlier text may already
+  // be in the field; a repeated replacement is idempotent.
+  _notePriorUnverifiedTextWrite(tabId, name, args, advisories) {
+    if (!Array.isArray(advisories) || this._textMutationReplacesValue(name, args)) return;
+    const target = this._textMutationTarget(tabId, name, args);
+    const prior = this._unverifiedTextWriteRecord(tabId, { key: target.key });
+    if (!prior || (prior.documentToken && target.documentToken && prior.documentToken !== target.documentToken)) return;
+    this._guardAdvisesFor(advisories, 'text-write-debt-block',
+      'An earlier write to this field was not verified and may already be in it, so this append can duplicate text. Read the field and fix it with one full replacement if needed.',
+      { decided: false });
+  }
+
+  async _uncertainTextMutationBlock(tabId, name, args = {}, { advisories = null } = {}) {
     if (!['set_field', 'type_ax', 'type_text'].includes(name)) return null;
+    this._notePriorUnverifiedTextWrite(tabId, name, args, advisories);
     const debts = this._uncertainTextMutations?.get(tabId);
     if (!(debts instanceof Map) || debts.size === 0) return null;
     let target = this._textMutationTarget(tabId, name, args);
@@ -33627,7 +34607,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
           && !this._textMutationFieldsProvenDistinct(debt.fieldMeta, original.fieldMeta)) {
         debts.delete(debt.key);
         if (debts.size === 0) this._uncertainTextMutations.delete(tabId);
-        return debts.size ? this._uncertainTextMutationBlock(tabId, name, args) : null;
+        return debts.size ? this._uncertainTextMutationBlock(tabId, name, args, { advisories }) : null;
       }
     }
     // Readback-only recovery requires positive same-field identity. The
@@ -33735,6 +34715,16 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       if (!debt) return null;
     }
 
+    // Default mode: the earlier uncertain write is reported, never a lock
+    // (guard-policy.js; default mode records no debt, so this one was left
+    // by Strict checks). The recovery shortcuts above still answer an exact
+    // repeat that already reads back. A replacement is idempotent; an
+    // append may duplicate text.
+    if (this._guardAdvisesFor(advisories, 'text-write-debt-block', replacement
+      ? 'An earlier write to this field was not verified; this replacement went ahead. Check the field before relying on it.'
+      : 'An earlier write to this field was not verified and may already be in it, so this append can duplicate text. Read the field and fix it with one full replacement if needed.',
+    { decided: false })) return null;
+
     return {
       success: false,
       dispatched: false,
@@ -33794,8 +34784,10 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       // Refresh to the live scope before recording (adopting clears
       // old-document debts/proofs through the document-change path when both
       // tokens exist), then re-derive the target below.
+      let liveDigest = null;
       try {
         const liveScope = await enrich(() => this._liveTextMutationScope(tabId, name, args));
+        liveDigest = liveScope?.digest || null;
         if (liveScope && (liveScope.documentToken || liveScope.pageUrl)) {
           const cachedScope = this._lastAxScopes.get(tabId) || {};
           if (String(liveScope.documentToken || '') !== String(cachedScope.documentToken || '')
@@ -33809,6 +34801,8 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
           }
         }
       } catch { /* an unreachable page keeps the cached scope below */ }
+      // Proofs are invalidated in every mode: an unverified readback never
+      // stands in for a verified one (the GitHub commit gate relies on it).
       const verifiedReplacements = this._verifiedTextReplacements.get(tabId);
       if (verifiedReplacements instanceof Map) {
         if (target.ambiguous) verifiedReplacements.clear();
@@ -33819,6 +34813,15 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
                 || /contenteditable/i.test(String(record?.key || key))) verifiedReplacements.delete(key);
           }
         } else verifiedReplacements.delete(target.key);
+      }
+      // Quality guards advise by default (guard-policy.js): the write is
+      // reported (as an unverified success when its text went out) and kept
+      // as a non-blocking record instead of debt that refuses later writes.
+      // Strict checks fall through to today's debt and lock.
+      const advisory = this._textWriteAdvisory(name, args, result);
+      if (advisory) {
+        return this._recordUnverifiedTextWrite(tabId, name, args, result, advisory,
+          { target, replacesValue, text, expectedSha256, enrich, liveDigest });
       }
       if (!this._uncertainTextMutations) this._uncertainTextMutations = new Map();
       let debts = this._uncertainTextMutations.get(tabId);
@@ -33954,6 +34957,8 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
         else verifiedReplacements.delete(target.key);
       }
     }
+    // A verified write supersedes the field's earlier unverified one.
+    if (result.success === true && result.verified === true) this._unverifiedTextWrites?.get(tabId)?.delete(target.key);
     return result;
   }
 
@@ -33970,6 +34975,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
   }
 
   clearConversation(tabId, { preserveStorage = false } = {}) {
+    this._guardRunStates.delete(tabId);
     this._failureRecovery.clear(tabId);
     this._cancelClarifications(tabId, 'conversation cleared');
     this._cancelPendingPlans(tabId, 'conversation cleared');
@@ -37486,7 +38492,8 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     // completion judge or the done_summary question); a failed or partial
     // done may describe what the user still has to do.
     const runtimeModeContradiction = summaryKind === 'mode_claim';
-    const looksPlanOnly = this._isStructuredPlanTerminal(content, state)
+    const structuredPlan = this._isStructuredPlanTerminal(content, state);
+    const looksPlanOnly = structuredPlan
       || (summaryKind === 'plan_only' && !terminalFailure) || runtimeModeContradiction;
     const staleCancellation = !viaDone && this._isLocalCancellationText(content);
     const missingRequiredSchedulingTool = !terminalFailure
@@ -37522,6 +38529,60 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     const invalidPlainFinal = !viaDone;
     const invalidDone = viaDone && (looksPlanOnly || missingEvidence || missingRequiredLedger);
     if (!invalidPlainFinal && !invalidDone) return null;
+    const modeCorrectionNudge = '[RUNTIME MODE CORRECTION: The trusted runtime for this run is Act/Dev, not Ask mode or a read-only mode. Page-changing tools are available. Continue the authorized task with the permitted tools now. If a required value is missing, call clarify without modifying that field. If a genuine blocker remains, call done with outcome partial or failed and explain the concrete blocker without contradicting the trusted runtime mode.]' + recoveryAnchor;
+    const recoveryNudge = () => (state.taskDrifted
+      ? '[PLAN EXECUTION BLOCK: The genuine user task changed after this run was authorized. Do not execute either the old or new task under stale authorization. Call done with outcome failed and report that a fresh run is required.]'
+      : state.conditionalMutationBlocked
+      ? '[PLAN EXECUTION BLOCK: The conditional editor mutation was not authorized by a matching workflow contract. No repair was dispatched. Use done with outcome partial or failed and explain that the failure branch needs a fresh plan.]'
+      : staleCancellation
+      ? '[PLAN EXECUTION BLOCK: No current user stop was received. The previous response echoed a stale local cancellation status from conversation history. That status is UI metadata, not an instruction or task result. Continue the active task with permitted tools. If complete or blocked, call done with an explicit outcome; do not repeat the cancellation status or return plain text.]'
+      : missingRequiredSchedulingTool
+      ? `[PLAN EXECUTION BLOCK: The approved plan requires a successful ${state.requiredSchedulingTool} call before this task can finish successfully. A one-time read, scroll, send, or other action does not create the scheduled work. Call ${state.requiredSchedulingTool} with the user's requested timing and verify success:true plus scheduled:true. If the schedule is unsupported or still lacks required timing, call done with outcome partial or failed and explain the exact limitation; do not claim it was scheduled.]`
+      : missingRequiredDownload
+      ? '[PLAN EXECUTION BLOCK: This task requires a file to be downloaded before it can finish successfully. Finding a URL, link, button, or media source is only read evidence. Use an authorized tool call with the DOWNLOAD capability and verify that it returned successful download evidence. If permission is denied or no file can be saved, call done with outcome partial or failed and explain the limitation; do not claim the file was downloaded.]'
+      : missingSocialPublishTargets.length
+      ? `[PLAN EXECUTION BLOCK: This task requests publication on every named social destination, but job-bound terminal evidence is still missing for: ${missingSocialPublishTargets.map(name => name === 'twitter' ? 'X' : name === 'bluesky' ? 'Bluesky' : name).join(', ')}. Continue with those destinations and verify each published resource before calling done again. Do not republish on a destination already verified in this run.]`
+      : missingRequiredSubmission
+      ? (this._workflowVerificationKind(state.siteWorkflow) === 'published_resource'
+        ? `[PLAN EXECUTION BLOCK: The selected ${state.siteWorkflow.job.id} job requires terminal evidence for its own publication. ${this._workflowPublicationRecoveryInstruction(state)}]`
+        : state.siteWorkflow?.job?.id
+        ? `[PLAN EXECUTION BLOCK: The selected ${state.siteWorkflow.job.id} job requires terminal evidence for its own submit/send/publish/commit contract. Filling fields, another site's submit, or an unrelated success signal is not completion. Dispatch the intended action and observe the job-specific terminal state (for example recipient-bound sent state, saved/published resource, form confirmation, or paid/ticket-issued transaction) before calling done again. If that cannot be verified, use outcome partial or failed and report the exact blocker.]`
+        // No site workflow was selected, so there is no job contract to
+        // point at.
+        : '[PLAN EXECUTION BLOCK: This task requires a submit/send/publish/commit action, and the page state read at completion does not yet show it took effect. No structured site workflow is bound to this run. Read the page that resulted from the action — the published item, the confirmation, or the changed state — in the same browser tab, then call done from there. If the action cannot be confirmed, use outcome partial or failed and report the exact blocker.]')
+      : forbiddenSubmission
+      ? `[PLAN EXECUTION BLOCK: The selected ${state.siteWorkflow?.job?.id || 'workflow'} job prepares the form and leaves it unsubmitted, but a submit action was dispatched. Do not submit again or try to undo it by submitting anything else. Call done with outcome partial or failed, state plainly that the form was submitted without authorization, and report what the page shows now.]`
+      : missingJobEvidence
+      ? `[PLAN EXECUTION BLOCK: The selected ${state.siteWorkflow?.job?.id || 'workflow'} job has its own success contract and an unrelated page read does not satisfy it. ${this._workflowJobEvidenceInstruction(state)} Produce that evidence, then call done. If it cannot be produced, call done with outcome partial or failed and report the exact blocker with whatever partial coverage you did verify.]`
+      : missingDraftEvidence
+      ? `[PLAN EXECUTION BLOCK: The selected ${state.siteWorkflow?.job?.id || 'workflow'} job finishes on the draft itself, not on a tool call. The intended recipients, the requested subject, and the complete body must all be readable in the open composer, and the provider must show its own saved-draft state. Re-read the composer once the app has saved the draft, then call done. If any field or the saved-draft state cannot be verified, call done with outcome partial or failed and report exactly what is unverified; do not send the message.]`
+      : missingRequiredLedger
+      ? `[PLAN EXECUTION BLOCK: The selected ${state.siteWorkflow.job.id} site workflow requires complete item-level reconciliation before success. Obtain a complete app-owned workflow inventory, use its exact item ids for one processed or intentionally skipped ledger row per item, then call progress_update with workflowReconciliation {job:"${state.siteWorkflow.job.id}", coverageComplete:true, itemCount:N, basis:"..."}. N and the row ids must exactly match that inventory; model-created rows alone are not coverage evidence, and any failed row requires a partial or failed outcome. If complete coverage cannot be verified, call done with outcome partial or failed and report completed versus unresolved work.]`
+      : unknownMutationIntent
+      ? '[PLAN EXECUTION BLOCK: Planning failed, so the runtime could not determine whether this task requires a state change. Continue with normally permitted tools. A success outcome now requires a verified consequential tool call; if the useful result is read-only or no safe consequential action is needed, deliver that result with done outcome partial instead of claiming success. Do not invent or perform a mutation merely to satisfy this guard.]'
+      : defaultPlanExecutionBlockNudge({
+        viaDone,
+        missingEvidence,
+        requiresStateChange: state.requiresStateChange,
+      })) + recoveryAnchor;
+    // By default (Strict checks off) each finding behind this refusal gives
+    // its note once per run, and the next completion is accepted with a
+    // caveat. The one-nudge budget and run-ending statuses below are the
+    // strict path.
+    const advisory = this._planGuardAdvisory(tabId, state, { viaDone, looksPlanOnly, runtimeModeContradiction,
+      structuredPlan: structuredPlan
+        || (state.allowsPlannerShapedResult !== true && this._isPlannerShapedJson(content)),
+      staleCancellation, missingRequiredSchedulingTool, missingRequiredDownload, missingRequiredSubmission,
+      forbiddenSubmission, missingJobEvidence, missingDraftEvidence, missingRequiredLedger,
+      missingSocialPublishTargets, missingEvidence });
+    if (advisory === 'accept') return null;
+    if (advisory === 'refuse') {
+      return {
+        retry: true,
+        retryAssistantContent: null,
+        nudge: runtimeModeContradiction && !missingRequiredSchedulingTool ? modeCorrectionNudge : recoveryNudge(),
+      };
+    }
     if (runtimeModeContradiction
         && !state.taskDrifted
         && !missingRequiredSchedulingTool
@@ -37531,7 +38592,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       return {
         retry: true,
         retryAssistantContent: null,
-        nudge: '[RUNTIME MODE CORRECTION: The trusted runtime for this run is Act/Dev, not Ask mode or a read-only mode. Page-changing tools are available. Continue the authorized task with the permitted tools now. If a required value is missing, call clarify without modifying that field. If a genuine blocker remains, call done with outcome partial or failed and explain the concrete blocker without contradicting the trusted runtime mode.]' + recoveryAnchor,
+        nudge: modeCorrectionNudge,
       };
     }
     if (!state.recoveryAttempted) {
@@ -37542,41 +38603,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
         retryAssistantContent: staleCancellation
           ? '[Stale local cancellation status omitted from execution context.]'
           : null,
-        nudge: (state.taskDrifted
-          ? '[PLAN EXECUTION BLOCK: The genuine user task changed after this run was authorized. Do not execute either the old or new task under stale authorization. Call done with outcome failed and report that a fresh run is required.]'
-          : state.conditionalMutationBlocked
-          ? '[PLAN EXECUTION BLOCK: The conditional editor mutation was not authorized by a matching workflow contract. No repair was dispatched. Use done with outcome partial or failed and explain that the failure branch needs a fresh plan.]'
-          : staleCancellation
-          ? '[PLAN EXECUTION BLOCK: No current user stop was received. The previous response echoed a stale local cancellation status from conversation history. That status is UI metadata, not an instruction or task result. Continue the active task with permitted tools. If complete or blocked, call done with an explicit outcome; do not repeat the cancellation status or return plain text.]'
-          : missingRequiredSchedulingTool
-          ? `[PLAN EXECUTION BLOCK: The approved plan requires a successful ${state.requiredSchedulingTool} call before this task can finish successfully. A one-time read, scroll, send, or other action does not create the scheduled work. Call ${state.requiredSchedulingTool} with the user's requested timing and verify success:true plus scheduled:true. If the schedule is unsupported or still lacks required timing, call done with outcome partial or failed and explain the exact limitation; do not claim it was scheduled.]`
-          : missingRequiredDownload
-          ? '[PLAN EXECUTION BLOCK: This task requires a file to be downloaded before it can finish successfully. Finding a URL, link, button, or media source is only read evidence. Use an authorized tool call with the DOWNLOAD capability and verify that it returned successful download evidence. If permission is denied or no file can be saved, call done with outcome partial or failed and explain the limitation; do not claim the file was downloaded.]'
-          : missingSocialPublishTargets.length
-          ? `[PLAN EXECUTION BLOCK: This task requests publication on every named social destination, but job-bound terminal evidence is still missing for: ${missingSocialPublishTargets.map(name => name === 'twitter' ? 'X' : name === 'bluesky' ? 'Bluesky' : name).join(', ')}. Continue with those destinations and verify each published resource before calling done again. Do not republish on a destination already verified in this run.]`
-          : missingRequiredSubmission
-          ? (this._workflowVerificationKind(state.siteWorkflow) === 'published_resource'
-            ? `[PLAN EXECUTION BLOCK: The selected ${state.siteWorkflow.job.id} job requires terminal evidence for its own publication. ${this._workflowPublicationRecoveryInstruction(state)}]`
-            : state.siteWorkflow?.job?.id
-            ? `[PLAN EXECUTION BLOCK: The selected ${state.siteWorkflow.job.id} job requires terminal evidence for its own submit/send/publish/commit contract. Filling fields, another site's submit, or an unrelated success signal is not completion. Dispatch the intended action and observe the job-specific terminal state (for example recipient-bound sent state, saved/published resource, form confirmation, or paid/ticket-issued transaction) before calling done again. If that cannot be verified, use outcome partial or failed and report the exact blocker.]`
-            // No site workflow was selected, so there is no job contract to
-            // point at.
-            : '[PLAN EXECUTION BLOCK: This task requires a submit/send/publish/commit action, and the page state read at completion does not yet show it took effect. No structured site workflow is bound to this run. Read the page that resulted from the action — the published item, the confirmation, or the changed state — in the same browser tab, then call done from there. If the action cannot be confirmed, use outcome partial or failed and report the exact blocker.]')
-          : forbiddenSubmission
-          ? `[PLAN EXECUTION BLOCK: The selected ${state.siteWorkflow?.job?.id || 'workflow'} job prepares the form and leaves it unsubmitted, but a submit action was dispatched. Do not submit again or try to undo it by submitting anything else. Call done with outcome partial or failed, state plainly that the form was submitted without authorization, and report what the page shows now.]`
-          : missingJobEvidence
-          ? `[PLAN EXECUTION BLOCK: The selected ${state.siteWorkflow?.job?.id || 'workflow'} job has its own success contract and an unrelated page read does not satisfy it. ${this._workflowJobEvidenceInstruction(state)} Produce that evidence, then call done. If it cannot be produced, call done with outcome partial or failed and report the exact blocker with whatever partial coverage you did verify.]`
-          : missingDraftEvidence
-          ? `[PLAN EXECUTION BLOCK: The selected ${state.siteWorkflow?.job?.id || 'workflow'} job finishes on the draft itself, not on a tool call. The intended recipients, the requested subject, and the complete body must all be readable in the open composer, and the provider must show its own saved-draft state. Re-read the composer once the app has saved the draft, then call done. If any field or the saved-draft state cannot be verified, call done with outcome partial or failed and report exactly what is unverified; do not send the message.]`
-          : missingRequiredLedger
-          ? `[PLAN EXECUTION BLOCK: The selected ${state.siteWorkflow.job.id} site workflow requires complete item-level reconciliation before success. Obtain a complete app-owned workflow inventory, use its exact item ids for one processed or intentionally skipped ledger row per item, then call progress_update with workflowReconciliation {job:"${state.siteWorkflow.job.id}", coverageComplete:true, itemCount:N, basis:"..."}. N and the row ids must exactly match that inventory; model-created rows alone are not coverage evidence, and any failed row requires a partial or failed outcome. If complete coverage cannot be verified, call done with outcome partial or failed and report completed versus unresolved work.]`
-          : unknownMutationIntent
-          ? '[PLAN EXECUTION BLOCK: Planning failed, so the runtime could not determine whether this task requires a state change. Continue with normally permitted tools. A success outcome now requires a verified consequential tool call; if the useful result is read-only or no safe consequential action is needed, deliver that result with done outcome partial instead of claiming success. Do not invent or perform a mutation merely to satisfy this guard.]'
-          : defaultPlanExecutionBlockNudge({
-            viaDone,
-            missingEvidence,
-            requiresStateChange: state.requiresStateChange,
-          })) + recoveryAnchor,
+        nudge: recoveryNudge(),
       };
     }
     if (state.taskDrifted) {
@@ -40232,6 +41259,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     contentArgs,
     upstreamAbortSignal = null,
     upstreamDispatchState = null,
+    guardAdvisories = null,
   ) {
     if (!response || response.success !== true || response.needsTrustedClick !== true) {
       return response;
@@ -40246,6 +41274,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
         upstreamAbortSignal,
         recoveryState,
         upstreamDispatchState,
+        guardAdvisories,
       );
     }
     try {
@@ -40258,6 +41287,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
           abortSignal,
           recoveryState,
           upstreamDispatchState,
+          guardAdvisories,
         ),
         'set_checked',
         CONTENT_ACTION_TIMEOUT_MS,
@@ -40305,6 +41335,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     abortSignal = null,
     recoveryState = { clickStarted: false, clickResult: null, trustedClickSucceeded: false },
     upstreamDispatchState = null,
+    guardAdvisories = null,
   ) {
     this._throwIfAborted(abortSignal);
     const confirmationSurfacesBefore = Array.isArray(response._confirmationSurfaces)
@@ -40324,7 +41355,12 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       this._throwIfAborted(abortSignal);
       if (contentArgs._jevBinding) {
         const probe = await chrome.tabs.sendMessage(tabId, { target: 'content', action: 'jev_validate_target', params: { _jevBinding: contentArgs._jevBinding } }, { frameId: 0 });
-        if (probe?.success !== true) return { success: false, noDispatch: true, dispatched: false, staleJevTarget: true, error: 'Checkbox changed before dispatch; observe again.' };
+        // The one-shot marker still names the exact checkbox the content
+        // script prepared; without Strict checks it is clicked with a note.
+        if (probe?.success !== true && !this._guardAdvisesFor(guardAdvisories, 'jev-target-changed',
+          JEV_TARGET_CHANGED_NOTE, { decided: probe?.staleJevTarget === true })) {
+          return { success: false, noDispatch: true, dispatched: false, staleJevTarget: true, error: 'Checkbox changed before dispatch; observe again.' };
+        }
       }
       clickResult = await cdpClient.clickElement(tabId, trustedSelector, {
         trustedOnly: true,
@@ -41123,6 +42159,14 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
         this._throwIfAborted(linked.signal);
         return { success: false, botMemory: true, noDispatch: true, dispatched: false, error: error.message };
       }
+      // A done that memory refuses because an action's outcome is still
+      // uncertain is advised once per run by default; then it goes through
+      // with a caveat, and the memory ledger keeps that action uncertain.
+      if (prepared.allowed !== true && ['done', 'done_json'].includes(name)
+          && !this._guardRefusesOnce(tabId, 'bot-memory-uncertain-done', { decided: false,
+            caveat: 'An earlier action\'s result was still uncertain when the task was reported done.' })) {
+        prepared = { allowed: true, readOnly: true };
+      }
       if (prepared.allowed !== true) return { success: false, botMemory: true, noDispatch: true,
         dispatched: false, retryable: false, ...(['done', 'done_json'].includes(name) ? { blockedDone: true } : {}), error: prepared.reason };
       // Memory acknowledgement adds a prerequisite. The current permission,
@@ -41142,6 +42186,17 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
   }
 
   async _executeToolWithLifecycle(tabId, name, args, onUpdate = null, executionContext = null) {
+    // Quality guards that advise instead of refusing leave their notes in
+    // this call's list; the result carries them to the model.
+    const guardAdvisories = Array.isArray(executionContext?.guardAdvisories) ? executionContext.guardAdvisories : [];
+    const result = await this._executeToolWithLifecycleInner(tabId, name, args, onUpdate, { ...(executionContext || {}), guardAdvisories });
+    // A note says what went through despite a check. When another check
+    // then refused the call, nothing went through and the note would mislead.
+    const refused = !!result && typeof result === 'object' && (result.noDispatch === true || result.dispatched === false);
+    return refused ? result : withGuardAdvisories(result, guardAdvisories);
+  }
+
+  async _executeToolWithLifecycleInner(tabId, name, args, onUpdate = null, executionContext = null) {
     const linked = this._linkAbortSignals(executionContext?._contentActionAbortSignal, this._runAbortSignal(tabId));
     const dispatchState = executionContext?._contentActionDispatchState || { started: false };
     // Every text-write route marks dispatch before content messaging or CDP input.
@@ -41157,9 +42212,21 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       if (executionContext?.jevBinding) {
         const probe = await chrome.tabs.sendMessage(tabId, { target: 'content', action: 'jev_validate_target', params: { _jevBinding: executionContext.jevBinding } }, { frameId: 0 });
         this._throwIfAborted(linked.signal);
-        if (probe?.success !== true) return { success: false, noDispatch: true, dispatched: false, staleJevTarget: true, error: 'Jev target changed; observe again before acting.' };
+        if (probe?.success !== true) {
+          if (!this._guardAdvisesFor(executionContext.guardAdvisories, 'jev-target-changed', JEV_TARGET_CHANGED_NOTE,
+            { decided: probe?.staleJevTarget === true })) {
+            return { success: false, noDispatch: true, dispatched: false, staleJevTarget: true, error: 'Jev target changed; observe again before acting.' };
+          }
+          // Without Strict checks the fast-path call goes to whatever its
+          // ref or selector resolves to now, through the ordinary tool path
+          // and its checks; the stale binding would only refuse it again.
+          executionContext = { ...executionContext, jevBinding: null };
+        }
       }
-      const uncertainTextBlock = await this._uncertainTextMutationBlock(tabId, name, args || {});
+      // Default mode only notes an earlier unverified write (the call's
+      // guardAdvisories); Strict checks still refuse it here.
+      const uncertainTextBlock = await this._uncertainTextMutationBlock(tabId, name, args || {},
+        { advisories: executionContext.guardAdvisories });
       if (uncertainTextBlock) return uncertainTextBlock;
       const context = executionContext && typeof executionContext === 'object'
         ? executionContext
@@ -41633,7 +42700,11 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       // Who receives a message is never settled by a question and its answer:
       // WebBrain confirms the send with the user on its own card. A question
       // declared to be about the recipient cannot repair a technical blocker.
-      if (technicalRecipientReason && explicitRecipientQuestion) {
+      // Asking it is harmless (the send stays guarded), so without Strict
+      // checks the question is shown with a note.
+      if (technicalRecipientReason && explicitRecipientQuestion
+          && !this._guardAdvisesFor(executionContext?.guardAdvisories, 'recipient-clarify-cannot-repair-technical',
+            `The user's answer cannot supply the page evidence the message guard is missing (${technicalRecipientReason}); a send still needs that evidence or WebBrain's own recipient card. Re-read the recipient and composer after the answer.`)) {
         return { success: false, blocked: true, noDispatch: true, dispatched: false, retryable: false,
           messageRecipientGuard: true, reasonCode: technicalRecipientReason,
           error: 'Recipient confirmation cannot repair the unresolved technical message guard. No clarification was shown. Re-read the active recipient and composer evidence; if it remains unavailable, report the blocker instead of requesting the same approval again.' };
@@ -41935,7 +43006,13 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       const nonMonotonic = previousState && (traversalDirection === 'reverse'
         ? target.requestedIndex >= previousState.minVerifiedIndex
         : target.requestedIndex <= previousState.maxVerifiedIndex);
-      if (nonMonotonic) {
+      // carousel-traversal-guards (quality): revisiting a slide is navigation,
+      // not a repeat of a consequential action. Without Strict checks it runs
+      // with a note; the post-navigation route and media checks still report.
+      if (nonMonotonic && !this._guardAdvisesFor(executionContext?.guardAdvisories, 'carousel-traversal-guards',
+        traversalDirection === 'reverse'
+          ? `This reversed carousel scan already processed slides down to ${previousState.minVerifiedIndex}; slide ${target.requestedIndex} was opened anyway. Do not record it again as a new row.`
+          : `This forward carousel scan already processed slides up to ${previousState.maxVerifiedIndex}; slide ${target.requestedIndex} was opened anyway. Do not record it again as a new row.`)) {
         return {
           success: false, dispatched: false, noDispatch: true, nonMonotonic: true,
           requestedIndex: target.requestedIndex, highestVerifiedIndex: previousState.maxVerifiedIndex,
@@ -42023,7 +43100,9 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       });
       const expected = this.progressExpectedItems.get(tabId);
       const session = this._currentProgressSession(tabId);
-      if (expected && session?.sessionId) {
+      // An advised revisit of an already processed slide must not reset its
+      // ledger row back to "acted".
+      if (expected && session?.sessionId && !nonMonotonic) {
         const discoveredSlideCount = afterState.discoveredSlideCount;
         const hasCover = discoveredSlideCount === expected.count + 1
           || (/hotel/i.test(expected.item_type)
@@ -43372,11 +44451,13 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
           // What the page's live messages and the statuses observed after the
           // submit say, read in any language for the checks below. Success
           // messages are only ever the agent's own readings, never page data.
-          const incompleteBlock = await incompleteCompletionBlock(this, tabId, {
+          // By default the incomplete-task judge redirects an honest partial or
+          // failed ending once per run; later endings are not judged again.
+          const incompleteBlock = this._guardHasAdvised(tabId, 'incomplete-task-redirect') ? null : await incompleteCompletionBlock(this, tabId, {
             terminalOnly: Number.isFinite(executionContext?.traceStep) && executionContext.traceStep >= this.maxSteps,
             outcome, summary: args.summary, pageState, pageUrl: probe?.url || '',
           });
-          if (incompleteBlock) return incompleteBlock;
+          if (incompleteBlock && this._incompleteRedirectRefuses(tabId, incompleteBlock)) return incompleteBlock;
           const readingStartedAt = Date.now();
           if (outcome === 'success' && pageState) await this._readCompletionFormSubmits(tabId, pageState);
           if (outcome === 'success' && pageState) await this._readCompletionStatusTexts(tabId, pageState);
@@ -43386,7 +44467,8 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
           this._recordDoneTiming(tabId, { preparationMs: readingStartedAt - doneStartedAt,
             readingMs: verificationStartedAt - readingStartedAt, verificationMs: Date.now() - verificationStartedAt,
             ...(completionDecision ? { outcome: completionDecision.outcome, engine: completionDecision.engine } : {}) });
-          if (completionDecision && ['pending', 'failed'].includes(completionDecision.outcome)) return { success: false, blockedDone: true, completionDecision: { outcome: completionDecision.outcome, engine: completionDecision.engine }, error: 'Completion verification reports ' + completionDecision.outcome + '. Inspect the result before any further submission; continue recovery or report partial/failed.' };
+          if (completionDecision && ['pending', 'failed'].includes(completionDecision.outcome)
+              && this._completionVerdictRefuses(tabId, completionDecision)) return { success: false, blockedDone: true, completionDecision: { outcome: completionDecision.outcome, engine: completionDecision.engine }, error: 'Completion verification reports ' + completionDecision.outcome + '. Inspect the result before any further submission; continue recovery or report partial/failed.' };
           if (pageState?.nativeChatDeliveryEvidence) {
             delete pageState.nativeChatDeliveryEvidence;
             this._planExecutionGuards.get(tabId).nativeChatDeliveryEvidence = null;
@@ -43399,7 +44481,8 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
           if (outcome === 'success' && pageState) pageState.iframeSubmissionEvidence = await this._completionIframeEvidence(tabId);
           if (outcome === 'success' && this._currentCompletionSubmitState(tabId)?.iframeSubmission
               && (!pageState?.iframeSubmissionEvidence || (completionDecision?.outcome === 'succeeded'
-                && completionDecision.submittedFrameStamp !== pageState.iframeSubmissionEvidence.stamp))) {
+                && completionDecision.submittedFrameStamp !== pageState.iframeSubmissionEvidence.stamp))
+              && this._iframeResultStaleRefuses(tabId)) {
             return { success: false, blockedDone: true, completionDecision: { outcome: 'pending', engine: 'freshness' },
               error: 'The submitted iframe changed or could not be refreshed at completion. Read its current result again; do not repeat the submission.' };
           }
@@ -43519,18 +44602,19 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
           // search/filter bar, not a submit form).
           if (completionWarning) {
             const blocks = this._nextCompletionPageBlock(tabId, completionPageBlock.key);
-            if (blocks <= 2) {
+            if (this._completionPageWarningRefuses(tabId, completionPageBlock.key) && blocks <= 2) {
               return {
                 success: false,
                 blockedDone: true,
                 completionPageBlock: true,
-                error: verification.completionWarning + ` (block attempt ${blocks}/2 — if you genuinely believe the task is complete and the visible form/dialog is unrelated, re-call done with summary explicitly acknowledging this, e.g. "already-existing product, no submit needed".)`,
+                error: verification.completionWarning + this._completionPageWarningSuffix(blocks),
                 pageUrl: verification.pageUrl,
                 pageState: verification.pageState,
                 ...(imageDataUrl ? { _attachImage: imageDataUrl } : {}),
               };
             }
-            // After 2 blocks, let done through with a loud note in verification.
+            // After 2 blocks (by default after one), let done through with a loud
+            // note in verification.
           }
           // A request that also expects votes or moderation to go a certain way
           // asks for something no run can verify. The completion judge reads that
@@ -43544,7 +44628,8 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
             await trace.recordScreenshot(runId, null, imageDataUrl, 'done verification');
           }
 
-          if (calculationEvidence && !await refreshCalculationEvidence(this, tabId, calculationEvidence)) {
+          if (calculationEvidence && !await refreshCalculationEvidence(this, tabId, calculationEvidence)
+              && this._calculationRefreshRefuses(tabId)) {
             return { success: false, blockedDone: true, completionDecision: { outcome: 'pending', engine: 'freshness' },
               error: 'The verified calculation authority changed before completion. Reconsider the current genuine task; no new action was performed.' };
           }
@@ -43558,14 +44643,16 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
         } catch (error) {
           if (completionStopError(error, this._runAbortSignal(tabId))) throw error;
           // Screenshot failed — still allow done but note it
-          if (calculationEvidence && !await refreshCalculationEvidence(this, tabId, calculationEvidence)) {
+          if (calculationEvidence && !await refreshCalculationEvidence(this, tabId, calculationEvidence)
+              && this._calculationRefreshRefuses(tabId)) {
             return { success: false, blockedDone: true, completionDecision: { outcome: 'pending', engine: 'freshness' },
               error: 'The verified calculation authority changed before completion. Reconsider the current genuine task; no new action was performed.' };
           }
           return { done: true, summary: args.summary, outcome, verification: null };
         }
       }
-      if (calculationEvidence && !await refreshCalculationEvidence(this, tabId, calculationEvidence)) {
+      if (calculationEvidence && !await refreshCalculationEvidence(this, tabId, calculationEvidence)
+          && this._calculationRefreshRefuses(tabId)) {
         return { success: false, blockedDone: true, completionDecision: { outcome: 'pending', engine: 'freshness' },
           error: 'The verified calculation authority changed before completion. Reconsider the current genuine task; no new action was performed.' };
       }
@@ -44663,7 +45750,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
         }
         if (this._formValidationBlocks.has(tabId)) {
           const currentStates = await this._captureFormValidationState(tabId);
-          this._applyVerifyFormRecovery(tabId, result, currentStates);
+          this._applyVerifyFormRecovery(tabId, result, currentStates, executionContext?.guardAdvisories);
         }
         return result;
       } catch (e) {
@@ -45225,7 +46312,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
           recommendationKind: result.recommendation?.kind || null,
         };
       };
-      const runDomDownloader = async () => {
+      const runDomDownloader = async ({ bound = true } = {}) => {
         // Inject the SocialMediaDownloader library into the page's main
         // world so it shares fetch/XHR/cookies with page scripts — same
         // execution context the script's DevTools-console docs target.
@@ -45243,7 +46330,9 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
           limit: typeof toolArgs.limit === 'number' && toolArgs.limit > 0
             ? toolArgs.limit
             : (bulkSocialDownload ? Number.MAX_SAFE_INTEGER : 1),
-          ...(executionContext?._expectedMediaBinding ? { expectedMediaBinding: executionContext._expectedMediaBinding } : {}),
+          ...(bound && executionContext?._expectedMediaBinding ? { expectedMediaBinding: executionContext._expectedMediaBinding } : {}),
+          // An advised unbound retry of a bound call stays on the DOM item path.
+          ...(!bound && executionContext?._expectedMediaBinding ? { domOnly: true } : {}),
         };
         const results = await chrome.scripting.executeScript({
           target: { tabId },
@@ -45269,7 +46358,9 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
               // recommendation builder so we can tell the agent to
               // call saveMse() when there's actually a capture.
               let mseBytes = 0;
-              try {
+              // An advised unbound retry of a bound call stays on the DOM
+              // item path, so a recorded stream is neither saved nor offered.
+              if (!runOpts.domOnly) try {
                 const rec = window.SocialMediaDownloader.getMseRecording();
                 for (const ms of (rec.mediaSources || [])) {
                   for (const b of (ms.buffers || [])) mseBytes += (b.bytes || 0);
@@ -45384,7 +46475,20 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
 
       try {
         // A bound call must never switch resources through MSE or vision fallback.
-        if (executionContext?._expectedMediaBinding) return await runDomDownloader();
+        if (executionContext?._expectedMediaBinding) {
+          const boundResult = await runDomDownloader();
+          // The focused media changed after the model observed it. Without
+          // Strict checks the download runs once more without that binding
+          // (still DOM-only, one item) and the model is told what it saved
+          // may not be the item it saw.
+          if (boundResult?.errorCode === 'media_binding_changed'
+              && this._guardAdvisesFor(executionContext?.guardAdvisories, 'media-download-target-binding',
+                'The media in focus changed after your last observation, so WebBrain could not confirm this download is the item you saw. It saved the media now in focus; check the downloaded file (list_downloads) before reporting it.')) {
+            this._throwIfAborted?.(executionContext?._contentActionAbortSignal || null);
+            return await runDomDownloader({ bound: false });
+          }
+          return boundResult;
+        }
         const strategy = ['auto', 'dom', 'vision'].includes(toolArgs.strategy) ? toolArgs.strategy : 'auto';
         const bulkSocialDownload = !!toolArgs.scroll || toolArgs.mode === 'all';
         const activeProvider = this._activeProvider(tabId);
@@ -45916,6 +47020,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
             messageRecipientDispatchBinding,
             expectedName: args.expected_name,
             expectedRole: args.expected_role,
+            guardAdvisories: dispatchContext.guardAdvisories,
           }, earlyCdpAbortSignal);
           throwIfEarlyCdpAborted();
           if (reconciled.result) return reconciled.result;
@@ -47199,7 +48304,9 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
           throwIfEarlyCdpAborted();
           if (previewCheck?.errorCode === 'truncated_value_replacement') return previewCheck;
         }
-        if (focusedBinding?.token) {
+        // Leaving this block early (break) falls back to typing into the
+        // currently focused field below, as an unbound type_text does.
+        boundFocusedTyping: if (focusedBinding?.token) {
           const frameId = Number.isInteger(focusedBinding.frameId)
             ? focusedBinding.frameId
             : 0;
@@ -47216,6 +48323,20 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
             throwIfEarlyCdpAborted();
             if (!prepared?.success) {
               tokenConsumed = !!prepared;
+              // The field bound by the toolbar preflight lost focus, or the
+              // page gave no answer. By default (typing-target-identity
+              // advises) type into the field focused now, which the unbound
+              // path still requires to be editable; Strict checks refuse.
+              // A clearing write never falls back: the truncated-preview
+              // check above ran against the bound field, and select-all +
+              // delete on whichever field has focus now could erase a value
+              // that check never saw (a deletion-class concern).
+              const identityLost = !prepared || prepared.reasonCode === 'focused_target_changed';
+              if (identityLost && !args.clear && this._guardAdvisesFor(dispatchContext.guardAdvisories, 'typing-target-identity',
+                'The field focused when this call was checked lost focus before typing, so the text went to the field focused now. Check that the intended field changed.',
+                { decided: !!prepared })) {
+                break boundFocusedTyping;
+              }
               return prepared || {
                 success: false,
                 dispatched: false,
@@ -47369,6 +48490,13 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
         if (args.selector) {
           let result;
           let expectedBackendNodeId = Number(dispatchBinding?.backendNodeId) || null;
+          const unpinnedRefusal = {
+            success: false,
+            dispatched: false,
+            noDispatch: true,
+            retryable: true,
+            error: 'Could not preserve the selector target for safe typing. Re-read the page and retry.',
+          };
           if (!expectedBackendNodeId) {
             try {
               const probe = await cdpClient.probeRichTextToolbarSelector(tabId, args.selector, {
@@ -47379,23 +48507,18 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
               throwIfEarlyCdpAborted();
               expectedBackendNodeId = Number(probe?.selectorBackendNodeId) || null;
             } catch {
-              return {
-                success: false,
-                dispatched: false,
-                noDispatch: true,
-                retryable: true,
-                error: 'Could not preserve the selector target for safe typing. Re-read the page and retry.',
-              };
+              // A stopped or expired action sends nothing in any mode.
+              if (earlyCdpAbortSignal?.aborted) return unpinnedRefusal;
             }
           }
-          if (!expectedBackendNodeId) {
-            return {
-              success: false,
-              dispatched: false,
-              noDispatch: true,
-              retryable: true,
-              error: 'Could not preserve the selector target for safe typing. Re-read the page and retry.',
-            };
+          // The node checked before typing could not be pinned. By default
+          // (typing-target-identity advises) type into the selector's current
+          // match, which typeText still resolves and checks; Strict checks
+          // refuse as before.
+          if (!expectedBackendNodeId && !this._guardAdvisesFor(dispatchContext.guardAdvisories, 'typing-target-identity',
+            'The field could not be pinned to the element checked before typing, so the text went to the current match of this selector. Check that the intended field changed.',
+            { decided: false })) {
+            return unpinnedRefusal;
           }
           const typeFieldEpoch = this._captureLastTypeFieldEpoch(tabId);
           try {
@@ -48332,6 +49455,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
           contentArgs,
           earlyCdpAbortSignal,
           earlyCdpDispatchState,
+          dispatchContext.guardAdvisories,
         );
       }
       if ((name === 'type_ax' || name === 'set_field') && !dispatchContext.jevBinding) {
@@ -49098,6 +50222,24 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     // is an unknown mutation outcome. Retrying here can append a second copy to
     // controlled or virtualized editors whose first write actually landed.
     if (response.noDispatch !== true || response.dispatched === true) {
+      // WebBrain never retypes on its own here, in any mode. By default the
+      // model is not locked out either (trusted-field-retry-guards advises):
+      // no repeat lock labels, and the text-write finalizer reports a write
+      // whose text went out as unverified so the model decides.
+      if (this._guardAdvises('trusted-field-retry-guards', { decided: true })) {
+        const unlocked = {
+          ...response,
+          success: false,
+          outcomeUnknown: true,
+          mutationMayHaveOccurred: true,
+          fallbackAttempted: false,
+          trustedFallbackAttempted: false,
+          error: `${response.error || 'Field verification failed'} No trusted retry was sent because the original write may already have changed the editor.`,
+        };
+        delete unlocked.repeatBlocked;
+        if (unlocked.recoveryRequired === 'verify_or_restore_field') delete unlocked.recoveryRequired;
+        return unlocked;
+      }
       return {
         ...response,
         success: false,
@@ -49317,6 +50459,11 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
         this._throwIfAborted(abortSignal);
       }
       if (!verification?.success || verification.verified !== true) {
+        // The trusted text went out. GitHub's CodeMirror lands here with a
+        // correct document: its innerText readback doubles blank lines and
+        // omits off-screen lines. `unverified` lets the finalizer report it
+        // as an unverified success by default (Strict checks: a failure).
+        const readable = verification?.success === true;
         return {
           ...failed,
           dispatched: true,
@@ -49324,6 +50471,10 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
           verified: false,
           ...(verification?.fieldMeta ? { fieldMeta: verification.fieldMeta } : {}),
           ...(Object.prototype.hasOwnProperty.call(verification || {}, 'actual') ? { actual: verification.actual } : {}),
+          unverified: { reason: readable ? 'readback_mismatch' : 'readback_unavailable',
+            reader: readable ? String(verification.reader || 'unknown') : 'none' },
+          ...(readable && typeof verification.readbackExact === 'boolean' ? { readbackExact: verification.readbackExact }
+            : !readable ? { readbackExact: false } : {}),
           error: 'The field value still did not exactly match after trusted typing. Repeat this exact replacement once for readback-only recovery; a generic tree read cannot verify the full value. Restore the editor if the mismatch persists.',
         };
       }
@@ -51066,6 +52217,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     let structuredOutputRecoveryAttempted = false;
     let autoModeEscalationRefusals = 0;
     let completionPlainFinalRecoveryAttempted = 0;
+    let plainFinalReceiptRefusals = 0;
     let forceCompletionVerificationTurn = false;
     let allowCompletionFailureTurn = false;
     let forceCompletionDoneAfterVerification = false;
@@ -51301,6 +52453,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
         forceCompletionDoneAfterVerification = false;
         forceCompletionDoneTurn = false;
         completionPlainFinalRecoveryAttempted = 0;
+        plainFinalReceiptRefusals = 0;
       }
       if (steeringOutcome?.terminal) {
         if (steeringOutcome.capture) {
@@ -51816,9 +52969,10 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
           if (typeof batchResult.rawSummary === 'string' && batchResult.rawSummary.trim()) {
             shareRawResponse = batchResult.rawSummary;
           }
-          if (batchResult.status) {
-            _traceStatus = batchResult.status;
-            onUpdate('run_status', { status: batchResult.status, message: batchResult.value });
+          const endStatus = batchResult.status || batchResult.endStatus;
+          if (endStatus) {
+            _traceStatus = endStatus;
+            onUpdate('run_status', { status: endStatus, message: batchResult.value });
           }
           return finalResponse;
         }
@@ -51989,6 +53143,9 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       }
       // Genuine final answer — emit and exit. Repeated-item progress recovery
       // takes priority so an unresolved ledger can still drive the next tool turn.
+      // A plain final is a new completion attempt (see
+      // _beginCompletionGuardAttempt).
+      this._beginCompletionGuardAttempt(tabId);
       const clarificationFinalDecision = this._isActionMode(mode)
         ? this._clarificationAuthorizationPlainFinalDecision(tabId)
         : null;
@@ -52013,7 +53170,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
         return finalResponse;
       }
       const readFinalLimitation = this._readCompletenessLimitation(tabId);
-      if (readFinalLimitation) {
+      if (readFinalLimitation && !this._guardAdvises('read-coverage-ask-limitation', { decided: false })) {
         finalResponse = readFinalLimitation;
         _traceStatus = 'read_scope_limited';
         messages.push({ role: 'assistant', content: finalResponse });
@@ -52036,13 +53193,13 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
         await this._persistNow(tabId);
         continue;
       }
-      const progressFinalBlock = this._plainFinalProgressBlock(tabId);
-      const completionFinalBlock = this._completionPlainFinalBlock(tabId);
-      const readFinalBlock = this._readCompletenessBlock(tabId);
-      const exactTableFinalBlock = structuredTableAnswerBlock(this.readCompletenessStates.get(tabId), result.content);
+      // By default each check refuses at most once per run (_plainFinalGuardBlocks).
+      const {
+        progressFinalBlock, completionFinalBlock, readFinalBlock, exactTableFinalBlock,
+      } = this._plainFinalGuardBlocks(tabId, result.content);
       const plainFinalBlocks = [progressFinalBlock, completionFinalBlock, readFinalBlock, exactTableFinalBlock].filter(Boolean);
       if (plainFinalBlocks.length) {
-        if (completionFinalBlock && completionPlainFinalRecoveryAttempted >= 2) {
+        if (completionFinalBlock && completionPlainFinalRecoveryAttempted >= 2 && this._plainFinalTwoStrikeEnds()) {
           finalResponse = this._completionPlainFinalPartial(tabId, result.content, {
             progressBlocked: !!progressFinalBlock,
             readBlocked: !!readFinalBlock,
@@ -52056,7 +53213,8 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
           return finalResponse;
         }
         if (completionFinalBlock) completionPlainFinalRecoveryAttempted++;
-        if (completionFinalBlock && completionPlainFinalRecoveryAttempted >= 2 && steps >= this.maxSteps) {
+        if (completionFinalBlock && completionPlainFinalRecoveryAttempted >= 2 && steps >= this.maxSteps
+            && this._plainFinalTwoStrikeEnds()) {
           finalResponse = this._completionPlainFinalPartial(tabId, result.content, {
             progressBlocked: !!progressFinalBlock,
             readBlocked: !!readFinalBlock,
@@ -52123,7 +53281,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
         onUpdate('warning', { message: finalResponse });
         break;
       }
-      if (this._isClearlyIncompleteStandaloneAnswer(result.content, runOptions)) {
+      if (this._isClearlyIncompleteStandaloneAnswer(result.content, runOptions) && this._standaloneTruncationRefuses(tabId)) {
         if (!standaloneIncompleteAnswerRecoveryAttempted) {
           standaloneIncompleteAnswerRecoveryAttempted = true;
           messages.push(this._withResponseItems({ role: 'assistant', content: result.content }, result.responseItems, result.reasoningContent, provider));
@@ -52143,6 +53301,29 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
         onUpdate('warning', { message: finalResponse });
         break;
       }
+      // A plain final is the model's own success claim: a chat message sent
+      // in this run is confirmed and its receipt saved first, as done does
+      // (native-chat-receipt-not-durable). Two refusals, or the step budget,
+      // end the run as partial, never as a success.
+      const plainFinalReceiptBlock = await this._plainFinalChatReceiptBlock(tabId);
+      if (plainFinalReceiptBlock) {
+        if (plainFinalReceiptRefusals >= 2 || steps >= this.maxSteps) {
+          finalResponse = this._chatReceiptPartialFinal(result.content);
+          _traceStatus = 'partial';
+          messages.push({ role: 'assistant', content: finalResponse });
+          onUpdate('text', { content: finalResponse, replace: true });
+          onUpdate('warning', { message: 'Run ended without a saved chat delivery receipt.' });
+          onUpdate('run_status', { status: 'partial', message: finalResponse });
+          break;
+        }
+        plainFinalReceiptRefusals++;
+        messages.push(this._withResponseItems({ role: 'assistant', content: result.content }, result.responseItems, result.reasoningContent, provider));
+        messages.push(this._appOwnedUserMessage(plainFinalReceiptBlock.error, 'chat_receipt'));
+        onUpdate('text', { content: '', replace: true });
+        onUpdate('warning', { message: 'The chat delivery receipt is not saved yet; continuing.' });
+        this._persist(tabId);
+        continue;
+      }
       shareRawResponse = rawProviderContent;
       const repairedFinalContent = repairAssistantDisplayText(result.content);
       finalResponse = result.costAllowanceMessage
@@ -52154,8 +53335,13 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
         runOptions,
       );
       finalResponse = this._withStandaloneUnverifiedNotice(finalResponse, standaloneGroundingGap, runOptions);
+      finalResponse = this._withCompletionCaveat(tabId, finalResponse);
       messages.push(this._withResponseItems({ role: 'assistant', content: finalResponse }, result.responseItems, result.reasoningContent, provider));
       onUpdate('text', { content: finalResponse, replace: true });
+      if (this._completionOutcomeDowngraded(tabId)) {
+        _traceStatus = 'partial';
+        onUpdate('run_status', { status: 'partial', message: finalResponse });
+      }
       break;
     }
 
@@ -52678,6 +53864,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     let emptyOutputRecoveryAttempted = false;
     let compressionPlaceholderRecoveryAttempted = false;
     let completionPlainFinalRecoveryAttempted = 0;
+    let plainFinalReceiptRefusals = 0;
     let forceCompletionVerificationTurn = false;
     let allowCompletionFailureTurn = false;
     let forceCompletionDoneAfterVerification = false;
@@ -52749,6 +53936,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
         forceCompletionDoneAfterVerification = false;
         forceCompletionDoneTurn = false;
         completionPlainFinalRecoveryAttempted = 0;
+        plainFinalReceiptRefusals = 0;
       }
       if (steeringOutcome?.terminal) {
         if (steeringOutcome.capture) {
@@ -53185,10 +54373,11 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
             if (typeof batchResult.rawSummary === 'string' && batchResult.rawSummary.trim()) {
               shareRawResponse = batchResult.rawSummary;
             }
-            if (batchResult.status) {
-              onUpdate('run_status', { status: batchResult.status, message: batchResult.value });
+            const endStatus = batchResult.status || batchResult.endStatus;
+            if (endStatus) {
+              onUpdate('run_status', { status: endStatus, message: batchResult.value });
             }
-            return finish(batchResult.value, batchResult.status);
+            return finish(batchResult.value, endStatus);
           }
           if (batchResult.action === 'deliver') {
             const recovery = await this._recoverDeliveryCheckpointTurn(
@@ -53314,6 +54503,9 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
         }
         emptyOutputRecoveryAttempted = false;
         compressionPlaceholderRecoveryAttempted = false;
+        // A plain final is a new completion attempt (see
+        // _beginCompletionGuardAttempt).
+        this._beginCompletionGuardAttempt(tabId);
         const clarificationFinalDecision = this._isActionMode(mode)
           ? this._clarificationAuthorizationPlainFinalDecision(tabId)
           : null;
@@ -53340,7 +54532,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
           return finish(clarificationFinalDecision.failure, clarificationFinalDecision.status);
         }
         const readFinalLimitation = this._readCompletenessLimitation(tabId);
-        if (readFinalLimitation) {
+        if (readFinalLimitation && !this._guardAdvises('read-coverage-ask-limitation', { decided: false })) {
           messages.push({ role: 'assistant', content: readFinalLimitation });
           onUpdate('text', { content: readFinalLimitation, replace: true });
           onUpdate('warning', { message: 'Ask mode could not verify that every Gmail message was expanded.' });
@@ -53363,13 +54555,13 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
           await this._persistNow(tabId);
           continue;
         }
-        const progressFinalBlock = this._plainFinalProgressBlock(tabId);
-        const completionFinalBlock = this._completionPlainFinalBlock(tabId);
-        const readFinalBlock = this._readCompletenessBlock(tabId);
-        const exactTableFinalBlock = structuredTableAnswerBlock(this.readCompletenessStates.get(tabId), fullText);
+        // By default each check refuses at most once per run (_plainFinalGuardBlocks).
+        const {
+          progressFinalBlock, completionFinalBlock, readFinalBlock, exactTableFinalBlock,
+        } = this._plainFinalGuardBlocks(tabId, fullText);
         const plainFinalBlocks = [progressFinalBlock, completionFinalBlock, readFinalBlock, exactTableFinalBlock].filter(Boolean);
         if (plainFinalBlocks.length) {
-          if (completionFinalBlock && completionPlainFinalRecoveryAttempted >= 2) {
+          if (completionFinalBlock && completionPlainFinalRecoveryAttempted >= 2 && this._plainFinalTwoStrikeEnds()) {
             const partial = this._completionPlainFinalPartial(tabId, fullText, {
               progressBlocked: !!progressFinalBlock,
               readBlocked: !!readFinalBlock,
@@ -53382,7 +54574,8 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
             return finish(partial, 'partial');
           }
           if (completionFinalBlock) completionPlainFinalRecoveryAttempted++;
-          if (completionFinalBlock && completionPlainFinalRecoveryAttempted >= 2 && steps >= this.maxSteps) {
+          if (completionFinalBlock && completionPlainFinalRecoveryAttempted >= 2 && steps >= this.maxSteps
+              && this._plainFinalTwoStrikeEnds()) {
             const partial = this._completionPlainFinalPartial(tabId, fullText, {
               progressBlocked: !!progressFinalBlock,
               readBlocked: !!readFinalBlock,
@@ -53453,7 +54646,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
           this._persist(tabId);
           return finish(visibleFailure, planOnlyDecision.status || 'plan_only_output');
         }
-        if (this._isClearlyIncompleteStandaloneAnswer(fullText, runOptions)) {
+        if (this._isClearlyIncompleteStandaloneAnswer(fullText, runOptions) && this._standaloneTruncationRefuses(tabId)) {
           if (!standaloneIncompleteAnswerRecoveryAttempted) {
             standaloneIncompleteAnswerRecoveryAttempted = true;
             messages.push(this._withResponseItems({ role: 'assistant', content: fullText }, responseItems, reasoningContent, provider));
@@ -53474,6 +54667,30 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
           traceFailureCode = 'EMPTY_RESPONSE';
           closeTraceStep({ ok: false, code: 'EMPTY_RESPONSE' });
           return finish(incompleteFailure, 'incomplete_output');
+        }
+        // A plain final is the model's own success claim: a chat message sent
+        // in this run is confirmed and its receipt saved first, as done does
+        // (native-chat-receipt-not-durable). Two refusals, or the step budget,
+        // end the run as partial, never as a success.
+        const plainFinalReceiptBlock = await this._plainFinalChatReceiptBlock(tabId);
+        if (plainFinalReceiptBlock) {
+          if (plainFinalReceiptRefusals >= 2 || steps >= this.maxSteps) {
+            const partialText = this._chatReceiptPartialFinal(fullText);
+            messages.push({ role: 'assistant', content: partialText });
+            onUpdate('text', { content: partialText, replace: true });
+            onUpdate('warning', { message: 'Run ended without a saved chat delivery receipt.' });
+            onUpdate('run_status', { status: 'partial', message: partialText });
+            this._persist(tabId);
+            closeTraceStep({ ok: true });
+            return finish(partialText, 'partial');
+          }
+          plainFinalReceiptRefusals++;
+          messages.push(this._withResponseItems({ role: 'assistant', content: fullText }, responseItems, reasoningContent, provider));
+          messages.push(this._appOwnedUserMessage(plainFinalReceiptBlock.error, 'chat_receipt'));
+          onUpdate('text', { content: '', replace: true });
+          onUpdate('warning', { message: 'The chat delivery receipt is not saved yet; continuing.' });
+          this._persist(tabId);
+          continue;
         }
         shareRawResponse = rawProviderContent;
         const repairedFullText = repairAssistantDisplayText(fullText);
@@ -53500,9 +54717,18 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
           fullText = attributedFullText;
           onUpdate('text', { content: fullText, replace: true });
         }
+        const caveatedFullText = this._withCompletionCaveat(tabId, fullText);
+        if (caveatedFullText !== fullText) {
+          fullText = caveatedFullText;
+          onUpdate('text', { content: fullText, replace: true });
+        }
         messages.push(this._withResponseItems({ role: 'assistant', content: fullText }, responseItems, reasoningContent, provider));
         this._persist(tabId);
         closeTraceStep({ ok: true });
+        if (this._completionOutcomeDowngraded(tabId)) {
+          onUpdate('run_status', { status: 'partial', message: fullText });
+          return finish(fullText, 'partial');
+        }
         return finish(fullText);
 
       } catch (e) {

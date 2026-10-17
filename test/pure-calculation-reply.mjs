@@ -275,6 +275,8 @@ for (const build of ['chrome', 'firefox']) {
           assert.equal(requests, 3);
           return call('honest-missing-calculation', 'done', { summary: 'The required calculation was not executed.', outcome: 'failed' });
         });
+        // Strict checks: the guard's refusal itself is under test.
+        agent.strictGuards = true;
         agent._enrichUserMessageWithCurrentPage = async (_tab, _messages, content) => {
           send = bind(agent, tab); return { role: 'user', content };
         };
@@ -313,6 +315,8 @@ for (const build of ['chrome', 'firefox']) {
         return messages.some(m => m.role === 'tool' && String(m.content).includes(expected))
           ? { content: answer } : call('calc-without-terminal', 'calculate', { expression });
       });
+      // Strict checks: the guard's refusal itself is under test.
+      agent.strictGuards = true;
       agent._enrichUserMessageWithCurrentPage = async (_tab, _messages, content) => {
         send = bind(agent, tab); return { role: 'user', content };
       };

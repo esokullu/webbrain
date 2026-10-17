@@ -862,6 +862,8 @@ export default {
   "st.display.clarify_timeout_policy.desc": "Co robi WebBrain, gdy nie odpowiesz na pytanie na czas. „Dokończ zadanie” wybiera odpowiedź, która pozwala kontynuować zadanie, żeby nie stało w miejscu pod twoją nieobecność. „Ostrożnie” wybiera bezpieczną odpowiedź i nie wykonuje bez ciebie żadnych ważnych kroków. W obu przypadkach pytania o usuwanie danych, wydawanie pieniędzy, dane logowania, odbiorcę wiadomości lub publikację czegoś, o co nie prosiłeś, zawsze dostają bezpieczną odpowiedź, a własne karty potwierdzeń WebBrain zawsze czekają na ciebie.",
   "st.display.clarify_timeout_policy.finish": "Dokończ zadanie",
   "st.display.clarify_timeout_policy.safe": "Ostrożnie",
+  "st.display.strict_guards.label": "Ścisłe kontrole",
+  "st.display.strict_guards.desc": "Wył. (domyślnie): akcję mogą zatrzymać tylko kontrole WebBrain dotyczące usuwania danych, wydawania pieniędzy, danych logowania, złego odbiorcy i publikacji czegoś, o co nie prosiłeś; pozostałe kontrole trafiają do modelu jako uwagi, żeby zadania nie utykały. Wł.: jak dotąd każda kontrola zatrzymuje akcję, gdy nie może jej potwierdzić.",
   'st.display.always_allow_api_mutations.label': "Zawsze zezwalaj na mutacje API",
   'st.display.always_allow_api_mutations.desc': "Zezwól WebBrain na używanie POST, PUT, PATCH i DELETE przez fetch_url lub research_url bez wymagania /allow-api w każdej rozmowie. Nadal obowiązują wskazówki preferujące interfejs oraz kontrole potwierdzeń. Domyślnie włączone.",
   'st.display.api_mutation_observer.label': 'Obserwator mutacji API',

@@ -2376,10 +2376,19 @@
       const accepted = options.dispatch ? options.dispatch(invoke) : invoke();
       await wait(); await wait();
       if (expired()) return deadlineFailure();
-      if (!current() || active() !== el || !within(range())) return failure('The editor scope changed during plain-text paste.');
+      // From here the paste went out. `unverified` tells the agent the text
+      // was sent but its settled value is unconfirmed; its policy decides
+      // whether that is a failure (Strict checks) or a noted success.
+      if (!current() || active() !== el || !within(range())) return failure('The editor scope changed during plain-text paste.',
+        { unverified: { reason: 'readback_unavailable', reader: 'none' }, readbackExact: false });
       const value = readDocument(el), expected = (clear ? '' : previous) + text;
       if (accepted || typeof value !== 'string' || value !== expected) {
-        return failure('The complete settled DraftJS value could not be verified after plain-text paste. No additional text was sent.');
+        const readable = typeof value === 'string';
+        return failure('The complete settled DraftJS value could not be verified after plain-text paste. No additional text was sent.', {
+          unverified: { reason: !readable ? 'readback_unavailable' : value !== expected ? 'readback_mismatch' : 'paste_not_consumed',
+            reader: readable ? 'semantic' : 'none' },
+          readbackExact: readable,
+        });
       }
       return { success: true, verified: true, dispatched: true, outcomeUnknown: false,
         pageHandledPaste: true, method: 'contenteditable-page-handled-paste', value: value.slice(0, 100) };
@@ -2439,6 +2448,17 @@
     }
     const semanticEditor = readProseMirrorText(el) !== null;
     const readValue = () => _editableTextValue(el);
+    // Which reader readValue used: a document reader is exact, innerText is
+    // the browser's rendered layout (block editors read blank lines twice).
+    const readbackReader = () => !el.isConnected ? 'none'
+      : (draftJsEditor ? readDraftJsText(el) : (readProseMirrorText(el) ?? readCodeMirrorText(el) ?? readEmptyCaretText(el))) !== null
+        || _nativeChatCaretValueIsEmpty(el) ? 'semantic' : 'rendered';
+    // The text went out but its settled value is unconfirmed; the agent's
+    // policy decides between a failure (Strict checks) and a noted success.
+    const unverifiedWrite = reason => {
+      const reader = readbackReader();
+      return { unverified: { reason: reader === 'none' ? 'element_replaced' : reason, reader }, readbackExact: reader === 'semantic' };
+    };
     const previous = readValue();
     const nativeClearContext = clear && text === '' ? _nativeChatCaretContext(el) : null;
     const selectContents = (collapse) => {
@@ -2492,7 +2512,9 @@
           && ((!nativeContextBefore && !nativeContextAfter)
             || _sameNativeChatCaretContext(nativeContextBefore, nativeContextAfter));
         const unknown = () => failure('The editor handled a cancelled beforeinput and changed. Its complete value could not be verified in the same scope. No additional text was dispatched.',
-          { cancelled: true, recoveryRequired: 'verify_or_restore_field', retryable: false });
+          { cancelled: true, recoveryRequired: 'verify_or_restore_field', retryable: false,
+            // The page applied the text itself; a handled deletion sent none.
+            ...(inputType === 'insertText' ? unverifiedWrite('page_handled_input') : {}) });
         if (!sameScope || (draftJsEditor && readDraftJsText(el) === null) || (el.isContentEditable && el.classList?.contains('cm-content') && readCodeMirrorText(el) === null)) return unknown();
         try {
           if (verifyNativeObservation) {
@@ -2590,17 +2612,19 @@
     if (actionDeadlineExpired()) return expired();
     if (draftJsEditor && readDraftJsText(el) === null) {
       return failure('The DraftJS editor structure changed during typing and cannot establish its exact document text.',
-        { recoveryRequired: 'verify_or_restore_field', retryable: false });
+        { recoveryRequired: 'verify_or_restore_field', retryable: false,
+          unverified: { reason: 'readback_unavailable', reader: 'none' }, readbackExact: false });
     }
     if ((el.isContentEditable && el.classList?.contains('cm-content') && readCodeMirrorText(el) === null)) {
       return failure('The CodeMirror editor shows only part of its document (a viewport gap or folded text), so its exact text cannot be read.',
-        { recoveryRequired: 'verify_or_restore_field', retryable: false });
+        { recoveryRequired: 'verify_or_restore_field', retryable: false,
+          unverified: { reason: 'readback_unavailable', reader: 'none' }, readbackExact: false });
     }
     const value = readValue();
     const expected = clear ? text : previous + text;
     const normalize = value => String(value).replace(/\r\n?/g, '\n');
     if (!el.isConnected || normalize(value) !== normalize(expected)) {
-      return failure('The complete settled rich-text value could not be verified exactly.');
+      return failure('The complete settled rich-text value could not be verified exactly.', unverifiedWrite('readback_mismatch'));
     }
     return {
       success: true, verified: true, dispatched,
@@ -6440,6 +6464,8 @@
         dispatched: false,
         noDispatch: true,
         retryable: true,
+        // Lets the agent's policy type into the field focused now instead.
+        reasonCode: 'focused_target_changed',
         error: 'The focused target changed after the rich-text toolbar safety preflight. Focus the intended field again and retry.',
       };
     }
@@ -9936,19 +9962,25 @@
 
           await new Promise(resolve => setTimeout(resolve, SET_FIELD_VERIFY_DELAY_MS));
           if (actionDeadlineExpired()) return deadlineFailure();
+          // Past this point the value went out. `unverified` marks a write
+          // whose settled value is unconfirmed; the agent's policy decides
+          // whether that is a failure (Strict checks) or a noted success.
           if (!el.isConnected) {
             return failure(
               `ref_id ${ref_id} was replaced while the value was being typed. Re-read the accessibility tree and retry with the current field ref_id.`,
-              { ref_id, verified: false, recoveryRequired: 'verify_or_restore_field', failureScope: `field-value:${ref_id}`, retryable: false, fieldMeta },
+              { ref_id, verified: false, recoveryRequired: 'verify_or_restore_field', failureScope: `field-value:${ref_id}`, retryable: false, fieldMeta,
+                unverified: { reason: 'element_replaced', reader: 'none' }, readbackExact: false },
             );
           }
           if (isDraftJsEditor(el) && readDraftJsText(el) === null) return failure(
             'The DraftJS editor structure changed during typing and cannot establish its exact document text.',
-            { ref_id, verified: false, fieldMeta, recoveryRequired: 'verify_or_restore_field', failureScope: `field-value:${ref_id}`, retryable: false },
+            { ref_id, verified: false, fieldMeta, recoveryRequired: 'verify_or_restore_field', failureScope: `field-value:${ref_id}`, retryable: false,
+              unverified: { reason: 'readback_unavailable', reader: 'none' }, readbackExact: false },
           );
           if ((el.isContentEditable && el.classList?.contains('cm-content') && readCodeMirrorText(el) === null)) return failure(
             'The CodeMirror editor shows only part of its document (a viewport gap or folded text), so its exact text cannot be read.',
-            { ref_id, verified: false, fieldMeta, recoveryRequired: 'verify_or_restore_field', failureScope: `field-value:${ref_id}`, retryable: false },
+            { ref_id, verified: false, fieldMeta, recoveryRequired: 'verify_or_restore_field', failureScope: `field-value:${ref_id}`, retryable: false,
+              unverified: { reason: 'readback_unavailable', reader: 'none' }, readbackExact: false },
           );
           const actual = el.isContentEditable ? _editableTextValue(el) : (el.value || '');
           const verified = selectExpected !== null
@@ -9956,6 +9988,10 @@
             : _setFieldValueMatches(actual, previous, text, !!clear, el.isContentEditable, (readProseMirrorText(el) !== null || readCodeMirrorText(el) !== null || readDraftJsText(el) !== null || readEmptyCaretText(el) !== null));
           const fallbackAttempted = false;
           if (!verified) {
+            // Input values and document readers are exact; innerText is the
+            // rendered layout (block editors read blank lines twice).
+            const reader = !el.isContentEditable ? 'exact'
+              : (readProseMirrorText(el) !== null || readCodeMirrorText(el) !== null || readDraftJsText(el) !== null || readEmptyCaretText(el) !== null) ? 'semantic' : 'rendered';
             return failure(
               'The field value did not exactly match the requested text after the page settled. Repeat the original replacement text and target for readback-only recovery, or restore the editor before another write.',
               {
@@ -9970,6 +10006,8 @@
                 recoveryRequired: 'verify_or_restore_field',
                 failureScope: `field-value:${ref_id}`,
                 retryable: false,
+                unverified: { reason: 'readback_mismatch', reader },
+                readbackExact: reader !== 'rendered',
               },
             );
           }
@@ -10148,19 +10186,24 @@
           // Let that reconciliation settle before verifying the exact result.
           await new Promise(resolve => setTimeout(resolve, SET_FIELD_VERIFY_DELAY_MS));
           if (actionDeadlineExpired()) return deadlineFailure();
+          // `unverified` marks a value that went out but is unconfirmed (see
+          // type_ax); a recovered draft that typed nothing stays no-dispatch.
           if (!el.isConnected) {
             return failure(
               `ref_id ${ref_id} was replaced while the value was being set. Re-read the accessibility tree and retry with the current field ref_id.`,
-              { ref_id, verified: false, recoveryRequired: 'verify_or_restore_field', failureScope: `field-value:${ref_id}`, retryable: false },
+              { ref_id, verified: false, recoveryRequired: 'verify_or_restore_field', failureScope: `field-value:${ref_id}`, retryable: false,
+                unverified: { reason: 'element_replaced', reader: 'none' }, readbackExact: false },
             );
           }
           if (isDraftJsEditor(el) && readDraftJsText(el) === null) return failure(
             'The DraftJS editor structure changed during typing and cannot establish its exact document text.',
-            { ref_id, verified: false, fieldMeta, recoveryRequired: 'verify_or_restore_field', failureScope: `field-value:${ref_id}`, retryable: false },
+            { ref_id, verified: false, fieldMeta, recoveryRequired: 'verify_or_restore_field', failureScope: `field-value:${ref_id}`, retryable: false,
+              unverified: { reason: 'readback_unavailable', reader: 'none' }, readbackExact: false },
           );
           if ((el.isContentEditable && el.classList?.contains('cm-content') && readCodeMirrorText(el) === null)) return failure(
             'The CodeMirror editor shows only part of its document (a viewport gap or folded text), so its exact text cannot be read.',
-            { ref_id, verified: false, fieldMeta, recoveryRequired: 'verify_or_restore_field', failureScope: `field-value:${ref_id}`, retryable: false },
+            { ref_id, verified: false, fieldMeta, recoveryRequired: 'verify_or_restore_field', failureScope: `field-value:${ref_id}`, retryable: false,
+              unverified: { reason: 'readback_unavailable', reader: 'none' }, readbackExact: false },
           );
           const actual = el.isContentEditable ? _editableTextValue(el) : (el.value || '');
           const verified = _setFieldValueMatches(actual, prevValue, text, clear, el.isContentEditable, (readProseMirrorText(el) !== null || readCodeMirrorText(el) !== null || readDraftJsText(el) !== null || readEmptyCaretText(el) !== null));
@@ -10332,6 +10375,11 @@
             }
           }
           if (!verified) {
+            // Input values and document readers are exact; innerText is the
+            // rendered layout (block editors read blank lines twice). The
+            // bundled submit above was withheld for this unverified value.
+            const reader = !el.isContentEditable ? 'exact'
+              : (readProseMirrorText(el) !== null || readCodeMirrorText(el) !== null || readDraftJsText(el) !== null || readEmptyCaretText(el) !== null) ? 'semantic' : 'rendered';
             return failure(
               'The field value did not exactly match the requested text after the page settled. Repeat the original replacement text and target for readback-only recovery, or restore the editor before another write.',
               {
@@ -10346,6 +10394,8 @@
                 recoveryRequired: 'verify_or_restore_field',
                 failureScope: `field-value:${ref_id}`,
                 retryable: false,
+                unverified: { reason: 'readback_mismatch', reader },
+                readbackExact: reader !== 'rendered',
               },
             );
           }
@@ -10477,6 +10527,10 @@
           const expectedPrefix = verifiesAppend
             ? expected.slice(0, expected.length - appendText.length)
             : '';
+          // 'rendered' (innerText) readback is the browser's layout, so a
+          // mismatch cannot tell a wrong write from a reader artifact.
+          const reader = !el.isContentEditable ? 'exact'
+            : (readProseMirrorText(el) !== null || readCodeMirrorText(el) !== null || readDraftJsText(el) !== null || readEmptyCaretText(el) !== null) ? 'semantic' : 'rendered';
           return {
             success: true,
             verified: verifiesAppend && !expected.endsWith(appendText)
@@ -10489,6 +10543,8 @@
                   el.isContentEditable, (readProseMirrorText(el) !== null || readCodeMirrorText(el) !== null || readDraftJsText(el) !== null || readEmptyCaretText(el) !== null),
                 ),
             actual: actual.slice(0, 200),
+            reader,
+            readbackExact: reader !== 'rendered',
             fieldMeta: _fieldMeta(el),
           };
         } catch (error) {
@@ -10551,6 +10607,9 @@
           const valueSha256 = [...new Uint8Array(digest)]
             .map(byte => byte.toString(16).padStart(2, '0'))
             .join('');
+          // A 'rendered' digest hashes innerText, not the editor's document.
+          const reader = !el.isContentEditable ? 'exact'
+            : (readProseMirrorText(el) !== null || readCodeMirrorText(el) !== null || readDraftJsText(el) !== null || readEmptyCaretText(el) !== null) ? 'semantic' : 'rendered';
           return {
             success: true,
             ...(typeof expected === 'string' ? {
@@ -10558,6 +10617,8 @@
             } : {}),
             valueLength: value.length,
             valueSha256,
+            reader,
+            readbackExact: reader !== 'rendered',
             fieldMeta: _fieldMeta(el),
             stableSelector: _stableFieldSelector(el),
           };

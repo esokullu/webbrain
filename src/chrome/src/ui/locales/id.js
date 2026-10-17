@@ -884,6 +884,8 @@ export default {
   "st.display.clarify_timeout_policy.desc": "Apa yang dilakukan WebBrain saat Anda tidak menjawab pertanyaan tepat waktu. “Selesaikan tugas” memilih jawaban yang membuat tugas terus berjalan, agar tidak macet saat Anda pergi. “Main aman” memilih jawaban yang aman dan tidak mengambil langkah penting tanpa Anda. Dalam kedua kasus, pertanyaan tentang menghapus data, mengeluarkan uang, kredensial, penerima pesan, atau memublikasikan sesuatu yang tidak Anda minta selalu memakai jawaban yang aman, dan kartu konfirmasi WebBrain sendiri selalu menunggu Anda.",
   "st.display.clarify_timeout_policy.finish": "Selesaikan tugas",
   "st.display.clarify_timeout_policy.safe": "Main aman",
+  "st.display.strict_guards.label": "Pemeriksaan ketat",
+  "st.display.strict_guards.desc": "Nonaktif (default): hanya pemeriksaan WebBrain tentang menghapus data, mengeluarkan uang, kredensial, penerima yang salah, dan memublikasikan sesuatu yang tidak Anda minta yang dapat menghentikan tindakan; pemeriksaan lainnya diberikan ke model sebagai catatan agar tugas tidak macet. Aktif: setiap pemeriksaan menghentikan tindakan setiap kali tidak dapat memastikannya, seperti sebelumnya.",
   'st.display.always_allow_api_mutations.label': "Selalu izinkan mutasi API",
   'st.display.always_allow_api_mutations.desc': "Izinkan WebBrain menggunakan POST, PUT, PATCH, dan DELETE melalui fetch_url atau research_url tanpa memerlukan /allow-api di setiap percakapan. Panduan yang mengutamakan UI dan pemeriksaan konfirmasi tetap berlaku. Aktif secara default.",
   'st.display.api_mutation_observer.label': 'Pengamat mutasi API',

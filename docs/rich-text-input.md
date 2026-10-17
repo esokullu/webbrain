@@ -80,6 +80,21 @@ text reader, so headings, lists and blockquotes can also be replaced. Full nativ
 selection must cover empty blocks and inline atoms as well as text; an intercepted
 partial selection leaves the original application document intact.
 
+A write whose text went out but whose settled value cannot be confirmed is
+reported, not locked. Editors without a document reader are read back through
+`innerText`, the rendered layout: GitHub's CodeMirror shows every blank line
+twice and omits off-screen lines, so a correct file never reads back exactly.
+By default such a write returns `success: true`, `unverifiedWrite: true`
+(`verified: false` when the readback differs) and a note in `guardAdvisories`;
+`readbackExact: false` marks the rendered-text fallback. Later writes to that editor are not refused,
+the loop detector does not count the write as a failure, and a browser batch
+continues. Editor proofs are still dropped, so a commit or publication gate never
+treats the write as verified; the agent keeps a non-blocking record for those
+gates (`_unverifiedTextWriteRecord`). `set_field({submit: true})` still withholds
+its Enter for an unverified value and says so (`submitSkipped: 'value_unverified'`).
+Settings → General → Strict checks restores the failure result, the text-write
+debt and its readback-only recovery lock (see `test/guard-advisory-writes.mjs`).
+
 When context verification or repeated page changes prevent the next action,
 the task shows a specific explanation and Give up / Retry choices. Retry keeps
 completed progress and verifies the current page again using the normal checks.

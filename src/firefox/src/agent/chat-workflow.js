@@ -677,9 +677,25 @@ export function advanceChatSession(value, rawSnapshot, now = Date.now()) {
   };
 }
 
-export function decideChatSend(value, rawSnapshot, text, now = Date.now()) {
+// Send preconditions a caller may waive with a note (WebBrain's quality
+// checks). The empty/over-long body, user input (credentials, payment, a new
+// user decision), thread binding, a user's own draft in the composer and the
+// duplicate checks are never waivable: an over-long body could not be matched
+// to its pending record afterwards, and a draft belongs to the user.
+// Only a missing composer may be waived by default (the send then simply
+// cannot dispatch). A terminal session and an unverified native message
+// baseline stay blocking: the baseline is what delivery matching and
+// duplicate-send detection rely on, and a terminal session asked for no
+// further message.
+export const WAIVABLE_CHAT_SEND_REASONS = Object.freeze([
+  'composer_unavailable',
+]);
+
+export function decideChatSend(value, rawSnapshot, text, now = Date.now(), { waive = null } = {}) {
   const session = normalizeChatSession(value, now);
   const snapshot = normalizeChatSnapshot(rawSnapshot, now);
+  const waived = reason => WAIVABLE_CHAT_SEND_REASONS.includes(reason)
+    && (waive instanceof Set ? waive.has(reason) : Array.isArray(waive) && waive.includes(reason));
   // Normalize one character past the cap so an over-long body is rejected
   // rather than silently truncated into a different message than requested.
   const body = normalizeChatText(text, MAX_MESSAGE_TEXT + 1);
@@ -688,17 +704,17 @@ export function decideChatSend(value, rawSnapshot, text, now = Date.now()) {
   if (session.userInput?.required || snapshot.userInput?.required) {
     return { ok: false, reason: 'user_input_required', error: 'Pause the chat until the user completes the required verification or decision.' };
   }
-  if (session.state === 'issue_resolved' || session.state === 'stopped') {
+  if ((session.state === 'issue_resolved' || session.state === 'stopped') && !waived('terminal_session')) {
     return { ok: false, reason: 'terminal_session', error: 'The chat session is terminal; do not send another message.' };
   }
   if (!session.threadKey || !snapshot.threadKey || session.threadKey !== snapshot.threadKey) {
     return { ok: false, reason: 'thread_unverified', error: 'The active conversation is not bound to the stored chat session.' };
   }
-  if (snapshot.nativeMessageBaselineComplete === false) {
+  if (snapshot.nativeMessageBaselineComplete === false && !waived('native_baseline_unverified')) {
     return { ok: false, reason: 'native_baseline_unverified',
       error: 'The latest mounted native message IDs or pending statuses are not verified. Observe the current conversation before sending.' };
   }
-  if (snapshot.composer.available !== true) {
+  if (snapshot.composer.available !== true && !waived('composer_unavailable')) {
     return { ok: false, reason: 'composer_unavailable', error: 'The active conversation composer is not available.' };
   }
   if (snapshot.composer.empty !== true) {

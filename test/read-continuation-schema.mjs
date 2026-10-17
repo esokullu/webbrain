@@ -126,6 +126,8 @@ for (const browser of ['chrome', 'firefox']) {
 
   test(`${browser}: sampled or corrupted table JSON cannot complete a literal extraction`, async () => {
     const agent = new Agent({ getActive: () => null });
+    // Strict checks: the guard's refusal itself is under test.
+    agent.strictGuards = true;
     agent._effectiveRunMode = () => 'ask';
     const rows = Array.from({ length: 172 }, (_, index) => ({
       ID: `ID-${(index * 73) % 172}`, stock: index, unit_price_cents: index * 119,

@@ -201,14 +201,22 @@ export class FirefoxBidiClient {
     if (message.actionDeadlineAt && Date.now() >= message.actionDeadlineAt) return { success: false, dispatched: false, noDispatch: true, deadlineExpired: true };
     const metadata = { fieldMeta: prepared.fieldMeta, ...(message.params?.ref_id ? { ref_id: message.params.ref_id } : {}) };
     try {
-      return { ...metadata, ...await this.perform(tabId, action, {
+      const performed = await this.perform(tabId, action, {
         ...message.params,
         token, frameId: options?.frameId || 0,
         url: prepared.url,
         point: prepared.point || null,
         checkable: prepared.checkable || null,
         deadlineAt: message.actionDeadlineAt || 0,
-      }, { onDispatch }), ...(prepared.rect ? { rect: prepared.rect } : {}), ...(prepared._filePickerGuardId ? { _filePickerGuardId: prepared._filePickerGuardId } : {}) };
+      }, { onDispatch });
+      // The companion answers verified:false only from its settled readback
+      // after trusted typing went out. Its rich-text reader falls back to
+      // innerText, so the agent's policy decides whether that is a failure
+      // (Strict checks) or a noted, unverified success.
+      const unverified = (action === 'type' || action === 'field') && performed?.success === false
+        && performed.dispatched === true && performed.verified === false && !performed.unverified
+        ? { unverified: { reason: 'readback_mismatch', reader: 'unknown' } } : {};
+      return { ...metadata, ...performed, ...unverified, ...(prepared.rect ? { rect: prepared.rect } : {}), ...(prepared._filePickerGuardId ? { _filePickerGuardId: prepared._filePickerGuardId } : {}) };
     } catch (error) {
       if (error?.name === 'AbortError' && isBidiRequestNotSentError(error)) throw error;
       // A refusal before the native request was posted sent nothing. A

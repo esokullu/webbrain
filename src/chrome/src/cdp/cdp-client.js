@@ -168,10 +168,19 @@ async function pasteDraftJsText(el, text, clear, readDocument, options = {}) {
     const accepted = options.dispatch ? options.dispatch(invoke) : invoke();
     await wait(); await wait();
     if (expired()) return deadlineFailure();
-    if (!current() || active() !== el || !within(range())) return failure('The editor scope changed during plain-text paste.');
+    // From here the paste went out. `unverified` tells the agent the text
+    // was sent but its settled value is unconfirmed; its policy decides
+    // whether that is a failure (Strict checks) or a noted success.
+    if (!current() || active() !== el || !within(range())) return failure('The editor scope changed during plain-text paste.',
+      { unverified: { reason: 'readback_unavailable', reader: 'none' }, readbackExact: false });
     const value = readDocument(el), expected = (clear ? '' : previous) + text;
     if (accepted || typeof value !== 'string' || value !== expected) {
-      return failure('The complete settled DraftJS value could not be verified after plain-text paste. No additional text was sent.');
+      const readable = typeof value === 'string';
+      return failure('The complete settled DraftJS value could not be verified after plain-text paste. No additional text was sent.', {
+        unverified: { reason: !readable ? 'readback_unavailable' : value !== expected ? 'readback_mismatch' : 'paste_not_consumed',
+          reader: readable ? 'semantic' : 'none' },
+        readbackExact: readable,
+      });
     }
     return { success: true, verified: true, dispatched: true, outcomeUnknown: false,
       pageHandledPaste: true, method: 'contenteditable-page-handled-paste', value: value.slice(0, 100) };
@@ -6629,18 +6638,24 @@ export class CDPClient {
         clear,
         beforeSignature,
       });
+      // The text went out in both cases below; `unverified` lets the agent's
+      // policy report it as a failure (Strict checks) or a noted success.
+      // verifyTextEntry reads textContent for generic editors, which drops
+      // block line breaks, so its doubt is not proof of a wrong value.
       if (verified !== true) {
         return {
           success: false,
           dispatched: true,
           verified: false,
           mutationMayHaveOccurred: true,
+          unverified: { reason: 'readback_unproven', reader: 'unknown' },
           error: 'Text was inserted, but the complete settled field value could not be verified exactly.',
         };
       }
       if (finishInput && !await finishInput()) {
         return { success: false, dispatched: true, verified: false, outcomeUnknown: true,
           mutationMayHaveOccurred: true, retryable: false,
+          unverified: { reason: 'input_unconfirmed', reader: 'unknown' },
           error: 'The editor value was verified, but its owned input operation could not be completed. Re-observe before acting.' };
       }
       return {

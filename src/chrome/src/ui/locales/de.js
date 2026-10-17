@@ -699,6 +699,8 @@ export default {
   "st.display.clarify_timeout_policy.desc": "Was WebBrain tut, wenn Sie eine Frage nicht rechtzeitig beantworten. „Aufgabe abschließen“ wählt die Antwort, mit der die Aufgabe weiterläuft, damit nichts stehen bleibt, während Sie weg sind. „Auf Nummer sicher“ wählt die sichere Antwort und unternimmt ohne Sie keine folgenreichen Schritte. In beiden Fällen nehmen Fragen zum Löschen von Daten, zu Geldausgaben, Zugangsdaten, dem Empfänger einer Nachricht oder zum Veröffentlichen von etwas, das Sie nicht verlangt haben, immer die sichere Antwort, und WebBrains eigene Bestätigungskarten warten immer auf Sie.",
   "st.display.clarify_timeout_policy.finish": "Aufgabe abschließen",
   "st.display.clarify_timeout_policy.safe": "Auf Nummer sicher",
+  "st.display.strict_guards.label": "Strenge Prüfungen",
+  "st.display.strict_guards.desc": "Aus (Standard): Nur WebBrains Prüfungen zum Löschen von Daten, zu Geldausgaben, Zugangsdaten, dem falschen Empfänger und zum Veröffentlichen von etwas, das Sie nicht verlangt haben, können eine Aktion stoppen; die übrigen Prüfungen gehen als Hinweise an das Modell, damit Aufgaben nicht hängen bleiben. An: Jede Prüfung stoppt die Aktion, sobald sie sie nicht bestätigen kann, wie bisher.",
   'st.display.verbose.label': 'Ausführlicher Modus',
   'st.display.verbose.desc': 'Zeigt vollständige Tool-Call-Details, Argumente und rohes JSON-Ergebnis. Standardmäßig deaktiviert für ein aufgeräumteres Chat-Erlebnis.',
   'st.display.selection_shortcut.label': 'Auswahlverknüpfung',

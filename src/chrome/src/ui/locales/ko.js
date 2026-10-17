@@ -884,6 +884,8 @@ export default {
   "st.display.clarify_timeout_policy.desc": "질문에 제때 답하지 않았을 때 WebBrain이 하는 일입니다. ‘작업 완료’는 작업을 계속 진행하는 답을 골라 자리를 비운 동안에도 멈추지 않게 합니다. ‘안전하게’는 안전한 답을 고르고 사용자 없이 중요한 단계를 진행하지 않습니다. 어느 쪽이든 데이터 삭제, 결제, 자격 증명, 메시지 받는 사람, 요청하지 않은 게시에 관한 질문은 항상 안전한 답을 택하며, WebBrain 자체 확인 카드는 항상 사용자를 기다립니다.",
   "st.display.clarify_timeout_policy.finish": "작업 완료",
   "st.display.clarify_timeout_policy.safe": "안전하게",
+  "st.display.strict_guards.label": "엄격한 검사",
+  "st.display.strict_guards.desc": "끔(기본값): 데이터 삭제, 결제, 자격 증명, 잘못된 받는 사람, 요청하지 않은 게시에 관한 WebBrain 검사만 작업을 멈출 수 있습니다. 다른 검사는 모델에 메모로 전달되어 작업이 멈추지 않습니다. 켬: 이전처럼 확인할 수 없을 때마다 모든 검사가 작업을 멈춥니다.",
   'st.display.always_allow_api_mutations.label': "API 변경 항상 허용",
   'st.display.always_allow_api_mutations.desc': "대화마다 /allow-api를 입력하지 않아도 WebBrain이 fetch_url 또는 research_url을 통해 POST, PUT, PATCH, DELETE를 사용하도록 허용합니다. UI 우선 지침과 확인 검사는 계속 적용됩니다. 기본적으로 켜져 있습니다.",
   'st.display.api_mutation_observer.label': 'API 변경 관찰자',

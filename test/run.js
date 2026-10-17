@@ -5962,6 +5962,7 @@ test('model-callable chat tools bind the thread, send once, and require outgoing
     assert.equal(boundedView.newMessages.at(-1).truncated, true, `${label}: oversized chat delta was not marked truncated`);
     assert.equal(boundedView.deltaTruncated, true, `${label}: dropped chat delta entries were not disclosed`);
     const staleAgent = new AgentClass({});
+    staleAgent.strictGuards = true; // Strict checks: the guard's refusal itself is under test.
     staleAgent._persist = () => { throw new Error('stale preflight must not commit chat state'); };
     staleAgent._persistNow = async () => { throw new Error('stale preflight must not persist chat state'); };
     staleAgent.chatSessions.set(tabId, agent.chatSessions.get(tabId));
@@ -9436,6 +9437,8 @@ test('carousel slide count prefers an explicit total over the current index', ()
 test('Instagram carousel navigation enumerates 16 slides monotonically and records 15 hotel rows', async () => {
   for (const [label, AgentClass] of [['chrome', AgentCh], ['firefox', AgentFx]]) {
     const agent = new AgentClass({});
+    // Strict checks: the guard's refusal itself is under test.
+    agent.strictGuards = true;
     const tabId = label === 'chrome' ? 551 : 552;
     let currentUrl = 'https://www.instagram.com/p/ABC123/';
     const recordedRows = [];
@@ -11597,6 +11600,8 @@ test('whole-thread guard blocks done before an incomplete read can become a fina
 test('Ask returns a fixed limitation when Gmail expansion cannot be verified', async () => {
   for (const [label, AgentClass] of [['chrome', AgentCh], ['firefox', AgentFx]]) {
     const agent = new AgentClass({ getVisionProvider: async () => null });
+    // Strict checks: the guard's refusal itself is under test.
+    agent.strictGuards = true;
     const tabId = label === 'chrome' ? 52705 : 52706;
     let executed = false;
     agent._persist = () => { };
@@ -20795,6 +20800,7 @@ async function runCoordinateSemanticCase({
   privateRestoreAttempt = null,
   privateDraftPreparationAttempt = false,
   privateDraftBindingAttempt = null,
+  strictGuards = false,
 }) {
   const previousChrome = globalThis.chrome;
   const previousBrowser = globalThis.browser;
@@ -20827,6 +20833,7 @@ async function runCoordinateSemanticCase({
     : { ...(previousBrowser || {}), tabs: { ...(previousBrowser?.tabs || {}), ...tabs } };
   try {
     const agent = new AgentClass({ getVisionProvider: async () => null });
+    agent.strictGuards = strictGuards;
     const tabId = label === 'chrome' ? 8811 : 8812;
     agent._isPdfTab = async () => false;
     agent._richTextToolbarToolBlock = async () => null;
@@ -21088,6 +21095,8 @@ test('screenshot coordinate assertions reject an unrelated language selector wit
       globalKey,
       expectedName: 'Next',
       expectedRole: 'button',
+      // Strict checks: the guard's refusal itself is under test.
+      strictGuards: true,
       resolverResponse: {
         success: true,
         semanticTarget: {
@@ -28365,6 +28374,8 @@ test('completion recovery keeps scoped observations read-only and target-specifi
     ['firefox', AgentFx, CompletionInvariantFx, getToolsForModeFx],
   ]) {
     const agent = new AgentClass({});
+    // Strict checks: the guard's refusal itself is under test.
+    agent.strictGuards = true;
     const tabId = label === 'chrome' ? 24852 : 24853;
     agent.conversationModes.set(tabId, 'act');
     const state = invariant.recordCompletionToolResult(
@@ -28799,7 +28810,9 @@ test('field tool contracts advertise settled verification and recovery', () => {
     const typeText = tools.find(tool => tool.function.name === 'type_text');
     assert.match(typeAx.function.description, /settle[\s\S]*verified:true/i, `${label}: type_ax verification contract missing`);
     assert.match(setField.function.description, /verify the exact settled value/i, `${label}: set_field exact verification contract missing`);
-    assert.match(setField.function.description, /recoveryRequired:"verify_or_restore_field"/, `${label}: set_field recovery contract missing`);
+    // Default mode reports an unconfirmed readback as verified:false with a
+    // note instead of a recovery lock (Strict checks keep recoveryRequired).
+    assert.match(setField.function.description, /exact readback fails, the result reports verified:false and says what to check/, `${label}: set_field recovery contract missing`);
     for (const tool of [typeAx, setField, typeText]) {
       assert.equal(tool.function.parameters.properties.lang, undefined, `${label}: ${tool.function.name} still exposes a hidden language transform`);
     }
@@ -50992,7 +51005,10 @@ test('agent propagates status-bearing terminal tool-batch returns to callers', (
     ['firefox', 'src/firefox/src/agent/agent.js'],
   ]) {
     const source = fs.readFileSync(path.join(ROOT, rel), 'utf8');
-    const emissions = source.match(/onUpdate\('run_status', \{ status: batchResult\.status, message: batchResult\.value \}\);/g) || [];
+    // A batch status, or the end status of a done downgraded to partial.
+    const statuses = source.match(/const endStatus = batchResult\.status \|\| batchResult\.endStatus;/g) || [];
+    const emissions = source.match(/onUpdate\('run_status', \{ status: endStatus, message: batchResult\.value \}\);/g) || [];
+    assert.equal(statuses.length, 2, `${label}: streaming and non-streaming terminal returns must both read the run status`);
     assert.equal(emissions.length, 2, `${label}: streaming and non-streaming terminal returns must both propagate run status`);
   }
 });
@@ -56230,6 +56246,8 @@ test('terminal schedule_resume settles its parent checkpoint only after durable 
 test('schedule_resume pauses unfinished chat work without running success completion guards', async () => {
   for (const [label, AgentClass, SchedulerMod] of [['chrome', AgentCh, SchedulerCh], ['firefox', AgentFx, SchedulerFx]]) {
     const h = makeResumeBatchHarness(AgentClass, SchedulerMod);
+    // Strict checks: the guard's refusal itself is under test.
+    h.agent.strictGuards = true;
     const guard = h.agent._startPlanExecutionGuard(77, 'act', {
       requestKind: 'execute', requiresStateChange: true, requiresSubmission: true,
     });
@@ -60906,6 +60924,7 @@ test('Chrome focused replacement blocks when clear is unproven and propagates fi
     cdpClientCh.sendCommand = async () => ({});
     cdpClientCh.verifyTextEntry = async () => null;
     const agent = new AgentCh({});
+    agent.strictGuards = true; // Strict checks: the guard's refusal itself is under test.
     const uncleared = await agent.executeTool(42, 'type_text', { text: 'hello', clear: true });
     assert.equal(uncleared.success, false);
     assert.equal(uncleared.verified, false);
@@ -79708,6 +79727,8 @@ test('form validation classifier surfaces native and custom submission errors', 
 test('unchanged failed-submit state permits one verify_form then directs checkbox recovery', () => {
   for (const AgentClass of [AgentCh, AgentFx]) {
     const agent = new AgentClass({ getVisionProvider: async () => null });
+    // Strict checks: the guard's refusal itself is under test.
+    agent.strictGuards = true;
     const tabId = 5120;
     const states = [{
       frameId: 0,
@@ -80874,6 +80895,8 @@ test('agent returns form validation messages and blocks unchanged repeat submits
 
   for (const AgentClass of [AgentCh, AgentFx]) {
     const agent = new AgentClass({ getVisionProvider: async () => null });
+    // Strict checks: the guard's refusal itself is under test.
+    agent.strictGuards = true;
     const tabId = 5117;
     let executions = 0;
     let prompts = 0;
@@ -82873,6 +82896,8 @@ test('Chrome controlled-field fallback skips retry when the original dispatch is
     };
 
     const agent = new AgentCh({});
+
+    agent.strictGuards = true; // Strict checks: the guard's refusal itself is under test.
     const result = await agent._maybeFallbackFieldWithCdp(
       42,
       'set_field',
@@ -82957,6 +82982,8 @@ test('Chrome controlled-field fallback recovers exactly once and never submits a
     };
 
     const agent = new AgentCh({});
+
+    agent.strictGuards = true; // Strict checks: the guard's refusal itself is under test.
     const recovered = await agent._maybeFallbackFieldWithCdp(
       42,
       'set_field',
@@ -83157,6 +83184,7 @@ test('uncertain text mutation debt blocks blind retries until the document chang
     globalThis.browser = { tabs };
     for (const [label, AgentClass] of [['chrome', AgentCh], ['firefox', AgentFx]]) {
       const agent = new AgentClass({});
+      agent.strictGuards = true; // Strict checks: the guard's refusal itself is under test.
       const tabId = label === 'chrome' ? 9441 : 9442;
       agent._lastAxScopes.set(tabId, {
         documentToken: 'doc-one',
@@ -83285,6 +83313,7 @@ test('an exact same-field readback resolves uncertain replacement without dispat
       ['firefox', AgentFx, 9444],
     ]) {
       const agent = new AgentClass({});
+      agent.strictGuards = true; // Strict checks: the guard's refusal itself is under test.
       agent._lastAxScopes.set(tabId, {
         documentToken: 'doc-readback',
         pageUrl: 'https://github.com/example/repo/edit/main/docs/plan.md',
@@ -83325,6 +83354,7 @@ test('an uncertain contenteditable write invalidates stale proof across locator 
     ['firefox', AgentFx, 9448],
   ]) {
     const agent = new AgentClass({});
+    agent.strictGuards = true; // Strict checks: the guard's refusal itself is under test.
     const pageUrl = 'https://github.com/example/repo/edit/main/docs/plan.md';
     agent._lastAxScopes.set(tabId, { documentToken: 'doc', pageUrl });
     agent._verifiedTextReplacements.set(tabId, new Map([
@@ -83358,6 +83388,7 @@ test('uncertain text mutation debt survives same-document route changes and back
     ['firefox', AgentFx, 9454],
   ]) {
     const agent = new AgentClass({});
+    agent.strictGuards = true; // Strict checks: the guard's refusal itself is under test.
     const pageUrl = 'https://github.com/example/repo/edit/main/docs/plan.md';
     agent._lastAxScopes.set(tabId, { documentToken: 'doc-route', pageUrl });
     const uncertain = await agent._finalizeTextMutationResult(
@@ -83410,6 +83441,7 @@ test('uncertain text mutation recovery requires same-field identity', async () =
       ['firefox', AgentFx, 9456],
     ]) {
       const agent = new AgentClass({});
+      agent.strictGuards = true; // Strict checks: the guard's refusal itself is under test.
       agent._lastAxScopes.set(tabId, {
         documentToken: 'doc-identity',
         pageUrl: 'https://github.com/example/repo/edit/main/docs/plan.md',
@@ -83998,6 +84030,9 @@ test('GitHub edit-file workflow verifies the exact committed raw blob', async ()
       ['firefox', AgentFx, resolveAdapterWorkflowJobFx, true],
     ]) {
       const agent = new AgentClass({});
+      // Strict checks: the guard's refusal itself is under test (the
+      // conditional variants expect the re-arm to defer the editor action).
+      agent.strictGuards = conditional;
       const tabId = label === 'chrome' ? 9445 : 9446;
       // Proofs bind to the active task token, minted here as _startTraceRun does.
       agent._taskTokens.set(tabId, `task-blob-${tabId}`);
@@ -84344,6 +84379,8 @@ test('GitHub edit-file workflow blocks compound submit actions on existing bindi
     ['firefox', AgentFx, 9462],
   ]) {
     const agent = new AgentClass({});
+    // Strict checks: the guard's refusal itself is under test.
+    agent.strictGuards = true;
     agent._planExecutionGuards.set(tabId, {
       enabled: true,
       siteWorkflow: { adapterName: 'github', job: { id: 'edit-file-and-commit' } },
@@ -85298,6 +85335,7 @@ test('uncertain selector writes capture live metadata for distinctness', async (
       ['firefox', AgentFx, 9527],
     ]) {
       const agent = new AgentClass({});
+      agent.strictGuards = true; // Strict checks: the guard's refusal itself is under test.
       agent._lastAxScopes.set(tabId, { documentToken: 'doc-multi', pageUrl });
       const tabs = {
         captureMeta: false,
@@ -85369,6 +85407,7 @@ test('selector writes to proven-distinct fields bypass unrelated debt', async ()
       ['firefox', AgentFx, 9501, 9503],
     ]) {
       const agent = new AgentClass({});
+      agent.strictGuards = true; // Strict checks: the guard's refusal itself is under test.
       agent._lastAxScopes.set(tabId, { documentToken: 'doc-multi', pageUrl });
       const tabs = {
         async sendMessage(_tabId, message) {
@@ -85401,6 +85440,7 @@ test('selector writes to proven-distinct fields bypass unrelated debt', async ()
         `${label}: distinct-field dispatch dropped the original debt`);
       // Shared identity field: fail-closed, still blocked.
       const control = new AgentClass({});
+      control.strictGuards = true; // Strict checks: the guard's refusal itself is under test.
       control._lastAxScopes.set(controlTabId, { documentToken: 'doc-multi', pageUrl });
       await control._finalizeTextMutationResult(
         controlTabId, 'type_text', { selector: '#a', text: 'alpha', clear: true },
@@ -85432,6 +85472,7 @@ test('distinctness escape covers focused and mixed-locator debts', async () => {
       ['firefox', AgentFx, 9531, 9533],
     ]) {
       const agent = new AgentClass({});
+      agent.strictGuards = true; // Strict checks: the guard's refusal itself is under test.
       agent._lastAxScopes.set(tabId, { documentToken: 'doc-cross', pageUrl });
       const tabs = {
         async sendMessage(_tabId, message) {
@@ -85470,6 +85511,7 @@ test('distinctness escape covers focused and mixed-locator debts', async () => {
         `${label}: distinct-field dispatch dropped the focused debt`);
       // Reverse direction: selector debt, focused retry on a distinct field.
       const control = new AgentClass({});
+      control.strictGuards = true; // Strict checks: the guard's refusal itself is under test.
       control._lastAxScopes.set(controlTabId, { documentToken: 'doc-cross', pageUrl });
       const controlTabs = {
         async sendMessage(_tabId, message) {
@@ -85541,6 +85583,7 @@ test('focused field_value_digest and live scope cover selectorless writes', asyn
       liveDoc.documentToken = 'doc-old';
       liveDoc.refScopeUrl = 'https://example.test/form';
       const agent = new AgentClass({});
+      agent.strictGuards = true; // Strict checks: the guard's refusal itself is under test.
       agent._lastAxScopes.set(tabId, { documentToken: 'doc-old', pageUrl: 'https://example.test/form' });
       await agent._finalizeTextMutationResult(
         tabId, 'type_text', { selector: '#field', text: 'draft', clear: true },
@@ -85575,6 +85618,7 @@ test('uncertain write after navigation records live scoped debt', async () => {
       ['firefox', AgentFx, 9491],
     ]) {
       const agent = new AgentClass({});
+      agent.strictGuards = true; // Strict checks: the guard's refusal itself is under test.
       // Cached scope predates a full navigation no AX read ever observed;
       // the live page is already the new document.
       agent._lastAxScopes.set(tabId, { documentToken: 'doc-old', pageUrl: 'https://example.test/form' });
@@ -85624,6 +85668,7 @@ test('focused uncertain writes recover on exact same-field readback', async () =
       ['firefox', AgentFx, 9519, 9521],
     ]) {
       const agent = new AgentClass({});
+      agent.strictGuards = true; // Strict checks: the guard's refusal itself is under test.
       agent._lastAxScopes.set(tabId, { documentToken: 'doc-focus', pageUrl: 'https://example.test/form' });
       // Commit-proof workflow so recovery mints a full readback record.
       agent._planExecutionGuards.set(tabId, {
@@ -85671,6 +85716,7 @@ test('focused uncertain writes recover on exact same-field readback', async () =
       // Control: record-time focus already lost (identity capture fails), so
       // even a later exact readback cannot prove the same field.
       const control = new AgentClass({});
+      control.strictGuards = true; // Strict checks: the guard's refusal itself is under test.
       control._lastAxScopes.set(controlTabId, { documentToken: 'doc-focus', pageUrl: 'https://example.test/form' });
       const controlTabs = {
         async sendMessage(_tabId, message) {
@@ -85863,6 +85909,7 @@ test('first live token bootstraps tokenless debt by URL', async () => {
       globalThis.chrome = { tabs: { async sendMessage() { return { success: false }; } } };
       globalThis.browser = globalThis.chrome;
       const agent = new AgentClass({});
+      agent.strictGuards = true; // Strict checks: the guard's refusal itself is under test.
       agent._currentUrl = async () => oldUrl;
       await agent._finalizeTextMutationResult(
         tabId, 'type_text', { selector: '#field', text: 'draft', clear: true },
@@ -85892,6 +85939,7 @@ test('first live token bootstraps tokenless debt by URL', async () => {
       globalThis.chrome = { tabs: { async sendMessage() { return { success: false }; } } };
       globalThis.browser = globalThis.chrome;
       const samePage = new AgentClass({});
+      samePage.strictGuards = true; // Strict checks: the guard's refusal itself is under test.
       samePage._currentUrl = async () => oldUrl;
       await samePage._finalizeTextMutationResult(
         controlTabId, 'type_text', { selector: '#field', text: 'draft', clear: true },
@@ -85926,6 +85974,7 @@ test('clearConversation preserves document-scoped mutation debt', async () => {
     ['firefox', AgentFx, 9525],
   ]) {
     const agent = new AgentClass({});
+    agent.strictGuards = true; // Strict checks: the guard's refusal itself is under test.
     agent._lastAxScopes.set(tabId, { documentToken: 'doc-conv', pageUrl: 'https://example.test/form' });
     await agent._finalizeTextMutationResult(
       tabId, 'type_text', { selector: '#field', text: 'maybe landed', clear: true },
@@ -85974,6 +86023,7 @@ test('clearConversation retains scope for first-try debt recovery', async () => 
       ['firefox', AgentFx, 9541],
     ]) {
       const agent = new AgentClass({});
+      agent.strictGuards = true; // Strict checks: the guard's refusal itself is under test.
       agent._lastAxScopes.set(tabId, { documentToken: 'doc-scope', pageUrl: 'https://example.test/form' });
       await agent._finalizeTextMutationResult(
         tabId, 'set_field', { ref_id: 'ref_a', text: 'hello' },
@@ -86398,6 +86448,7 @@ test('Firefox selector debt recovers on exact digest readback', async () => {
     globalThis.chrome = { tabs };
     globalThis.browser = { tabs };
     const agent = new AgentFx({});
+    agent.strictGuards = true; // Strict checks: the guard's refusal itself is under test.
     const tabId = 9465;
     agent._lastAxScopes.set(tabId, {
       documentToken: 'doc-fx-selector',
@@ -86495,6 +86546,7 @@ test('navigation scopes stale text-mutation debt to its document', async () => {
       liveDoc.documentToken = 'doc-old';
       liveDoc.refScopeUrl = 'https://example.test/form';
       const agent = new AgentClass({});
+      agent.strictGuards = true; // Strict checks: the guard's refusal itself is under test.
       agent._lastAxScopes.set(tabId, {
         documentToken: 'doc-old',
         pageUrl: 'https://example.test/form',
@@ -90680,6 +90732,8 @@ test('non-stream and stream runs keep forced done active across empty and reject
       getActive: () => provider,
       getVisionProvider: async () => null,
     });
+    // Strict checks: the guard's refusal itself is under test.
+    agent.strictGuards = true;
     const tabId = streaming ? 24812 : 24811;
     agent.planBeforeAct = false;
     agent._maybeRunPlannerGate = async () => ({
@@ -90832,6 +90886,8 @@ test('non-stream and stream runs expose failure completion after a verifier make
         getActive: () => provider,
         getVisionProvider: async () => null,
       });
+      // Strict checks: the guard's refusal itself is under test.
+      agent.strictGuards = true;
       const tabId = streaming ? 24816 : 24815;
       agent.planBeforeAct = false;
       agent._maybeRunPlannerGate = async () => ({
@@ -90985,6 +91041,8 @@ test('non-stream and stream runs release forced done when progress work remains'
         getActive: () => provider,
         getVisionProvider: async () => null,
       });
+      // Strict checks: the guard's refusal itself is under test.
+      agent.strictGuards = true;
       const tabId = streaming ? 24814 : 24813;
       agent.planBeforeAct = false;
       agent._maybeRunPlannerGate = async () => ({
@@ -91108,6 +91166,8 @@ test('navigation auto-screenshot verification turns terminal prose into a forced
       getActive: () => provider,
       getVisionProvider: async () => null,
     });
+    // Strict checks: the guard's refusal itself is under test.
+    agent.strictGuards = true;
     const tabId = 24830 + browserIndex;
     agent.planBeforeAct = false;
     agent._maybeRunPlannerGate = async () => ({
@@ -91261,6 +91321,8 @@ test('repeated plain finals stop after two completion-protocol recovery turns wi
           getActive: () => provider,
           getVisionProvider: async () => null,
         });
+        // Strict checks: the guard's refusal itself is under test.
+        agent.strictGuards = true;
         const tabId = 24820 + (streaming ? 100 : 0) + (verified ? 10 : 0) + browserIndex;
         agent.planBeforeAct = false;
         agent._maybeRunPlannerGate = async () => ({
@@ -91384,6 +91446,8 @@ test('repeated plain finals at the step limit emit partial instead of max_steps'
         getActive: () => provider,
         getVisionProvider: async () => null,
       });
+      // Strict checks: the guard's refusal itself is under test.
+      agent.strictGuards = true;
       const tabId = 24900 + (streaming ? 100 : 0) + browserIndex;
       agent.planBeforeAct = false;
       agent._maybeRunPlannerGate = async () => ({
@@ -92138,6 +92202,8 @@ test('decision completion recognizes published Reddit content while preserving v
       cdpClientCh.evaluate = async () => ({ result: { value: page } });
       const provider = { model: 'test-model', supportsVision: false, config: { category: 'local' } };
       const agent = new AgentClass({ getActive: () => provider, getVisionProvider: async () => null });
+      // Strict checks: the guard's refusal itself is under test.
+      agent.strictGuards = true;
       agent.conversationModes.set(tabId, 'act');
       agent.autoScreenshot = 'off';
       agent._persist = () => {};
@@ -92307,6 +92373,8 @@ test('decision completion releases forced done into read-only recovery and then 
     };
     else provider.chat = async (_messages, options) => next(options);
     const agent = new AgentClass({ getActive: () => provider, getVisionProvider: async () => null });
+    // Strict checks: the guard's refusal itself is under test.
+    agent.strictGuards = true;
     const tabId = 24960 + (streaming ? 1 : 0);
     agent.planBeforeAct = false;
     agent._maybeRunPlannerGate = async () => ({ proceed: true, requestKind: 'execute', requiresStateChange: true });
@@ -93317,6 +93385,8 @@ test('structured blockers may describe future requirements without becoming plan
 test('false Ask-mode completions receive a focused Act recovery and honest terminal evidence', () => {
   for (const [index, AgentClass] of [AgentCh, AgentFx].entries()) {
     const agent = new AgentClass({});
+    // Strict checks: the guard's refusal itself is under test.
+    agent.strictGuards = true;
     const tabId = 8625 + index;
     agent._startPlanExecutionGuard(tabId, 'act', {
       requestKind: 'execute',
@@ -94100,6 +94170,8 @@ test('future-promise prose is read by the completion judge, not by words', () =>
 test('completion words do not mask mixed progress plus plan terminals', () => {
   for (const [index, AgentClass] of [AgentCh, AgentFx].entries()) {
     const agent = new AgentClass({});
+    // Strict checks: the guard's refusal itself is under test.
+    agent.strictGuards = true;
     const tabId = 8633 + index;
     agent._startPlanExecutionGuard(tabId, 'act', {
       requestKind: 'execute',
@@ -95073,6 +95145,10 @@ test('conditional resumed GitHub repair re-arms commit guards before dispatch an
       const runUrl = 'https://github.com/Example/Repo/actions/runs/123';
       const editUrl = `https://github.com/${variant === 'other_repository' ? 'Other/Repo' : 'Example/Repo'}/${variant === 'new_file' ? 'new' : 'edit'}/main/.github/workflows/main.yml`;
       const agent = new AgentClass({ getActive: () => ({ supportsVision: false }), getVisionProvider: async () => null });
+      // Strict checks: the guard's refusal itself is under test. Only the
+      // re-arm is a quality guard; every other variant is refused by the
+      // unrequested-publication guard, which must hold with Strict checks off.
+      agent.strictGuards = variant === 'authorized';
       configurePlanOnlyGuardAgent(agent, tabId);
       agent.conversations.get(tabId).push({ role: 'user', content: 'Check CI; if it failed, fix the workflow and commit.' });
       agent._currentUrl = async () => editUrl;
@@ -95131,6 +95207,8 @@ test('conditional resumed GitHub repair re-arms commit guards before dispatch an
 test('planned scheduling requires successful evidence from the matching scheduling tool', () => {
   for (const [index, AgentClass] of [AgentCh, AgentFx].entries()) {
     const agent = new AgentClass({});
+    // Strict checks: the guard's refusal itself is under test.
+    agent.strictGuards = true;
     const missingTabId = 8570 + index;
     const missingState = agent._startPlanExecutionGuard(missingTabId, 'act', {
       requestKind: 'execute',
@@ -95491,6 +95569,8 @@ test('only explicitly requested app-state tools count as execution evidence', ()
 test('repeated plan failure distinguishes read-only progress from possible side effects', () => {
   for (const [index, AgentClass] of [AgentCh, AgentFx].entries()) {
     const agent = new AgentClass({});
+    // Strict checks: the guard's refusal itself is under test.
+    agent.strictGuards = true;
     const readTabId = 8618 + index;
     agent._startPlanExecutionGuard(readTabId, 'act', {
       requestKind: 'execute',
@@ -101804,6 +101884,8 @@ test('generic submission evidence failure does not claim that a site workflow jo
   for (const [index, AgentClass] of [AgentCh, AgentFx].entries()) {
     const tabId = 8965 + index;
     const agent = new AgentClass({});
+    // Strict checks: the guard's refusal itself is under test.
+    agent.strictGuards = true;
     const guard = agent._startPlanExecutionGuard(tabId, 'act', {
       requestKind: 'execute',
       requiresStateChange: true,

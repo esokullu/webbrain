@@ -14,7 +14,7 @@ function handler(build) {
   return new AsyncFunction('tabId', 'name', 'args', 'onUpdate', 'executionContext', 'chrome', 'browser', source.slice(start, end));
 }
 
-function setup(build, runResult, { binding = null, mseBytes = 100 } = {}) {
+function setup(build, runResult, { binding = null, mseBytes = 100, strictGuards = true } = {}) {
   const effects = { run: 0, mseSave: 0, visionRoute: 0, visionSave: 0, opts: null };
   const downloader = {
     async run(opts) { effects.run++; effects.opts = opts; return runResult; },
@@ -40,6 +40,14 @@ function setup(build, runResult, { binding = null, mseBytes = 100 } = {}) {
     _activeProvider: () => ({}), providerManager: { getActive: () => ({}) },
     async _resolveVisionRoute() { effects.visionRoute++; return { provider: {} }; },
     async _saveVisibleMediaCrop() { effects.visionSave++; return { success: true, completedCount: 1 }; },
+    // Strict checks: the guard's refusal itself is under test. (Default
+    // advice is covered with the real agent in guard-advisory-actions.mjs.)
+    strictGuards,
+    _guardAdvisesFor(advisories, guard, note) {
+      if (this.strictGuards) return false;
+      advisories?.push?.({ guard, note });
+      return true;
+    },
   };
   return { effects, execute: args => handler(build).call(agent, 1, 'download_social_media', args, () => {},
     binding ? { _expectedMediaBinding: binding } : {}, api, api) };

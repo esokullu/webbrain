@@ -533,8 +533,9 @@ async function loadResearchEscalation() {
 const researchEscalationReady = loadResearchEscalation().catch(() => {});
 
 async function loadStrictSecretMode() {
-  const stored = await browser.storage.local.get('strictSecretMode').catch(() => ({}));
+  const stored = await browser.storage.local.get(['strictSecretMode', 'strictGuards']).catch(() => ({}));
   agent.strictSecretMode = stored?.strictSecretMode === true;
+  agent.strictGuards = stored?.strictGuards === true;
 }
 const strictSecretModeReady = loadStrictSecretMode().catch(() => {});
 
@@ -1207,6 +1208,9 @@ browser.storage.onChanged.addListener((changes, areaName) => {
   if (areaName === 'local' && changes.browserBatchEnabled) {
     browserBatchSettingsRevision++;
     agent.setBrowserBatchEnabled(changes.browserBatchEnabled.newValue !== false);
+  }
+  if (changes.strictGuards) {
+    agent.strictGuards = changes.strictGuards.newValue === true;
   }
   if (changes.strictSecretMode) {
     agent.strictSecretMode = changes.strictSecretMode.newValue === true;

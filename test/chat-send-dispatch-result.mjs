@@ -11,6 +11,7 @@ for (const build of ['chrome', 'firefox']) {
   const { Agent } = await import(`../src/${build}/src/agent/agent.js`);
   test(`${build}: structured send preserves an actual nested rich-text recovery block without inventing a send`, async () => {
     const agent = new Agent({}), tabId = 755;
+    agent.strictGuards = true; // Strict checks: the guard's refusal itself is under test.
     const observed = { success: true, url, threadKey, composer: { available: true, empty: true, ref: 'ref_composer' },
       nativeChatMessageBaseline: { threadKey, coverage: 'mounted_native_id_floor', complete: true,
         messageIds: ['telegram:k:123456:0:1'] },

@@ -260,6 +260,19 @@ are separate prompts: they never time out.
 
 The logic lives in `src/*/src/agent/clarify-timeout.js`.
 
+## Guards
+
+WebBrain's own checks on model actions are registered in
+`src/*/src/agent/guard-policy.js`. Only five classes may refuse an action
+outright: the wrong recipient, deleting data, money, credentials, and
+publishing or sending something the user did not ask for. Verification,
+readback, evidence and completion checks leave a note for the model instead,
+and a completion accepted over them tells the user what was not verified.
+Permission gates, host and frame boundaries, CAPTCHA and access walls, and
+loop budgets are not guards and keep their behavior. Settings → General →
+**Strict checks** makes every verification check block again.
+`docs/guards.md` lists what still refuses and the rule for adding a guard.
+
 ## `/allow-api` Flag
 
 Set per-conversation via the `/allow-api` slash command in the side panel, or

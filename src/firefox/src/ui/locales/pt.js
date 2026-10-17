@@ -700,6 +700,8 @@ export default {
   "st.display.clarify_timeout_policy.desc": "O que o WebBrain faz quando você não responde a uma pergunta a tempo. “Concluir a tarefa” escolhe a resposta que mantém a tarefa andando, para que ela não fique parada enquanto você está fora. “Jogar seguro” escolhe a resposta segura e não dá passos importantes sem você. Em qualquer caso, perguntas sobre excluir dados, gastar dinheiro, credenciais, quem recebe uma mensagem ou publicar algo que você não pediu sempre ficam com a resposta segura, e os cartões de confirmação do próprio WebBrain sempre esperam por você.",
   "st.display.clarify_timeout_policy.finish": "Concluir a tarefa",
   "st.display.clarify_timeout_policy.safe": "Jogar seguro",
+  "st.display.strict_guards.label": "Verificações rigorosas",
+  "st.display.strict_guards.desc": "Desligado (padrão): só as verificações do WebBrain sobre excluir dados, gastar dinheiro, credenciais, destinatário errado e publicar algo que você não pediu podem interromper uma ação; as demais são passadas ao modelo como notas, para que as tarefas não travem. Ligado: cada verificação interrompe a ação sempre que não consegue confirmá-la, como antes.",
   'st.display.verbose.label': "Modo detalhado",
   'st.display.verbose.desc': "Mostre detalhes completos da chamada da ferramenta, argumentos e resultados JSON brutos. Desativado por padrão para uma experiência de bate-papo mais limpa.",
   'st.display.selection_shortcut.label': "Atalho de seleção",

@@ -58,7 +58,10 @@ function finish(a, tab) { a._finishSteeringRun(tab); a._releaseRunEntry(tab); }
 for (const build of ['chrome', 'firefox']) {
   const { Agent } = await import(new URL(`src/${build}/src/agent/agent.js`, ROOT));
   test(`${build}: missing current calculation attempts exclude premature completion`, async () => {
-    const tab = nextTab++, a = setup(Agent, async () => ({ content: '' })); await begin(a, tab);
+    const tab = nextTab++, a = setup(Agent, async () => ({ content: '' }));
+    // Strict checks: the guard's refusal itself is under test.
+    a.strictGuards = true;
+    await begin(a, tab);
     try { const policy = a._pureCalculationToolPolicy(tab); assert.deepEqual(policy.names, ['calculate', 'done']);
       assert.deepEqual(policy.toolChoice, { type: 'function', function: { name: 'calculate' } });
       for (const outcome of ['success', 'partial', 'failed']) { const blocked = a._pureCalculationToolBlock(tab, 'done', { outcome, summary: answer });
@@ -133,6 +136,8 @@ for (const build of ['chrome', 'firefox']) {
         if (n === 7) { assert.deepEqual(opts.toolChoice, { type: 'function', function: { name: 'calculate' } }); return call('new-calculation', 'calculate', { expression }); }
         return call('new-done', 'done', { summary: answer, outcome: 'success' });
       });
+      // Strict checks: the guard's refusal itself is under test.
+      a.strictGuards = true;
       a._enrichUserMessageWithCurrentPage = async (_tab, _messages, content) => { bind(a, tab); return { role: 'user', content }; };
       a.executeTool = async (_tab, name, args) => {
         if (name === 'calculate') { calculations++; return a._executeToolImpl(_tab, name, args); }

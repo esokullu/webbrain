@@ -870,6 +870,8 @@ export default {
   "st.display.clarify_timeout_policy.desc": "Ano ang ginagawa ng WebBrain kapag hindi mo nasagot ang isang tanong sa oras. Pinipili ng “Tapusin ang gawain” ang sagot na nagpapatuloy sa gawain, para hindi ito tumigil habang wala ka. Pinipili ng “Mag-ingat” ang ligtas na sagot at hindi ito gagawa ng mahahalagang hakbang nang wala ka. Alinman dito, ang mga tanong tungkol sa pagbura ng data, paggastos ng pera, credentials, kung sino ang tatanggap ng mensahe, o pag-publish ng bagay na hindi mo hiningi ay laging kumukuha ng ligtas na sagot, at laging naghihintay sa iyo ang sariling confirmation cards ng WebBrain.",
   "st.display.clarify_timeout_policy.finish": "Tapusin ang gawain",
   "st.display.clarify_timeout_policy.safe": "Mag-ingat",
+  "st.display.strict_guards.label": "Mahigpit na pagsusuri",
+  "st.display.strict_guards.desc": "Naka-off (default): ang mga pagsusuri lang ng WebBrain tungkol sa pagbura ng data, paggastos ng pera, credentials, maling tatanggap, at pag-publish ng bagay na hindi mo hiningi ang makakapigil sa isang aksyon; ipinapasa sa model bilang mga tala ang iba pang pagsusuri para hindi maipit ang mga gawain. Naka-on: gaya ng dati, pinapahinto ng bawat pagsusuri ang aksyon kapag hindi nito ito makumpirma.",
   'st.display.always_allow_api_mutations.label': "Palaging payagan ang mga pagbabago sa API",
   'st.display.always_allow_api_mutations.desc': "Payagan ang WebBrain na gumamit ng POST, PUT, PATCH, at DELETE sa pamamagitan ng fetch_url o research_url nang hindi kailangan ang /allow-api sa bawat usapan. Nalalapat pa rin ang gabay na unahin ang UI at mga pagsusuri sa kumpirmasyon. Naka-on bilang default.",
   'st.display.api_mutation_observer.label': 'Tagamasid ng mutasyon ng API',

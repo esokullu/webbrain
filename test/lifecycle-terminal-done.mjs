@@ -194,6 +194,8 @@ for (const build of ['chrome', 'firefox']) {
           return call('done-' + requests, 'done', { summary: 'Posted and verified.', outcome: 'success' });
         });
         agent.maxSteps = 8;
+        // Strict checks: the guard's refusal itself is under test.
+        agent.strictGuards = true;
         agent._enrichUserMessageWithCurrentPage = async (_tab, _messages, content) => { send = bindMain(agent, tab); return { role: 'user', content }; };
         agent._completionDoneBlock = tabId => {
           if (blocked++) return null;

@@ -196,6 +196,10 @@ for (const [kind, engine, Agent] of [['chrome', chromium, ChromeAgent], ['firefo
         assert.equal(blocked?.recipientAuthorizationRequired, false);
         assert.equal(blocked.recipientConfirmation, undefined, 'A page without a verifiable recipient offers no card');
         assert.doesNotMatch(blocked.error, /clarify\(|Ask the user to authorize/);
+        // The recipient refusal above ran in the default mode. Strict checks
+        // only for the clarify refusal below: by default that quality check
+        // advises and the question would wait for an answer.
+        f.agent.strictGuards = true;
         const updates = [];
         const repeatedApproval = await f.agent._executeToolImpl(71, 'clarify', {
           purpose: 'message_recipient', question: 'Send to Anne instead?', options: ['Anne', 'Cancel'],
@@ -257,11 +261,16 @@ for (const [kind, engine, Agent] of [['chrome', chromium, ChromeAgent], ['firefo
         ['messageRecipientDispatchBinding', undefined, 'recipient_dispatch_binding_unavailable'],
       ]) {
         f.agent._messageRecipientContentProbe = async (...args) => ({ ...await realProbe(...args), [field]: value });
+        // The recipient refusal runs in the default mode; Strict checks only
+        // for the clarify refusal after it (a quality check that advises by
+        // default, when the question would wait for an answer).
+        f.agent.strictGuards = false;
         const { blocked } = await f.bind();
         assert.equal(blocked?.reasonCode, reasonCode, JSON.stringify(blocked));
         assert.equal(blocked.recipientAuthorizationRequired, false);
         assert.deepEqual(guard.approvedRecipients, ['anne']);
         assert.equal(blocked.recipientConfirmation, undefined, 'Missing delivery evidence is not put to the user again');
+        f.agent.strictGuards = true;
         const updates = [];
         const confirmation = await f.agent._executeToolImpl(71, 'clarify', {
           purpose: 'message_recipient', question: 'Send to Anne?', options: ['Anne', 'Cancel'],
@@ -271,6 +280,7 @@ for (const [kind, engine, Agent] of [['chrome', chromium, ChromeAgent], ['firefo
         assert.deepEqual(updates, []);
       }
       f.agent._messageRecipientContentProbe = realProbe;
+      f.agent.strictGuards = false;
       assert.equal((await f.bind()).blocked, null);
       assert.equal(guard.messageRecipientTechnicalBlock, undefined);
       assert.deepEqual(guard.approvedRecipients, ['anne']);

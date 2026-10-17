@@ -51,6 +51,8 @@ test('terminal message module stays byte-identical across builds', () => {
 
 function batchAgent(Agent, tabId) {
   const agent = new Agent({ getActive: () => ({ model: 'test', supportsTools: true }), getVisionProvider: async () => null });
+  // Strict checks: the guard's refusal itself is under test.
+  agent.strictGuards = true;
   agent.conversationIds.set(tabId, 'conv-terminal');
   agent.conversationModes.set(tabId, 'act');
   agent.conversations.set(tabId, [

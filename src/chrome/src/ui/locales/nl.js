@@ -679,6 +679,8 @@ export default {
   "st.display.clarify_timeout_policy.desc": "Wat WebBrain doet als u een vraag niet op tijd beantwoordt. ‘Taak afmaken’ kiest het antwoord waarmee de taak doorgaat, zodat niets blijft hangen terwijl u weg bent. ‘Op veilig spelen’ kiest het veilige antwoord en zet zonder u geen ingrijpende stappen. Hoe dan ook krijgen vragen over gegevens verwijderen, geld uitgeven, inloggegevens, wie een bericht ontvangt of iets publiceren waar u niet om vroeg altijd het veilige antwoord, en de eigen bevestigingskaarten van WebBrain wachten altijd op u.",
   "st.display.clarify_timeout_policy.finish": "Taak afmaken",
   "st.display.clarify_timeout_policy.safe": "Op veilig spelen",
+  "st.display.strict_guards.label": "Strenge controles",
+  "st.display.strict_guards.desc": "Uit (standaard): alleen de controles van WebBrain op gegevens verwijderen, geld uitgeven, inloggegevens, de verkeerde ontvanger en iets publiceren waar u niet om vroeg kunnen een actie stoppen; de andere controles gaan als notities naar het model, zodat taken niet vastlopen. Aan: elke controle stopt de actie zodra die haar niet kan bevestigen, zoals voorheen.",
   'st.display.verbose.label': 'Uitvoerige modus',
   'st.display.verbose.desc': 'Toon volledige toolaanroepdetails, argumenten en onbewerkte JSON-resultaten...',
   'st.display.selection_shortcut.label': 'Selectiesneltoets',

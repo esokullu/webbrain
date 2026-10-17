@@ -1064,17 +1064,20 @@ export function consumeCompletionObservationResult(state) {
   };
 }
 
-export function completionDoneBlock(state, toolName, args = {}) {
+// `skip`: reasons a caller already accepted over advice (Strict checks off,
+// see guard-policy.js), so the next invariant still gets its own note.
+export function completionDoneBlock(state, toolName, args = {}, { skip = null } = {}) {
+  const skipped = reason => skip?.has?.(reason) === true;
   const isDoneJson = toolName === 'done_json';
   const outcome = isDoneJson ? 'success' : normalizedOutcome(args?.outcome);
-  if (!isDoneJson && !outcome) {
+  if (!isDoneJson && !outcome && !skipped('missing_outcome')) {
     return {
       reason: 'missing_outcome',
       error: 'done requires outcome="success", "partial", or "failed". Use partial or failed when the task is not fully verified.',
     };
   }
   if (outcome === 'partial' || outcome === 'failed') return null;
-  if (state?.iframeFormVerificationDebt) {
+  if (state?.iframeFormVerificationDebt && !skipped('iframe_form_verification_required')) {
     const pendingCount = Array.isArray(state.iframeFormVerificationObligations)
       ? state.iframeFormVerificationObligations.length
       : 1;
@@ -1085,7 +1088,7 @@ export function completionDoneBlock(state, toolName, args = {}) {
       pendingTargetCount: pendingCount,
     };
   }
-  if (state?.verificationDebt) {
+  if (state?.verificationDebt && !skipped('verification_required')) {
     return {
       reason: 'verification_required',
       error: 'The latest consequential action has not been verified by a successful explicit page/state observation. Re-read the relevant state after the action, then call done again; otherwise finish with outcome="partial" or outcome="failed".'

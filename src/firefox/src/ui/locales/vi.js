@@ -700,6 +700,8 @@ export default {
   "st.display.clarify_timeout_policy.desc": "WebBrain làm gì khi bạn không trả lời câu hỏi kịp thời. “Hoàn thành tác vụ” chọn câu trả lời giúp tác vụ tiếp tục, để nó không bị dừng khi bạn vắng mặt. “Cẩn thận” chọn câu trả lời an toàn và không thực hiện bước quan trọng nào khi không có bạn. Dù chọn cách nào, các câu hỏi về xóa dữ liệu, chi tiền, thông tin đăng nhập, người nhận tin nhắn hoặc đăng thứ bạn không yêu cầu luôn nhận câu trả lời an toàn, và các thẻ xác nhận riêng của WebBrain luôn chờ bạn.",
   "st.display.clarify_timeout_policy.finish": "Hoàn thành tác vụ",
   "st.display.clarify_timeout_policy.safe": "Cẩn thận",
+  "st.display.strict_guards.label": "Kiểm tra nghiêm ngặt",
+  "st.display.strict_guards.desc": "Tắt (mặc định): chỉ các kiểm tra của WebBrain về xóa dữ liệu, chi tiền, thông tin đăng nhập, người nhận sai và đăng thứ bạn không yêu cầu mới có thể dừng một hành động; các kiểm tra khác được chuyển cho mô hình dưới dạng ghi chú để tác vụ không bị kẹt. Bật: như trước, mỗi kiểm tra dừng hành động bất cứ khi nào không xác nhận được.",
   'st.display.verbose.label': "Chế độ dài dòng",
   'st.display.verbose.desc': "Hiển thị đầy đủ chi tiết lệnh gọi công cụ, đối số và kết quả JSON thô. Tắt theo mặc định để có trải nghiệm trò chuyện rõ ràng hơn.",
   'st.display.selection_shortcut.label': "Phím tắt lựa chọn",

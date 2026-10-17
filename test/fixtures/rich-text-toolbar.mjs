@@ -166,6 +166,8 @@ export function registerRichTextToolbarFixtures({
 
       const AgentClass = browserKind === 'chrome' ? Agent : FirefoxAgent;
       const agent = new AgentClass({ getVisionProvider: async () => null });
+      // Strict checks: the guard's refusal itself is under test.
+      agent.strictGuards = true;
       const tabId = browserKind === 'chrome' ? 1901 : 1902;
       const wrongTarget = {};
       agent._applyRichTextToolbarWrongTarget(
@@ -1400,6 +1402,8 @@ export function registerRichTextToolbarFixtures({
       }
 
       const agent = new AgentClass({ getVisionProvider: async () => null });
+      // Strict checks: the guard's refusal itself is under test.
+      agent.strictGuards = true;
       const tabId = 77;
       const focusAgent = new AgentClass({ getVisionProvider: async () => null });
       const extensionGlobal = AgentClass === Agent ? 'chrome' : 'browser';

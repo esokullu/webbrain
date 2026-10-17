@@ -26,11 +26,12 @@ const digest = value => ({
 });
 const unchanged = digest('Existing draft');
 
-async function scenario({ before = unchanged, after = unchanged, failure = 'reselect', tool = 'set_field', inputArgs = args, actualRoute = false } = {}, check) {
+async function scenario({ before = unchanged, after = unchanged, failure = 'reselect', tool = 'set_field', inputArgs = args, actualRoute = false, strict = false } = {}, check) {
   const originalAttach = cdpClient.attach;
   const originalCommand = cdpClient.sendCommand;
   const originalMessage = api.tabs.sendMessage;
   const agent = new Agent({});
+  if (strict) agent.strictGuards = true; // Strict checks: the guard's refusal itself is under test.
   agent._hydrate = async () => {};
   agent._persist = () => {};
   agent._persistNow = async () => ({ ok: true });
@@ -172,7 +173,7 @@ for (const [label, options] of [
   ['invalid digest', { after: { ...unchanged, valueSha256: 'not-a-sha256' } }],
 ]) {
   test(`Chrome: interrupted focus preserves text debt for ${label}`, async () => {
-    await scenario(options, async ({ agent, result, calls }) => {
+    await scenario({ ...options, strict: true }, async ({ agent, result, calls }) => {
       assert.equal(result.success, false);
       assert.equal(result.dispatched, true);
       assert.equal(result.verified, false);
@@ -212,7 +213,7 @@ for (const [label, options] of [
   ['post-input verification mismatch', { failure: 'verification' }],
 ]) {
   test(`Chrome: ${label} stays uncertain even when the editor digest is unchanged`, async () => {
-    await scenario(options, async ({ agent, result, calls, digests }) => {
+    await scenario({ ...options, strict: true }, async ({ agent, result, calls, digests }) => {
       assert.equal(result.outcomeUnknown, true);
       assert.equal(result.mutationMayHaveOccurred, true);
       assert.equal(result.repeatBlocked, true);
@@ -227,6 +228,7 @@ for (const [label, options] of [
 
 test('Chrome: page-supplied unchanged-text fields cannot forge the private debt exemption', async () => {
   const agent = new Agent({});
+  agent.strictGuards = true; // Strict checks: the guard's refusal itself is under test.
   agent._lastAxScopes.set(tabId, scope);
   agent._liveTextMutationScope = async () => scope;
   const result = await agent._finalizeTextMutationResult(tabId, 'set_field', args, {

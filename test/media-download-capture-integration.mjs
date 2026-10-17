@@ -75,6 +75,8 @@ for (const [build, Agent, engine] of variants) {
     test(`${build}: actual model capture and handler bind the intended photo across ${change}`, async () => {
       const { browser, page, calls } = await fixture(build, engine);
       const tab = nextTab++, { agent, run } = agentWithRun(Agent, tab, page.url());
+      // Strict checks: the guard's refusal itself is under test.
+      if (change !== 'counter') agent.strictGuards = true;
       try {
         await agent._capturePageFeedbackModelState(tab);
         const expected = run.modelState.mediaBindings.image;
@@ -155,10 +157,12 @@ for (const change of ['counter', 'asset']) {
       });
       const ui = await context.newPage();
       await ui.goto(`chrome-extension://${extensionId}/src/ui/settings.html`);
-      const captured = await ui.evaluate(async () => {
+      const captured = await ui.evaluate(async strictGuards => {
         const { Agent } = await import(chrome.runtime.getURL('src/agent/agent.js'));
         const provider = { name: 'synthetic capture test', model: 'test', supportsVision: false };
         const agent = new Agent({ getActive: () => provider, getProvider: () => provider, getVisionProvider: async () => null });
+        // Strict checks: the guard's refusal itself is under test.
+        agent.strictGuards = strictGuards;
         agent._uncertainTextMutationBlock = async () => null;
         agent._richTextToolbarToolBlock = async () => null;
         agent._finalizeToolResultOnce = async (_tab, _name, _args, result) => result;
@@ -172,7 +176,7 @@ for (const change of ['counter', 'asset']) {
         await agent._capturePageFeedbackModelState(tab.id);
         return { binding: run.modelState.mediaBindings.image, diagnostic: run.modelState.mediaCapture,
           legacyAvailable: typeof chrome.tabs.executeScript, manifest: chrome.runtime.getManifest().manifest_version };
-      });
+      }, change !== 'counter');
       assert.equal(captured.manifest, 3);
       assert.equal(captured.legacyAvailable, 'undefined');
       assert.equal(captured.diagnostic.targets.image.status, 'bound');

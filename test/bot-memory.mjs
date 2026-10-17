@@ -153,6 +153,8 @@ for (const browser of ['chrome', 'firefox']) {
   });
   test(`${browser}: unverified actions block successful completion, but an honest partial outcome can finish`, async () => {
     const h = harness();
+    // Strict checks: the guard's refusal itself is under test.
+    h.agent.strictGuards = true;
     await h.agent.executeTool(7, 'click_ax', { ref_id: 'ref_5' });
     const done = await h.agent.executeTool(7, 'done', { outcome: 'success', summary: 'Sent.' });
     assert.equal(done.blockedDone, true);

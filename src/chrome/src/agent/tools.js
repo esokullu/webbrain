@@ -207,7 +207,7 @@ export const AGENT_TOOLS = [
     type: 'function',
     function: {
       name: 'set_field',
-      description: 'Focus + (optionally clear) + type text into a form field by ref_id, then verify the exact settled value. Prefer set_field({submit:true}) for search fields. Enter is sent only after verification succeeds. If dispatch occurred but exact readback fails, the result reports mutationMayHaveOccurred:true and recoveryRequired:"verify_or_restore_field"; do not switch typing tools or resend text blindly.',
+      description: 'Focus + (optionally clear) + type text into a form field by ref_id, then verify the exact settled value. Prefer set_field({submit:true}) for search fields. Enter is sent only after verification succeeds. If dispatch occurred but exact readback fails, the result reports verified:false and says what to check; do not switch typing tools or resend text blindly.',
       parameters: {
         type: 'object',
         properties: {

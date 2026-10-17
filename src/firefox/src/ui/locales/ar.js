@@ -870,6 +870,8 @@ export default {
   "st.display.clarify_timeout_policy.desc": "ماذا يفعل WebBrain عندما لا تجيب عن سؤال في الوقت المحدد. «إنهاء المهمة» يختار الإجابة التي تُبقي المهمة مستمرة، فلا تتوقف أثناء غيابك. «الحذر» يختار الإجابة الآمنة ولا يتخذ خطوات مؤثرة بدونك. في الحالتين، تأخذ الأسئلة المتعلقة بحذف البيانات أو إنفاق المال أو بيانات الاعتماد أو مستلم الرسالة أو نشر شيء لم تطلبه الإجابة الآمنة دائمًا، وتنتظرك بطاقات التأكيد الخاصة بـ WebBrain دائمًا.",
   "st.display.clarify_timeout_policy.finish": "إنهاء المهمة",
   "st.display.clarify_timeout_policy.safe": "الحذر",
+  "st.display.strict_guards.label": "فحوص صارمة",
+  "st.display.strict_guards.desc": "إيقاف (الافتراضي): فقط فحوص WebBrain المتعلقة بحذف البيانات وإنفاق المال وبيانات الاعتماد والمستلم الخاطئ ونشر شيء لم تطلبه يمكنها إيقاف إجراء؛ وتُمرَّر فحوصه الأخرى إلى النموذج كملاحظات حتى لا تتعطل المهام. تشغيل: يوقف كل فحص الإجراء كلما تعذّر عليه تأكيده، كما في السابق.",
   'st.display.always_allow_api_mutations.label': "السماح دائمًا بتعديلات API",
   'st.display.always_allow_api_mutations.desc': "اسمح لـ WebBrain باستخدام POST وPUT وPATCH وDELETE عبر fetch_url أو research_url دون الحاجة إلى /allow-api في كل محادثة. تظل إرشادات أولوية واجهة المستخدم وفحوصات التأكيد سارية. مفعّل افتراضيًا.",
   'st.display.api_mutation_observer.label': 'مراقب تحولات API',

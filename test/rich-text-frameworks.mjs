@@ -272,7 +272,9 @@ test('Chrome: real trusted input updates DraftJS once through production selecto
         await assertApplication(f, args.text);
         const retry = await agent._maybeFallbackFieldWithCdpImpl(41, 'set_field', args,
           { ...unknown, _expectedValue: args.text }, {}, null, f.frameId);
-        assert.equal(retry.success, false); assert.equal(retry.outcomeUnknown, true); assert.equal(retry.repeatBlocked, true);
+        // By default trusted-field-retry-guards advises: no repeat lock label,
+        // but WebBrain still never retypes on its own (one insertion below).
+        assert.equal(retry.success, false); assert.equal(retry.outcomeUnknown, true); assert.equal(retry.repeatBlocked, undefined);
         assert.equal(commands.filter(command => command.method === 'Input.insertText').length, 1);
         await assertApplication(f, args.text);
       });

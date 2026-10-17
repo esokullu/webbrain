@@ -51,6 +51,13 @@ vanilla JS/CSS unless there is a very strong reason to add a framework.
   messages, download files, record media, or mutate remote state.
 - Do not weaken permission-gate behavior or host checks to make a task pass.
   Fix the routing, user prompt, or adapter instead.
+- Guards (WebBrain checks that refuse, defer or stop a model action) follow
+  `docs/guards.md`. Only the hard list refuses outright: the wrong recipient,
+  deleting data, money, credentials, and publishing something the user did
+  not ask for. Every other check leaves a note for the model or asks the
+  user. A new guard is registered in `src/*/src/agent/guard-policy.js` with
+  what it does when it cannot decide and `mustNotBlock`, a test of a
+  legitimate task it must let through. `test/guard-policy.mjs` enforces this.
 - Avoid committing secrets, trace files with private page content, downloaded
   user files, or generated artifacts unless the task explicitly requires them.
 
@@ -70,6 +77,8 @@ vanilla JS/CSS unless there is a very strong reason to add a framework.
   permissions, and user-risk model.
 - `docs/prompt-injection-defense.md`: mandatory reading for any change that
   passes page-derived content into prompts or tool results.
+- `docs/guards.md`: mandatory reading before adding or changing a check that
+  refuses, defers or stops a tool call, write, submit or completion.
 
 ## Layout
 

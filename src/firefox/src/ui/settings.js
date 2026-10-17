@@ -132,6 +132,7 @@ const tracingToggle = document.getElementById('toggle-tracing');
 const feedbackDiagnosticsToggle = document.getElementById('toggle-feedback-diagnostics');
 const losslessTracingToggle = document.getElementById('toggle-lossless-tracing');
 const strictSecretToggle = document.getElementById('toggle-strict-secret');
+const strictGuardsToggle = document.getElementById('toggle-strict-guards');
 const allowLocalNetworkToggle = document.getElementById('toggle-allow-local-network');
 const scheduledTasksToggle = document.getElementById('toggle-scheduled-tasks');
 const scheduledConfirmToggle = document.getElementById('toggle-scheduled-confirm');
@@ -607,7 +608,7 @@ async function init() {
   browser.storage.local.remove(['authToken', 'authEmail', 'authDefaultModel']).catch(() => {});
 
   // Load display settings
-  const stored = await browser.storage.local.get([...DECISION_SETTINGS_KEYS, 'verboseMode', 'composerDeliveryMode', 'selectionShortcutEnabled', AUTO_GROUP_TABS_KEY, 'helpImproveWebBrain', 'screenshotFallback', 'maxAgentSteps', 'autoScreenshot', 'useSiteAdapters', 'researchEscalationEnabled', 'researchEscalationEngine', 'voiceInputEnabled', 'alwaysAllowApiMutations', 'apiMutationObserverEnabled', 'openaiAskStreamingEnabled', 'planBeforeActMode', 'planBeforeAct', 'planReviewMode', 'planReviewConfidenceThreshold', DOWNLOAD_DIRECTORY_STORAGE_KEY, 'notifySound', 'completionConfetti', 'completionFlashTab', 'tracingEnabled', 'feedbackDiagnosticsEnabled', 'losslessTrace', 'strictSecretMode', 'agentAllowLocalNetwork', 'scheduledTasksEnabled', 'scheduledRequireConsequentialConfirmation', 'systemOneEnabled', 'systemOneWatchEnabled', 'systemOneCompletionEnabled', 'systemOneFastClassifications', 'systemOneFastBrowser', 'systemOneWatchThreshold', 'systemOneCompletionThreshold', 'typesafeApiKey', 'providerFilter', 'requestTimeoutMs', 'clarifyTimeoutSec', 'clarifyTimeoutSemanticsV2', 'clarifyTimeoutPolicy', 'costAllowanceSessionUsd', 'costAllowanceTotalUsd', 'meteredProviderCostSpentUsd', 'screenshotRedaction', 'imageDetail', 'maxScreenshotsPerTurn', 'maxImageDimension']);
+  const stored = await browser.storage.local.get([...DECISION_SETTINGS_KEYS, 'verboseMode', 'composerDeliveryMode', 'selectionShortcutEnabled', AUTO_GROUP_TABS_KEY, 'helpImproveWebBrain', 'screenshotFallback', 'maxAgentSteps', 'autoScreenshot', 'useSiteAdapters', 'researchEscalationEnabled', 'researchEscalationEngine', 'voiceInputEnabled', 'alwaysAllowApiMutations', 'apiMutationObserverEnabled', 'openaiAskStreamingEnabled', 'planBeforeActMode', 'planBeforeAct', 'planReviewMode', 'planReviewConfidenceThreshold', DOWNLOAD_DIRECTORY_STORAGE_KEY, 'notifySound', 'completionConfetti', 'completionFlashTab', 'tracingEnabled', 'feedbackDiagnosticsEnabled', 'losslessTrace', 'strictSecretMode', 'strictGuards', 'agentAllowLocalNetwork', 'scheduledTasksEnabled', 'scheduledRequireConsequentialConfirmation', 'systemOneEnabled', 'systemOneWatchEnabled', 'systemOneCompletionEnabled', 'systemOneFastClassifications', 'systemOneFastBrowser', 'systemOneWatchThreshold', 'systemOneCompletionThreshold', 'typesafeApiKey', 'providerFilter', 'requestTimeoutMs', 'clarifyTimeoutSec', 'clarifyTimeoutSemanticsV2', 'clarifyTimeoutPolicy', 'costAllowanceSessionUsd', 'costAllowanceTotalUsd', 'meteredProviderCostSpentUsd', 'screenshotRedaction', 'imageDetail', 'maxScreenshotsPerTurn', 'maxImageDimension']);
   if (typeof stored.providerFilter === 'string' && ['all','active','local','cloud','router'].includes(stored.providerFilter)) {
     providerFilter = stored.providerFilter;
   }
@@ -695,6 +696,7 @@ async function init() {
   if (costTotalLimitInput) costTotalLimitInput.value = totalLimit.toFixed(2);
   renderCostAllowanceSpent(totalSpent, totalLimit);
   if (strictSecretToggle) strictSecretToggle.checked = stored.strictSecretMode === true; // off by default
+  if (strictGuardsToggle) strictGuardsToggle.checked = stored.strictGuards === true; // off by default
   if (allowLocalNetworkToggle) allowLocalNetworkToggle.checked = stored.agentAllowLocalNetwork === true;
   if (scheduledTasksToggle) scheduledTasksToggle.checked = stored.scheduledTasksEnabled !== false;
   if (scheduledConfirmToggle) scheduledConfirmToggle.checked = stored.scheduledRequireConsequentialConfirmation !== false;
@@ -1491,6 +1493,10 @@ btnResetCostSpend?.addEventListener('click', async () => {
 
 strictSecretToggle?.addEventListener('change', async () => {
   await browser.storage.local.set({ strictSecretMode: strictSecretToggle.checked }).catch(() => {});
+});
+
+strictGuardsToggle?.addEventListener('change', async () => {
+  await browser.storage.local.set({ strictGuards: strictGuardsToggle.checked }).catch(() => {});
 });
 
 allowLocalNetworkToggle?.addEventListener('change', async () => {

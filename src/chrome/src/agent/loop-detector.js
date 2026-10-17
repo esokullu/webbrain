@@ -78,6 +78,12 @@ export class LoopDetector {
 
   _isToolResultErroredForLoop(name, _args, result) {
     if (!result || typeof result !== 'object') return false;
+    // A text write that went out but could not be read back exactly is an
+    // advisory result (success with unverifiedWrite, see the agent's
+    // text-write advisories), not a failed target: a content failureScope
+    // such as 'field-value:<ref>' must not count it toward the stop.
+    // Refusals and real errors are reported as failures and still count.
+    if (result.success === true && result.unverifiedWrite === true && !result.error) return false;
     if (result.error || result.success === false || result.noProgress) return true;
     const status = Number(result.status);
     return URL_FAMILY_TOOLS.has(name) && Number.isFinite(status) && status >= 400;

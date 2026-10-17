@@ -311,6 +311,8 @@ for (const [build, engine] of [['chrome', chromium], ['firefox', firefox]]) {
       try {
         const provider = { promptTier: 'full', contextWindow: 128000, supportsVision: false };
         const agent = new Agent({ getActive: () => provider });
+        // Strict checks: the guard's refusal itself is under test.
+        agent.strictGuards = true;
         agent._effectiveRunMode = () => 'ask';
         agent._ensureGateSetting = async () => false;
         agent._skipPermissionGate = true;

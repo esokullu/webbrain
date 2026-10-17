@@ -424,6 +424,7 @@ test('[mocked transport] type_text: a fence veto before Input.insertText is undi
 
 test('[mocked transport] type_text: a lost Input.insertText acknowledgement stays uncertain and blocks a blind repeat', async () => {
   const agent = newAgent();
+  agent.strictGuards = true; // Strict checks: the guard's refusal itself is under test.
   focusedTypingMocks({ insertText: () => { throw new Error('Owned text response lost'); } });
   try {
     const result = await agent.executeTool(17, 'type_text', { text: 'hello' });

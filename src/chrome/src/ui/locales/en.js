@@ -707,6 +707,8 @@ export default {
   "st.display.clarify_timeout_policy.desc": "What WebBrain does when you don’t answer a question in time. Finish the task picks the answer that keeps the task going, so runs don’t stall while you’re away. Play it safe picks the safe answer and won’t take consequential steps without you. Either way, questions about deleting data, spending money, credentials, who receives a message, or publishing something you didn’t ask for always take the safe answer, and WebBrain’s own confirmation cards always wait for you.",
   "st.display.clarify_timeout_policy.finish": "Finish the task",
   "st.display.clarify_timeout_policy.safe": "Play it safe",
+  "st.display.strict_guards.label": "Strict checks",
+  "st.display.strict_guards.desc": "Off (default): only WebBrain’s checks for deleting data, spending money, credentials, the wrong recipient, and publishing something you didn’t ask for can stop an action; its other checks are passed to the model as notes so runs don’t get stuck. On: every check stops the action whenever it can’t confirm it, as before.",
   'st.display.verbose.label': 'Verbose Mode',
   'st.display.verbose.desc': 'Show full tool call details, arguments, and raw JSON results. Off by default for a cleaner chat experience.',
   'st.display.selection_shortcut.label': 'Selection shortcut',

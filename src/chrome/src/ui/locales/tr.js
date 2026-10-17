@@ -893,6 +893,8 @@ export default {
   "st.display.clarify_timeout_policy.desc": "Bir soruyu zamanında yanıtlamadığınızda WebBrain’in ne yapacağı. “Görevi tamamla”, görevi ilerleten yanıtı seçer; böylece siz yokken iş durmaz. “Temkinli ol”, güvenli yanıtı seçer ve siz olmadan önemli adımlar atmaz. Her iki durumda da veri silme, para harcama, kimlik bilgileri, mesajın alıcısı veya istemediğiniz bir şeyi yayınlama ile ilgili sorular her zaman güvenli yanıtı alır ve WebBrain’in kendi onay kartları her zaman sizi bekler.",
   "st.display.clarify_timeout_policy.finish": "Görevi tamamla",
   "st.display.clarify_timeout_policy.safe": "Temkinli ol",
+  "st.display.strict_guards.label": "Katı denetimler",
+  "st.display.strict_guards.desc": "Kapalı (varsayılan): bir eylemi yalnızca WebBrain’in veri silme, para harcama, kimlik bilgileri, yanlış alıcı ve istemediğiniz bir şeyi yayınlama ile ilgili denetimleri durdurabilir; diğer denetimler görevler takılmasın diye modele not olarak iletilir. Açık: önceden olduğu gibi her denetim, eylemi doğrulayamadığında durdurur.",
   'st.display.always_allow_api_mutations.label': "API değişikliklerine her zaman izin ver",
   'st.display.always_allow_api_mutations.desc': "WebBrain’in her konuşmada /allow-api gerektirmeden fetch_url veya research_url üzerinden POST, PUT, PATCH ve DELETE kullanmasına izin verin. Önce arayüz yaklaşımı ve onay kontrolleri uygulanmaya devam eder. Varsayılan olarak açıktır.",
   'st.display.api_mutation_observer.label': 'API mutasyon gözlemcisi',

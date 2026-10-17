@@ -870,6 +870,8 @@ export default {
   "st.display.clarify_timeout_policy.desc": "Apa yang WebBrain lakukan apabila anda tidak menjawab soalan tepat pada masanya. “Selesaikan tugas” memilih jawapan yang mengekalkan tugas berjalan, supaya ia tidak tergendala semasa anda tiada. “Berhati-hati” memilih jawapan yang selamat dan tidak mengambil langkah penting tanpa anda. Walau apa pun, soalan tentang memadam data, berbelanja, kelayakan log masuk, penerima mesej atau menerbitkan sesuatu yang anda tidak minta sentiasa mengambil jawapan yang selamat, dan kad pengesahan WebBrain sendiri sentiasa menunggu anda.",
   "st.display.clarify_timeout_policy.finish": "Selesaikan tugas",
   "st.display.clarify_timeout_policy.safe": "Berhati-hati",
+  "st.display.strict_guards.label": "Semakan ketat",
+  "st.display.strict_guards.desc": "Mati (lalai): hanya semakan WebBrain tentang memadam data, berbelanja, kelayakan log masuk, penerima yang salah dan menerbitkan sesuatu yang anda tidak minta boleh menghentikan tindakan; semakan lain disampaikan kepada model sebagai nota supaya tugas tidak tersekat. Hidup: setiap semakan menghentikan tindakan apabila ia tidak dapat mengesahkannya, seperti sebelum ini.",
   'st.display.always_allow_api_mutations.label': "Sentiasa benarkan mutasi API",
   'st.display.always_allow_api_mutations.desc': "Benarkan WebBrain menggunakan POST, PUT, PATCH dan DELETE melalui fetch_url atau research_url tanpa memerlukan /allow-api dalam setiap perbualan. Panduan mengutamakan UI dan semakan pengesahan masih terpakai. Dihidupkan secara lalai.",
   'st.display.api_mutation_observer.label': 'Pemerhati mutasi API',

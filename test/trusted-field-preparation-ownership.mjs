@@ -23,6 +23,7 @@ const sha = text => createHash('sha256').update(text).digest('hex');
 async function runScenario(options = {}, inspect) {
   const savedSend = api.tabs.sendMessage, savedAttach = cdpClient.attach, savedCommand = cdpClient.sendCommand;
   const agent = new Agent({});
+  if (options.strict) agent.strictGuards = true; // Strict checks: the guard's refusal itself is under test.
   const commands = [], messages = [];
   const abort = new AbortController();
   let preparations = 0, digests = 0;
@@ -89,7 +90,7 @@ for (const [name, options] of [
   ['missing initial digest', { missingBefore: true }],
   ['Stop after focus', { abortAfterFocus: true }],
 ]) test(`Chrome ${name} retains uncertain text debt after trusted focus`, async () => {
-  await runScenario(options, async ({ agent, result, commands }) => {
+  await runScenario({ ...options, strict: true }, async ({ agent, result, commands }) => {
     assert.notEqual(result.textUnchanged, true);
     assert.equal(commands.some(command => command.method === 'Input.insertText'), false);
     const finalized = await agent._finalizeTextMutationResult(tabId, 'set_field', args, result);
@@ -99,7 +100,7 @@ for (const [name, options] of [
 });
 
 test('Chrome a lost text-command response cannot mint unchanged preparation proof even if readback still looks unchanged', async () => {
-  await runScenario({ reselectionFails: false, loseTextResponse: true }, async ({ agent, result, commands, digests }) => {
+  await runScenario({ reselectionFails: false, loseTextResponse: true, strict: true }, async ({ agent, result, commands, digests }) => {
     assert.equal(commands.filter(command => command.method === 'Input.insertText').length, 1);
     assert.equal(digests, 1, 'An attempted text command must not use a sample that can precede a delayed applied write.');
     assert.notEqual(result.textUnchanged, true);
@@ -120,7 +121,7 @@ test('Chrome preparation failure before native focus preserves no-dispatch and f
 for (const [name, destinationTab, destinationArgs] of [
   ['different tab', tabId + 1, args], ['different ref', tabId, { ...args, ref_id: 'ref_8' }],
 ]) test(`Chrome unchanged preparation attestation cannot be transferred to a ${name}`, async () => {
-  await runScenario({}, async ({ agent, result }) => {
+  await runScenario({ strict: true }, async ({ agent, result }) => {
     const finalized = await agent._finalizeTextMutationResult(destinationTab, 'set_field', destinationArgs, result);
     assert.equal(finalized.repeatBlocked, true);
     assert.equal(agent._uncertainTextMutations.get(destinationTab)?.size, 1);
@@ -130,6 +131,7 @@ for (const [name, destinationTab, destinationArgs] of [
 for (const build of ['chrome', 'firefox']) test(`${build}: page or model textUnchanged flags cannot forge native preparation authority`, async () => {
   const { Agent: Variant } = await import(`../src/${build}/src/agent/agent.js`);
   const agent = new Variant({});
+  agent.strictGuards = true; // Strict checks: the guard's refusal itself is under test.
   agent._lastAxScopes.set(tabId, { documentToken: scope.documentToken, pageUrl: scope.refScopeUrl });
   const saved = api.tabs.sendMessage;
   api.tabs.sendMessage = async () => ({ success: false, ...scope });

@@ -1390,12 +1390,33 @@ export const pageFeedbackMethods = {
   // target the certificate cannot bind at all is answered first and
   // precisely: a probe of an ambiguous selector could only pick one of its
   // elements. Anything else is left to the dispatch wrapper.
-  async _pageFeedbackUnbindableResult(tabId, name, args = {}) {
+  async _pageFeedbackUnbindableResult(tabId, name, args = {}, advisories = null) {
     const run = this._pageFeedbackRuns?.get(tabId);
     if (!run || typeof args?.selector !== 'string' || !args.selector.trim() || !this.constructor.STATE_CHANGE_TOOLS?.has(name)
         || pageFeedbackCallPolicy(name, args, run.modelState, run.latestPage).kind !== 'bound_target') return null;
     if (await this._validatePageFeedbackAction(tabId, name, args, run.modelState, null, { answerOnly: true }) !== false) return null;
-    return run.actionBindingUnavailable === `${name}:${JSON.stringify(args)}` ? actionBindingUnavailableResult(run, name) : null;
+    if (run.actionBindingUnavailable !== `${name}:${JSON.stringify(args)}`) return null;
+    return this._pageFeedbackBindingAdvises(tabId, run, args, advisories) ? null : actionBindingUnavailableResult(run, name);
+  },
+
+  // page-feedback-target-binding (quality): the observed action certificate
+  // does not cover this call's ref (target_uncovered: the element the model
+  // read exists and is unique, but the certified observation did not include
+  // it). With nothing else pending (no page activity, so no human input or
+  // unknown attribution, and no correction), Strict checks off sends the call
+  // with the ordinary unbound semantics and a note; the dispatch fences at the
+  // transport still run. A selector may name an element the model never
+  // observed (an upload slot it guessed, say), and a selector naming several
+  // elements or none has no single element to send to: those keep their
+  // answer, as does anything pending.
+  _pageFeedbackBindingAdvises(tabId, run, args = {}, advisories = null) {
+    if (!run || run.events.size || run.actionBindingUnavailableReason !== 'target_uncovered'
+        || typeof args?.ref_id !== 'string' || !/^ref_[A-Za-z0-9_-]+$/.test(args.ref_id)
+        || (typeof args?.selector === 'string' && args.selector.trim())
+        || this._hasPendingSteering?.(tabId) || typeof this._guardAdvisesFor !== 'function') return false;
+    return this._guardAdvisesFor(advisories, 'page-feedback-target-binding',
+      'This target was outside the page observation WebBrain certified for this action, so its binding to what you observed was not checked. It was sent anyway; read the page to confirm what it changed.',
+      { decided: false });
   },
 
   _pageFeedbackBlocksCall(tabId, name, args = {}) {
@@ -1777,7 +1798,11 @@ export function installPageFeedback(Agent) {
     let modelBound = !!run && mutation && policy.kind === 'bound_target';
     if (modelBound) {
       const validated = await this._validatePageFeedbackAction(tabId, name, args, modelState, batchId);
-      if (validated === false) return run.actionBindingUnavailable === `${name}:${JSON.stringify(args)}`
+      const unbindable = validated === false && run.actionBindingUnavailable === `${name}:${JSON.stringify(args)}`;
+      // A pure binding failure with nothing else pending may advise instead
+      // (it then dispatches with the ordinary, unbound semantics below).
+      if (validated === false && !(unbindable
+          && this._pageFeedbackBindingAdvises(tabId, run, args, executionContext?.guardAdvisories))) return unbindable
         ? actionBindingUnavailableResult(run, name)
         : run.actionContextUnverified === true
           ? { ...pageFeedbackPendingResult(), actionContextUnverified: true, errorCode: 'action_context_unverified',

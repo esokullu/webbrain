@@ -870,6 +870,8 @@ export default {
   "st.display.clarify_timeout_policy.desc": "当你没有及时回答问题时 WebBrain 的做法。“完成任务”会选择能让任务继续的答案，这样你不在时任务也不会停滞。“稳妥为先”会选择安全的答案，不会在没有你的情况下执行重要操作。无论哪种设置，涉及删除数据、花钱、凭据、消息收件人或发布你未要求发布的内容的问题，始终采用安全答案；WebBrain 自己的确认卡片始终会等待你。",
   "st.display.clarify_timeout_policy.finish": "完成任务",
   "st.display.clarify_timeout_policy.safe": "稳妥为先",
+  "st.display.strict_guards.label": "严格检查",
+  "st.display.strict_guards.desc": "关闭（默认）：只有 WebBrain 关于删除数据、花钱、凭据、收件人错误以及发布你未要求发布的内容的检查才能阻止操作；其他检查会作为备注交给模型，任务不会卡住。开启：与以前一样，任何检查在无法确认时都会阻止操作。",
   'st.display.always_allow_api_mutations.label': "始终允许 API 变更",
   'st.display.always_allow_api_mutations.desc': "允许 WebBrain 通过 fetch_url 或 research_url 使用 POST、PUT、PATCH 和 DELETE，无需在每个对话中输入 /allow-api。仍会遵循 UI 优先指引和确认检查。默认开启。",
   'st.display.api_mutation_observer.label': 'API 变更观察器',

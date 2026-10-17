@@ -144,6 +144,7 @@ const tracingToggle = document.getElementById('toggle-tracing');
 const feedbackDiagnosticsToggle = document.getElementById('toggle-feedback-diagnostics');
 const losslessTracingToggle = document.getElementById('toggle-lossless-tracing');
 const strictSecretToggle = document.getElementById('toggle-strict-secret');
+const strictGuardsToggle = document.getElementById('toggle-strict-guards');
 const allowLocalNetworkToggle = document.getElementById('toggle-allow-local-network');
 const scheduledTasksToggle = document.getElementById('toggle-scheduled-tasks');
 const scheduledConfirmToggle = document.getElementById('toggle-scheduled-confirm');
@@ -631,7 +632,7 @@ async function init() {
   chrome.storage.local.remove(['authToken', 'authEmail', 'authDefaultModel']).catch(() => {});
 
   // Load display settings
-  const stored = await chrome.storage.local.get([...DECISION_SETTINGS_KEYS, 'verboseMode', 'composerDeliveryMode', 'selectionShortcutEnabled', 'pdfViewerEnabled', AUTO_GROUP_TABS_KEY, 'helpImproveWebBrain', 'screenshotFallback', 'maxAgentSteps', 'autoScreenshot', 'useSiteAdapters', 'researchEscalationEnabled', 'researchEscalationEngine', 'voiceInputEnabled', 'alwaysAllowApiMutations', 'apiMutationObserverEnabled', 'webMcpEnabled', 'openaiAskStreamingEnabled', 'planBeforeActMode', 'planBeforeAct', 'planReviewMode', 'planReviewConfidenceThreshold', DOWNLOAD_DIRECTORY_STORAGE_KEY, 'notifySound', 'completionConfetti', 'completionFlashTab', 'tracingEnabled', 'feedbackDiagnosticsEnabled', 'losslessTrace', 'strictSecretMode', 'agentAllowLocalNetwork', 'scheduledTasksEnabled', 'scheduledRequireConsequentialConfirmation', 'systemOneEnabled', 'systemOneWatchEnabled', 'systemOneCompletionEnabled', 'systemOneFastClassifications', 'systemOneFastBrowser', 'systemOneWatchThreshold', 'systemOneCompletionThreshold', 'typesafeApiKey', 'providerFilter', 'requestTimeoutMs', 'clarifyTimeoutSec', 'clarifyTimeoutSemanticsV2', 'clarifyTimeoutPolicy', 'costAllowanceSessionUsd', 'costAllowanceTotalUsd', 'meteredProviderCostSpentUsd', 'screenshotRedaction', 'imageDetail', 'maxScreenshotsPerTurn', 'maxImageDimension']);
+  const stored = await chrome.storage.local.get([...DECISION_SETTINGS_KEYS, 'verboseMode', 'composerDeliveryMode', 'selectionShortcutEnabled', 'pdfViewerEnabled', AUTO_GROUP_TABS_KEY, 'helpImproveWebBrain', 'screenshotFallback', 'maxAgentSteps', 'autoScreenshot', 'useSiteAdapters', 'researchEscalationEnabled', 'researchEscalationEngine', 'voiceInputEnabled', 'alwaysAllowApiMutations', 'apiMutationObserverEnabled', 'webMcpEnabled', 'openaiAskStreamingEnabled', 'planBeforeActMode', 'planBeforeAct', 'planReviewMode', 'planReviewConfidenceThreshold', DOWNLOAD_DIRECTORY_STORAGE_KEY, 'notifySound', 'completionConfetti', 'completionFlashTab', 'tracingEnabled', 'feedbackDiagnosticsEnabled', 'losslessTrace', 'strictSecretMode', 'strictGuards', 'agentAllowLocalNetwork', 'scheduledTasksEnabled', 'scheduledRequireConsequentialConfirmation', 'systemOneEnabled', 'systemOneWatchEnabled', 'systemOneCompletionEnabled', 'systemOneFastClassifications', 'systemOneFastBrowser', 'systemOneWatchThreshold', 'systemOneCompletionThreshold', 'typesafeApiKey', 'providerFilter', 'requestTimeoutMs', 'clarifyTimeoutSec', 'clarifyTimeoutSemanticsV2', 'clarifyTimeoutPolicy', 'costAllowanceSessionUsd', 'costAllowanceTotalUsd', 'meteredProviderCostSpentUsd', 'screenshotRedaction', 'imageDetail', 'maxScreenshotsPerTurn', 'maxImageDimension']);
   if (typeof stored.providerFilter === 'string' && ['all','active','local','cloud','router'].includes(stored.providerFilter)) {
     providerFilter = stored.providerFilter;
   }
@@ -725,6 +726,9 @@ async function init() {
   renderCostAllowanceSpent(totalSpent, totalLimit);
   if (strictSecretToggle) {
     strictSecretToggle.checked = stored.strictSecretMode === true; // off by default
+  }
+  if (strictGuardsToggle) {
+    strictGuardsToggle.checked = stored.strictGuards === true; // off by default
   }
   if (allowLocalNetworkToggle) {
     allowLocalNetworkToggle.checked = stored.agentAllowLocalNetwork === true; // off by default
@@ -1544,6 +1548,10 @@ if (strictSecretToggle) {
     await chrome.storage.local.set({ strictSecretMode: strictSecretToggle.checked }).catch(() => {});
   });
 }
+
+strictGuardsToggle?.addEventListener('change', async () => {
+  await chrome.storage.local.set({ strictGuards: strictGuardsToggle.checked }).catch(() => {});
+});
 
 if (allowLocalNetworkToggle) {
   allowLocalNetworkToggle.addEventListener('change', async () => {

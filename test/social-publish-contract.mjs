@@ -356,6 +356,7 @@ for (const browser of ['chrome', 'firefox']) {
     for (const mode of ['exact','partial','wrong-document','wrong-target','append','second-debt','no-digest']) {
       const f = setup();
       const {agent,tabId} = f;
+      agent.strictGuards = true; // Strict checks: the guard's refusal itself is under test.
       const original = 'Original\n\nbody';
       const args = {ref_id:'editor',text:original,clear:true};
       agent._lastAxScopes.set(tabId,{documentToken:'doc',pageUrl:'https://bsky.app/'});

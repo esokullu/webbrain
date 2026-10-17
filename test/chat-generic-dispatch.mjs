@@ -87,6 +87,8 @@ for (const build of ['chrome', 'firefox']) {
 
   test(`${build}: generic send observes new incoming and OTP gates without consuming the delta`, async () => {
     const gated = harness(); await gated.agent._observeChatWorkflow(tabId);
+    // Strict checks: the guard's refusal itself is under test.
+    gated.agent.strictGuards = true;
     gated.observed.messages.push({ id: 'telegram:k:123456:0:2:rnext', direction: 'incoming', text: 'New fixture question' });
     await gated.call(); assert.equal(gated.sends, 0);
     gated.observed.userInput = { required: true, reason: 'otp' };

@@ -79,6 +79,8 @@ for (const browser of ['chrome', 'firefox']) {
 
   test(`${browser}: Cloud Act rejects Qwen's prose tool promise and stops after bounded recovery`, async () => {
     const h = harness([{ content: promiseOnly, toolCalls: [] }, { content: promiseOnly, toolCalls: [] }]);
+    // Strict checks: the guard's refusal itself is under test.
+    h.agent.strictGuards = true;
     const run = await h.controller.startRun({ task: 'Read the current page and return observed video URLs.', mode: 'act' });
     const snapshot = await finish(h.controller, run);
     assert.equal(snapshot.status, 'failed');
@@ -154,6 +156,8 @@ for (const browser of ['chrome', 'firefox']) {
       tool('done', { summary: 'Videos found.', outcome: 'success' }),
       tool('done', { summary: 'Videos found.', outcome: 'success' }),
     ]);
+    // Strict checks: the guard's refusal itself is under test.
+    h.agent.strictGuards = true;
     const run = await h.controller.startRun({ task: 'Read the current page and return observed video URLs.', mode: 'act' });
     const snapshot = await finish(h.controller, run);
     assert.equal(snapshot.status, 'failed');
@@ -307,6 +311,8 @@ for (const browser of ['chrome', 'firefox']) {
     for (const toolChoice of ['none', { type: 'function', function: { name: 'unavailable_tool' } }]) {
       const normalized = normalizeQwenToolResult(config, { tools, toolChoice }, { content, finishReason: 'stop' });
       const h = harness([normalized, normalized, normalized]);
+      // Strict checks: the guard's refusal itself is under test.
+      h.agent.strictGuards = true;
       h.agent._gateSettingLoaded = true;
       h.agent._shouldAutoScreenshot = () => false;
       h.agent._observeCaptchaChallenge = async () => ({ gate: null, loopCheck: { kind: 'none' } });

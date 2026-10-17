@@ -138,6 +138,8 @@ for(const build of ['chrome','firefox']){
    assert.ok(requests<=7);return call('actual-explicit-done','done',{summary:answer,outcome:'success'});
   });
   agent._skipPermissionGate=false;agent._ensureGateSetting=async()=>false;agent.maxSteps=12;
+  // Strict checks: the guard's refusal itself is under test.
+  if(scenario==='wrong_literal'||scenario==='same_batch_repeat')agent.strictGuards=true;
   agent._promptPermission=async()=>{permissions++;return 'deny';};
   agent._enrichUserMessageWithCurrentPage=async(_tab,_messages,content)=>{send=bind(agent,tab);return{role:'user',content};};
   agent._runPlannerIntentGate=async()=>({proceed:true,requestKind:'execute',requiresStateChange:false,requiresSubmission:false,...agent._plannerCompletionGateFields({read_scope:'none',deliverables:scope.deliverables})});

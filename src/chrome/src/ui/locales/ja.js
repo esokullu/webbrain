@@ -884,6 +884,8 @@ export default {
   "st.display.clarify_timeout_policy.desc": "質問に時間内に答えなかったときの WebBrain の動作です。「タスクを完了」はタスクを進める回答を選ぶので、席を外している間も止まりません。「安全に」は安全な回答を選び、あなたなしで重要な操作はしません。どちらの場合も、データの削除、支払い、認証情報、メッセージの宛先、頼んでいない公開に関する質問は常に安全な回答になり、WebBrain 自身の確認カードは常にあなたの操作を待ちます。",
   "st.display.clarify_timeout_policy.finish": "タスクを完了",
   "st.display.clarify_timeout_policy.safe": "安全に",
+  "st.display.strict_guards.label": "厳格なチェック",
+  "st.display.strict_guards.desc": "オフ（既定）：アクションを止められるのは、データの削除、支払い、認証情報、誤った宛先、頼んでいない公開に関する WebBrain のチェックだけです。その他のチェックはメモとしてモデルに伝えられるので、タスクが止まりません。オン：これまでどおり、確認できないときはすべてのチェックがアクションを止めます。",
   'st.display.always_allow_api_mutations.label': "API変更を常に許可",
   'st.display.always_allow_api_mutations.desc': "会話ごとに /allow-api を必要とせず、WebBrain が fetch_url または research_url で POST、PUT、PATCH、DELETE を使用できるようにします。UI優先の指針と確認チェックは引き続き適用されます。既定ではオンです。",
   'st.display.api_mutation_observer.label': 'API変更オブザーバー',

@@ -264,7 +264,7 @@ for (const build of ['chrome', 'firefox']) {
 
   // A full run of the real agent loop over an owned page. `script(names,
   // request)` plays the model; `execute(name, args)` stands in for the browser.
-  async function runOwnedTask({ streaming, task, url, pageState, judge, script, execute }) {
+  async function runOwnedTask({ streaming, task, url, pageState, judge, script, execute, strict = false }) {
     const tab = nextTab++;
     const next = async (messages, options) => {
       const fixed = fixtureFixedChoiceReply(messages, { incomplete_task: judge, done_summary: 'result' });
@@ -281,6 +281,7 @@ for (const build of ['chrome', 'firefox']) {
         if (result.toolCalls) yield { type: 'tool_call', content: result.toolCalls.map((entry, index) => ({ ...entry, index })) };
         yield { type: 'done' }; } };
     const agent = new Agent({ getActive: () => provider, getProvider: () => provider, getVisionProvider: async () => null });
+    agent.strictGuards = strict;
     Object.assign(agent, {
       _hydrate: async () => {}, _persist: () => {}, _persistNow: async () => ({ ok: true }), _persistSubmittedTurn: async () => {},
       _startTraceRun: async () => null, _endTraceRun: async () => {}, _beginReadCompleteness: async () => null,
@@ -321,7 +322,8 @@ for (const build of ['chrome', 'firefox']) {
     test(`${build}: ${streaming ? 'stream' : 'chat'} keeps an unverified action read-only after a recoverable incomplete ending`, async () => {
       const actions = [];
       let pageText = 'Saving...\nSubmit', requests = 0, judgments = 0, reads = 0;
-      const result = await runOwnedTask({ streaming, task: 'Submit the owned form.', url: 'https://owned.example.test/form',
+      // Strict checks: the guard's refusal itself is under test.
+      const result = await runOwnedTask({ streaming, strict: true, task: 'Submit the owned form.', url: 'https://owned.example.test/form',
         pageState: () => ({ workflowPageText: pageText, incompleteTaskControls: [{ label: 'Submit',
           disabled: pageText.startsWith('Saving'), busy: pageText.startsWith('Saving') }] }),
         judge: () => { judgments++; return 'wait_then_check'; },
@@ -363,7 +365,8 @@ for (const build of ['chrome', 'firefox']) {
     test(`${build}: ${streaming ? 'stream' : 'chat'} corrects an observed iframe value mismatch after a recoverable incomplete ending`, async () => {
       const actions = [], field = { selector: '#email', urlFilter: 'owned-frame.test', text: 'owner@example.test', clear: true };
       let requests = 0, judgments = 0, corrected = false, matched = false;
-      const result = await runOwnedTask({ streaming, task: 'Fill the owned email field.', url: 'https://owned.example.test/form',
+      // Strict checks: the guard's refusal itself is under test.
+      const result = await runOwnedTask({ streaming, strict: true, task: 'Fill the owned email field.', url: 'https://owned.example.test/form',
         pageState: () => ({ workflowPageText: 'Email: wrong@example.test', incompleteTaskControls: [] }),
         judge: () => { judgments++; return 'continue_now'; },
         script: names => {

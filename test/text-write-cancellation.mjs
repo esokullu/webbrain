@@ -97,6 +97,7 @@ for (const [browser, Agent] of variants) {
 
   test(`${browser}: Stop after a real content send records debt and blocks the next run`, async () => {
     const agent = setup(Agent); const entered = deferred(); const release = deferred();
+    agent.strictGuards = true; // Strict checks: the guard's refusal itself is under test.
     await agent._claimRunEntry(tabId, 'interactive');
     agent.sendWrite = () => { entered.resolve(); return release.promise; };
     const dispatchState = { started: false };
@@ -116,6 +117,7 @@ for (const [browser, Agent] of variants) {
   for (const failure of ['AbortError', 'closed channel']) {
     test(`${browser}: a dispatched ${failure} never reinjects or retries the text write`, async () => {
       const agent = setup(Agent);
+      agent.strictGuards = true; // Strict checks: the guard's refusal itself is under test.
       await agent._claimRunEntry(tabId, 'interactive');
       agent.sendWrite = async () => { throw failure === 'AbortError' ? abortError() : new Error('The message port closed before a response was received.'); };
       const result = await agent.executeTool(tabId, 'set_field', args);
@@ -144,6 +146,7 @@ for (const [browser, Agent] of variants) {
   for (const stage of ['injection', 'retry send']) {
     test(`${browser}: Stop during ${stage} after missing receiver preserves dispatch evidence`, async () => {
       const agent = setup(Agent); const entered = deferred(); const release = deferred();
+      agent.strictGuards = true; // Strict checks: the guard's refusal itself is under test.
       await agent._claimRunEntry(tabId, 'interactive');
       agent.sendWrite = () => {
         if (agent.writes === 1) return Promise.reject(noReceiverError());
@@ -185,6 +188,7 @@ for (const [browser, Agent] of variants) {
   for (const stopAt of ['dispatch', 'content preparation']) {
     test(`${browser}: saved workflow Stop during ${stopAt} retains correct text mutation evidence`, async () => {
       const agent = setup(Agent); const entered = deferred(); const release = deferred();
+      agent.strictGuards = true; // Strict checks: the guard's refusal itself is under test.
       agent.ensureConversationId = async () => 'workflow-conversation';
       agent._startSavedWorkflowTraceRun = async () => null;
       agent._endSavedWorkflowTraceRun = async () => {};
@@ -248,6 +252,7 @@ for (const [browser, Agent] of variants) {
 
   test(`${browser}: late lower result cannot recreate canceled debt after exact readback recovery`, async () => {
     const agent = setup(Agent); const entered = deferred(); const release = deferred();
+    agent.strictGuards = true; // Strict checks: the guard's refusal itself is under test.
     const dispatchState = { started: false };
     agent.sendWrite = () => { entered.resolve(); return release.promise; };
     const pending = agent.executeTool(tabId, 'set_field', args, null, { _contentActionDispatchState: dispatchState });
@@ -271,6 +276,7 @@ for (const [browser, Agent] of variants) {
   for (const stage of ['cancelled result', 'pending ordinary finalization']) {
     test(`${browser}: Stop bounds stalled scope enrichment for ${stage}`, { timeout: 2000 }, async () => {
       const agent = setup(Agent); const entered = deferred(); const release = deferred();
+      agent.strictGuards = true; // Strict checks: the guard's refusal itself is under test.
       await agent._claimRunEntry(tabId, 'interactive');
       agent._liveTextMutationScope = () => { entered.resolve(); return release.promise; };
       agent.sendWrite = async () => { throw stage === 'cancelled result'
@@ -317,6 +323,7 @@ for (const [browser, Agent] of variants) {
   if (browser === 'chrome') {
     test('chrome: EARLY_CDP public wrapper shares its parent dispatch marker on cancellation', async () => {
       const agent = setup(Agent); const dispatchState = { started: false }; const controller = new AbortController();
+      agent.strictGuards = true; // Strict checks: the guard's refusal itself is under test.
       agent._executeToolImpl = async (_id, _name, _args, _update, context) => {
         assert.equal(context._contentActionDispatchState, dispatchState);
         context._contentActionDispatchState.started = true;
