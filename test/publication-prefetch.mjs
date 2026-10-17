@@ -982,6 +982,51 @@ for (const browser of ['chrome', 'firefox']) {
     for (const reading of f.readings) assert.deepEqual(reading.texts, ['Post', 'Close', 'Choose audience']);
   });
 
+  test(`${browser}: a caption read in flight is joined by a later prefetch and by the click, never asked twice`, async () => {
+    const f = setup();
+    const { agent, tabId } = f;
+    agent._runAbortStates.set(tabId, { controller: new AbortController(), dispose() {} });
+    f.detected.publicationPrefetchCaptions = ['Post'];
+    // A model's answers, stored when a read settles; reads stay in flight
+    // until released. As in _readPageTexts, a text read before is not asked
+    // of a model again.
+    const answers = new Map();
+    agent._pageTextReading = (kind, text) => answers.get(`${kind}:${text}`) ?? null;
+    const reads = [];
+    agent._readPageTexts = (_tabId, kind, texts, _context, options = {}) => {
+      const unread = texts.filter(text => !answers.has(`${kind}:${text}`));
+      if (!unread.length) return Promise.resolve();
+      return new Promise(resolve => {
+        reads.push({ kind, background: !!options.background, release: () => {
+          for (const text of unread) answers.set(`${kind}:${text}`, 'publish');
+          resolve();
+        } });
+      });
+    };
+    const first = f.write();
+    await until(() => reads.length === 2, 'the first prefetch reads the caption');
+    assert.deepEqual(reads.map(read => [read.kind, read.background]).sort(),
+      [['control_effect', true], ['message_control', true]]);
+    // A second prefetch, and the click's submit probe and recipient guard,
+    // join the reads in flight instead of asking a model again.
+    const settled = { second: false, effect: false, control: false };
+    const second = f.write({ ref_id: 'ref_7', text: 'Hello', clear: true }).then(value => { settled.second = true; return value; });
+    const effect = agent._readControlEffects(tabId, ['Post']).then(() => { settled.effect = true; });
+    const control = agent._readUnreadPageTexts(tabId, [{ kind: 'message_control', text: 'Post' }])
+      .then(value => { settled.control = true; return value; });
+    await settle();
+    assert.equal(reads.length, 2, 'nothing was asked twice');
+    assert.deepEqual(settled, { second: false, effect: false, control: false }, 'each waits for the read in flight');
+    for (const read of reads) read.release();
+    await within(effect, 'the click has its caption reading');
+    assert.equal(await within(control, 'the recipient guard has its reading'), true);
+    await within(first, 'the first prefetch ends');
+    await within(second, 'the second prefetch ends');
+    assert.equal(reads.length, 2, 'still nothing was asked twice');
+    assert.equal(agent._controlEffectReading('Post'), 'publish');
+    assert.equal(agent._socialPublicationPrefetchReading?.size || 0, 0, 'no read is left in flight');
+  });
+
   test(`${browser}: the prefetch's caption reads belong to the run that started it`, async () => {
     const f = setup();
     const { agent, tabId } = f;

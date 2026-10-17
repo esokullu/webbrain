@@ -24974,15 +24974,19 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     const list = [...new Set((Array.isArray(captions) ? captions : [])
       .map(caption => String(caption ?? '').replace(/\s+/g, ' ').trim())
       .filter(caption => caption && caption.length <= 200))];
-    // A caption an earlier prefetch is still reading is not asked twice.
-    const reading = this._socialPublicationPrefetchReading ||= new Set();
-    const unread = kind => list.filter(caption => this._pageTextReading(kind, caption) === null
-      && !reading.has(kind + '\u0000' + caption));
-    const effects = unread('control_effect').slice(0, 24);
+    // A caption an earlier prefetch is still reading is not asked twice: its
+    // read in flight is joined, so this prefetch ends with its answer too.
+    const reading = this._socialPublicationPrefetchReading ||= new Map();
+    const unread = kind => list.filter(caption => this._pageTextReading(kind, caption) === null);
     let guarded = false;
     try { guarded = getMessageRecipientGuardPolicy(pageUrl)?.verifyActiveRecipient === true; } catch {}
-    const controls = guarded ? unread('message_control').slice(0, 48) : [];
-    if (!effects.length && !controls.length) return Promise.resolve([]);
+    const unreadEffects = unread('control_effect');
+    const unreadControls = guarded ? unread('message_control') : [];
+    const joined = [...new Set([...unreadEffects.map(caption => reading.get('control_effect\u0000' + caption)),
+      ...unreadControls.map(caption => reading.get('message_control\u0000' + caption))].filter(Boolean))];
+    const effects = unreadEffects.filter(caption => !reading.has('control_effect\u0000' + caption)).slice(0, 24);
+    const controls = unreadControls.filter(caption => !reading.has('message_control\u0000' + caption)).slice(0, 48);
+    if (!effects.length && !controls.length) return Promise.allSettled(joined).then(() => []);
     const abort = this._socialPublicationBackgroundAbort(binding, tabId);
     const background = this._socialPublicationBackgroundCall(tabId, guard, binding, abort);
     // A correction or clarification cancels them with the contract and the
@@ -24991,11 +24995,15 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       || this._socialPublicationCaptionReads.set(guard, new Set()).get(guard)) : null;
     captionReads?.add(abort);
     const read = (kind, texts, request) => {
-      for (const text of texts) reading.add(kind + '\u0000' + text);
-      return Promise.resolve().then(request)
-        .finally(() => { for (const text of texts) reading.delete(kind + '\u0000' + text); });
+      const pending = Promise.resolve().then(request);
+      for (const text of texts) reading.set(kind + '\u0000' + text, pending);
+      return pending.finally(() => {
+        for (const text of texts) {
+          if (reading.get(kind + '\u0000' + text) === pending) reading.delete(kind + '\u0000' + text);
+        }
+      });
     };
-    const reads = [];
+    const reads = [...joined];
     if (effects.length) reads.push(read('control_effect', effects, () => this._readControlEffects(tabId, effects, { background })));
     if (controls.length) {
       reads.push(read('message_control', controls, () => this._readPageTexts(tabId, 'message_control', controls, {},
@@ -28734,6 +28742,10 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       .map(caption => String(caption ?? '').replace(/\s+/g, ' ').trim())
       .filter(caption => caption && caption.length <= 200))].slice(0, 24);
     if (!list.length) return;
+    // A caption a background prefetch is reading now is joined, not read a
+    // second time: _readPageTexts below asks only what is still unread, and
+    // makes a held reading one of the most recent the submit probe gets.
+    if (!background) await this._joinBackgroundPageTextReads('control_effect', list);
     try {
       await this._readPageTexts(tabId, 'control_effect', list, {}, { maxChars: 200, mainTimeoutMs: CONTROL_READING_TIMEOUT_MS,
         ...(background ? { background } : {}) });
@@ -28823,6 +28835,10 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     let read = false;
     for (const [kind, list] of byKind) {
       const pending = [...list].slice(0, 48);
+      // Texts a background prefetch is reading now are joined first, so
+      // _readPageTexts asks only what is still unread (and still makes a
+      // held reading one of the most recent the page gets).
+      await this._joinBackgroundPageTextReads(kind, pending);
       try {
         await this._readPageTexts(tabId, kind, pending, {}, { maxChars: 400, mainTimeoutMs: CONTROL_READING_TIMEOUT_MS });
       } catch (error) {
@@ -28831,6 +28847,21 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       read ||= pending.some(text => !!this._pageTextReading(kind, text));
     }
     return read;
+  }
+
+  // Waits for the reads of these texts that a background publication
+  // prefetch has in flight (_socialPublicationPrefetchReadings), so a click
+  // joins them instead of asking a model the same question again. The wait
+  // is capped: a read that does not settle in time is read again here.
+  async _joinBackgroundPageTextReads(kind, texts) {
+    const reading = this._socialPublicationPrefetchReading;
+    if (!reading?.size) return;
+    const pending = [...new Set(texts.map(text => reading.get(kind + '\u0000' + text)).filter(Boolean))];
+    if (!pending.length) return;
+    let timer = null;
+    await Promise.race([Promise.allSettled(pending),
+      new Promise(resolve => { timer = setTimeout(resolve, 2 * CONTROL_READING_TIMEOUT_MS); })]);
+    clearTimeout(timer);
   }
 
   // The recipient guard's check in the page, with the agent's readings of the
