@@ -496,6 +496,36 @@ for (const { build, Agent, adapters, Scheduler } of builds) {
     assert.equal(dispatched.length, 2);
   });
 
+  test(`${build}: an editor that changes while a later card waits is checked again right before the commit`, async () => {
+    for (const changes of [true, false]) {
+      const { agent, tab, provider, page } = await githubFixture();
+      const { dispatched, cards, run } = pipeline(agent, provider, 'once');
+      // The submit confirmation and the permission card come after the
+      // unverified-step card; the editor changes while the first one waits.
+      agent._skipPermissionGate = false;
+      const waits = [];
+      agent._promptSubmitConfirmation = async () => {
+        waits.push('submit');
+        if (changes) page.editor = `${POST_BODY}Late edit.\n`;
+        return 'once';
+      };
+      agent._promptPermission = async () => { waits.push('permission'); return 'once'; };
+      const { messages } = await run(tab, [call('commit', 'click_ax', { ref_id: 'ref_7' })]);
+      assert.equal(cards.length, 1, `${changes}: one unverified-step card`);
+      assert.equal(waits[0], 'submit', `${changes}: the submit confirmation came after the card`);
+      const result = resultFor(messages, 'commit');
+      if (changes) {
+        assert.deepEqual(dispatched, [], 'the answer covered the text the user saw, not the changed editor');
+        assert.equal(result.noDispatch, true);
+        assert.match(result.error, /Commit submission is blocked/);
+        assert.equal(result.unverifiedStepConfirmation, undefined, 'no card can wait at dispatch time');
+      } else {
+        assert.deepEqual(dispatched.map(item => item.name), ['click_ax'], 'an unchanged editor still commits');
+        assert.equal(result.success, true);
+      }
+    }
+  });
+
   test(`${build}: one answer covers one commit call; committing the same text again asks again`, async () => {
     const { agent, tab, provider } = await githubFixture();
     const { dispatched, cards, run } = pipeline(agent, provider, 'once');

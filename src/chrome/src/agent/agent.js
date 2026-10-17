@@ -3242,13 +3242,22 @@ export class Agent extends LoopDetector {
     const socialBlock = await this._socialPublicationPreSubmitBlock(tabId, name, args, detectedSubmit, provider);
     if (socialBlock) return socialBlock;
     await this._captureMastodonPublicationAttempt(tabId, name, args, detectedSubmit, provider);
+    return this._githubCommitPreSubmitBlock(tabId, name, args, detectedSubmit, advisories);
+  }
+
+  // GitHub's edit-file-and-commit gate: a commit goes out only on the exact
+  // file and message evidence (or the user's answer on the card for the
+  // editor text it showed). Run before the call's cards and again right
+  // before dispatch, since those cards can wait while the editor changes.
+  async _githubCommitPreSubmitBlock(tabId, name, args = {}, detectedSubmit = null, advisories = null, { recheck = false } = {}) {
     const guard = this._planExecutionGuards.get(tabId);
     if (guard?.siteWorkflow?.adapterName !== 'github'
         || guard.siteWorkflow?.job?.id !== 'edit-file-and-commit') return null;
     // This gate decides before the click by what a text click's caption
-    // means, so an unread caption is read now, once, in any language.
+    // means, so an unread caption is read now, once, in any language. The
+    // recheck before dispatch uses that reading as it stands.
     const caption = this._controlCaption(name, args, null);
-    if (caption && this._controlEffectReading(caption) === null) await this._readControlEffect(tabId, caption);
+    if (!recheck && caption && this._controlEffectReading(caption) === null) await this._readControlEffect(tabId, caption);
     const looksLikeSubmit = detectedSubmit?.isSubmit === true
       || this._formValidationActionLooksSubmit(name, args, null, detectedSubmit);
     // Fail closed when submit detection is inconclusive: a click_ax carrying
@@ -16301,7 +16310,13 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
             // stands, without the card's page text.
             const socialDispatchBlock = pipelineToolbarPreflight.block ? null
               : this._withoutUnverifiedStepAsk(
-                await this._socialPublicationPreSubmitBlock(tabId, fnName, fnArgs, detectedSubmitAction, provider));
+                await this._socialPublicationPreSubmitBlock(tabId, fnName, fnArgs, detectedSubmitAction, provider))
+                // The same for a GitHub commit: the submit and permission
+                // cards after the first check can wait while the editor
+                // changes, and a "Go ahead" covers only the text the user saw.
+                // Its notes were already given by the first check.
+                || this._withoutUnverifiedStepAsk(
+                  await this._githubCommitPreSubmitBlock(tabId, fnName, fnArgs, detectedSubmitAction, [], { recheck: true }));
             this._throwIfAborted(abortSignal);
             // Permission, checkpoint and preflight waits can receive a correction.
             // Recheck after all preparation, before marking or invoking dispatch.

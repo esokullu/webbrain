@@ -72,9 +72,11 @@ When a guard cannot verify a consequential step and its `onCannotDecide` is
   that call runs sees it, and it is spent when the call ends, sent or not, so
   the next attempt (a repeated commit or post included) asks again. Changed
   content is asked about again, and a declined step with the same content is
-  not. When the checks after a "Go ahead" reach another guard's question
-  about the same action, that card is asked in turn and the first answer
-  stands.
+  not. The content is checked again right before the step is sent, after any
+  later submit or permission card: if it changed while a card waited, the
+  step is refused there and the next attempt asks. When the checks after a
+  "Go ahead" reach another guard's question about the same action, that card
+  is asked in turn and the first answer stands.
 - **Timeout.** A quality guard's card follows Settings → General: the clarify
   timeout (Off waits, Instant answers at once) and "When a question times
   out" (`finish` goes ahead, `safe` does not). A hard-class card never times
