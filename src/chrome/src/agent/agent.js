@@ -6189,6 +6189,7 @@ export class Agent extends LoopDetector {
 
   _releaseRunEntry(tabId) {
     this._settleUnverifiedStepScope(tabId);
+    this._cancelSocialPublicationBackground(tabId);
     const feedbackRun = this._pageFeedbackRuns?.get(tabId);
     if (feedbackRun?.monitoringRetry && !feedbackRun.monitoringRetry.started) {
       this._restoreFailureRecoveryStart(tabId, feedbackRun.monitoringRetry.requestId, feedbackRun.onUpdate, feedbackRun.monitoringRetry);
@@ -23973,7 +23974,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       // A background compile of another input can never be installed:
       // cancel its request (and an audit of what it compiled) first.
       if (prefetch) this._dropSocialPublicationContractPrefetch(guard, prefetch);
-      const abort = this._socialPublicationBackgroundAbort(binding);
+      const abort = this._socialPublicationBackgroundAbort(binding, tabId);
       const call = this._socialPublicationBackgroundCall(tabId, guard, binding, abort);
       const entry = { previous, state, settled: false, compiled: null, done: null, abort };
       prefetches.set(guard, entry);
@@ -24673,7 +24674,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     // this one.
     if (running?.key === key && running.runSignal === binding.signal && !running.abort.signal.aborted) return running.done;
     if (running) this._dropSocialPublicationAuditPrefetch(social, running);
-    const abort = this._socialPublicationBackgroundAbort(binding);
+    const abort = this._socialPublicationBackgroundAbort(binding, tabId);
     const call = this._socialPublicationBackgroundCall(tabId, guard, binding, abort);
     const entry = { key, done: null, abort, runSignal: binding.signal, settled: false };
     audits.set(social, entry);
@@ -24725,9 +24726,9 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     if (!keepAudit && kept.compiled) this._dropSocialPublicationAuditPrefetch(kept.compiled);
   }
 
-  // A background publication check's own abort: the Stop of the run that
-  // started it, or a newer check that supersedes it.
-  _socialPublicationBackgroundAbort(binding) {
+  // A background publication check's own abort: the Stop or the end of the
+  // run that started it, or a newer check that supersedes it.
+  _socialPublicationBackgroundAbort(binding, tabId = null) {
     const controller = new AbortController();
     const runSignal = binding?.signal || null;
     const onAbort = () => {
@@ -24735,13 +24736,35 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     };
     if (runSignal?.aborted) onAbort();
     else runSignal?.addEventListener?.('abort', onAbort, { once: true });
-    return {
+    // Kept per tab until it settles, so the end of its run cancels it too
+    // (_cancelSocialPublicationBackground), not only a Stop.
+    const open = tabId == null ? null : (this._socialPublicationBackgroundAborts ||= new Map());
+    if (open && !open.has(tabId)) open.set(tabId, new Set());
+    const abort = {
       controller,
       signal: controller.signal,
       dispose: () => {
         try { runSignal?.removeEventListener?.('abort', onAbort); } catch {}
+        open?.get(tabId)?.delete(abort);
       },
     };
+    open?.get(tabId).add(abort);
+    return abort;
+  }
+
+  // The run on `tabId` ended, however it ended: the background publication
+  // checks it started stop with it, so they neither keep spending nor hold a
+  // provider's queue or the cost allowance for the next run.
+  _cancelSocialPublicationBackground(tabId) {
+    const open = this._socialPublicationBackgroundAborts?.get(tabId);
+    if (!open) return;
+    this._socialPublicationBackgroundAborts.delete(tabId);
+    for (const abort of open) {
+      if (abort.controller.signal.aborted) continue;
+      const reason = new Error('The run that started this background check ended.');
+      reason.name = 'AbortError';
+      abort.controller.abort(reason);
+    }
   }
 
   // What a background model call is bound to: its abort, the allowance of the

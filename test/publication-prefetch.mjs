@@ -546,6 +546,25 @@ for (const browser of ['chrome', 'firefox']) {
     }
   });
 
+  test(`${browser}: the end of the run that started a background check cancels it, not only a Stop`, async () => {
+    for (const stage of ['social_publication_contract', 'social_publication_authorization']) {
+      const f = setup();
+      const { agent, tabId } = f;
+      agent._runAbortStates.set(tabId, { controller: new AbortController(), dispose() {} });
+      const held = f.hold(stage);
+      const prefetch = f.write();
+      await until(() => held.started, `${stage}: the background check started`);
+      const [request] = f.named(stage);
+      // The run finishes normally: no Stop, its abort controller is only disposed.
+      agent._releaseRunEntry(tabId);
+      await settle();
+      assert.equal(request.aborted, true, `${stage}: the request in flight was cancelled when its run ended`);
+      held.release();
+      assert.notEqual(await within(prefetch, `${stage}: the prefetch settles`), 'authorized', stage);
+      assert.equal(agent._socialPublicationBackgroundAborts?.get(tabId)?.size || 0, 0, `${stage}: nothing is left to cancel`);
+    }
+  });
+
   test(`${browser}: a newer draft cancels the background audit of the older one, and a click awaiting it audits on its own`, async () => {
     const f = setup();
     const audit = f.hold('social_publication_authorization');
