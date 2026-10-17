@@ -8955,6 +8955,45 @@ export class Agent extends LoopDetector {
     if (runId) try { trace.recordNote(runId, 0, 'done_timing', timing); } catch {}
   }
 
+  // Where one tool call spent its time before dispatch, for traces: one
+  // predispatch_timing note per consequential call, milliseconds per stage of
+  // the pipeline, never page or model content. `lap(stage)` charges the time
+  // since the previous lap to that stage. Checks nested in a stage add their
+  // own sub-steps with _predispatchStage while the call's record is open.
+  _predispatchTimer(tabId) {
+    const stages = {};
+    const startedAt = Date.now();
+    let last = startedAt;
+    (this._predispatchTimings ||= new Map()).set(tabId, stages);
+    const add = (stage, ms) => {
+      if (Number.isFinite(ms) && ms >= 0) stages[stage] = (stages[stage] || 0) + ms;
+    };
+    return {
+      lap: stage => { const now = Date.now(); add(stage, now - last); last = now; },
+      add,
+      // The whole pipeline up to this point, e.g. until dispatch begins.
+      since: stage => add(stage, Date.now() - startedAt),
+      emit: (step, extra = {}) => {
+        if (this._predispatchTimings?.get(tabId) === stages) this._predispatchTimings.delete(tabId);
+        this._recordPredispatchTiming(tabId, step, { ...stages, totalMs: Date.now() - startedAt, ...extra });
+      },
+    };
+  }
+
+  _recordPredispatchTiming(tabId, step, timing) {
+    const runId = this.currentRunId.get(tabId);
+    if (!runId) return;
+    try {
+      const pending = trace.recordNote(runId, Number.isInteger(step) ? step : null, 'predispatch_timing', timing);
+      if (pending?.catch) pending.catch(() => {});
+    } catch {}
+  }
+
+  _predispatchStage(tabId, stage, ms) {
+    const stages = this._predispatchTimings?.get(tabId);
+    if (stages && Number.isFinite(ms) && ms >= 0) stages[stage] = (stages[stage] || 0) + ms;
+  }
+
   recordSystemOneVerdict(tabId, metadata, context = {}) {
     const runId = context.runId || this.currentRunId.get(tabId);
     if (runId) try { trace.recordNote(runId, 0, 'system_one', metadata); } catch {}
@@ -13717,11 +13756,16 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
         continue;
       }
       fnArgs = coordinates.args;
+      const predispatch = this._predispatchTimer(tabId);
       if (fnName !== 'done' && !Agent.NAV_TOOLS.has(fnName)) {
         try {
           await this._adoptLiveSocialPublishWorkflow(tabId, provider);
         } catch {}
       }
+      // Writing into a post composer starts compiling the publication
+      // contract in the background (see _socialPublicationContractPrefetch).
+      this._socialPublicationContractPrefetch(tabId, fnName, fnArgs, provider);
+      predispatch.lap('workflowAdoptMs');
 
       const recordPagePreparationTimeout = async (error, stage) => {
         const timeoutResult = this._contentActionPreparationTimeoutResult(fnName, error, stage);
@@ -13768,6 +13812,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       }
       if (captchaPreflight) onUpdate('captcha_gate', captchaPreflight);
       const captchaGateBlock = this._captchaGateBlockResult(tabId, fnName, fnArgs);
+      predispatch.lap('captchaGateMs');
       if (captchaGateBlock) {
         // This path returns before normal tool observation. Retain the signup
         // checkpoint even when the first detected challenge needs manual help.
@@ -13879,6 +13924,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       // the side effect may have completed before its reply was lost.
       const missingResponseOutcomeUnknown = capabilities.length > 0 || Agent.STATE_CHANGE_TOOLS.has(fnName);
       const executionMutationEvidence = this._isExecutionMutationEvidence(fnName, fnArgs, capabilities);
+      predispatch.lap('preparationMs');
       const clarificationAuthorizationBlock = this._clarificationAuthorizationBlock(
         tabId,
         fnName,
@@ -13975,6 +14021,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
         });
         continue;
       }
+      predispatch.lap('clarificationMs');
       const formValidationCandidate = this._isFormValidationCandidate(fnName, fnArgs);
       let formValidationAllFrames = false;
       let detectedSubmitAction = null;
@@ -13988,13 +14035,19 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
             // The detector owns its supported-tool filtering. Every form
             // validation candidate, including set_field({submit:true}), needs
             // the same resolved-target evidence before workflow guards run.
-            const detected = await this._detectLikelySubmitAction(tabId, fnName, fnArgs);
+            const probeStarted = Date.now();
+            const detected = await this._detectLikelySubmitAction(tabId, fnName, fnArgs, {
+              onCaptionReading: ms => predispatch.add('submitCaptionReadingMs', ms),
+            });
+            predispatch.add('submitProbeMs', Date.now() - probeStarted);
             this._throwIfAborted(abortSignal);
             const currentValidationBlock = this._formValidationBlocks.get(tabId) || null;
             const obviousSubmit = this._formValidationActionLooksSubmit(fnName, fnArgs, null, detected);
             if (!this._leanRunActive(tabId) && (obviousSubmit || detected?.isSubmit === true) && detected && fnName !== 'iframe_click'
                 && /^ref_\d+$/.test(String(fnArgs?.ref_id || ''))) {
+              const baselineStarted = Date.now();
               const baseline = await this._readCompletionResult(tabId, fnArgs.ref_id);
+              predispatch.add('resultBaselineMs', Date.now() - baselineStarted);
               if (baseline?.identity && baseline.scopeRef && typeof baseline.text === 'string') {
                 detected.resultBaseline = { identity: baseline.identity, scopeRef: baseline.scopeRef,
                   textSha256: this._sha256TextSync(baseline.text) };
@@ -14005,10 +14058,12 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
             // yet, may still turn out to submit: keep the page's state from
             // before the click, so a rejection it shows is new.
             const caption = this._controlCaption(fnName, fnArgs, null);
+            const validationStarted = Date.now();
             const before = !this._leanRunActive(tabId) && (currentValidationBlock || obviousSubmit || detected?.isSubmit === true
                 || (caption && this._controlEffectReading(caption) === null))
               ? await this._captureFormValidationState(tabId, { allFrames })
               : [];
+            predispatch.add('validationSnapshotMs', Date.now() - validationStarted);
             this._throwIfAborted(abortSignal);
             return {
               allFrames,
@@ -14029,6 +14084,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
           continue;
         }
       }
+      predispatch.lap('submitPreflightMs');
       if (fnName === 'chrome_web_store_publish') {
         detectedSubmitAction = {
           isSubmit: true,
@@ -14036,12 +14092,24 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
           reason: 'submit the configured Chrome Web Store release for review',
         };
       }
-      const runWorkflowPreSubmitChecks = async () => await this._resourceMutationPreSubmitBlock(tabId, fnName, fnArgs, detectedSubmitAction, provider)
+      const timedCheck = async (stage, check) => {
+        const started = Date.now();
+        try {
+          return await check();
+        } finally {
+          predispatch.add(stage, Date.now() - started);
+        }
+      };
+      const runWorkflowPreSubmitChecks = async () => await timedCheck('resourceMutationMs',
+        () => this._resourceMutationPreSubmitBlock(tabId, fnName, fnArgs, detectedSubmitAction, provider))
         || this._steeringPriorSubmissionBlock(tabId, fnName, fnArgs, detectedSubmitAction)
-        || await this._conditionalGithubCommitTransition(tabId, fnName, fnArgs, detectedSubmitAction, callState.guardAdvisories)
-        || await this._workflowPreSubmitDispatchBlock(
-        tabId, fnName, fnArgs, detectedSubmitAction, provider, callState.guardAdvisories,
-      );
+        || await timedCheck('githubTransitionMs',
+          () => this._conditionalGithubCommitTransition(tabId, fnName, fnArgs, detectedSubmitAction, callState.guardAdvisories))
+        || await timedCheck('workflowDispatchMs', () => this._workflowPreSubmitDispatchBlock(
+          tabId, fnName, fnArgs, detectedSubmitAction, provider, callState.guardAdvisories,
+        ));
+      const predispatchConsequential = () => missingResponseOutcomeUnknown
+        || detectedSubmitAction?.isSubmit === true || detectedSubmitAction?.publicationControl === true;
       let workflowPreSubmitBlock = await runWorkflowPreSubmitChecks();
       if (workflowPreSubmitBlock?.mutationConfirmation
           && this.scheduledRunPolicies.get(tabId)?.requireConsequentialConfirmation !== false) {
@@ -14063,6 +14131,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
           return { action: 'abort', value };
         }
       }
+      predispatch.lap('workflowPreSubmitMs');
       // A quality guard that cannot verify a commit, publish or submit asks
       // the user on WebBrain's card instead of refusing (guard-policy.js
       // 'ask'); 'once' lets this one step go ahead with a note for the model.
@@ -14087,8 +14156,10 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
           onUpdate('warning', { message: 'Stopped by user.' });
           return { action: 'abort', value };
         }
+        predispatch.lap('unverifiedStepCardMs');
       }
       if (workflowPreSubmitBlock) {
+        if (predispatchConsequential()) predispatch.emit(step, { tool: fnName, outcome: 'blocked' });
         onUpdate('tool_call', { name: fnName, args: fnArgs, outcomeUnknown: false });
         onUpdate('tool_result', { name: fnName, result: workflowPreSubmitBlock });
         messages.push({
@@ -14171,7 +14242,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
         let submitConfirmation = detectedSubmitAction || groupedSearchForm;
         if (!submitConfirmation) {
           try {
-            submitConfirmation = await detectSubmitWithDeadline();
+            submitConfirmation = await timedCheck('submitDetectionMs', detectSubmitWithDeadline);
           } catch (error) {
             if (error?.code !== 'content_action_timeout') throw error;
             const loopStop = await recordPagePreparationTimeout(error, 'submit-action detection');
@@ -14342,6 +14413,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
           }
         }
       }
+      predispatch.lap('submitConfirmationMs');
       if (capabilities.length && !this._skipPermissionGate && !scheduledBypassesGate) {
         await this.permissions.hydrate();
         const curUrl = await this._currentUrl(tabId);
@@ -14472,6 +14544,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
           continue;
         }
       }
+      predispatch.lap('permissionMs');
 
       if (fnName === 'done' || fnName === 'done_json') {
         // Each completion invariant gets its own note: one that already advised
@@ -14631,6 +14704,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       // Snapshot URL before nav-prone calls. Some tools are conditional:
       // Enter and set_field({submit:true}) can navigate, while other key
       // presses and ordinary field edits should avoid the URL-check delay.
+      predispatch.lap('completionChecksMs');
       const navigationProneCall = this._isNavigationProneToolCall(fnName, fnArgs);
       let beforeUrl = '';
       let afterUrl = '';
@@ -14693,7 +14767,9 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
         }
         if (this._hasPendingSteering(tabId)) return skipSteeredPermissionWait(toolIndex);
       }
+      predispatch.lap('recipientGuardMs');
       if (messageRecipientBlock) {
+        if (predispatchConsequential()) predispatch.emit(step, { tool: fnName, outcome: 'blocked' });
         onUpdate('tool_call', { name: fnName, args: fnArgs, outcomeUnknown: false });
         onUpdate('tool_result', { name: fnName, result: messageRecipientBlock });
         messages.push({
@@ -14743,6 +14819,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
           return { action: 'return', value, status: 'persistence_degraded' };
         }
       }
+      predispatch.lap('checkpointMs');
       this._throwIfAborted(this._runAbortSignal(tabId));
       const _toolStart = Date.now();
       let steeringBeforeDispatch = false;
@@ -14757,6 +14834,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
           const abortSignal = linked.signal;
           try {
           this._throwIfAborted(abortSignal);
+          predispatch.lap('pipelineWaitMs');
           const pipelineToolbarPreflight = await this._preflightRichTextToolbarTarget(
             tabId,
             fnName,
@@ -14764,6 +14842,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
             provider,
             { onUpdate, guardAdvisories: callState.guardAdvisories },
           );
+          predispatch.lap('toolbarPreflightMs');
           this._throwIfAborted(abortSignal);
           // The draft was asked about (and answered) before this deadline
           // started. A question that comes up only now, because the draft
@@ -14778,13 +14857,16 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
               // Its notes were already given by the first check.
               || this._withoutUnverifiedStepAsk(
                 await this._githubCommitPreSubmitBlock(tabId, fnName, fnArgs, detectedSubmitAction, [], { recheck: true }));
+          predispatch.lap('pipelinePublicationMs');
           this._throwIfAborted(abortSignal);
           // Permission, checkpoint and preflight waits can receive a correction.
           // Recheck after all preparation, before marking or invoking dispatch.
             if (this._hasPendingSteering(tabId) || await this._refreshPageFeedbackForCall(tabId, tc, onUpdate)) return { steered: true };
+          predispatch.lap('feedbackRecheckMs');
           const genericChatBlock = pipelineToolbarPreflight.block || socialDispatchBlock ? null
             : await this._prepareGenericChatDispatch(tabId, fnName, fnArgs, messageRecipientExecutionContext, abortSignal,
               callState.guardAdvisories);
+          predispatch.lap('genericChatMs');
           this._throwIfAborted(abortSignal);
           if (!pipelineToolbarPreflight.block && !socialDispatchBlock && !genericChatBlock) {
             // Save the task's record with this action's sites before it can be
@@ -14799,6 +14881,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
               return { steered: true };
             }
           }
+            predispatch.lap('attemptCheckpointMs');
             let calculationDispatchBlock = this._pureCalculationToolBlock(tabId, fnName, fnArgs, calculationRequestScope);
             if (calculationDispatchBlock && this._pureCalculationScopeAdvises(tabId, fnName, fnArgs,
                 calculationRequestScope, callState.guardAdvisories)) {
@@ -14815,6 +14898,8 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
               if (fnName === 'calculate') this._rememberPureCalculationAttempt(tabId, fnArgs, calculationRequestScope);
               callState.invoked = true;
             }
+            predispatch.lap('dispatchPreparationMs');
+            predispatch.since('preDispatchMs');
             const pipelineRawToolResult = pipelineToolbarPreflight.block || socialDispatchBlock || genericChatBlock || calculationDispatchBlock || await this.executeTool(
             tabId,
             fnName,
@@ -14836,6 +14921,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
               _contentActionDispatchState: actionDispatchState,
             },
           );
+          predispatch.lap('executeToolMs');
           callState.result = this._normalizeToolResult(fnName, pipelineRawToolResult, missingResponseOutcomeUnknown);
           if (pipelineRawToolResult?.dispatched === false || pipelineRawToolResult?.noDispatch === true) {
             actionDispatchState.started = false;
@@ -14955,6 +15041,10 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
         rawToolResult = pipelineResult.rawToolResult;
         toolResult = pipelineResult.toolResult;
       }
+      if (predispatchConsequential()) {
+        predispatch.emit(step, { tool: fnName, outcome: steeringBeforeDispatch || attemptRecordNotSaved
+          || rawToolResult?.noDispatch === true || rawToolResult?.dispatched === false ? 'not_dispatched' : 'dispatched' });
+      }
       if (attemptRecordNotSaved) {
         const value = 'Stopped before sending the page action because the record of what this task has posted could not be saved. Retry after extension storage is available.';
         this._appendSyntheticToolResults(tabId, toolCalls, toolIndex, messages, onUpdate, step, () => ({
@@ -15009,6 +15099,9 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       // That also noted the call in the dispatch record; see the catch in
       // _executeToolBatch for a call interrupted before this point.
       callState.dispatchNoted = true;
+      // A write into a post composer starts the publication check of its
+      // draft in the background; the click on Post then finds it done.
+      this._socialPublicationPrefetch(tabId, fnName, fnArgs, toolResult, provider);
       const readCompletenessBeforeTool = this.readCompletenessStates.get(tabId) || null;
       const readCompletenessAfterTool = this._recordReadCompleteness(tabId, fnName, fnArgs, toolResult);
       const requiredReadProgress = readCompletenessMadeProgress(
@@ -20774,6 +20867,9 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
   }
 
   _invalidateSocialPublicationContract(guard) {
+    // A contract compiled in the background before a correction is never
+    // installed after it.
+    this._socialPublicationContractPrefetches?.delete(guard);
     const social = guard.socialPublication;
     if (!social) return;
     social.needsRecompile = true;
@@ -20910,15 +21006,33 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       delete next.deniedAudit;
       delete next.deniedAuditKey;
     }
+    // A verdict prefetched for the run that ended is never reused by another.
+    delete next.prefetchedAudit;
     return next;
   }
 
-  async _ensureSocialPublicationContract(tabId, provider = this._activeProvider(tabId)) {
+  // One compile runs per publication state at a time: a caller arriving while
+  // one runs waits for it instead of reading its still empty contract or
+  // compiling a second time (`wait: false` returns null instead of waiting).
+  // A background compile (`background`, the prefetch) changes nothing in the
+  // run: it is kept beside the run's state and never throws. A later caller
+  // that would compile awaits it and installs it only when it compiled exactly
+  // the input that caller would compile from now: the same sources, context,
+  // task and prior state. Anything else compiles as before.
+  async _ensureSocialPublicationContract(tabId, provider = this._activeProvider(tabId), { background = false, wait = true } = {}) {
     const guard = this._planExecutionGuards.get(tabId);
     if (!guard?.enabled) return null;
     // The app-owned guard is new for every user revision. A trusted Continue
     // carries its frozen contract, including exact raw source text.
     const previous = guard.socialPublication;
+    const compiles = this._socialPublicationCompiles ||= new WeakMap();
+    const running = previous ? compiles.get(previous) : null;
+    if (running) {
+      if (!wait) return null;
+      await running.catch(() => {});
+      if (this._planExecutionGuards.get(tabId) !== guard) return null;
+      return this._ensureSocialPublicationContract(tabId, provider, { background, wait });
+    }
     if (previous && (!previous.needsRecompile || Object.keys(previous.outcomes || {}).length)) return previous;
     const sources = this._socialPublicationSources(tabId);
     // This URL was observed by the app when the user task started, before
@@ -20928,12 +21042,66 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       requestPlatform: SOCIAL_PLATFORMS.includes(requestWorkflow?.adapterName) ? requestWorkflow.adapterName : null,
     };
     const key = this._sha256TextSync(JSON.stringify({ sources, context, taskKey: guard.taskKey }));
+    const prefetches = this._socialPublicationContractPrefetches ||= new WeakMap();
+    const prefetch = prefetches.get(guard);
+    if (prefetch && prefetch.previous === previous && prefetch.state.key === key) {
+      if (background) return prefetch.done;
+      if (!prefetch.settled) {
+        if (!wait) return null;
+        await prefetch.done;
+        if (this._planExecutionGuards.get(tabId) !== guard) return null;
+        // Checked again: the sources may have changed while it ran.
+        return this._ensureSocialPublicationContract(tabId, provider, { background, wait });
+      }
+      prefetches.delete(guard);
+      if (prefetch.compiled && !this._checkAbort(tabId) && !this._hasPendingSteering(tabId)) {
+        guard.socialPublication = prefetch.compiled;
+        return prefetch.compiled;
+      }
+    } else if (prefetch && !background) {
+      // A background compile of another input is never installed.
+      prefetches.delete(guard);
+    }
     const state = { key, sources, context, contract: null, outcomes: {}, actionId: null, dispatch: null, error: '' };
+    if (background) {
+      if (!provider?.chat || JSON.stringify(sources).length > 120000) return null;
+      const entry = { previous, state, settled: false, compiled: null, done: null };
+      prefetches.set(guard, entry);
+      entry.done = this._socialPublicationCompile(tabId, provider, guard, state, previous, true)
+        .catch(() => null)
+        .then(compiled => {
+          entry.settled = true;
+          entry.compiled = compiled || null;
+          if (!compiled && prefetches.get(guard) === entry) prefetches.delete(guard);
+          return entry.compiled;
+        });
+      return entry.done;
+    }
     guard.socialPublication = state;
     if (!provider?.chat || JSON.stringify(sources).length > 120000) {
       state.error = 'Publication intent could not be read completely with the selected provider.';
       return state;
     }
+    const compile = this._socialPublicationCompile(tabId, provider, guard, state, previous, false);
+    compiles.set(state, compile);
+    let outcome;
+    try {
+      outcome = await compile;
+    } finally {
+      if (compiles.get(state) === compile) compiles.delete(state);
+    }
+    return outcome === 'recompile' ? this._ensureSocialPublicationContract(tabId, provider, { wait }) : outcome;
+  }
+
+  // The compile itself: the compiled state, null when the run or its task
+  // moved on, or 'recompile' when a correction arrived meanwhile. A background
+  // compile stops once the run's state or its own slot moved on, and leaves
+  // the click its own attempts when it cannot finish.
+  async _socialPublicationCompile(tabId, provider, guard, state, previous, background) {
+    const { sources, context } = state;
+    const replaced = () => (background
+      ? guard.socialPublication !== previous || this._socialPublicationContractPrefetches?.get(guard)?.state !== state
+      : guard.socialPublication !== state || state.needsRecompile);
     const messages = publicationContractMessages(sources, context);
     let portable = false;
     for (let attempt = 0; attempt < 2; attempt++) {
@@ -20951,7 +21119,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
         await this._tracePlannerAttemptResponse(runId, 0, provider, response,
           'social_publication_contract', attempt + 1, startedAt, options);
         if (this._planExecutionGuards.get(tabId) !== guard || this._checkAbort(tabId)) return null;
-        if (guard.socialPublication !== state || state.needsRecompile) return this._ensureSocialPublicationContract(tabId, provider);
+        if (replaced()) return background ? null : 'recompile';
         if (this._hasPendingSteering(tabId)) return null;
         state.contract = normalizePublicationContract(this._socialPublicationResponseObject(response, options), sources);
         // A clarification invalidates authorization, not the uploads already
@@ -20966,16 +21134,29 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
         state.error = '';
         return state;
       } catch (error) {
-        if (this._isCostAllowanceError(error) || this._checkAbort(tabId)) throw error;
+        if (this._isCostAllowanceError(error) || this._checkAbort(tabId)) {
+          if (background) return null;
+          throw error;
+        }
         await this._socialPublicationCheckerFailure(tabId, 'social_publication_contract', attempt + 1, error, received);
-        if (this._planExecutionGuards.get(tabId) !== guard || guard.socialPublication !== state
-            || state.needsRecompile || this._hasPendingSteering(tabId)) return null;
-        state.error = 'Failed while reading the publication request. The checker could not return a complete result; the draft was not published.';
-        state.errorKind = 'technical';
+        if (this._planExecutionGuards.get(tabId) !== guard || replaced() || this._hasPendingSteering(tabId)) return null;
+        if (!background) {
+          state.error = 'Failed while reading the publication request. The checker could not return a complete result; the draft was not published.';
+          state.errorKind = 'technical';
+        }
         if (this._socialPublicationOptionsRejected(error)) portable = true;
       }
     }
-    return state;
+    return background ? null : state;
+  }
+
+  // Whether `social` is the run's publication state, or the one a background
+  // compile holds for it while it could still be installed.
+  _socialPublicationStateCurrent(guard, social) {
+    if (!social) return false;
+    if (guard.socialPublication === social) return true;
+    const prefetch = this._socialPublicationContractPrefetches?.get(guard);
+    return prefetch?.compiled === social && prefetch.previous === guard.socialPublication;
   }
 
   _socialPublicationAction(guard) {
@@ -21052,7 +21233,9 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     const liveUrl = await this._currentUrl(tabId);
     const live = resolveAdapterWorkflowJob(liveUrl, 'publish-post');
     if (!SOCIAL_PLATFORMS.includes(live?.adapterName)) return false;
-    const social = await this._ensureSocialPublicationContract(tabId, provider);
+    // Only the click waits for a contract still being compiled; an ordinary
+    // tool call binds on a later call instead of waiting here.
+    const social = await this._ensureSocialPublicationContract(tabId, provider, { wait: !!detected });
     if (!social || social.needsRecompile || social.contract?.status !== 'ready') return false;
     this._recordSocialPublishTargetSatisfied(guard);
     const eligible = publicationProgress(social.contract, social.outcomes).eligible;
@@ -21192,8 +21375,10 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     }
     if (!['click', 'click_ax', 'iframe_click'].includes(name)) return blocked('Write and verify the draft first, then activate its publish control in a separate click.');
     if (detected.publicationControl !== true) return blocked('Publication composer ownership could not be observed. Read the current page and use its resolved publish control.');
+    const contractStarted = Date.now();
     await this._adoptLiveSocialPublishWorkflow(tabId, provider, detected);
     const social = await this._ensureSocialPublicationContract(tabId, provider);
+    this._predispatchStage(tabId, 'publicationContractMs', Date.now() - contractStarted);
     const action = this._socialPublicationAction(guard);
     if (social?.needsRecompile || !action || action.platform !== live.adapterName
         || !publicationProgress(social?.contract, social?.outcomes).eligible.includes(action.id)) {
@@ -21273,57 +21458,28 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     if (social.deniedAuditKey === key && !bypassMatches) return auditBlocked();
     if (social.dispatch?.key !== key) {
       if (!bypassMatches) {
-        const auditProvider = provider || this._activeProvider(tabId);
-        const messages = publicationAuditMessages(social.sources, social.contract, action, snapshot, key, social.context);
-        let portable = false;
-        let authorized = false;
-        for (let attempt = 0; attempt < 2; attempt++) {
-          const requestMessages = attempt ? this._socialPublicationRepairMessages(messages) : messages;
-          const options = this._socialPublicationChatOptions(auditProvider, attempt > 0, portable, true);
-          const runId = this.currentRunId.get(tabId);
-          const startedAt = Date.now();
-          let received = false;
-          try {
-            await this._tracePlannerAttemptRequest(runId, 0, auditProvider, requestMessages,
-              'social_publication_authorization', attempt + 1, this._effectiveRunMode(tabId), options);
-            const response = await this._chatWithCostAllowance(auditProvider, requestMessages, options,
-              this.currentCostState.get(tabId) || null, { tabId, generationName: 'social_publication_authorization' });
-            received = true;
-            await this._tracePlannerAttemptResponse(runId, 0, auditProvider, response,
-              'social_publication_authorization', attempt + 1, startedAt, options);
-            if (this._planExecutionGuards.get(tabId) !== guard || guard.socialPublication !== social
-                || social.needsRecompile || this._checkAbort(tabId) || this._hasPendingSteering(tabId)
-                || guard.taskKey !== taskKey) {
-              return blocked('Publication context changed during authorization.');
-            }
-            const verdict = publicationAuditValidation(this._socialPublicationResponseObject(response, options), key, action.id);
-            if (!verdict.valid) throw new Error(verdict.failure);
-            if (!verdict.authorized) {
-              social.deniedAuditKey = key;
-              social.deniedAudit = { status: 'denied', reason: verdict.reason };
-              return auditBlocked();
-            }
-            authorized = true;
-            delete social.deniedAudit;
-            delete social.deniedAuditKey;
-            break;
-          } catch (error) {
-            if (this._isCostAllowanceError(error) || this._checkAbort(tabId)) throw error;
-            await this._socialPublicationCheckerFailure(tabId, 'social_publication_authorization', attempt + 1, error, received);
-            if (this._planExecutionGuards.get(tabId) !== guard || guard.socialPublication !== social
-                || social.needsRecompile || this._hasPendingSteering(tabId)
-                || guard.taskKey !== taskKey) {
-              return blocked('Publication context changed during authorization.');
-            }
+        const auditStarted = Date.now();
+        // A background prefetch audited this exact key (or still is): its
+        // verdict decides once, exactly as this audit would have. Any other
+        // key, or no verdict, runs the audit now.
+        const prefetched = await this._socialPublicationPrefetchedVerdict(tabId, guard, social, key, taskKey);
+        if (prefetched?.changed) return blocked('Publication context changed during authorization.');
+        if (prefetched) {
+          this._predispatchStage(tabId, prefetched.awaited ? 'publicationAuditAwaitedMs' : 'publicationAuditReusedMs', Date.now() - auditStarted);
+          if (!prefetched.authorized) {
             social.deniedAuditKey = key;
-            social.deniedAudit = { status: received ? 'invalid_response' : 'unavailable',
-              reason: received ? 'The publication checker returned an invalid or mismatched authorization response.'
-                : 'The selected provider could not complete the publication check.',
-              validationFailure: String(error?.message || error).slice(0, 600) };
-            if (this._socialPublicationOptionsRejected(error)) portable = true;
+            social.deniedAudit = { status: 'denied', reason: prefetched.reason };
+            return auditBlocked();
           }
+          delete social.deniedAudit;
+          delete social.deniedAuditKey;
+        } else {
+          const outcome = await this._socialPublicationAuditRun(tabId, provider || this._activeProvider(tabId),
+            guard, social, action, snapshot, key, taskKey, { record: true });
+          this._predispatchStage(tabId, 'publicationAuditMs', Date.now() - auditStarted);
+          if (outcome.status === 'changed') return blocked('Publication context changed during authorization.');
+          if (outcome.status !== 'authorized') return auditBlocked();
         }
-        if (!authorized) return auditBlocked();
       }
       social.dispatch = { key, actionId: action.id, snapshot: JSON.parse(JSON.stringify(snapshot)), pageUrl,
         documentIdentity, frameId, ...(bypassMatches ? { auditBypassed: true } : {}),
@@ -21331,7 +21487,9 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     }
     // The semantic check can take time. Re-read the same target afterward;
     // neither a changed draft/account nor a navigated document inherits it.
+    const rereadStarted = Date.now();
     const fresh = await this._detectLikelySubmitAction(tabId, name, args);
+    this._predispatchStage(tabId, 'publicationRereadMs', Date.now() - rereadStarted);
     if (this._planExecutionGuards.get(tabId) !== guard || guard.socialPublication !== social || social.needsRecompile
         || this._checkAbort(tabId) || this._hasPendingSteering(tabId) || guard.taskKey !== taskKey
         || fresh?.isSubmit !== true || fresh.publicationControl !== true || fresh.publicationResourceUrlsComplete !== true
@@ -21345,6 +21503,270 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     }
     Object.assign(detected, fresh);
     return null;
+  }
+
+  // The publication audit of one concrete draft: the same request, schema,
+  // two attempts, format repair and validation for the click and for its
+  // background prefetch. `record` (the click) records each outcome on the
+  // publication state as it goes; the prefetch records nothing here.
+  // `isCurrent` tells whether `social` is still the run's publication state.
+  async _socialPublicationAuditRun(tabId, provider, guard, social, action, snapshot, key, taskKey,
+    { record = false, isCurrent = () => guard.socialPublication === social } = {}) {
+    const messages = publicationAuditMessages(social.sources, social.contract, action, snapshot, key, social.context);
+    let portable = false;
+    let failure = null;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const requestMessages = attempt ? this._socialPublicationRepairMessages(messages) : messages;
+      const options = this._socialPublicationChatOptions(provider, attempt > 0, portable, true);
+      const runId = this.currentRunId.get(tabId);
+      const startedAt = Date.now();
+      let received = false;
+      try {
+        await this._tracePlannerAttemptRequest(runId, 0, provider, requestMessages,
+          'social_publication_authorization', attempt + 1, this._effectiveRunMode(tabId), options);
+        const response = await this._chatWithCostAllowance(provider, requestMessages, options,
+          this.currentCostState.get(tabId) || null, { tabId, generationName: 'social_publication_authorization' });
+        received = true;
+        await this._tracePlannerAttemptResponse(runId, 0, provider, response,
+          'social_publication_authorization', attempt + 1, startedAt, options);
+        if (this._planExecutionGuards.get(tabId) !== guard || !isCurrent()
+            || social.needsRecompile || this._checkAbort(tabId) || this._hasPendingSteering(tabId)
+            || guard.taskKey !== taskKey) {
+          return { status: 'changed' };
+        }
+        const verdict = publicationAuditValidation(this._socialPublicationResponseObject(response, options), key, action.id);
+        if (!verdict.valid) throw new Error(verdict.failure);
+        if (!verdict.authorized) {
+          if (record) {
+            social.deniedAuditKey = key;
+            social.deniedAudit = { status: 'denied', reason: verdict.reason };
+          }
+          return { status: 'denied', reason: verdict.reason };
+        }
+        if (record) {
+          delete social.deniedAudit;
+          delete social.deniedAuditKey;
+        }
+        return { status: 'authorized', reason: verdict.reason };
+      } catch (error) {
+        if (this._isCostAllowanceError(error) || this._checkAbort(tabId)) throw error;
+        await this._socialPublicationCheckerFailure(tabId, 'social_publication_authorization', attempt + 1, error, received);
+        if (this._planExecutionGuards.get(tabId) !== guard || !isCurrent()
+            || social.needsRecompile || this._hasPendingSteering(tabId)
+            || guard.taskKey !== taskKey) {
+          return { status: 'changed' };
+        }
+        failure = { status: received ? 'invalid_response' : 'unavailable',
+          reason: received ? 'The publication checker returned an invalid or mismatched authorization response.'
+            : 'The selected provider could not complete the publication check.',
+          validationFailure: String(error?.message || error).slice(0, 600) };
+        if (record) {
+          social.deniedAuditKey = key;
+          social.deniedAudit = failure;
+        }
+        if (this._socialPublicationOptionsRejected(error)) portable = true;
+      }
+    }
+    return { status: 'failed', failure };
+  }
+
+  // The verdict a background prefetch reached for this exact key, awaiting
+  // one still running for it. The click decides here once: a stored verdict is
+  // used at most once, and a prefetch still running for another draft can no
+  // longer store anything. A run, task or correction that moved on meanwhile
+  // is reported as a change, as after the click's own audit.
+  async _socialPublicationPrefetchedVerdict(tabId, guard, social, key, taskKey) {
+    const audits = this._socialPublicationAuditPrefetches;
+    const running = audits?.get(social);
+    let awaited = false;
+    if (running?.key === key && social.prefetchedAudit?.key !== key) {
+      awaited = true;
+      await running.done;
+    }
+    if (running && audits.get(social) === running) audits.delete(social);
+    const stored = social.prefetchedAudit?.key === key ? social.prefetchedAudit : null;
+    delete social.prefetchedAudit;
+    if (!stored) return null;
+    if (this._planExecutionGuards.get(tabId) !== guard || guard.socialPublication !== social
+        || social.needsRecompile || this._checkAbort(tabId) || this._hasPendingSteering(tabId)
+        || guard.taskKey !== taskKey) return { changed: true };
+    return { authorized: stored.authorized === true, reason: String(stored.reason || ''), awaited };
+  }
+
+  // After a text write into an X or Bluesky post editor, or a file added to
+  // the composer last written, the click on Post will need the publication
+  // contract, an audit of this exact draft and readings of what the composer's
+  // controls do. They are prepared here in the background so the click does
+  // not wait for them. Nothing here authorizes anything or changes the run:
+  // the contract is installed only by a caller that would compile exactly the
+  // same input, the click recomputes the binding key from its own fresh probe
+  // and uses a verdict only for that exact key, and every later check still
+  // runs. The prefetch writes no transcript and emits no UI event (only trace
+  // notes), and its model calls go through the run's cost allowance.
+  _socialPublicationPrefetch(tabId, name, args = {}, result = null, provider = null) {
+    try {
+      const guard = this._planExecutionGuards.get(tabId);
+      if (!this._socialPublicationPrefetchAllowed(guard) || !provider?.chat
+          || this._checkAbort(tabId) || this._hasPendingSteering(tabId)
+          || !result || typeof result !== 'object' || result.success !== true
+          || result.noDispatch === true || result.outcomeUnknown === true) return null;
+      const hints = this._socialPublicationPrefetchHints ||= new WeakMap();
+      const hint = name === 'upload_file' ? hints.get(guard) || null : this._socialPublicationPrefetchHint(name, args);
+      if (!hint) return null;
+      hints.set(guard, hint);
+      return this._socialPublicationPrefetchRun(tabId, guard, provider, hint).catch(() => null);
+    } catch {
+      return null;
+    }
+  }
+
+  // The contract depends on the request, never on the draft, so its compile
+  // starts as soon as the agent begins a write into a post editor, while that
+  // write is still being prepared. The audit waits for the written draft.
+  _socialPublicationContractPrefetch(tabId, name, args = {}, provider = null) {
+    try {
+      const guard = this._planExecutionGuards.get(tabId);
+      const hint = this._socialPublicationPrefetchHint(name, args);
+      const social = guard?.socialPublication;
+      const pending = this._socialPublicationContractPrefetches?.get(guard);
+      if (!hint || !this._socialPublicationPrefetchAllowed(guard) || !provider?.chat
+          || this._checkAbort(tabId) || this._hasPendingSteering(tabId)
+          || (social && (this._socialPublicationCompiles?.get(social)
+            || !social.needsRecompile || Object.keys(social.outcomes || {}).length))
+          || (pending && pending.previous === social)) return null;
+      return this._socialPublicationPrefetchRun(tabId, guard, provider, hint, { contractOnly: true }).catch(() => null);
+    } catch {
+      return null;
+    }
+  }
+
+  // A write may prepare the click on Post only in a run that executes a plan
+  // submitting something and is not bound to another site job (a message to
+  // send, a file to commit): the planner told those apart from a post.
+  _socialPublicationPrefetchAllowed(guard) {
+    const job = guard?.siteWorkflow?.job;
+    return !!guard?.enabled && guard.requiresSubmission === true
+      && (!job || (job.id === 'publish-post' && SOCIAL_PLATFORMS.includes(guard.siteWorkflow.adapterName)));
+  }
+
+  // The editor a text write targets: its ref, its selector, or the focused
+  // element.
+  _socialPublicationPrefetchHint(name, args = {}) {
+    if ((name === 'type_ax' || (name === 'set_field' && args?.submit !== true))
+        && typeof args?.ref_id === 'string' && args.ref_id) return { editorRef: args.ref_id };
+    if (name !== 'type_text') return null;
+    return typeof args?.selector === 'string' && args.selector.trim()
+      ? { editorSelector: args.selector.trim() } : { focused: true };
+  }
+
+  async _socialPublicationPrefetchRun(tabId, guard, provider, hint, { contractOnly = false } = {}) {
+    const startedAt = Date.now();
+    const runId = this.currentRunId.get(tabId);
+    const taskKey = guard.taskKey;
+    const current = () => this._planExecutionGuards.get(tabId) === guard && guard.taskKey === taskKey
+      && !this._checkAbort(tabId) && !this._hasPendingSteering(tabId);
+    let status = 'skipped';
+    try {
+      const pageUrl = await this._currentUrl(tabId);
+      if (!current() || !SOCIAL_PLATFORMS.includes(resolveAdapterWorkflowJob(pageUrl, 'publish-post')?.adapterName)) return status;
+      // The same probe the click runs, on the publish control of the composer
+      // that holds the post editor written (found by the app's own markers).
+      const detected = await this._detectLikelySubmitAction(tabId, 'click_ax', { __wbPublicationPrefetch: hint }, { captionPass: 'final' });
+      if (!current() || detected?.isSubmit !== true || detected.publicationControl !== true) return status;
+      const readings = this._socialPublicationPrefetchReadings(tabId, detected.publicationPrefetchCaptions, pageUrl);
+      try {
+        const social = await this._ensureSocialPublicationContract(tabId, provider, { background: true });
+        status = contractOnly
+          ? (social?.contract && this._socialPublicationStateCurrent(guard, social) ? 'contract_ready' : 'skipped')
+          : await this._socialPublicationPrefetchAudit(tabId, guard, provider, social, detected, pageUrl, taskKey, current);
+      } finally {
+        await readings;
+      }
+      return status;
+    } catch {
+      return (status = 'failed');
+    } finally {
+      // Noted in the trace of the run that started it.
+      if (runId) {
+        try {
+          const pending = trace.recordNote(runId, 0, 'publication_prefetch', { status, durationMs: Date.now() - startedAt });
+          if (pending?.catch) pending.catch(() => {});
+        } catch {}
+      }
+    }
+  }
+
+  async _socialPublicationPrefetchAudit(tabId, guard, provider, social, detected, pageUrl, taskKey, current) {
+    const isCurrent = () => this._socialPublicationStateCurrent(guard, social);
+    if (!current() || !isCurrent() || social.needsRecompile
+        || social.contract?.status !== 'ready' || social.retryBypass) return 'skipped';
+    // The action the click's own workflow binding chooses for this site.
+    const live = resolveAdapterWorkflowJob(pageUrl, 'publish-post');
+    const eligible = publicationProgress(social.contract, social.outcomes).eligible;
+    const action = social.contract.actions.find(a => a.platform === live?.adapterName && eligible.includes(a.id));
+    if (!action) return 'skipped';
+    // The click audits only a draft that passes its preflight; so does this.
+    const snapshot = this._socialPublicationSnapshot(guard, detected.publicationSnapshot);
+    if (this._socialSnapshotActionIssues(action, snapshot).length
+        || !Array.isArray(detected.publicationResourceUrls) || detected.publicationResourceUrlsComplete !== true) return 'skipped';
+    const documentIdentity = detected.frameDocumentIdentity || '';
+    const frameId = Number.isInteger(detected.frameId) ? detected.frameId : 0;
+    const key = this._sha256TextSync(JSON.stringify({ contract: social.key, action, snapshot, pageUrl, documentIdentity, frameId }));
+    if (social.dispatch?.key === key || social.deniedAuditKey === key || social.prefetchedAudit?.key === key) return 'cached';
+    const audits = this._socialPublicationAuditPrefetches ||= new WeakMap();
+    const entry = { key, done: null };
+    audits.set(social, entry);
+    entry.done = (async () => {
+      try {
+        const outcome = await this._socialPublicationAuditRun(tabId, provider, guard, social, action, snapshot, key, taskKey, { isCurrent });
+        if (outcome.status !== 'authorized' && outcome.status !== 'denied') return outcome.status;
+        // Stored only while nothing moved on: the same run, task, contract
+        // and page, no newer prefetch, and no click that already decided.
+        const unchanged = () => audits.get(social) === entry && current() && isCurrent()
+          && !social.needsRecompile && social.dispatch?.key !== key && social.deniedAuditKey !== key;
+        if (!unchanged()) return 'changed';
+        const liveUrl = await this._currentUrl(tabId);
+        if (!unchanged() || this._normalizeUrl(liveUrl) !== this._normalizeUrl(pageUrl)) return 'changed';
+        social.prefetchedAudit = { key, authorized: outcome.status === 'authorized', reason: outcome.reason, at: Date.now() };
+        return outcome.status;
+      } catch {
+        return 'failed';
+      } finally {
+        if (audits.get(social) === entry) audits.delete(social);
+      }
+    })();
+    return entry.done;
+  }
+
+  // The readings the click's own checks ask for, asked now: what the publish
+  // control and the controls beside it do (the submit probe), and, on a page
+  // whose sends the recipient guard checks, whether activating them sends a
+  // message. Readings are kept per caption, so asking earlier changes no
+  // answer; a caption that differs at the click is read there as before.
+  _socialPublicationPrefetchReadings(tabId, captions, pageUrl) {
+    const list = [...new Set((Array.isArray(captions) ? captions : [])
+      .map(caption => String(caption ?? '').replace(/\s+/g, ' ').trim())
+      .filter(caption => caption && caption.length <= 200))];
+    // A caption an earlier prefetch is still reading is not asked twice.
+    const reading = this._socialPublicationPrefetchReading ||= new Set();
+    const unread = kind => list.filter(caption => this._pageTextReading(kind, caption) === null
+      && !reading.has(kind + '\u0000' + caption));
+    const read = (kind, texts, request) => {
+      for (const text of texts) reading.add(kind + '\u0000' + text);
+      return Promise.resolve().then(request)
+        .finally(() => { for (const text of texts) reading.delete(kind + '\u0000' + text); });
+    };
+    const reads = [];
+    const effects = unread('control_effect').slice(0, 24);
+    if (effects.length) reads.push(read('control_effect', effects, () => this._readControlEffects(tabId, effects)));
+    let guarded = false;
+    try { guarded = getMessageRecipientGuardPolicy(pageUrl)?.verifyActiveRecipient === true; } catch {}
+    const controls = guarded ? unread('message_control').slice(0, 48) : [];
+    if (controls.length) {
+      reads.push(read('message_control', controls, () => this._readPageTexts(tabId, 'message_control', controls, {},
+        { maxChars: 400, mainTimeoutMs: CONTROL_READING_TIMEOUT_MS })));
+    }
+    return Promise.allSettled(reads);
   }
 
   _socialPublishedContractMatches(binding, guard, pageState) {
@@ -25111,7 +25533,11 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     let result = await check();
     for (let pass = 0; pass < 3; pass += 1) {
       const unread = Array.isArray(result?.pageTextsNeeded) ? result.pageTextsNeeded : [];
-      if (!unread.length || !await this._readUnreadPageTexts(tabId, unread)) break;
+      if (!unread.length) break;
+      const readingStarted = Date.now();
+      const read = await this._readUnreadPageTexts(tabId, unread);
+      this._predispatchStage(tabId, 'recipientReadingMs', Date.now() - readingStarted);
+      if (!read) break;
       result = await check();
     }
     return result;
@@ -28004,11 +28430,15 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
         }
         return results;
       };
-      let rawResults = await runProbe('collect');
+      // A background publication prefetch reads the captions itself, beside
+      // its other work, so its probe goes straight to the final pass.
+      let rawResults = await runProbe(options.captionPass === 'final' ? 'final' : 'collect');
       const captionsNeeded = (Array.isArray(rawResults) ? rawResults : [])
         .flatMap(item => (Array.isArray(item?.captionsNeeded) ? item.captionsNeeded : []));
       if (captionsNeeded.length) {
+        const readingStarted = Date.now();
         await this._readControlEffects(tabId, captionsNeeded);
+        if (typeof options.onCaptionReading === 'function') options.onCaptionReading(Date.now() - readingStarted);
         rawResults = await runProbe('final');
       }
       const detected = (Array.isArray(rawResults) ? rawResults : [])
@@ -28060,6 +28490,10 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
           publicationSnapshot: detected.publicationSnapshot || null,
           publicationAccountIdentity: String(detected.publicationAccountIdentity || '').slice(0, 300),
           publicationAccountIdentityComplete: detected.publicationAccountIdentityComplete === true,
+          ...(Array.isArray(detected.publicationPrefetchCaptions) ? {
+            publicationPrefetchCaptions: detected.publicationPrefetchCaptions
+              .filter(caption => typeof caption === 'string' && caption.length <= 200).slice(0, 48),
+          } : {}),
           transactionOrderIds: Array.isArray(detected.transactionOrderIds)
             ? detected.transactionOrderIds.slice(0, 20)
             : [],
@@ -29070,7 +29504,50 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     const interactiveElements = () => Array.from((findTopmostModal() || doc).querySelectorAll(
       'a, button, [role="button"], [role="link"], [role="tab"], [role="menuitem"], input:not([type="hidden"]), textarea, select, input[type="button"], input[type="submit"], summary, label, [onclick], [data-action]'
     )).filter(isVisible);
+    // A background publication prefetch names no control: it asks for the
+    // publish control of the composer that holds the post editor just
+    // written, found by the app's own publish marker nearest that editor. Any
+    // other field, even one beside a Post button, and a missing, hidden or
+    // ambiguous control resolve to nothing.
+    const publicationPrefetchControl = hint => {
+      const adapterName = socialPublishAdapterName();
+      if (!adapterName || !hint || typeof hint !== 'object') return null;
+      let editor = null;
+      try {
+        if (typeof hint.editorRef === 'string' && typeof window.__wb_ax_lookup === 'function') {
+          editor = window.__wb_ax_lookup(hint.editorRef);
+        } else if (typeof hint.editorSelector === 'string' && hint.editorSelector) {
+          const matches = Array.from(doc.querySelectorAll(hint.editorSelector)).filter(isVisible);
+          editor = matches.length === 1 ? matches[0] : null;
+        } else if (hint.focused === true) {
+          editor = doc.activeElement;
+        }
+        // X marks its post editor tweetTextarea_N; Bluesky's is a ProseMirror
+        // editor (composerTextInput in some builds).
+        if (!editor?.closest?.(adapterName === 'twitter'
+          ? '[data-testid^="tweetTextarea_"]'
+          : '[data-testid="composerTextInput"],.ProseMirror[contenteditable="true"]')) return null;
+      } catch {
+        return null;
+      }
+      if (!editor || editor.nodeType !== 1 || !editor.isConnected) return null;
+      const markers = adapterName === 'twitter'
+        ? '[data-testid="tweetButton"],[data-testid="tweetButtonInline"]'
+        : '[data-testid="composerPublishBtn"],[data-testid="composerPublishButton"]';
+      // The nearest ancestor holding a publish control decides; a control of
+      // another composer is refused below, so the climb can be generous.
+      for (let node = editor.parentElement, depth = 0; node && depth < 24; node = node.parentElement, depth += 1) {
+        let controls = [];
+        try { controls = Array.from(node.querySelectorAll(markers)).filter(isVisible); } catch { return null; }
+        if (!controls.length) continue;
+        if (controls.length !== 1) return null;
+        const composer = socialPublishComposerFor(controls[0]);
+        return composer && composer.contains(editor) ? controls[0] : null;
+      }
+      return null;
+    };
     const resolveClickTarget = () => {
+      if (toolName === 'click_ax' && args.__wbPublicationPrefetch) return publicationPrefetchControl(args.__wbPublicationPrefetch);
       if (toolName === 'click_ax' || toolName === 'set_field' || toolName === 'type_ax') {
         try {
           if (typeof window.__wb_ax_lookup === 'function' && typeof args.ref_id === 'string') {
@@ -29542,8 +30019,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       // A click is judged by its activated control's captions and by those of
       // the control that owns its activation. On a collect pass, unread ones
       // are reported before anything else; fields and plain links have none.
-      if (args.__wbCaptionPass === 'collect' && ['click', 'click_ax', 'iframe_click'].includes(toolName)
-          && target && !isEditableActivationTarget(target)) {
+      const activationCaptions = () => {
         const subject = labelControlFor(target) || target;
         const subjects = [control, subject.closest?.('button,input,[role="button"],[onclick],[data-action]'),
           subject.closest?.('button,input,[role="button"],[role="menuitem"],[role="menuitemradio"],[role="menuitemcheckbox"],[role="tab"],[role="option"],[role="treeitem"],[role="switch"],[role="checkbox"],[role="radio"],summary')];
@@ -29551,8 +30027,11 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
         // there makes a confirmation ambiguous in any language.
         const dialog = subject.closest?.('dialog[open],[role="dialog"],[role="alertdialog"]');
         if (dialog) subjects.push(...[...dialog.querySelectorAll('button,input[type="button"],input[type="submit"],[role="button"],[role="menuitem"]')].slice(0, 24));
-        const needed = [...new Set(subjects.filter(el => el && !isEditableActivationTarget(el)).flatMap(controlCaptions))]
-          .filter(key => !captionReading(key));
+        return [...new Set(subjects.filter(el => el && !isEditableActivationTarget(el)).flatMap(controlCaptions))];
+      };
+      if (args.__wbCaptionPass === 'collect' && ['click', 'click_ax', 'iframe_click'].includes(toolName)
+          && target && !isEditableActivationTarget(target)) {
+        const needed = activationCaptions().filter(key => !captionReading(key));
         if (needed.length) return { captionsNeeded: needed.slice(0, 24) };
       }
       const actionReading = captionsReading(actionWords);
@@ -30134,6 +30613,9 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
           const submitter = owner.closest?.('button,input,[role="button"],[onclick],[data-action]') || owner;
           if (isVisible(submitter) && ordinaryControlEvidence(submitter, ordinaryLabels(submitter))) info.nonCommittingControl = true;
         }
+        // The captions a click on this control would have read, for the
+        // prefetch to read ahead of it.
+        if (args.__wbPublicationPrefetch && toolName === 'click_ax') info.publicationPrefetchCaptions = activationCaptions().slice(0, 48);
         return info;
       }
       if (target && ['click', 'click_ax', 'iframe_click'].includes(toolName)

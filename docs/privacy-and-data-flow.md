@@ -372,6 +372,11 @@ counts, outcome categories, and safety-status booleans. URL, target labels,
 accessibility references, and other page content are excluded in both tiers,
 including lossless traces.
 
+`predispatch_timing` trace notes retain only bounded per-stage milliseconds of
+one tool call's pre-dispatch pipeline, the tool name and an outcome category.
+`publication_prefetch` notes retain only a status label and a duration. Page,
+draft and model content are excluded in both tiers, including lossless traces.
+
 `done_timing` trace notes retain only the milliseconds a completion check spent
 preparing its evidence, reading the page's status texts and reaching a verdict,
 with the verdict's outcome and engine names. Completion verification attempts

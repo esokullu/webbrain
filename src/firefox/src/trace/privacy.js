@@ -113,6 +113,32 @@ function projectDoneTiming(data) {
   return { step: Number.isFinite(data?.step) ? data.step : 0, note: 'done_timing', extra };
 }
 
+// Where one tool call spent its time before dispatch: the pipeline's stages
+// in milliseconds, the tool's name and the call's outcome, never what the
+// page or the model said.
+const PREDISPATCH_TIMING_MS_FIELDS = [
+  'workflowAdoptMs', 'captchaGateMs', 'preparationMs', 'clarificationMs', 'submitPreflightMs',
+  'submitProbeMs', 'submitCaptionReadingMs', 'resultBaselineMs', 'validationSnapshotMs',
+  'workflowPreSubmitMs', 'resourceMutationMs', 'githubTransitionMs', 'workflowDispatchMs',
+  'publicationContractMs', 'publicationAuditMs', 'publicationAuditReusedMs', 'publicationAuditAwaitedMs',
+  'publicationRereadMs', 'submitDetectionMs', 'submitConfirmationMs', 'permissionMs', 'completionChecksMs',
+  'recipientGuardMs', 'recipientReadingMs', 'checkpointMs', 'pipelineWaitMs', 'toolbarPreflightMs',
+  'pipelinePublicationMs', 'feedbackRecheckMs', 'genericChatMs', 'attemptCheckpointMs',
+  'dispatchPreparationMs', 'preDispatchMs', 'executeToolMs', 'totalMs',
+];
+function projectPredispatchTiming(data) {
+  const extra = {};
+  for (const key of PREDISPATCH_TIMING_MS_FIELDS) {
+    const value = data?.extra?.[key];
+    if (typeof value === 'number' && Number.isFinite(value) && value >= 0) extra[key] = Math.min(value, 600_000);
+  }
+  const tool = data?.extra?.tool;
+  if (typeof tool === 'string' && /^[a-z][a-z0-9_]{0,63}$/.test(tool)) extra.tool = tool;
+  const outcome = data?.extra?.outcome;
+  if (['dispatched', 'not_dispatched', 'blocked'].includes(outcome)) extra.outcome = outcome;
+  return { step: Number.isFinite(data?.step) ? data.step : 0, note: 'predispatch_timing', extra };
+}
+
 function projectClickAxTiming(data) {
   const extra = {};
   for (const key of CLICK_AX_TIMING_MS_FIELDS) {
@@ -242,6 +268,9 @@ export function projectTraceEventData(kind, data, { includeContent = false } = {
   }
   if (kind === 'note' && data?.note === 'done_timing') {
     return projectDoneTiming(data);
+  }
+  if (kind === 'note' && data?.note === 'predispatch_timing') {
+    return projectPredispatchTiming(data);
   }
   if (includeContent || data == null) return data;
   const source = data && typeof data === 'object' && !Array.isArray(data) ? data : {};
