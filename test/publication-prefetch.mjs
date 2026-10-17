@@ -28,6 +28,16 @@ const until = async (predicate, message) => {
   }
   assert.fail(message);
 };
+// A promise that must settle soon: a hang fails the test instead of the run.
+const within = async (promise, message, ms = 2000) => {
+  let timer;
+  const late = new Promise((_resolve, reject) => { timer = setTimeout(() => reject(new Error(`timed out: ${message}`)), ms); });
+  try {
+    return await Promise.race([promise, late]);
+  } finally {
+    clearTimeout(timer);
+  }
+};
 
 for (const browser of ['chrome', 'firefox']) {
   const { Agent } = await import(`../src/${browser}/src/agent/agent.js`);
@@ -45,21 +55,33 @@ for (const browser of ['chrome', 'firefox']) {
     agent._currentUrl = async () => f.pageUrl;
     agent.conversations.set(tabId, [{ role: 'system', content: 'system' }, { role: 'user', content: request }]);
     f.guard = agent._startPlanExecutionGuard(tabId, 'act', { requestKind: 'execute', requiresStateChange: true, requiresSubmission: true });
-    agent._chatWithCostAllowance = async (usedProvider, messages, _options, _cost, meta) => {
+    agent._chatWithCostAllowance = async (usedProvider, messages, options, cost, meta) => {
       assert.equal(usedProvider, provider);
-      const call = { name: meta.generationName, startedAt: Date.now(), endedAt: null, done: false };
+      const signal = options?.signal || null;
+      const call = { name: meta.generationName, startedAt: Date.now(), endedAt: null, done: false, cost, signal, aborted: false };
       f.calls.push(call);
+      // Like a provider that honors its request's signal.
+      const aborted = () => {
+        call.aborted = true;
+        const error = new Error('The request was aborted.');
+        error.name = 'AbortError';
+        return error;
+      };
+      const input = JSON.parse(messages[1].content);
+      if (meta.generationName === 'social_publication_authorization') call.key = input.key;
+      if (signal?.aborted) throw aborted();
       const hold = f.holds[meta.generationName];
       if (hold) {
         delete f.holds[meta.generationName];
         hold.started = true;
-        await hold.promise;
+        await new Promise((resolve, reject) => {
+          hold.promise.then(resolve);
+          if (f.honorAbort !== false) signal?.addEventListener('abort', () => reject(aborted()), { once: true });
+        });
       }
       call.endedAt = Date.now();
       call.done = true;
-      const input = JSON.parse(messages[1].content);
       if (meta.generationName === 'social_publication_authorization') {
-        call.key = input.key;
         const authorized = f.authorize(input);
         return { content: JSON.stringify({ key: input.key, actionId: input.action.id, authorized,
           reason: authorized ? 'The draft matches the request.' : 'The draft does not match the request.' }) };
@@ -72,7 +94,13 @@ for (const browser of ['chrome', 'firefox']) {
     // The same probe answers the prefetch (its publish-control hint) and the click.
     agent._detectLikelySubmitAction = async (_tabId, name, args, options = {}) => {
       f.probes.push({ name, args: structuredClone(args), captionPass: options.captionPass || 'collect' });
-      return structuredClone(f.detected);
+      const detected = structuredClone(f.detected);
+      // One probe can see a changed composer while later ones do not.
+      if (f.probeOnce) {
+        Object.assign(detected, f.probeOnce);
+        f.probeOnce = null;
+      }
+      return detected;
     };
     agent._readPageTexts = async (_tabId, kind, texts) => { f.readings.push({ kind, texts: [...texts] }); };
     f.hold = name => { const gate = deferred(); f.holds[name] = gate; return gate; };
@@ -269,6 +297,159 @@ for (const browser of ['chrome', 'firefox']) {
       assert.equal(f.pending(), null, interruption);
       assert.equal(f.named('social_publication_authorization').length, 0, interruption);
     }
+  });
+
+  test(`${browser}: a background check sends nothing for a run that stopped or was replaced, and never charges the next run`, async () => {
+    for (const stage of ['social_publication_contract', 'social_publication_authorization']) {
+      const f = setup();
+      const { agent, tabId } = f;
+      const startingRun = new AbortController();
+      agent._runAbortStates.set(tabId, { controller: startingRun, dispose() {} });
+      agent.currentCostState.set(tabId, { run: 'the run that wrote the draft' });
+      // Hold the check where it awaits trace persistence: after its last
+      // liveness check, before inference.
+      const tracing = deferred();
+      const traced = agent._tracePlannerAttemptRequest;
+      let held = false;
+      agent._tracePlannerAttemptRequest = async (...args) => {
+        if (!held && args[4] === stage) {
+          held = true;
+          await tracing.promise;
+        }
+        return traced.apply(agent, args);
+      };
+      const prefetch = f.write();
+      await until(() => held, `${stage}: the background check reached trace persistence`);
+      const sent = f.calls.length;
+      // Stop, then the next run starts on the tab with its own guard, signal
+      // and allowance.
+      agent.abort(tabId);
+      agent._runAbortStates.set(tabId, { controller: new AbortController(), dispose() {} });
+      agent.abortFlags.delete(tabId);
+      const nextCost = { run: 'the next run' };
+      agent.currentCostState.set(tabId, nextCost);
+      agent._startPlanExecutionGuard(tabId, 'act', { requestKind: 'execute', requiresStateChange: true, requiresSubmission: true });
+      tracing.release();
+      assert.equal(await within(prefetch, `${stage}: the stale prefetch ends`),
+        stage === 'social_publication_contract' ? 'skipped' : 'changed', stage);
+      assert.equal(f.calls.length, sent, `${stage}: the stale check was never sent`);
+      assert(f.calls.every(call => call.cost !== nextCost), `${stage}: the next run was not charged`);
+    }
+  });
+
+  test(`${browser}: a background check carries the signal and allowance of the run that started it`, async () => {
+    const f = setup();
+    const { agent, tabId } = f;
+    const startingRun = new AbortController();
+    const startingCost = { run: 'the run that wrote the draft' };
+    agent._runAbortStates.set(tabId, { controller: startingRun, dispose() {} });
+    agent.currentCostState.set(tabId, startingCost);
+    const audit = f.hold('social_publication_authorization');
+    const prefetch = f.write();
+    await until(() => audit.started, 'the background audit started');
+    const [compile] = f.named('social_publication_contract');
+    const [request] = f.named('social_publication_authorization');
+    assert.equal(compile.cost, startingCost, 'the compile is charged to the run that started it');
+    assert.equal(request.cost, startingCost, 'the audit is charged to the run that started it');
+    // Stopping that run cancels the request in flight.
+    startingRun.abort();
+    await settle();
+    audit.release();
+    assert.equal(await within(prefetch, 'the stopped prefetch ends'), 'changed');
+    assert.equal(request.aborted, true, 'the request in flight was cancelled');
+    assert.equal(f.pending()?.compiled?.prefetchedAudit, undefined, 'a cancelled audit stores no verdict');
+  });
+
+  test(`${browser}: a newer draft cancels the background audit of the older one, and a click awaiting it audits on its own`, async () => {
+    const f = setup();
+    const audit = f.hold('social_publication_authorization');
+    const first = f.write();
+    await until(() => audit.started, 'the first background audit started');
+    const [stale] = f.named('social_publication_authorization');
+    // The click on Post awaits the audit of its own draft.
+    let clicked = false;
+    const click = f.click().then(result => { clicked = true; return result; });
+    await settle();
+    assert.equal(clicked, false, 'the click awaits the audit in flight');
+    // Another write changes the composer: its audit supersedes the first.
+    f.probeOnce = { frameDocumentIdentity: 'https://x.com/compose/post|fixture-document-2' };
+    const second = f.write();
+    try {
+      assert.equal(await within(first, 'the superseded audit settles'), 'changed');
+      assert.equal(stale.aborted, true, 'its request was cancelled');
+      assert.equal(await within(click, 'the click goes on without the superseded audit'), null);
+      assert.equal(await within(second, 'the newer audit ends'), 'authorized');
+    } finally {
+      audit.release();
+    }
+    const audits = f.named('social_publication_authorization');
+    assert.equal(audits.length, 3, 'the cancelled audit, the newer draft\'s and the click\'s own');
+    const own = audits.filter(call => call !== stale && call.key === stale.key);
+    assert.equal(own.length, 1, 'the click audited the draft it probed');
+    assert.equal(f.guard.socialPublication.dispatch.key, stale.key);
+    assert.notEqual(f.guard.socialPublication.prefetchedAudit?.key, stale.key, 'the cancelled audit stored no verdict');
+    // With a provider that cannot cancel its request, the superseded audit
+    // still settles at once, and its late verdict is not stored.
+    const stuck = setup();
+    stuck.honorAbort = false;
+    const blocked = stuck.hold('social_publication_authorization');
+    const older = stuck.write();
+    await until(() => blocked.started, 'the background audit started');
+    const [late] = stuck.named('social_publication_authorization');
+    stuck.probeOnce = { frameDocumentIdentity: 'https://x.com/compose/post|fixture-document-2' };
+    const newer = stuck.write();
+    try {
+      assert.equal(await within(older, 'the superseded audit settles without its provider'), 'changed');
+      assert.equal(await within(newer, 'the newer audit ends'), 'authorized');
+    } finally {
+      blocked.release();
+    }
+    await settle();
+    assert.equal(late.done, true);
+    assert.notEqual(stuck.guard.socialPublication?.prefetchedAudit?.key ?? stuck.pending()?.compiled?.prefetchedAudit?.key, late.key,
+      'the late verdict of the superseded audit is not stored');
+    // The same draft written again joins the audit already running for it.
+    const again = setup();
+    const held = again.hold('social_publication_authorization');
+    const one = again.write();
+    await until(() => held.started, 'the background audit started');
+    const two = again.write();
+    await settle();
+    held.release();
+    assert.equal(await within(one, 'the first prefetch ends'), 'authorized');
+    assert.equal(await within(two, 'the joined prefetch ends'), 'authorized');
+    assert.equal(again.named('social_publication_authorization').length, 1, 'one audit for the same draft');
+  });
+
+  test(`${browser}: a correction or a compile of other sources cancels a background compile in flight`, async () => {
+    const f = setup();
+    const contract = f.hold('social_publication_contract');
+    const prefetch = f.write();
+    await until(() => contract.started, 'the background compile started');
+    const [stale] = f.named('social_publication_contract');
+    f.applySteering('Actually post Goodbye instead');
+    try {
+      assert.equal(await within(prefetch, 'the corrected prefetch ends'), 'skipped');
+    } finally {
+      contract.release();
+    }
+    assert.equal(stale.aborted, true, 'the correction cancelled the compile request');
+    // A click whose sources differ from a background compile cancels it and
+    // compiles its own.
+    const g = setup();
+    const held = g.hold('social_publication_contract');
+    const background = g.write();
+    await until(() => held.started, 'the background compile started');
+    const [other] = g.named('social_publication_contract');
+    g.agent.conversations.get(g.tabId).push({ role: 'assistant', content: 'Draft: Hello' });
+    try {
+      assert.equal(await within(g.click(), 'the click compiles its own contract'), null);
+      assert.equal(await within(background, 'the cancelled prefetch ends'), 'skipped');
+    } finally {
+      held.release();
+    }
+    assert.equal(other.aborted, true, 'the background compile of other sources was cancelled');
+    assert.equal(g.guard.socialPublication.sources.draft0, 'Draft: Hello');
   });
 
   test(`${browser}: a failed background compile leaves the click its own two attempts`, async () => {
@@ -515,7 +696,8 @@ test('Chrome and Firefox share the publication prefetch', async () => {
     '_socialPublicationPrefetchAllowed', '_socialPublicationStateCurrent', '_socialPublicationPrefetchRun', '_socialPublicationPrefetchAudit',
     '_socialPublicationPrefetchReadings', '_socialPublicationPrefetchedVerdict', '_socialPublicationAuditRun',
     '_socialPublicationCompile', '_ensureSocialPublicationContract', '_predispatchTimer', '_predispatchStage',
-    '_recordPredispatchTiming']) {
+    '_recordPredispatchTiming', '_socialPublicationBackgroundAbort', '_socialPublicationBackgroundCall',
+    '_socialPublicationBackgroundSettle', '_invalidateSocialPublicationContract']) {
     assert.equal(typeof Chrome.prototype[name], 'function', name);
     assert.equal(Chrome.prototype[name].toString(), Firefox.prototype[name].toString(), name);
   }

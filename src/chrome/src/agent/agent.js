@@ -23685,7 +23685,8 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
 
   _invalidateSocialPublicationContract(guard) {
     // A contract compiled in the background before a correction is never
-    // installed after it.
+    // installed after it, so its request is cancelled too.
+    this._socialPublicationContractPrefetches?.get(guard)?.abort?.controller.abort();
     this._socialPublicationContractPrefetches?.delete(guard);
     const social = guard.socialPublication;
     if (!social) return;
@@ -23836,7 +23837,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
   // that would compile awaits it and installs it only when it compiled exactly
   // the input that caller would compile from now: the same sources, context,
   // task and prior state. Anything else compiles as before.
-  async _ensureSocialPublicationContract(tabId, provider = this._activeProvider(tabId), { background = false, wait = true } = {}) {
+  async _ensureSocialPublicationContract(tabId, provider = this._activeProvider(tabId), { background = false, wait = true, binding = null } = {}) {
     const guard = this._planExecutionGuards.get(tabId);
     if (!guard?.enabled) return null;
     // The app-owned guard is new for every user revision. A trusted Continue
@@ -23848,7 +23849,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       if (!wait) return null;
       await running.catch(() => {});
       if (this._planExecutionGuards.get(tabId) !== guard) return null;
-      return this._ensureSocialPublicationContract(tabId, provider, { background, wait });
+      return this._ensureSocialPublicationContract(tabId, provider, { background, wait, binding });
     }
     if (previous && (!previous.needsRecompile || Object.keys(previous.outcomes || {}).length)) return previous;
     const sources = this._socialPublicationSources(tabId);
@@ -23868,7 +23869,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
         await prefetch.done;
         if (this._planExecutionGuards.get(tabId) !== guard) return null;
         // Checked again: the sources may have changed while it ran.
-        return this._ensureSocialPublicationContract(tabId, provider, { background, wait });
+        return this._ensureSocialPublicationContract(tabId, provider, { background, wait, binding });
       }
       prefetches.delete(guard);
       if (prefetch.compiled && !this._checkAbort(tabId) && !this._hasPendingSteering(tabId)) {
@@ -23876,20 +23877,26 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
         return prefetch.compiled;
       }
     } else if (prefetch && !background) {
-      // A background compile of another input is never installed.
+      // A background compile of another input is never installed: cancel it.
+      prefetch.abort?.controller.abort();
       prefetches.delete(guard);
     }
     const state = { key, sources, context, contract: null, outcomes: {}, actionId: null, dispatch: null, error: '' };
     if (background) {
       if (!provider?.chat || JSON.stringify(sources).length > 120000) return null;
-      const entry = { previous, state, settled: false, compiled: null, done: null };
+      // A background compile of another input still running can never be
+      // installed: cancel its request before this one starts.
+      if (prefetch && !prefetch.settled) prefetch.abort?.controller.abort();
+      const abort = this._socialPublicationBackgroundAbort(binding);
+      const call = this._socialPublicationBackgroundCall(tabId, guard, binding, abort);
+      const entry = { previous, state, settled: false, compiled: null, done: null, abort };
       prefetches.set(guard, entry);
-      entry.done = this._socialPublicationCompile(tabId, provider, guard, state, previous, true)
-        .catch(() => null)
+      entry.done = this._socialPublicationBackgroundSettle(abort,
+        this._socialPublicationCompile(tabId, provider, guard, state, previous, true, call).catch(() => null), null)
         .then(compiled => {
           entry.settled = true;
-          entry.compiled = compiled || null;
-          if (!compiled && prefetches.get(guard) === entry) prefetches.delete(guard);
+          entry.compiled = abort.signal.aborted ? null : (compiled || null);
+          if (!entry.compiled && prefetches.get(guard) === entry) prefetches.delete(guard);
           return entry.compiled;
         });
       return entry.done;
@@ -23914,7 +23921,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
   // moved on, or 'recompile' when a correction arrived meanwhile. A background
   // compile stops once the run's state or its own slot moved on, and leaves
   // the click its own attempts when it cannot finish.
-  async _socialPublicationCompile(tabId, provider, guard, state, previous, background) {
+  async _socialPublicationCompile(tabId, provider, guard, state, previous, background, call = null) {
     const { sources, context } = state;
     const replaced = () => (background
       ? guard.socialPublication !== previous || this._socialPublicationContractPrefetches?.get(guard)?.state !== state
@@ -23930,8 +23937,15 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       try {
         await this._tracePlannerAttemptRequest(runId, 0, provider, requestMessages,
           'social_publication_contract', attempt + 1, this._effectiveRunMode(tabId), options);
-        const response = await this._chatWithCostAllowance(provider, requestMessages, options,
-          this.currentCostState.get(tabId) || null, { tabId, generationName: 'social_publication_contract' });
+        // In the background, checked again right before inference: the run
+        // that started the compile may have stopped or been replaced while
+        // the request was traced. Its request carries that run's signal and
+        // allowance, never a later run's.
+        if (background && (call.signal.aborted || !call.current() || replaced())) return null;
+        const response = await this._chatWithCostAllowance(provider, requestMessages,
+          background ? { ...options, signal: call.signal } : options,
+          background ? call.costState : (this.currentCostState.get(tabId) || null),
+          { tabId, generationName: 'social_publication_contract' });
         received = true;
         await this._tracePlannerAttemptResponse(runId, 0, provider, response,
           'social_publication_contract', attempt + 1, startedAt, options);
@@ -23951,6 +23965,8 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
         state.error = '';
         return state;
       } catch (error) {
+        // Cancelled: its run stopped, or a newer compile replaced it.
+        if (background && call.signal.aborted) return null;
         if (this._isCostAllowanceError(error) || this._checkAbort(tabId)) {
           if (background) return null;
           throw error;
@@ -24327,8 +24343,10 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
   // background prefetch. `record` (the click) records each outcome on the
   // publication state as it goes; the prefetch records nothing here.
   // `isCurrent` tells whether `social` is still the run's publication state.
+  // `background` (the prefetch) binds the request to the run that started it:
+  // its signal, allowance and liveness check.
   async _socialPublicationAuditRun(tabId, provider, guard, social, action, snapshot, key, taskKey,
-    { record = false, isCurrent = () => guard.socialPublication === social } = {}) {
+    { record = false, isCurrent = () => guard.socialPublication === social, background = null } = {}) {
     const messages = publicationAuditMessages(social.sources, social.contract, action, snapshot, key, social.context);
     let portable = false;
     let failure = null;
@@ -24341,8 +24359,13 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       try {
         await this._tracePlannerAttemptRequest(runId, 0, provider, requestMessages,
           'social_publication_authorization', attempt + 1, this._effectiveRunMode(tabId), options);
-        const response = await this._chatWithCostAllowance(provider, requestMessages, options,
-          this.currentCostState.get(tabId) || null, { tabId, generationName: 'social_publication_authorization' });
+        // In the background, checked again right before inference (see
+        // _socialPublicationCompile).
+        if (background && (background.signal.aborted || !background.current() || !isCurrent())) return { status: 'changed' };
+        const response = await this._chatWithCostAllowance(provider, requestMessages,
+          background ? { ...options, signal: background.signal } : options,
+          background ? background.costState : (this.currentCostState.get(tabId) || null),
+          { tabId, generationName: 'social_publication_authorization' });
         received = true;
         await this._tracePlannerAttemptResponse(runId, 0, provider, response,
           'social_publication_authorization', attempt + 1, startedAt, options);
@@ -24366,6 +24389,8 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
         }
         return { status: 'authorized', reason: verdict.reason };
       } catch (error) {
+        // Cancelled: its run stopped, or an audit of a newer draft replaced it.
+        if (background?.signal.aborted) return { status: 'changed' };
         if (this._isCostAllowanceError(error) || this._checkAbort(tabId)) throw error;
         await this._socialPublicationCheckerFailure(tabId, 'social_publication_authorization', attempt + 1, error, received);
         if (this._planExecutionGuards.get(tabId) !== guard || !isCurrent()
@@ -24480,8 +24505,14 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     const startedAt = Date.now();
     const runId = this.currentRunId.get(tabId);
     const taskKey = guard.taskKey;
+    // The run that started the prefetch: its Stop cancels the background
+    // requests, they are charged to its allowance, and they stop mattering
+    // once another run owns the tab.
+    const runSignal = this._runAbortSignal(tabId);
     const current = () => this._planExecutionGuards.get(tabId) === guard && guard.taskKey === taskKey
-      && !this._checkAbort(tabId) && !this._hasPendingSteering(tabId);
+      && !this._checkAbort(tabId) && !this._hasPendingSteering(tabId)
+      && this._runAbortSignal(tabId) === runSignal && !runSignal?.aborted;
+    const binding = { signal: runSignal, costState: this.currentCostState.get(tabId) || null, current };
     let status = 'skipped';
     try {
       const pageUrl = await this._currentUrl(tabId);
@@ -24492,10 +24523,10 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       if (!current() || detected?.isSubmit !== true || detected.publicationControl !== true) return status;
       const readings = this._socialPublicationPrefetchReadings(tabId, detected.publicationPrefetchCaptions, pageUrl);
       try {
-        const social = await this._ensureSocialPublicationContract(tabId, provider, { background: true });
+        const social = await this._ensureSocialPublicationContract(tabId, provider, { background: true, binding });
         status = contractOnly
           ? (social?.contract && this._socialPublicationStateCurrent(guard, social) ? 'contract_ready' : 'skipped')
-          : await this._socialPublicationPrefetchAudit(tabId, guard, provider, social, detected, pageUrl, taskKey, current);
+          : await this._socialPublicationPrefetchAudit(tabId, guard, provider, social, detected, pageUrl, taskKey, binding);
       } finally {
         await readings;
       }
@@ -24513,7 +24544,8 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     }
   }
 
-  async _socialPublicationPrefetchAudit(tabId, guard, provider, social, detected, pageUrl, taskKey, current) {
+  async _socialPublicationPrefetchAudit(tabId, guard, provider, social, detected, pageUrl, taskKey, binding) {
+    const { current } = binding;
     const isCurrent = () => this._socialPublicationStateCurrent(guard, social);
     if (!current() || !isCurrent() || social.needsRecompile
         || social.contract?.status !== 'ready' || social.retryBypass) return 'skipped';
@@ -24531,11 +24563,21 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     const key = this._sha256TextSync(JSON.stringify({ contract: social.key, action, snapshot, pageUrl, documentIdentity, frameId }));
     if (social.dispatch?.key === key || social.deniedAuditKey === key || social.prefetchedAudit?.key === key) return 'cached';
     const audits = this._socialPublicationAuditPrefetches ||= new WeakMap();
-    const entry = { key, done: null };
+    const running = audits.get(social);
+    // The same draft is already being audited for this run: join it. An
+    // audit of an older draft is superseded: cancel its request, so it
+    // neither spends tokens nor holds a serialized provider queue ahead of
+    // this one.
+    if (running?.key === key && running.runSignal === binding.signal && !running.abort.signal.aborted) return running.done;
+    running?.abort.controller.abort();
+    const abort = this._socialPublicationBackgroundAbort(binding);
+    const call = this._socialPublicationBackgroundCall(tabId, guard, binding, abort);
+    const entry = { key, done: null, abort, runSignal: binding.signal };
     audits.set(social, entry);
-    entry.done = (async () => {
+    entry.done = this._socialPublicationBackgroundSettle(abort, (async () => {
       try {
-        const outcome = await this._socialPublicationAuditRun(tabId, provider, guard, social, action, snapshot, key, taskKey, { isCurrent });
+        const outcome = await this._socialPublicationAuditRun(tabId, provider, guard, social, action, snapshot, key, taskKey,
+          { isCurrent, background: call });
         if (outcome.status !== 'authorized' && outcome.status !== 'denied') return outcome.status;
         // Stored only while nothing moved on: the same run, task, contract
         // and page, no newer prefetch, and no click that already decided.
@@ -24551,8 +24593,48 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       } finally {
         if (audits.get(social) === entry) audits.delete(social);
       }
-    })();
+    })(), 'changed');
     return entry.done;
+  }
+
+  // A background publication check's own abort: the Stop of the run that
+  // started it, or a newer check that supersedes it.
+  _socialPublicationBackgroundAbort(binding) {
+    const controller = new AbortController();
+    const runSignal = binding?.signal || null;
+    const onAbort = () => {
+      if (!controller.signal.aborted) controller.abort(runSignal?.reason);
+    };
+    if (runSignal?.aborted) onAbort();
+    else runSignal?.addEventListener?.('abort', onAbort, { once: true });
+    return {
+      controller,
+      signal: controller.signal,
+      dispose: () => {
+        try { runSignal?.removeEventListener?.('abort', onAbort); } catch {}
+      },
+    };
+  }
+
+  // What a background model call is bound to: its abort, the allowance of the
+  // run that started it, and that run's liveness check.
+  _socialPublicationBackgroundCall(tabId, guard, binding, abort) {
+    return {
+      signal: abort.signal,
+      costState: binding ? binding.costState : (this.currentCostState.get(tabId) || null),
+      current: binding?.current || (() => this._planExecutionGuards.get(tabId) === guard && !this._checkAbort(tabId)),
+    };
+  }
+
+  // A cancelled check settles at once with `cancelled`, even when its provider
+  // cannot cancel the request (an in-browser model's queue): nothing waits
+  // behind it, and its late result can no longer be stored.
+  _socialPublicationBackgroundSettle(abort, work, cancelled) {
+    const stopped = new Promise(resolve => {
+      if (abort.signal.aborted) resolve(cancelled);
+      else abort.signal.addEventListener('abort', () => resolve(cancelled), { once: true });
+    });
+    return Promise.race([work, stopped]).finally(() => abort.dispose());
   }
 
   // The readings the click's own checks ask for, asked now: what the publish
