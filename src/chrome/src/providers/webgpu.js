@@ -195,6 +195,10 @@ export const WEBGPU_MODEL_NOT_READY_ERROR = `${WEBGPU_COMPASS_TINY_V2_MODEL_ID} 
 // `visionModel` endpoint so enabling the fallback never overwrites a user's
 // remote vision credentials or sends a Chromium-only provider type to Firefox.
 export const WEBGPU_VISION_ENABLED_KEY = 'webgpuVisionEnabled';
+// Optional chrome.storage.local override for the Bonsai 2 Vision prefill slice
+// (prompt tokens per GPU pass; 0 disables slicing). Smaller slices keep a GPU
+// shared with the display responsive at a small throughput cost.
+export const WEBGPU_PREFILL_SLICE_TOKENS_KEY = 'webgpuPrefillSliceTokens';
 // Legacy provenance key retained only so the one-time consent migration can
 // remove selections made automatically by older Apocalypse Mode builds.
 export const WEBGPU_VISION_AUTO_SELECTED_KEY = 'webgpuVisionAutoSelected';
@@ -419,6 +423,7 @@ export class WebGPUProvider extends WebGPUOffscreenProvider {
     if (!download.ready) {
       throw new Error(`${webgpuModelDisplayName(this.model)} is not downloaded. Open Settings > Providers > WebGPU or Apocalypse Mode > WebGPU to download it before chatting.`);
     }
+    const prefillSliceTokens = await this._prefillSliceTokens();
     const response = await this._dispatch({
       type: 'webgpu-chat',
       model: this.model,
@@ -430,6 +435,7 @@ export class WebGPUProvider extends WebGPUOffscreenProvider {
       options: {
         maxTokens: options.maxTokens,
         tools: Array.isArray(options.tools) ? options.tools : [],
+        ...(prefillSliceTokens == null ? {} : { prefillSliceTokens }),
       },
     });
     if (!response || response.error) {
@@ -450,6 +456,15 @@ export class WebGPUProvider extends WebGPUOffscreenProvider {
       usage: null,
       raw: response.raw || null,
     };
+  }
+
+  async _prefillSliceTokens() {
+    try {
+      const stored = await chrome.storage.local.get(WEBGPU_PREFILL_SLICE_TOKENS_KEY);
+      return stored?.[WEBGPU_PREFILL_SLICE_TOKENS_KEY] ?? null;
+    } catch {
+      return null;
+    }
   }
 
   /** Probe the packaged runtime and adapter without downloading model weights. */

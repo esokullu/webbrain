@@ -292,6 +292,86 @@ export async function refreshBonsai2DecoderGraph(modelId, {
   }
 }
 
+// Long Bonsai 2 Vision prompts are prefilled in slices so no single GPU pass
+// covers the whole prompt. On a GPU shared with the display (Apple silicon, a
+// display-attached discrete card) one multi-second prefill starves window
+// compositing and the desktop stutters; slices bound each pass. Each slice
+// continues from the previous slice's recurrent/conv/KV cache, which the
+// chunked decoder graph computes exactly like a single pass.
+export const BONSAI2_DEFAULT_PREFILL_SLICE_TOKENS = 512;
+const BONSAI2_MIN_PREFILL_SLICE_TOKENS = 64;
+const BONSAI2_MAX_PREFILL_SLICE_TOKENS = 8192;
+
+/** 0 disables slicing; invalid values use the default. */
+export function bonsai2PrefillSliceTokens(value) {
+  if (value === 0 || value === '0') return 0;
+  const tokens = Math.round(Number(value));
+  if (!Number.isFinite(tokens) || tokens <= 0) return BONSAI2_DEFAULT_PREFILL_SLICE_TOKENS;
+  return Math.min(BONSAI2_MAX_PREFILL_SLICE_TOKENS, Math.max(BONSAI2_MIN_PREFILL_SLICE_TOKENS, tokens));
+}
+
+function presentToPastName(name) {
+  return name
+    .replace('present_conv', 'past_conv')
+    .replace('present_recurrent', 'past_recurrent')
+    .replace('present', 'past_key_values');
+}
+
+/**
+ * Prefill all but the last prompt token in slices and return the cache, or
+ * null when the prompt fits in one slice. generate() then continues from the
+ * cache: the Qwen VL input preparation computes the full rotary positions and
+ * feeds only the remaining token.
+ */
+export async function prefillBonsai2InSlices(runtime, inputs, sliceTokens) {
+  const { model, library } = runtime;
+  const length = inputs.input_ids.dims.at(-1);
+  if (!sliceTokens || length - 1 <= sliceTokens) return null;
+  let embeds = await model.encode_text({ input_ids: inputs.input_ids });
+  let attentionMask = inputs.attention_mask;
+  if (inputs.pixel_values) {
+    const imageFeatures = await model.encode_image({
+      pixel_values: inputs.pixel_values,
+      image_grid_thw: inputs.image_grid_thw,
+    });
+    ({ inputs_embeds: embeds, attention_mask: attentionMask } = model._merge_input_ids_with_image_features({
+      image_features: imageFeatures,
+      inputs_embeds: embeds,
+      input_ids: inputs.input_ids,
+      attention_mask: attentionMask,
+    }));
+  }
+  const [positionIds] = model.get_rope_index(
+    inputs.input_ids,
+    inputs.image_grid_thw ?? null,
+    inputs.video_grid_thw ?? null,
+    attentionMask,
+  );
+  let cache = null;
+  try {
+    for (let start = 0; start < length - 1; start += sliceTokens) {
+      const end = Math.min(start + sliceTokens, length - 1);
+      const outputs = await model.forward({
+        inputs_embeds: embeds.slice(null, [start, end], null),
+        attention_mask: attentionMask.slice(null, [0, end]),
+        position_ids: positionIds.slice(null, null, [start, end]),
+        past_key_values: cache,
+      });
+      const present = {};
+      for (const [name, tensor] of Object.entries(outputs)) {
+        if (name.startsWith('present')) present[presentToPastName(name)] = tensor;
+        else if (tensor?.location === 'gpu-buffer') tensor.dispose();
+      }
+      if (cache) cache.update(present);
+      else cache = new library.DynamicCache(present);
+    }
+    return cache;
+  } catch (error) {
+    await cache?.dispose?.();
+    throw error;
+  }
+}
+
 export function normalizeBonsai2Config(config) {
   return {
     ...config,
@@ -1648,15 +1728,28 @@ async function runMultimodalText(payload) {
   lastWebGpuDeviceError = '';
   lastWebGpuDeviceLost = '';
   let outputs;
+  let prefilled = null;
   try {
+    if (WEBGPU_BONSAI2_VISION_MODEL_IDS.has(modelId)) {
+      prefilled = await prefillBonsai2InSlices(
+        runtime,
+        inputs,
+        bonsai2PrefillSliceTokens(payload?.options?.prefillSliceTokens),
+      );
+    }
     outputs = await runtime.model.generate({
       ...inputs,
+      ...(prefilled ? { past_key_values: prefilled } : {}),
       do_sample: false,
       max_new_tokens: maxNewTokens,
     });
   } catch (error) {
     if (isWebGpuExecutionFailure(error)) throw await handleWebGpuExecutionFailure(error);
     throw error;
+  } finally {
+    // generate() keeps a caller-supplied cache alive; release its GPU buffers
+    // without masking a generation error.
+    if (prefilled) await prefilled.dispose().catch(() => {});
   }
   const inputLength = inputs.input_ids.dims.at(-1);
   const generated = outputs.slice(null, [inputLength, null]);

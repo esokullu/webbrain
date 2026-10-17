@@ -67653,6 +67653,102 @@ test('Bonsai 2 Vision worker replaces only a stale cached decoder graph', async 
   }
 });
 
+test('Bonsai 2 Vision prefill runs long prompts in cache-carrying slices', async () => {
+  const previousSelf = globalThis.self;
+  const ortSymbol = Symbol.for('onnxruntime');
+  const previousOrt = globalThis[ortSymbol];
+  try {
+    globalThis.self = { addEventListener() {}, postMessage() {} };
+    globalThis[ortSymbol] = await import(pathToFileURL(path.join(ROOT, 'src/chrome/vendor/transformers/onnxruntime-common/index.js')).href);
+    const worker = await import(`${pathToFileURL(path.join(ROOT, 'src/chrome/src/offscreen/inference-worker.js')).href}?bonsai2-prefill-slices`);
+    const { Tensor, DynamicCache } = await import(pathToFileURL(path.join(ROOT, 'src/chrome/vendor/transformers/transformers.web.js')).href);
+    assert.equal(worker.bonsai2PrefillSliceTokens(0), 0, '0 disables slicing');
+    assert.equal(worker.bonsai2PrefillSliceTokens('0'), 0);
+    assert.equal(worker.bonsai2PrefillSliceTokens(undefined), worker.BONSAI2_DEFAULT_PREFILL_SLICE_TOKENS);
+    assert.equal(worker.bonsai2PrefillSliceTokens('nonsense'), worker.BONSAI2_DEFAULT_PREFILL_SLICE_TOKENS);
+    assert.equal(worker.bonsai2PrefillSliceTokens(8), 64);
+    assert.equal(worker.bonsai2PrefillSliceTokens(1e9), 8192);
+    assert.equal(worker.bonsai2PrefillSliceTokens(300), 300);
+
+    const L = 10, H = 3;
+    const ids = new Tensor('int64', BigInt64Array.from({ length: L }, (_, i) => BigInt(100 + i)), [1, L]);
+    const mask = new Tensor('int64', new BigInt64Array(L).fill(1n), [1, L]);
+    const calls = [];
+    const imageCalls = [];
+    const model = {
+      async encode_text({ input_ids }) {
+        const n = input_ids.dims[1];
+        return new Tensor('float32', Float32Array.from({ length: n * H }, (_, i) => i), [1, n, H]);
+      },
+      async encode_image(args) { imageCalls.push(['encode', args.image_grid_thw.dims]); return new Tensor('float32', new Float32Array(2 * H), [2, H]); },
+      _merge_input_ids_with_image_features({ inputs_embeds, attention_mask, image_features }) {
+        imageCalls.push(['merge', image_features.dims]);
+        return { inputs_embeds, attention_mask };
+      },
+      get_rope_index(input_ids, grid, video, attention_mask) {
+        const n = input_ids.dims[1];
+        const data = new BigInt64Array(3 * n);
+        for (let r = 0; r < 3; r++) for (let i = 0; i < n; i++) data[r * n + i] = BigInt(i);
+        return [new Tensor('int64', data, [3, 1, n]), new Tensor('int64', [0n], [1, 1])];
+      },
+      async forward(inputs) {
+        calls.push({
+          embeds: inputs.inputs_embeds.dims.slice(),
+          firstEmbed: inputs.inputs_embeds.data[0],
+          mask: inputs.attention_mask.dims[1],
+          positions: Array.from(inputs.position_ids.data.slice(0, inputs.position_ids.dims[2])).map(Number),
+          past: inputs.past_key_values,
+        });
+        const n = calls.length;
+        return {
+          logits: new Tensor('float32', new Float32Array(1), [1, 1, 1]),
+          'present_conv.0': new Tensor('float32', [n], [1]),
+          'present_recurrent.0': new Tensor('float32', [n], [1]),
+          'present.3.key': new Tensor('float32', new Float32Array(inputs.attention_mask.dims[1]), [1, 1, inputs.attention_mask.dims[1], 1]),
+        };
+      },
+    };
+    const runtime = { model, library: { DynamicCache } };
+    assert.equal(await worker.prefillBonsai2InSlices(runtime, { input_ids: ids, attention_mask: mask }, 0), null);
+    assert.equal(await worker.prefillBonsai2InSlices(runtime, { input_ids: ids, attention_mask: mask }, 9), null,
+      'a prompt whose prefill fits in one slice keeps the single-pass path');
+    assert.equal(calls.length, 0);
+
+    const cache = await worker.prefillBonsai2InSlices(runtime, { input_ids: ids, attention_mask: mask }, 4);
+    assert.deepEqual(calls.map(c => c.embeds), [[1, 4, H], [1, 4, H], [1, 1, H]],
+      'all but the last prompt token are prefilled in slices; generate() feeds the last one');
+    assert.deepEqual(calls.map(c => c.firstEmbed), [0, 4 * H, 8 * H], 'slices cover consecutive prompt positions');
+    assert.deepEqual(calls.map(c => c.mask), [4, 8, 9], 'each slice attends to every earlier prompt token');
+    assert.deepEqual(calls.map(c => c.positions[0]), [0, 4, 8]);
+    assert.equal(calls[0].past, null);
+    assert.equal(calls[1].past, cache, 'later slices continue from the shared cache');
+    assert.equal(calls[2].past, cache);
+    assert.deepEqual(Object.keys(cache).sort(), ['past_conv.0', 'past_key_values.3.key', 'past_recurrent.0']);
+    assert.equal(cache['past_conv.0'].data[0], 3, 'the cache holds the final slice state');
+    assert.equal(cache.get_seq_length(), 9);
+
+    calls.length = 0;
+    const grid = new Tensor('int64', [1n, 2n, 2n], [1, 3]);
+    await worker.prefillBonsai2InSlices(runtime, {
+      input_ids: ids, attention_mask: mask,
+      pixel_values: new Tensor('float32', new Float32Array(4), [4, 1]), image_grid_thw: grid,
+    }, 4);
+    assert.deepEqual(imageCalls, [['encode', [1, 3]], ['merge', [2, H]]],
+      'image features are merged once over the whole prompt before slicing');
+    assert.equal(calls.length, 3);
+
+    const workerSource = fs.readFileSync(path.join(ROOT, 'src/chrome/src/offscreen/inference-worker.js'), 'utf8');
+    assert.match(workerSource, /past_key_values: prefilled/);
+    assert.match(workerSource, /if \(prefilled\) await prefilled\.dispose\(\)/,
+      'the caller-supplied cache must be released after generation');
+  } finally {
+    if (previousSelf === undefined) delete globalThis.self;
+    else globalThis.self = previousSelf;
+    if (previousOrt === undefined) delete globalThis[ortSymbol];
+    else globalThis[ortSymbol] = previousOrt;
+  }
+});
+
 test('Bonsai 2 worker keeps native rotary positions continuous for text and images', async () => {
   const previousSelf = globalThis.self;
   const ortSymbol = Symbol.for('onnxruntime');

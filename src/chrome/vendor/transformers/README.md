@@ -40,6 +40,15 @@ single causal graph with its own complete metadata. The Vision presets use
 `webbrain-one/Ternary-Bonsai-2-{2B,4B}-ONNX-WebGPU-Vision`, the Qwen processor's
 text-first image API, and a bounded image resolution.
 
+The Vision presets prefill long prompts in 512-token slices that carry the
+recurrent, convolution and KV cache, then let `generate()` continue from that
+cache. A single pass over a multi-thousand-token prompt can occupy a GPU shared
+with the display (Apple silicon, a display-attached card) for seconds; slices
+bound each pass at the cost of roughly one extra decoder run per slice. Greedy
+answers match the single-pass path. `chrome.storage.local` key
+`webgpuPrefillSliceTokens` overrides the slice size (64–8192 tokens; `0`
+disables slicing).
+
 For the split Bonsai text and Vision models, the worker corrects Transformers.js
 4.2's text-only rotary cache offset; image turns keep the native three-axis
 positions. Independent screenshots are processed separately before concatenating
