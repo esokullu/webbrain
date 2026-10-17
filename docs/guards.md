@@ -93,7 +93,7 @@ When a guard cannot verify a consequential step and its `onCannotDecide` is
 |---|---|---|
 | `github-commit-evidence-binding` | The file editor was replaced but could not be read back exactly (CodeMirror), and path, branch and commit message bind | The editor's text |
 | `github-commit-split-write-required` | A script, Enter or `set_field` submit that may or may not commit, when a commit click would be allowed | The editor's text |
-| `social-publication-draft-quality` | The X/Bluesky draft's body or media does not read back as requested, or the composer could not be read, when the user asked to publish (the publication audit still runs) | The composer's text |
+| `social-publication-draft-quality` | The X/Bluesky draft's text does not read back as requested or could not be read, when the user asked to publish (the publication audit still runs). Media that does not match and a composer that was not read completely still refuse: the card shows only the text | The composer's text |
 | `steer-prior-submission-target-unresolved` | After a correction, a submit-capable control the probe could not identify | Nothing (check the page) |
 | `clickax-task-click-lock` (hard, Chrome) | An earlier trusted click on the same target may have landed and was never verified | Nothing (check the page) |
 

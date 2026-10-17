@@ -23761,21 +23761,24 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
           + '. Resolve publicationValidation before retrying. For body_mismatch, use the exact contract body; preserve every space and line break. A pending text write must first be verified or restored.'),
         publicationValidation: { issues } };
       // social-publication-draft-quality (quality) cannot decide when the
-      // only issues are the draft's readback: a body or media that does not
-      // match the contract, or a body, composer or post baseline it could not
+      // only issues are the draft's text: a body that does not match the
+      // contract or could not be read, or a post baseline it could not
       // observe. The user asked to publish here (the contract action is
       // eligible), so WebBrain asks on its card, showing the composer's text,
-      // instead of refusing. The account, the reply or quote target and the
-      // number of posts are not readback: their issues keep the refusal, and
-      // the independent publication audit (unrequested_publication) still
-      // runs on the observed draft after a 'once'. Strict checks refuse.
-      const draftIssues = new Set(['body_mismatch', 'media_mismatch', 'body_unobserved', 'composer_incomplete', 'baseline_incomplete']);
+      // instead of refusing. The card shows only that text, so media that
+      // does not match and a composer that was not read completely keep the
+      // refusal: neither the user nor a timeout could judge them from the
+      // card. The account, the reply or quote target and the number of posts
+      // are not readback either. The independent publication audit
+      // (unrequested_publication) still runs on the observed draft after a
+      // 'once'. Strict checks refuse.
+      const draftIssues = new Set(['body_mismatch', 'body_unobserved', 'baseline_incomplete']);
       if (!issues.every(issue => draftIssues.has(issue.reason))
           || this._guardOutcome('social-publication-draft-quality', { decided: false }) !== 'ask') return refusal;
       if (!this._unverifiedStepApproval(tabId, 'social-publication-draft-quality', key)) {
         const bodies = (Array.isArray(snapshot?.posts) ? snapshot.posts : [])
           .map(post => (typeof post?.bodyText === 'string' ? post.bodyText : '')).filter(Boolean);
-        const unobserved = issues.some(issue => ['body_unobserved', 'composer_incomplete'].includes(issue.reason)) || !bodies.length;
+        const unobserved = issues.some(issue => issue.reason === 'body_unobserved') || !bodies.length;
         return { ...refusal, unverifiedStepConfirmation: { guardId: 'social-publication-draft-quality', hard: false,
           action: 'publish', reason: unobserved ? 'draft_unobserved' : 'draft_unverified', host: normalizeHost(pageUrl),
           contentLabel: 'composer', text: bodies.join('\n\n'), stepKey: key } };

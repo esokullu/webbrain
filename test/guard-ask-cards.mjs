@@ -676,6 +676,33 @@ for (const { build, Agent, adapters, Scheduler } of builds) {
     assert.equal(ask.unverifiedStepConfirmation.text, '');
   });
 
+  test(`${build}: media that does not match, or a composer read only in part, keeps the refusal without a card`, async () => {
+    // The card shows only the composer's text. An attachment the request did
+    // not ask for, or a part of the composer that was never read, cannot be
+    // judged from it by the user, let alone by a timeout.
+    const image = [{ type: 'image', src: 'https://pbs.twimg.com/media/unrequested.jpg' }];
+    const check = f => f.agent._workflowPreSubmitDispatchBlock(f.tab, 'click_ax', { ref_id: 'ref_post' }, f.detected, f.provider);
+    const media = socialFixture();
+    media.detected.publicationSnapshot.posts[0].bodyText = 'Hello';
+    media.detected.publicationSnapshot.posts[0].attachments = image;
+    const wrongMedia = await check(media);
+    assert.equal(wrongMedia.noDispatch, true);
+    assert.deepEqual(wrongMedia.publicationValidation.issues.map(issue => issue.reason), ['media_mismatch']);
+    assert.equal(wrongMedia.unverifiedStepConfirmation, undefined, 'the card cannot show the media');
+    const both = socialFixture();
+    both.detected.publicationSnapshot.posts[0].attachments = image;
+    const textAndMedia = await check(both);
+    assert.deepEqual(textAndMedia.publicationValidation.issues.map(issue => issue.reason), ['body_mismatch', 'media_mismatch']);
+    assert.equal(textAndMedia.unverifiedStepConfirmation, undefined, 'a text issue does not open the card for the media');
+    const partial = socialFixture();
+    partial.detected.publicationSnapshot.complete = false;
+    partial.detected.publicationSnapshot.posts[0].bodyText = 'Hello';
+    const incomplete = await check(partial);
+    assert.deepEqual(incomplete.publicationValidation.issues.map(issue => issue.reason), ['composer_incomplete']);
+    assert.equal(incomplete.unverifiedStepConfirmation, undefined, 'a readable body does not vouch for the unread part');
+    for (const f of [media, both, partial]) assert.equal(f.audits.length, 0, 'nothing reached the publication audit');
+  });
+
   // ── steer-prior-submission-target-unresolved ───────────────────────────
   test(`${build}: after a correction, an unidentified control asks instead of refusing`, async () => {
     for (const strict of [false, true]) {
