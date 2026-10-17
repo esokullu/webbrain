@@ -990,6 +990,79 @@ for (const browser of ['chrome', 'firefox']) {
     assert.equal(traced.every(context => context?.runId === 'run-A'), true, 'traced only to the run that started it');
   });
 
+  test(`${browser}: a decision-model request holds its cost until it settles, as a background one for a background read`, async () => {
+    const agent = new Agent({});
+    const tabId = 982;
+    agent._getCostAllowanceState = async () => ({ sessionLimitUsd: 1, totalLimitUsd: 100, totalSpentUsd: 0 });
+    agent._recordCostUsage = async () => null;
+    const config = { provider: 'typesafe', config: { category: 'cloud', inputCostPerMillionUsd: 1, outputCostPerMillionUsd: 1 } };
+    const runCost = { spentUsd: 0 };
+    const held = [];
+    const client = { evaluate: async ({ beforeRequest, onUsage }) => {
+      await beforeRequest();
+      held.push([...(agent._costHolds || [])].map(hold => ({ background: hold.background, costState: hold.costState, usd: hold.usd })));
+      await onUsage({ usage: { input_tokens: 10, output_tokens: 1 } });
+      return { answers: {} };
+    } };
+    const args = { config, state: { context: 'x'.repeat(4000) }, questions: { item_0: {} } };
+    await agent.evaluateSystemOne(tabId, client, args, { costState: runCost, runId: 'run-A', isCurrent: () => true, background: true });
+    await agent.evaluateSystemOne(tabId, client, args, { costState: runCost, runId: 'run-A', isCurrent: () => true });
+    assert.equal(held.length, 2);
+    assert.deepEqual(held.map(list => list.length), [1, 1], 'one hold per request in flight');
+    assert.equal(held[0][0].background, true, 'a background read is held as a background request');
+    assert.equal(held[0][0].costState, runCost, 'against the allowance of its run');
+    assert.ok(held[0][0].usd > 0, 'at its most');
+    assert.equal(held[1][0].background, false);
+    assert.equal(agent._costHolds?.size || 0, 0, 'released once the request settled');
+  });
+
+  test(`${browser}: a correction cancels the prefetch's caption reads, and an answer that outlived its run is kept nowhere`, async () => {
+    // A correction cancels the reads the prefetch started, with its contract and audit.
+    {
+      const f = setup();
+      const { agent, tabId } = f;
+      agent._runAbortStates.set(tabId, { controller: new AbortController(), dispose() {} });
+      f.detected.publicationPrefetchCaptions = ['Post', 'Close'];
+      const reads = [];
+      agent._readPageTexts = (_tabId, kind, texts, _context, options = {}) => new Promise(resolve => {
+        reads.push({ kind, background: options.background, resolve });
+      });
+      const prefetch = f.write();
+      await until(() => reads.length === 2, 'both caption reads started');
+      f.applySteering('Make it shorter.');
+      for (const { kind, background } of reads) assert.equal(background.signal.aborted, true, `${kind}: cancelled by the correction`);
+      await within(prefetch, 'the prefetch settles');
+      for (const read of reads) read.resolve();
+    }
+    // An answer that arrives after its run moved on is neither returned,
+    // cached nor stored as a reading: the next read asks again.
+    {
+      const provider = { name: 'checker', model: 'checker', chat: async () => ({ content: '{}' }) };
+      const agent = new Agent({ getActive: () => provider });
+      const tabId = 983;
+      agent._jevSettings = async () => null;
+      let live = true;
+      let sent = 0;
+      agent._chatWithCostAllowance = async () => {
+        sent += 1;
+        live = false; // the run moves on while the request is in flight
+        return { content: JSON.stringify({ answers: [{ item: 0, choice: 'publish' }] }) };
+      };
+      const background = { signal: new AbortController().signal, costState: { spentUsd: 0 }, runId: 'run-A', current: () => live };
+      const [late] = await agent._semanticDecisions(tabId, 'control_effect', { items: [{ text: 'Post' }] }, { provider, background });
+      assert.equal(late.choice, null, 'the late answer is dropped');
+      live = true;
+      await agent._readPageTexts(tabId, 'control_effect', ['Post'], {}, { background });
+      assert.equal(sent, 2, 'nothing was cached, so the next read asks again');
+      assert.equal(agent._pageTextReading('control_effect', 'Post'), null, 'nor is the late answer stored as a reading');
+      // The same answer within a live run is kept as before.
+      live = true;
+      agent._chatWithCostAllowance = async () => { sent += 1; return { content: JSON.stringify({ answers: [{ item: 0, choice: 'publish' }] }) }; };
+      await agent._readPageTexts(tabId, 'control_effect', ['Post'], {}, { background });
+      assert.equal(agent._pageTextReading('control_effect', 'Post'), 'publish');
+    }
+  });
+
   test(`${browser}: an upload into the composer last written audits the draft again`, async () => {
     const f = setup({ request: 'Tweet about my blog post',
       contract: rawContract([rawAction('p1', 'twitter', 'about my blog post', 'compose')]) });

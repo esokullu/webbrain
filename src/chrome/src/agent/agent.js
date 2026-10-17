@@ -9027,6 +9027,9 @@ export class Agent extends LoopDetector {
               request: trusted, items: indexes.map(index => data[index]) })), 12000)) },
             questions: semanticSystemOneBatchQuestions(kind, indexes.length),
           }, context);
+          // A background read whose run ended or moved on while the request
+          // was in flight keeps nothing from it.
+          if (background && stopped()) break;
           let sure = 0;
           indexes.forEach((index, position) => {
             const answer = verdict.answers?.[`item_${position}`];
@@ -9056,6 +9059,7 @@ export class Agent extends LoopDetector {
               background ? background.costState : (this.currentCostState.get(tabId) || null),
               { tabId, generationName: `semantic_${kind}`, ...(background ? { background: true } : {}) });
           }, runSignal, mainTimeoutMs);
+          if (background && stopped()) break;
           const accepted = acceptSemanticBatchAnswers(kind,
             this._socialPublicationResponseObject(response, { maxTokens: 120 + 60 * indexes.length }), trusted,
             indexes.map(index => data[index]));
@@ -9105,6 +9109,8 @@ export class Agent extends LoopDetector {
     const askMain = mainModel && !this._workflowReplayTabs?.has(tabId);
     const readings = await this._semanticDecisions(tabId, kind, { items: pending.map(text => ({ ...context, text })) },
       { ...(mainTimeoutMs ? { mainTimeoutMs } : {}), mainModel: askMain, ...(background ? { background } : {}) });
+    // A background read whose run ended or moved on meanwhile stores nothing.
+    if (background && (background.signal.aborted || !background.current())) return;
     // A text counts as unanswered only once the active model had its turn
     // too: a read by the decision model alone, a stopped run or a provider
     // that cannot answer leaves it for the next read. So does a background
@@ -9289,25 +9295,39 @@ export class Agent extends LoopDetector {
 
   async evaluateSystemOne(tabId, client, args, context = this.systemOneContext(tabId)) {
     const costState = context.costState || this.currentCostState.get(tabId) || this._newCostRunState();
+    const costProvider = args.config || SYSTEM_ONE_COST_PROVIDER;
     const activeConfig = this._activeProvider(tabId)?.config;
     const compass = args.config?.provider === 'compass' && activeConfig?.providerName === 'webbrain-cloud' ? activeConfig : null;
-    return client.evaluate({ ...args,
-      ...(compass ? {
-        headers: { 'X-WebBrain-Device-Id': compass.deviceGuid || '', 'X-WebBrain-Client': 'extension',
-          'X-WebBrain-Help-Improve': compass.helpImproveWebBrain === false ? '0' : '1', ...args.headers },
-        metadata: { session_id: this.conversationIds.get(tabId), ...args.metadata },
-      } : {}),
-      beforeRequest: async () => {
-        if (this.strictSecretMode || (!args.config?.local && globalThis.navigator?.onLine === false) || context.isCurrent?.() === false) throw new Error('Jev unavailable.');
-        const message = await this._checkCostAllowance(args.config || SYSTEM_ONE_COST_PROVIDER, costState);
-        if (message) throw this._costAllowanceError(message);
-      },
-      onUsage: async metadata => {
-        const stopped = await this._recordCostUsage(args.config || SYSTEM_ONE_COST_PROVIDER, metadata.usage, costState);
-        this.recordSystemOneVerdict(tabId, { decision: 'usage', ...metadata }, context);
-        if (stopped) throw this._costAllowanceError(stopped);
-      },
-    });
+    // Held at its most until it settles, like any other metered request
+    // (_checkCostAllowance): its state and questions as the prompt and a short
+    // answer per question. A background check's request (`context.background`)
+    // is held as a background one.
+    let hold = null;
+    try {
+      return await client.evaluate({ ...args,
+        ...(compass ? {
+          headers: { 'X-WebBrain-Device-Id': compass.deviceGuid || '', 'X-WebBrain-Client': 'extension',
+            'X-WebBrain-Help-Improve': compass.helpImproveWebBrain === false ? '0' : '1', ...args.headers },
+          metadata: { session_id: this.conversationIds.get(tabId), ...args.metadata },
+        } : {}),
+        beforeRequest: async () => {
+          if (this.strictSecretMode || (!args.config?.local && globalThis.navigator?.onLine === false) || context.isCurrent?.() === false) throw new Error('Jev unavailable.');
+          hold ??= this._holdCostAllowance(costProvider,
+            [{ role: 'user', content: JSON.stringify({ state: args.state ?? null, questions: args.questions ?? null }) }],
+            { maxTokens: 256 + 128 * Object.keys(args.questions || {}).length }, costState,
+            { background: context.background === true });
+          const message = await this._checkCostAllowance(costProvider, costState, { signal: args.signal || null, hold });
+          if (message) throw this._costAllowanceError(message);
+        },
+        onUsage: async metadata => {
+          const stopped = await this._recordCostUsage(costProvider, metadata.usage, costState);
+          this.recordSystemOneVerdict(tabId, { decision: 'usage', ...metadata }, context);
+          if (stopped) throw this._costAllowanceError(stopped);
+        },
+      });
+    } finally {
+      hold?.release();
+    }
   }
 
   // Where a completion check spent its time, for traces: preparing the
@@ -23819,9 +23839,13 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
 
   _invalidateSocialPublicationContract(guard) {
     // A contract compiled in the background before a correction is never
-    // installed after it, so its request is cancelled too, and so is a
-    // background audit against the contract the correction replaces.
+    // installed after it, so its request is cancelled too, and so are a
+    // background audit against the contract the correction replaces and the
+    // caption readings the same prefetch started.
     this._dropSocialPublicationContractPrefetch(guard);
+    for (const abort of this._socialPublicationCaptionReads?.get(guard) || []) {
+      if (!abort.controller.signal.aborted) abort.controller.abort();
+    }
     const social = guard.socialPublication;
     this._dropSocialPublicationAuditPrefetch(social);
     if (!social) return;
@@ -24880,6 +24904,11 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     if (!effects.length && !controls.length) return Promise.resolve([]);
     const abort = this._socialPublicationBackgroundAbort(binding, tabId);
     const background = this._socialPublicationBackgroundCall(tabId, guard, binding, abort);
+    // A correction or clarification cancels them with the contract and the
+    // audit (_invalidateSocialPublicationContract).
+    const captionReads = guard ? ((this._socialPublicationCaptionReads ||= new WeakMap()).get(guard)
+      || this._socialPublicationCaptionReads.set(guard, new Set()).get(guard)) : null;
+    captionReads?.add(abort);
     const read = (kind, texts, request) => {
       for (const text of texts) reading.add(kind + '\u0000' + text);
       return Promise.resolve().then(request)
@@ -24891,7 +24920,8 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       reads.push(read('message_control', controls, () => this._readPageTexts(tabId, 'message_control', controls, {},
         { maxChars: 400, mainTimeoutMs: CONTROL_READING_TIMEOUT_MS, background })));
     }
-    return this._socialPublicationBackgroundSettle(abort, Promise.allSettled(reads), []);
+    return this._socialPublicationBackgroundSettle(abort, Promise.allSettled(reads), [])
+      .finally(() => captionReads?.delete(abort));
   }
 
   _socialPublishedContractMatches(binding, guard, pageState) {
