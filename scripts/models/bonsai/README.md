@@ -82,6 +82,11 @@ the worker compares the cached graph with a pinned SHA-256. Inference stays
 cache-only and keeps using a stale graph; an explicit download of the model
 replaces just the 3 MB graph file and keeps the cached weights.
 
+The general lessons and the checklist for any in-browser model are in
+[`docs/webgpu-models.md`](../../../docs/webgpu-models.md). Run
+`scripts/models/audit_webgpu_onnx.py` on every decoder graph and
+`scripts/check-webgpu-long-prompts.mjs` on every bundle before publishing.
+
 ## Runtime contract
 
 Load `AutoProcessor` and `AutoModelForImageTextToText` with:

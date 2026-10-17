@@ -61,6 +61,8 @@ vanilla JS/CSS unless there is a very strong reason to add a framework.
 - `docs/site-adapters.md`: adapter shape, prompt style, and testing guidance.
 - `docs/providers-and-models.md`: provider configuration and model capability
   assumptions.
+- `docs/webgpu-models.md`: required checklist before adding or changing an
+  in-browser WebGPU model or its ONNX graphs.
 - `docs/localization.md`: UI locale workflow and mirroring expectations.
 - `docs/privacy-and-data-flow.md` and `docs/security-model.md`: data handling,
   permissions, and user-risk model.

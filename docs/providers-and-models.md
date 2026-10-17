@@ -453,6 +453,13 @@ approximately one megapixel per image. Build sources, tensor mapping checks,
 and the hardware browser verification command are documented in
 [`scripts/models/bonsai/README.md`](../scripts/models/bonsai/README.md).
 
+Before adding, replacing or re-exporting any in-browser model, follow
+[`docs/webgpu-models.md`](webgpu-models.md). It records why the first Bonsai 2
+graphs prefilled on the CPU and froze the desktop, and the required checks:
+`scripts/models/audit_webgpu_onnx.py` for CPU-only ops and full-sequence
+logits, node placement, long-prompt timing with
+`scripts/check-webgpu-long-prompts.mjs`, and how to update a published graph.
+
 To verify the published text presets through the packaged production worker,
 run these commands from the repository root with its Playwright Chromium
 installed:
