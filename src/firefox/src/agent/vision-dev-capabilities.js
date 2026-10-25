@@ -227,10 +227,22 @@ export async function runVisionDevCapability(agent, ctx) {
     await diagnosticBackend.attach(tabId); await fresh();
     const bound = await operation('_check_target');
     if (bound.success !== true) return { result: bound, effects };
-    const expression = `(() => { if(location.href!==${JSON.stringify(sourceFrame.viewport.url)}||String(performance.timeOrigin)!==${JSON.stringify(expectedTimeOrigin)})return null; let el = document.elementFromPoint(${JSON.stringify(point.x)},${JSON.stringify(point.y)}); while(el?.shadowRoot?.elementFromPoint) { const next=el.shadowRoot.elementFromPoint(${JSON.stringify(point.x)},${JSON.stringify(point.y)}); if(!next||next===el) break; el=next; } return el; })()`;
-    const resolved = await diagnosticBackend.sendCommand(tabId, 'Runtime.evaluate', { expression, objectGroup: 'webbrain-visual-dev', returnByValue: false });
-    const objectId = resolved?.result?.objectId;
+    let documentObjectId, objectId;
     try {
+      // Keep executable code fixed. Screenshot metadata and coordinates are
+      // protocol values, never interpolated JavaScript, even for hostile URLs.
+      const root = await diagnosticBackend.sendCommand(tabId, 'Runtime.evaluate', {
+        expression: 'document', objectGroup: 'webbrain-visual-dev', returnByValue: false });
+      documentObjectId = root?.result?.objectId;
+      if (root.exceptionDetails || !documentObjectId) return { result: blocked('The native diagnostic document is unavailable.'), effects };
+      const resolved = await diagnosticBackend.sendCommand(tabId, 'Runtime.callFunctionOn', {
+        objectId: documentObjectId,
+        functionDeclaration: 'function(expectedUrl, expectedTimeOrigin, x, y) { const view = this.defaultView; if (!view || view.location.href !== expectedUrl || String(view.performance.timeOrigin) !== expectedTimeOrigin || !Number.isFinite(x) || !Number.isFinite(y)) return null; let el = this.elementFromPoint(x, y); while (el?.shadowRoot?.elementFromPoint) { const next = el.shadowRoot.elementFromPoint(x, y); if (!next || next === el) break; el = next; } return el; }',
+        arguments: [sourceFrame.viewport.url, expectedTimeOrigin, point.x, point.y].map(value => ({ value })),
+        objectGroup: 'webbrain-visual-dev', returnByValue: false,
+      });
+      objectId = resolved?.result?.objectId;
+      if (resolved.exceptionDetails) return { result: blocked('The native diagnostic target could not be resolved.'), effects };
       if (!objectId) return { result: blocked('No native diagnostic target at the screenshot point.'), effects };
       const raw = await diagnosticBackend.sendCommand(tabId, 'DOMDebugger.getEventListeners', { objectId, depth: 0, pierce: false });
       await fresh();
@@ -239,7 +251,10 @@ export async function runVisionDevCapability(agent, ctx) {
         listeners: selected.slice(0, 30).map(item => ({ type: String(item.type).slice(0, 80), useCapture: item.useCapture === true,
           passive: item.passive === true, once: item.once === true, lineNumber: item.lineNumber, columnNumber: item.columnNumber })),
         source: 'visual_target_native_listener_metadata' };
-    } finally { if (objectId) await diagnosticBackend.sendCommand(tabId, 'Runtime.releaseObject', { objectId }).catch(() => {}); }
+    } finally {
+      for (const handle of new Set([objectId, documentObjectId].filter(Boolean)))
+        await diagnosticBackend.sendCommand(tabId, 'Runtime.releaseObject', { objectId: handle }).catch(() => {});
+    }
   } else {
     const patchId = `visual-patch-${crypto.randomUUID()}`;
     try { result = await operation(name, { patchId }); }

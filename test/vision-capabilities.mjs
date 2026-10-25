@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { Worker } from 'node:worker_threads';
 import { test } from 'node:test';
 import { makeSchedulerHarness } from './lib/scheduler-harness.mjs';
 
@@ -165,6 +166,51 @@ for (const build of ['chrome', 'firefox']) {
       const result = await network.fetchUrl('https://example.com/page', { replayRequestId: 'old-capture' }, { tabId: 77, visionOnly: true });
       assert.equal(result.code, 'vision_fetch_replay_unavailable'); assert.equal(fetched, 0);
     } finally { globalThis.fetch = original; }
+  });
+
+  test(`${build}: adversarial comment prefixes finish within a worker deadline and preserve visual HTML refusal`, { timeout: 12000 }, async () => {
+    // A worker deadline also stops the old exponential regexp instead of
+    // hanging the whole test process when this regression is reintroduced.
+    const results = await new Promise((resolve, reject) => {
+      const worker = new Worker(`
+        const { parentPort, workerData } = require('node:worker_threads');
+        globalThis.chrome = globalThis.browser = {
+          runtime: { getURL: path => 'chrome-extension://fixture/' + path },
+          storage: { local: { get: async () => ({}) }, onChanged: { addListener() {} } },
+        };
+        (async () => {
+          const { fetchUrl } = await import(workerData.moduleUrl);
+          const comments = '<!--' + '--><!--'.repeat(50000);
+          const cases = [
+            { body: comments + 'unterminated comment', mime: 'text/plain', denied: false },
+            { body: comments + 'unterminated comment', mime: 'application/json', denied: false },
+            { body: '\\uFEFF \\n' + comments + '--> \\t<div>Private rendered page</div>', mime: 'text/plain', denied: true },
+            { body: '<!-- note --> \\r\\n<?XML version="1.0"?> \\t<SVG>Private labels</SVG>', mime: 'application/json', denied: true },
+            { body: '<!-- note --><!-- next --> \\n<!DOCTYPE \\tHTML><title>Private title</title>', mime: 'text/plain', denied: true },
+            { body: '<!-- note -->' + ' '.repeat(200000) + '{"value":3}', mime: 'text/plain', denied: false },
+          ];
+          const results = [];
+          for (const entry of cases) {
+            // Convert test escape sequences to actual whitespace before fetch.
+            const body = entry.body.replace(/\\\\uFEFF/g, '\\uFEFF').replace(/\\\\n/g, '\\n').replace(/\\\\r/g, '\\r').replace(/\\\\t/g, '\\t');
+            globalThis.fetch = async () => new Response(body, { headers: { 'content-type': entry.mime } });
+            const result = await fetchUrl('https://example.com/api/data', { maxChars: 1000 }, { visionOnly: true });
+            results.push({ denied: entry.denied, success: result.success, code: result.code, output: result.text || result.json || '' });
+          }
+          parentPort.postMessage(results);
+        })().catch(error => { throw error; });
+      `, { eval: true, workerData: { moduleUrl: new URL(`../src/${build}/src/network/network-tools.js`, import.meta.url).href } });
+      const timeout = setTimeout(() => { void worker.terminate(); reject(new Error('Visual response sniffing exceeded its bounded worker deadline')); }, 8000);
+      worker.once('message', value => { clearTimeout(timeout); resolve(value); void worker.terminate(); });
+      worker.once('error', error => { clearTimeout(timeout); reject(error); });
+      worker.once('exit', code => { clearTimeout(timeout); if (code) reject(new Error('Response sniff worker exited ' + code)); });
+    });
+    assert.equal(results.length, 6);
+    for (const result of results) {
+      assert.equal(result.success, !result.denied, JSON.stringify(result));
+      if (result.denied) { assert.equal(result.code, 'vision_page_text_unavailable'); assert.equal(result.output, ''); }
+      else assert.ok(result.output.length <= 1000);
+    }
   });
 
   test(`${build}: actual scheduler alarm retains visual Dev mode even after the global preference changes`, async () => {

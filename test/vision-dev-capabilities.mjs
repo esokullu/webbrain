@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { createServer } from 'node:http';
+import { runInNewContext } from 'node:vm';
 import { chromium, firefox } from 'playwright';
 import * as chromeDev from '../src/chrome/src/agent/vision-dev-capabilities.js';
 import * as firefoxDev from '../src/firefox/src/agent/vision-dev-capabilities.js';
@@ -59,6 +60,70 @@ test('explicit source inspection uses bounded server bytes directly, without leg
   } finally { Object.assign(globalThis, previous); }
 });
 
+test('native listener lookup keeps hostile metadata in typed arguments and releases handles on every path', async () => {
+  const previous = { chrome: globalThis.chrome, browser: globalThis.browser };
+  const backend = { attach: cdpClient.attach, sendCommand: cdpClient.sendCommand };
+  const hostileUrl = 'https://source.test/#";globalThis.injected=true;//\\\n`${globalThis.injected=true}`\u2028\u2029';
+  const hostileEpoch = '1700000000000";globalThis.injected=true;//';
+  const viewport = { url: hostileUrl }, latest = { frameId: 'frame-1', viewport };
+  const frames = { latest, toCssPoint: () => ({ x: 60, y: 80 }), assertViewport() {}, assertCurrentPixels() {} };
+  let fixedFunction;
+  globalThis.chrome = { scripting: { executeScript: async () => [{ result: { success: true, timeOrigin: hostileEpoch } }] } };
+  delete globalThis.browser;
+  cdpClient.attach = async () => {};
+  try {
+    for (const failure of ['none', 'document-exception', 'resolve', 'target-exception', 'missing-target', 'listeners', 'cleanup']) {
+      const commands = [], released = [], sandbox = { injected: false };
+      const element = {}, document = { defaultView: { location: { href: hostileUrl }, performance: { timeOrigin: hostileEpoch } },
+        elementFromPoint: (x, y) => { assert.equal(x, 60); assert.equal(y, 80); return element; } };
+      cdpClient.sendCommand = async (_tab, method, params) => {
+        commands.push({ method, params });
+        if (method === 'Runtime.evaluate') {
+          assert.equal(params.expression, 'document', 'Runtime.evaluate source cannot contain page-controlled metadata');
+          return { result: { objectId: 'document-handle' }, ...(failure === 'document-exception' ? { exceptionDetails: { text: 'Document lookup failed' } } : {}) };
+        }
+        if (method === 'Runtime.callFunctionOn') {
+          assert.equal(params.objectId, 'document-handle');
+          assert.deepEqual(params.arguments, [hostileUrl, hostileEpoch, 60, 80].map(value => ({ value })));
+          fixedFunction ||= params.functionDeclaration;
+          assert.equal(params.functionDeclaration, fixedFunction, 'Executable source must remain invariant');
+          assert.equal(params.functionDeclaration.includes(hostileUrl), false);
+          assert.equal(params.functionDeclaration.includes(hostileEpoch), false);
+          const resolve = runInNewContext(`(${params.functionDeclaration})`, sandbox);
+          assert.equal(resolve.call(document, ...params.arguments.map(arg => arg.value)), element);
+          assert.equal(sandbox.injected, false);
+          assert.equal(resolve.call(document, hostileUrl + 'changed', hostileEpoch, 60, 80), null);
+          assert.equal(resolve.call(document, hostileUrl, 'different-document', 60, 80), null);
+          assert.equal(resolve.call(document, hostileUrl, hostileEpoch, '60;globalThis.injected=true', 80), null);
+          if (failure === 'resolve') throw new Error('Resolution failed');
+          return { result: failure === 'missing-target' ? { subtype: 'null' } : { objectId: 'element-handle' },
+            ...(failure === 'target-exception' ? { exceptionDetails: { text: 'Target resolution failed' } } : {}) };
+        }
+        if (method === 'DOMDebugger.getEventListeners') {
+          assert.equal(params.objectId, 'element-handle');
+          if (failure === 'listeners') throw new Error('Listener inspection failed');
+          return { listeners: [{ type: 'click', passive: true }] };
+        }
+        assert.equal(method, 'Runtime.releaseObject'); released.push(params.objectId);
+        if (failure === 'cleanup' && params.objectId === 'element-handle') throw new Error('Element cleanup failed');
+        return {};
+      };
+      const run = () => chromeDev.runVisionDevCapability({}, { mode: 'dev', devAuthorized: true, tabId: 1,
+        name: 'inspect_event_listeners', args: { frameId: latest.frameId, x: 60, y: 80 }, frames,
+        browser: { readViewport: async () => viewport, capture: async () => ({ dataUrl: 'fixture', viewport }) }, authorize: async () => true });
+      if (failure === 'resolve' || failure === 'listeners') await assert.rejects(run(), /failed/i);
+      else {
+        const { result } = await run(); assert.equal(result.success, !['missing-target', 'document-exception', 'target-exception'].includes(failure));
+        if (result.success) assert.equal(result.count, 1);
+      }
+      assert.deepEqual(released, ['resolve', 'missing-target', 'document-exception'].includes(failure)
+        ? ['document-handle'] : ['element-handle', 'document-handle']);
+      assert.equal(sandbox.injected, false);
+      assert.equal(commands.some(command => command.method === 'Input.insertText'), false);
+    }
+  } finally { Object.assign(globalThis, previous); Object.assign(cdpClient, backend); }
+});
+
 for (const [name, engine, api] of [['Chrome', chromium, chromeDev], ['Firefox', firefox, firefoxDev]]) {
   test(`${name}: real point-target CSS, reversible patches and race/conflict guards`, async t => {
     const server = createServer((_request, response) => { response.setHeader('Content-Type', 'text/html');
@@ -70,6 +135,7 @@ for (const [name, engine, api] of [['Chrome', chromium, chromeDev], ['Firefox', 
     const previous = { chrome: globalThis.chrome, browser: globalThis.browser };
     const backend = { attach: cdpClient.attach, sendCommand: cdpClient.sendCommand };
     let cdp, contextId, scripts = 0, inputs = 0, frameSequence = 0, originalImage;
+    const nativeCommands = [];
     const url = `http://127.0.0.1:${server.address().port}/`;
     await page.goto(url);
     if (name === 'Chrome') {
@@ -77,7 +143,7 @@ for (const [name, engine, api] of [['Chrome', chromium, chromeDev], ['Firefox', 
       const { frameTree } = await cdp.send('Page.getFrameTree');
       contextId = (await cdp.send('Page.createIsolatedWorld', { frameId: frameTree.frame.id, worldName: 'test-extension-isolated' })).executionContextId;
       cdpClient.attach = async () => {};
-      cdpClient.sendCommand = async (_tab, method, params) => cdp.send(method, params);
+      cdpClient.sendCommand = async (_tab, method, params) => { nativeCommands.push({ method, params }); return cdp.send(method, params); };
     }
     const script = async details => {
       scripts++;
@@ -123,6 +189,21 @@ for (const [name, engine, api] of [['Chrome', chromium, chromeDev], ['Firefox', 
         const listeners = await run('inspect_event_listeners', { eventTypes: ['click'] });
         assert.equal(listeners.result.success, true); assert.equal(listeners.result.count, 1);
         assert.equal(listeners.result.listeners[0].passive, true); assert.equal(Object.hasOwn(listeners.result.listeners[0], 'handler'), false);
+        await t.test('hostile URL text stays typed data during real native listener inspection', async () => {
+          await page.evaluate(() => { globalThis.__devInjectionExecuted = false;
+            location.hash = "';globalThis.__devInjectionExecuted=true;//`${globalThis.__devInjectionExecuted=true}`\\\u2028\u2029"; });
+          await refresh(); nativeCommands.length = 0;
+          const hostile = await run('inspect_event_listeners', { eventTypes: ['click'] });
+          assert.equal(hostile.result.success, true); assert.equal(hostile.result.count, 1);
+          assert.equal(hostile.result.listeners[0].passive, true);
+          assert.equal(await page.evaluate(() => globalThis.__devInjectionExecuted), false);
+          assert.equal(nativeCommands.find(command => command.method === 'Runtime.evaluate').params.expression, 'document');
+          const lookup = nativeCommands.find(command => command.method === 'Runtime.callFunctionOn').params;
+          assert.deepEqual(lookup.arguments, [page.url(), await page.evaluate(() => String(performance.timeOrigin)), 60, 80].map(value => ({ value })));
+          assert.equal(lookup.functionDeclaration.includes(page.url()), false);
+          assert.equal(nativeCommands.filter(command => command.method === 'Runtime.releaseObject').length, 2);
+          await page.evaluate(() => history.replaceState(null, '', location.pathname)); await refresh();
+        });
       }
       const patch = await run('patch_element', { styles: { color: 'red' }, text: 'Edited', attributes: { 'aria-label': 'Edited control' } });
       assert.equal(patch.result.success, true, JSON.stringify(patch)); assert.equal(patch.effects.observe, true);

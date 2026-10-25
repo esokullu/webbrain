@@ -2077,6 +2077,38 @@ export async function readPageSource(url, opts = {}, ctx = {}) {
   }
 }
 
+// Scan leading whitespace/comments once. A regex that can repartition adjacent
+// HTML comments makes a hostile MIME-spoofed response expensive to reject.
+function isRenderedPageMarkup(text) {
+  let offset = 0;
+  const whitespace = char => char !== undefined && /\s/u.test(char);
+  while (offset < text.length) {
+    while (whitespace(text[offset])) offset++;
+    if (text.startsWith('<!--', offset)) {
+      const end = text.indexOf('-->', offset + 4);
+      if (end < 0) return false;
+      offset = end + 3;
+      continue;
+    }
+    if (text.slice(offset, offset + 5).toLowerCase() === '<?xml') {
+      const end = text.indexOf('?>', offset + 5);
+      if (end < 0) return false;
+      offset = end + 2;
+      continue;
+    }
+    break;
+  }
+  if (text.slice(offset, offset + 9).toLowerCase() === '<!doctype') {
+    offset += 9;
+    if (!whitespace(text[offset])) return false;
+    while (whitespace(text[offset])) offset++;
+    return text.slice(offset, offset + 4).toLowerCase() === 'html';
+  }
+  // The longest accepted tag is seven characters. Reading a fixed prefix
+  // avoids scanning an attacker-controlled tag name or arbitrary suffix.
+  return /^<(?:html|head|body|svg|title|meta|link|main|section|article|nav|div|p|span|form|table|ul|ol|li|h[1-6]|script|style|iframe|input|button|a|img)\b/i.test(text.slice(offset, offset + 10));
+}
+
 /**
  * Agent-driven fetch.
  *
@@ -2177,7 +2209,7 @@ export async function fetchUrl(url, opts = {}, ctx = {}) {
     // JSON
     if (contentType.includes('json')) {
       const text = await readFetchResponseText(res, deadline.signal);
-      if (ctx.visionOnly && /^\s*(?:(?:<!--[\s\S]*?-->|<\?xml[^>]*\?>)\s*)*(?:<!doctype\s+html|<(?:html|head|body|svg|title|meta|link|main|section|article|nav|div|p|span|form|table|ul|ol|li|h[1-6]|script|style|iframe|input|button|a|img)\b)/i.test(text)) {
+      if (ctx.visionOnly && isRenderedPageMarkup(text)) {
         return { success: false, code: 'vision_page_text_unavailable', error: 'This resource contains a rendered page document. Use its screenshot instead.' };
       }
       let pretty = text;
@@ -2214,7 +2246,7 @@ export async function fetchUrl(url, opts = {}, ctx = {}) {
         contentType.includes('markdown') ||
         contentType === '') {
       const text = await readFetchResponseText(res, deadline.signal);
-      if (ctx.visionOnly && /^\s*(?:(?:<!--[\s\S]*?-->|<\?xml[^>]*\?>)\s*)*(?:<!doctype\s+html|<(?:html|head|body|svg|title|meta|link|main|section|article|nav|div|p|span|form|table|ul|ol|li|h[1-6]|script|style|iframe|input|button|a|img)\b)/i.test(text)) {
+      if (ctx.visionOnly && isRenderedPageMarkup(text)) {
         return { success: false, code: 'vision_page_text_unavailable', error: 'This resource contains a rendered page document. Use its screenshot instead.' };
       }
       return constrainFetchTextResult({
