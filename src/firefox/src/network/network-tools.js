@@ -2065,6 +2065,7 @@ export async function readPageSource(url, opts = {}, ctx = {}) {
  */
 export async function fetchUrl(url, opts = {}, ctx = {}) {
   if (!url) return { success: false, error: 'url is required' };
+  if (ctx.visionOnly && opts.replayRequestId) return { success: false, code: 'vision_fetch_replay_unavailable', error: 'Visual API requests require explicit arguments; captured page requests are not replayed.' };
   const restricted = firefoxRestrictedDomainFailure(url);
   if (restricted) return restricted;
   const replay = apiReplayOptionsForFetch(url, opts, ctx);
@@ -2126,6 +2127,10 @@ export async function fetchUrl(url, opts = {}, ctx = {}) {
       }
     }
     const contentType = (res.headers.get('content-type') || '').toLowerCase();
+    if (ctx.visionOnly && /(?:html|xhtml|svg)/i.test(contentType)) {
+      return { success: false, code: 'vision_page_text_unavailable', status: res.status, contentType,
+        error: 'Rendered page content is unavailable through fetch_url in visual mode. Inspect the browser screenshot or request a direct API/data-file resource.' };
+    }
     const status = res.status;
     const finalUrl = res.url;
     const success = status < 400;
@@ -2135,6 +2140,9 @@ export async function fetchUrl(url, opts = {}, ctx = {}) {
 
     if (contentType.includes('json')) {
       const text = await readFetchResponseText(res, deadline.signal);
+      if (ctx.visionOnly && /^\s*(?:(?:<!--[\s\S]*?-->|<\?xml[^>]*\?>)\s*)*(?:<!doctype\s+html|<(?:html|head|body|svg|title|meta|link|main|section|article|nav|div|p|span|form|table|ul|ol|li|h[1-6]|script|style|iframe|input|button|a|img)\b)/i.test(text)) {
+        return { success: false, code: 'vision_page_text_unavailable', error: 'This resource contains a rendered page document. Use its screenshot instead.' };
+      }
       let pretty = text;
       try { pretty = JSON.stringify(JSON.parse(text), null, 2); } catch (e) {}
       return constrainFetchTextResult({
@@ -2162,6 +2170,9 @@ export async function fetchUrl(url, opts = {}, ctx = {}) {
         contentType.includes('markdown') ||
         contentType === '') {
       const text = await readFetchResponseText(res, deadline.signal);
+      if (ctx.visionOnly && /^\s*(?:(?:<!--[\s\S]*?-->|<\?xml[^>]*\?>)\s*)*(?:<!doctype\s+html|<(?:html|head|body|svg|title|meta|link|main|section|article|nav|div|p|span|form|table|ul|ol|li|h[1-6]|script|style|iframe|input|button|a|img)\b)/i.test(text)) {
+        return { success: false, code: 'vision_page_text_unavailable', error: 'This resource contains a rendered page document. Use its screenshot instead.' };
+      }
       return constrainFetchTextResult({
         success, ...(error ? { error } : {}), ...retrieval, status, contentType, url: finalUrl,
         ...responseMetadata,
@@ -2439,22 +2450,24 @@ export async function readDownloadedFile(downloadId, ctx = {}) {
     if (item.state !== 'complete' || item.exists === false) {
       return { success: false, code: 'saved_download_unavailable', error: 'The completed download is missing, deleted or not yet complete.' };
     }
-    // Firefox has no native saved-path reader. Only the immutable payload
-    // already captured in this download record can be read without a network
-    // substitution; this is explicitly not current on-disk byte verification.
-    if (typeof item.url !== 'string' || !item.url.startsWith('data:')) {
+    // Visual runs can use the trusted native companion to read this exact
+    // browser-reported saved path. Never substitute a new source URL fetch.
+    const nativeReader = typeof ctx.savedDownloadReader === 'function';
+    if (!nativeReader && (typeof item.url !== 'string' || !item.url.startsWith('data:'))) {
       return { success: false, code: 'saved_download_read_unavailable', error: 'Firefox cannot read this saved HTTP(S) download. Only immutable captured data: payloads are supported; the source URL was not fetched.' };
     }
     const ct = String(item.mime || '').toLowerCase();
     const prefixBytes = downloadedFileIsText(item, ct) ? READ_FILE_TEXT_PREFIX_BYTES : READ_FILE_BINARY_PREFIX_BYTES;
-    const payload = immutableDownloadedDataPayload(item.url, prefixBytes);
+    const payload = nativeReader
+      ? await ctx.savedDownloadReader(item, { maxBytes: prefixBytes, readPrefixBytes: prefixBytes })
+      : immutableDownloadedDataPayload(item.url, prefixBytes);
     const current = await browser.downloads.search({ id: downloadId });
     downloadedFileReadStillActive(ctx);
     if (current.length !== 1 || downloadedFileIdentity(current[0]) !== downloadedFileIdentity(item)
         || (Number.isSafeInteger(item.fileSize) && item.fileSize >= 0 && item.fileSize !== payload.size)) {
       return { success: false, code: 'saved_download_changed', error: 'The captured download payload changed or disappeared during the read.' };
     }
-    return downloadedFileContent(item, payload, 'immutable_download_data_url', false);
+    return downloadedFileContent(item, payload, nativeReader ? 'saved_local_file' : 'immutable_download_data_url', nativeReader);
   } catch (error) {
     return { success: false, code: ctx.signal?.aborted ? 'saved_download_read_cancelled' : 'saved_download_read_failed',
       error: ctx.signal?.aborted ? 'Download read stopped; no file bytes returned.' : String(error?.message || 'Captured download read failed.') };

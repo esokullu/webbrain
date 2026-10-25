@@ -528,12 +528,14 @@ async function solveForm(apiKey, contract, task) {
   throw new Error('SolveCaptcha: timed out waiting for solution.');
 }
 
-export async function solveNativeCaptchaTasks(prepared, { onAttempt } = {}) {
+export async function solveNativeCaptchaTasks(prepared, { onAttempt, signal } = {}) {
   const failures = [];
   for (const { provider, contract, task, family } of prepared) {
+    signal?.throwIfAborted();
     // Reserve each provider before contacting it, including after a restart.
     // A persistence failure must stop the entire chain, not try another vendor.
     if (onAttempt) await onAttempt(provider.id);
+    signal?.throwIfAborted();
     try {
       const result = JSON_BASES[provider.id]
         ? await solveJsonCaptcha(JSON_BASES[provider.id], provider.id, provider.apiKey, task,
@@ -553,6 +555,7 @@ export async function solveNativeCaptchaTasks(prepared, { onAttempt } = {}) {
       }
       return { ...result, provider: provider.id, method: contract.method, family };
     } catch (error) {
+      signal?.throwIfAborted();
       // Some providers echo inputs in errors. Never return a saved account key.
       failures.push(`${provider.id}: ${String(error.message).split(provider.apiKey).join('[redacted]')}`);
     }

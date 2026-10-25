@@ -14,7 +14,8 @@ const out = path.resolve(process.env.WEBBRAIN_QUALITY_ARTIFACTS || 'ci/artifacts
 await fs.mkdir(out, { recursive: true });
 const tempRoot = await fs.realpath(os.tmpdir());
 const profileRoot = await fs.mkdtemp(path.join(tempRoot, 'webbrain-vision-act-'));
-const sourceFiles = ['agent.js', 'vision-act.js', 'vision-browser.js', 'vision-frames.js', 'vision-transport.js', 'vision-redaction.js', 'vision-dev.js'];
+const sourceFiles = ['agent.js', 'vision-act.js', 'vision-browser.js', 'vision-frames.js', 'vision-transport.js', 'vision-redaction.js', 'vision-dev.js',
+  'vision-review.js', 'vision-capabilities.js', 'vision-files.js', 'vision-evidence.js', 'vision-captcha.js', 'vision-dev-capabilities.js', 'vision-runtime-state.js'];
 const hashSources = async () => Object.fromEntries(await Promise.all(sourceFiles.map(async name =>
   [name, createHash('sha256').update(await fs.readFile(path.join(extension, 'src/agent', name))).digest('hex')])));
 const sourceBefore = await hashSources();
@@ -68,7 +69,7 @@ const cases = [
   { id: 'dev', viewport: { width: 1280, height: 900 }, dpr: 1, mode: 'dev', action: 'chat' },
 ];
 let activeCase, activePage, beforeNavigation;
-const requests = [], failures = [], submissions = [];
+const requests = [], reviews = [], failures = [], submissions = [];
 const pageHtml = `<!doctype html><meta charset="utf-8"><title>Owned visual form</title>
 <style>*{box-sizing:border-box}body{font:20px Arial;margin:0;background:#fff;min-height:1800px}h1{position:absolute;left:80px;top:35px}label{position:absolute;left:80px;top:120px}input{position:absolute;left:80px;top:160px;width:360px;height:50px;font:22px Arial}button{position:absolute;left:80px;top:260px;width:220px;height:60px;font:22px Arial}#result{position:absolute;left:520px;top:165px;width:300px;height:100px;padding:16px;background:#ddd}#lower{position:absolute;left:80px;top:1200px;font-size:28px}</style>
 <h1>Visual browser test</h1><label>Name</label><input id="name" aria-label="DOM_ONLY_SENTINEL_NEVER_SEND"><button id="save">Save visually</button><div id="result">Not saved</div><p id="lower">Lower viewport marker</p><div hidden>AX_HIDDEN_SENTINEL_NEVER_SEND</div>
@@ -90,6 +91,15 @@ const server = http.createServer(async (request, response) => {
     }
     assert.ok(activeCase, 'Task inference requires an active owned case');
     assert.equal(input.parallel_tool_calls, false, 'Real provider requests must ask for one visual tool call');
+    if (input.tools?.length === 1 && input.tools[0].function.name === 'vision_review') {
+      assert.ok(screenshotsIn(input.messages).length, 'Independent reviews use current screenshots');
+      reviews.push({ case: activeCase.id, images: screenshotsIn(input.messages).length });
+      const call = { id: `review-${reviews.length}`, type: 'function', function: { name: 'vision_review',
+        arguments: JSON.stringify({ verified: true, allowed: true, reason: 'The owned non-message form action or explicit diagnostic request is authorized.' }) } };
+      response.writeHead(200, { 'Content-Type': 'application/json' });
+      response.end(JSON.stringify({ choices: [{ message: { role: 'assistant', content: '', tool_calls: [call] }, finish_reason: 'tool_calls' }], usage: { prompt_tokens: 100, completion_tokens: 20 } }));
+      return;
+    }
     assert.ok(input.tools?.some(tool => tool.function.name === 'vision_click'), `${activeCase.mode || 'act'} must advertise vision tools`);
     assert.ok(!input.tools.some(tool => /^(get_accessibility_tree|click_ax|type_ax|read_page|execute_js|browser_batch)$/.test(tool.function.name)));
     const images = screenshotsIn(input.messages), frames = framesIn(input.messages), frame = frames.at(-1);
@@ -137,6 +147,7 @@ const server = http.createServer(async (request, response) => {
       { name: 'done', args: { frameId: frame.frameId, summary: 'Owned visual task complete.', outcome: 'success' } },
     ];
     if (activeCase.mode === 'dev') steps.unshift(
+      { name: 'vision_enable_tools', args: { group: 'dev' } },
       { name: 'read_console', args: { levels: ['info'], limit: 10 } },
       { name: 'inspect_network_requests', args: { urlPattern: '/diagnostic-probe', limit: 10 } },
     );
@@ -183,7 +194,8 @@ try {
     console.log(`Running installed visual ${entry.mode || 'act'} ${entry.id}: ${entry.viewport.width}x${entry.viewport.height} @ ${entry.dpr}x`);
     context = await chromium.launchPersistentContext(path.join(profileRoot, entry.id), {
       headless: true, channel: 'chromium', viewport: entry.viewport, deviceScaleFactor: entry.dpr,
-      args: [`--disable-extensions-except=${extension}`, `--load-extension=${extension}`, '--disable-background-networking', '--disable-sync'],
+      args: [`--disable-extensions-except=${extension}`, `--load-extension=${extension}`, '--disable-background-networking', '--disable-sync',
+        ...(process.env.WEBBRAIN_QUALITY_SOFTWARE_RENDERING === '1' ? ['--disable-gpu', '--disable-gpu-compositing'] : [])],
     });
     const worker = context.serviceWorkers()[0] || await context.waitForEvent('serviceworker', { timeout: 30000 });
     console.log('Extension service worker loaded');

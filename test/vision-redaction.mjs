@@ -13,7 +13,8 @@ before(async () => {
     response.end(request.url === '/' ? '<!doctype html><title>Vision privacy canvas test</title>' : modules.get(request.url) || '');
   });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
-  browser = await chromium.launch({ headless: true });
+  browser = await chromium.launch({ headless: true,
+    args: process.env.WEBBRAIN_QUALITY_SOFTWARE_RENDERING === '1' ? ['--disable-gpu', '--disable-gpu-compositing'] : [] });
   page = await browser.newPage();
   await page.goto(`http://127.0.0.1:${server.address().port}`);
   await page.evaluate(async () => {

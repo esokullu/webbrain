@@ -288,7 +288,8 @@ const fixture = `<!doctype html><style>body{margin:0;height:2500px}button{positi
 <button id="button">Click</button><textarea id="text"></textarea><div id="drag"></div>
 <script>window.events=[];for(const name of ['click','input','keydown','pointermove','pointerdown','pointerup','wheel']) document.addEventListener(name,e=>events.push({type:name,trusted:e.isTrusted,target:e.target.id,x:e.clientX,y:e.clientY,key:e.key}));window.count=0;button.onclick=()=>count++;</script>`;
 test('real Chromium: DPR 1/2 and pinch zoom capture, click, Unicode typing, keys, drag, wheel, resize and reload', { timeout: 60000 }, async () => {
-  const browser = await chromium.launch({ headless: true });
+  const browser = await chromium.launch({ headless: true,
+    args: process.env.WEBBRAIN_QUALITY_SOFTWARE_RENDERING === '1' ? ['--disable-gpu', '--disable-gpu-compositing'] : [] });
   const previousChrome = globalThis.chrome;
   try {
     for (const dpr of [1, 2]) {
@@ -344,7 +345,8 @@ test('real Chromium: DPR 1/2 and pinch zoom capture, click, Unicode typing, keys
 });
 
 test('real Chromium: redirect or resize across screenshot transfer rejects once, then observation-only retry succeeds', { timeout: 30000 }, async () => {
-  const browser = await chromium.launch({ headless: true });
+  const browser = await chromium.launch({ headless: true,
+    args: process.env.WEBBRAIN_QUALITY_SOFTWARE_RENDERING === '1' ? ['--disable-gpu', '--disable-gpu-compositing'] : [] });
   const previousChrome = globalThis.chrome;
   const tabId = 102;
   const server = createServer((request, response) => {

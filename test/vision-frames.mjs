@@ -18,7 +18,8 @@ before(async () => {
     response.end(request.url === '/' ? '<!doctype html><title>Vision frame canvas test</title>' : files.get(request.url) || '');
   });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
-  browser = await chromium.launch({ headless: true });
+  browser = await chromium.launch({ headless: true,
+    args: process.env.WEBBRAIN_QUALITY_SOFTWARE_RENDERING === '1' ? ['--disable-gpu', '--disable-gpu-compositing'] : [] });
   page = await browser.newPage();
   await page.goto(`http://127.0.0.1:${server.address().port}`);
   await page.evaluate(async path => {
@@ -342,4 +343,74 @@ test('predispatch crop-local and drag destination checks preserve coordinate pro
   assert.equal(result.valid, true); assert.match(result.destination, /Stale vision target/);
   assert.match(result.badGeometry, /viewport changed/); assert.match(result.oldFrame, /Stale vision frame/);
   assert.match(result.wrongSource, /screenshot size changed/);
+});
+
+test('semantic evidence validates the entire header/draft rectangle, ignores unrelated pixels and preserves frame history', async () => {
+  const result = await page.evaluate(async () => {
+    const session = new vision.VisionFrameSession(), viewport = { width: 800, height: 600 };
+    const header = { x: 10, y: 10, width: 600, height: 50, color: '#eee' };
+    const draft = { x: 10, y: 400, width: 600, height: 50, color: '#aaa' };
+    const raw = makeImage(800, 600, [header, draft]);
+    const frame = await session.capture(raw, viewport);
+    const before = JSON.stringify(session.contextFrames());
+    const args = { frameId: frame.frameId, rects: [header, draft].map(({ color, ...rect }) => rect) };
+    const unrelated = await session.assertCurrentRegions(makeImage(800, 600, [header, draft,
+      { x: 750, y: 500, width: 20, height: 20, color: '#f00' }]), viewport, args);
+    const failures = [];
+    for (const change of [{ x: 10, y: 10 }, { x: 609, y: 59 }, { x: 10, y: 400 }, { x: 609, y: 449 }]) {
+      try { await session.assertCurrentRegions(makeImage(800, 600, [header, draft, { ...change, width: 1, height: 1, color: '#000' }]), viewport, args); }
+      catch (error) { failures.push({ code: error.code, message: error.message }); }
+    }
+    const historyUnchanged = before === JSON.stringify(session.contextFrames());
+    const after = await session.capture(raw, viewport);
+    return { unrelated, failures, historyUnchanged, kind: after.kind, previous: after.previousFrameId, original: frame.frameId };
+  });
+  assert.equal(result.unrelated, true); assert.equal(result.failures.length, 4);
+  for (const error of result.failures) assert.equal(error.code, 'vision_stale_frame');
+  assert.equal(result.historyUnchanged, true); assert.equal(result.kind, 'unchanged'); assert.equal(result.previous, result.original);
+});
+
+test('full-evidence validation uses measured retina scaling and empty rectangles mean the whole screenshot', async () => {
+  const result = await page.evaluate(async () => {
+    const session = new vision.VisionFrameSession(), viewport = { width: 800, height: 600, devicePixelRatio: 2, zoom: 1.25,
+      offsetLeft: 20, offsetTop: 30, scrollX: 120, scrollY: 330, documentId: 'retina-doc' };
+    const raw = makeImage(1600, 1200);
+    const frame = await session.capture(raw, viewport);
+    const rect = { x: 100, y: 100, width: 200, height: 50 };
+    const valid = await session.assertCurrentRegions(raw, viewport, { frameId: frame.frameId, rects: [rect] });
+    const scale = 1600 / frame.canvas.width;
+    let inside, whole;
+    try { await session.assertCurrentRegions(makeImage(1600, 1200, [{ x: 110 * scale, y: 110 * scale, width: 20, height: 20, color: '#000' }]), viewport,
+      { frameId: frame.frameId, rects: [rect] }); } catch (error) { inside = error.code; }
+    try { await session.assertCurrentRegions(makeImage(1600, 1200, [{ x: 1500, y: 1100, width: 20, height: 20, color: '#000' }]), viewport,
+      { frameId: frame.frameId, rects: [] }); } catch (error) { whole = error.code; }
+    return { valid, inside, whole, canvas: frame.canvas, source: frame.source };
+  });
+  assert.equal(result.valid, true); assert.equal(result.inside, 'vision_stale_frame'); assert.equal(result.whole, 'vision_stale_frame');
+  assert.ok(result.canvas.width < result.source.width);
+});
+
+test('evidence validation rejects stale identity, geometry, out-of-bounds boxes and reset during decode', async () => {
+  const result = await page.evaluate(async () => {
+    const session = new vision.VisionFrameSession(), viewport = { width: 800, height: 600, documentId: 'document-one' };
+    const raw = makeImage(800, 600), frame = await session.capture(raw, viewport);
+    const errors = [];
+    for (const [image, geometry, args] of [
+      [raw, viewport, { frameId: 'old', rects: [] }],
+      [raw, { ...viewport, documentId: 'document-two' }, { frameId: frame.frameId, rects: [] }],
+      [raw, { ...viewport, scrollY: 1 }, { frameId: frame.frameId, rects: [] }],
+      [raw, viewport, { frameId: frame.frameId, rects: [{ x: 799, y: 0, width: 2, height: 2 }] }],
+      [raw, viewport, { frameId: frame.frameId, rects: [{ x: NaN, y: 0, width: 2, height: 2 }] }],
+      [makeImage(1600, 1200), viewport, { frameId: frame.frameId, rects: [] }],
+      [raw, viewport, { frameId: frame.frameId, rects: Array(251).fill({ x: 0, y: 0, width: 1, height: 1 }) }],
+    ]) {
+      try { await session.assertCurrentRegions(image, geometry, args); errors.push(null); } catch (error) { errors.push(error.message); }
+    }
+    const pending = session.assertCurrentRegions(raw, viewport, { frameId: frame.frameId, rects: [] }); session.reset();
+    let reset;
+    try { await pending; } catch (error) { reset = error.message; }
+    return { errors, reset, latest: session.latest };
+  });
+  assert.equal(result.errors.length, 7); assert.ok(result.errors.every(Boolean));
+  assert.match(result.reset, /Stale screenshot/); assert.equal(result.latest, null);
 });

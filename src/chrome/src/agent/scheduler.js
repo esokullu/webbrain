@@ -362,6 +362,7 @@ function sameScheduledIntent(a, b) {
     a?.kind === b?.kind &&
     scheduledJobConversationKey(a) === scheduledJobConversationKey(b) &&
     String(a?.mode || 'act') === String(b?.mode || 'act') &&
+    String(a?.actObservation || '') === String(b?.actObservation || '') &&
     scheduledJobPayloadKey(a) === scheduledJobPayloadKey(b);
   if (!samePayload) return false;
   if (a.kind === 'resume' && String(a.resumeTaskId || '') !== String(b.resumeTaskId || '')) return false;
@@ -656,6 +657,8 @@ export function summarizeScheduledJob(job) {
   return {
     id: job.id,
     kind: job.kind,
+    mode: job.mode || 'act',
+    ...(['vision', 'accessibility'].includes(job.actObservation) ? { actObservation: job.actObservation } : {}),
     source: job.source || null,
     title: job.title || job.reason || 'Scheduled job',
     status: job.status,
@@ -1022,7 +1025,7 @@ export class ScheduledJobManager {
     });
   }
 
-  async createResumeJob({ tabId, conversationId, resumeTaskId = null, mode = 'act', args, currentUrl = '', currentTitle = '' }, creation = null) {
+  async createResumeJob({ tabId, conversationId, resumeTaskId = null, mode = 'act', actObservation = null, args, currentUrl = '', currentTitle = '' }, creation = null) {
     const parsed = validateResumeArgs(args, this.now());
     if (!parsed.ok) return { success: false, error: parsed.error };
     const predecessor = [...this._executions.entries()].find(([id, execution]) => !execution.cancelled
@@ -1039,6 +1042,7 @@ export class ScheduledJobManager {
       resumeTaskId: String(resumeTaskId || '') || null,
       ...(predecessor ? { predecessorJobId: predecessor[0] } : {}),
       mode,
+      ...(['vision', 'accessibility'].includes(actObservation) ? { actObservation } : {}),
       reason: parsed.reason,
       resumeInstruction: parsed.resumeInstruction,
       scheduledAt: parsed.scheduledAt,
@@ -1067,7 +1071,7 @@ export class ScheduledJobManager {
     };
   }
 
-  async createTaskJob({ tabId = null, conversationId = null, args, source = 'agent', currentUrl = '', currentTitle = '' }, creation = null) {
+  async createTaskJob({ tabId = null, conversationId = null, args, source = 'agent', actObservation = null, currentUrl = '', currentTitle = '' }, creation = null) {
     const parsed = validateTaskArgs(args, this.now());
     if (!parsed.ok) return { success: false, error: parsed.error };
     const createdAt = iso(this.now());
@@ -1084,6 +1088,7 @@ export class ScheduledJobManager {
       tabId: target.tabId || null,
       conversationId: target.conversationId || null,
       mode: parsed.mode,
+      ...(['vision', 'accessibility'].includes(actObservation) ? { actObservation } : {}),
       title: parsed.title,
       prompt: parsed.prompt,
       schedule: {
@@ -2293,6 +2298,7 @@ export class ScheduledJobManager {
     let runStatus = null;
     let endedForUserInput = false;
     let ranLean = false;
+    let ranVision = false;
     let watchAlert = null;
     let sawFailureLikeUpdate = false;
     let judgeContext = null;
@@ -2432,6 +2438,7 @@ export class ScheduledJobManager {
         [],
         {
           scheduledRun: true,
+          ...(running.actObservation ? { actObservation: running.actObservation } : {}),
           independentRun: true,
           scheduledResume: running.kind === 'resume',
           isDetachedStartCancelled: () => execution.cancelled,
@@ -2442,6 +2449,7 @@ export class ScheduledJobManager {
           onRunFinished: (_status, details) => {
             endedForUserInput = details?.needsUserInput === true;
             ranLean = details?.leanMode === true;
+            ranVision = details?.observation === 'vision';
           },
           beforeConsequentialTool: async ({ name } = {}) => {
             if (execution.cancelled) return false;
@@ -2482,7 +2490,7 @@ export class ScheduledJobManager {
       if (await this._markReconciliationRequired(running)) return;
       if (runStatus === 'clarification_required') {
         await this._markClarificationRequired(running, result);
-      } else if (runStatus === 'delivery_recovery_failed') {
+      } else if (runStatus === 'delivery_recovery_failed' || ranVision && runStatus === 'error') {
         await this._markFailed(
           running,
           result || 'Scheduled run reached the browser observation limit without a valid terminal result.',

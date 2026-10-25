@@ -294,7 +294,11 @@ test('Chrome certified native BUTTON initial trusted input and one-shot fences',
       assert.equal(finished.ready, scenario === 'current');
       await page.evaluate(() => { const row = document.createElement('div');
         row.textContent = 'Separate material record mutation'; document.querySelector('main').append(row); });
-      await page.waitForTimeout(180);
+      // DOM feedback has a 150 ms debounce followed by asynchronous delivery.
+      // Wait for that receipt instead of assuming 30 ms of scheduling slack.
+      const mutationDeadline = Date.now() + 3000;
+      while (![...f.run.events.values()].some(event => event.kind === 'dom') && Date.now() < mutationDeadline)
+        await new Promise(resolve => setTimeout(resolve, 20));
       const changes = [...f.run.events.values()].filter(event => event.kind === 'dom');
       assert.ok(changes.length > 0, 'The real monitor must deliver the material DOM mutation.');
       assert.equal(changes.some(event => event.source === 'unknown'), scenario !== 'current',

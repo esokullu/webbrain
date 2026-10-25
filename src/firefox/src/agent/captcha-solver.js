@@ -247,7 +247,7 @@ export async function solveCaptcha(apiKey, params, { useCloudBroker = false } = 
 // One tool dispatch, at most one task per enabled provider. Fallback happens
 // before token injection; a page/injection failure must not spend another solve.
 // A timeout can leave a paid task running upstream; fallback may charge both accounts.
-export async function solveCaptchaWithProviders(providers, params) {
+export async function solveCaptchaWithProviders(providers, params, { signal } = {}) {
   if (!providers.length) throw new Error('No CAPTCHA solver is enabled with a valid API key.');
   const paramError = captchaParamError(params);
   if (paramError) throw new Error(paramError);
@@ -258,6 +258,7 @@ export async function solveCaptchaWithProviders(providers, params) {
   const task = params.type === 'hcaptcha' ? null : buildTask(params);
   const failures = [];
   for (const provider of eligibleProviders) {
+    signal?.throwIfAborted();
     try {
       const result = provider.id === 'capsolver'
         ? await solveCaptcha(provider.apiKey, params, { useCloudBroker: provider.useCloudBroker === true })
@@ -274,6 +275,7 @@ export async function solveCaptchaWithProviders(providers, params) {
       }
       return { ...result, provider: provider.id };
     } catch (error) {
+      signal?.throwIfAborted();
       // Some providers echo inputs in errors. Never return a saved account key.
       const message = String(error.message);
       failures.push(`${provider.id}: ${provider.apiKey ? message.split(provider.apiKey).join('[redacted]') : message}`);

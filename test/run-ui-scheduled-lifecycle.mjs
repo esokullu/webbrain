@@ -114,6 +114,41 @@ function scheduledUiHarness(item, processMessage, options = {}) {
 }
 
 for (const item of builds) {
+  test(`${item.build}: a scheduled visual pause stays pending through public delivery and cold reconnect`, async () => {
+    const h = backgroundHarness(item);
+    const requestId = 'visual-scheduled-pause';
+    const updates = [{ type: 'run_status', data: { status: 'scheduled', message: 'Scheduled a resume in 60 seconds.' } }];
+    h.context.beginRunUiSnapshot(77, requestId, { mode: 'dev', kind: 'chat' });
+    for (const event of updates) h.context.recordRunUiEvent(77, requestId, event.type, event.data);
+    const status = h.context.terminalRunUiStatus(updates[0].data.message, updates);
+    assert.equal(status, 'scheduled');
+    assert.equal(h.context.runUpdatesSucceeded(updates), false, 'A scheduled pause is not completed task memory');
+    assert.equal(h.context.terminalRunUiStatus('Stopped by user', updates), 'stopped');
+    assert.equal(h.context.terminalRunUiStatus('Failed', [...updates, { type: 'error', data: { message: 'Failed' } }]), 'failed');
+    const terminal = h.context.finishRunUiSnapshot(77, requestId, status, updates[0].data.message);
+    await h.context.sendAgentRunComplete(77, terminal);
+    assert.equal(terminal.runSucceeded, false);
+    assert.equal(h.messages.at(-1).type, 'run_complete');
+    assert.equal(h.messages.at(-1).data.status, 'scheduled');
+    const cold = backgroundHarness(item);
+    const restored = cold.journal.restore(77, JSON.parse(JSON.stringify(item.compactRunUiSnapshotForPersist(h.stored.get(77)))));
+    const replay = await item.runDetachedWithReconnect({
+      initialAction: 'chat_start', payload: { requestId },
+      start: async () => ({ accepted: true, requestId }),
+      probe: async () => ({ submittedTurnDurable: true, runUi: restored }),
+      wait: async () => {}, pollIntervalMs: 0,
+    });
+    assert.equal(replay.runStatus, 'scheduled'); assert.equal(replay.success, false);
+    assert.equal(replay.hadError, false); assert.equal(replay.content, updates[0].data.message);
+    const panel = vm.createContext({});
+    vm.runInContext(['isTerminalRunUiStatus', 'isFinishedRunUiStatus'].map(name => functionSource(item.panelSource, name)).join('\n'), panel);
+    assert.equal(panel.isTerminalRunUiStatus('scheduled'), true);
+    assert.equal(panel.isFinishedRunUiStatus('scheduled'), false, 'The panel must not claim the final result is complete');
+    const owner = scope('next-resume', 'child-job', 'dev');
+    h.context.sendScheduledAgentUpdate(77, 'scheduled_job', jobEvent('running', owner), owner);
+    assert.equal(h.journal.get(77).scheduledExecutionId, 'next-resume', 'The alarm must be able to claim the paused foreground tab');
+  });
+
   test(`${item.build}: exact typed table JSON survives terminal delivery, both persistence modes and cold replay`, async () => {
     const rows = Array.from({ length: 85 }, (_, index) => ({ id: index, amount: index % 2 ? -2.5 : 0,
       label: 'Original café ı漢字 "quoted" C:\\owned\\table ' + 'literal '.repeat(12),

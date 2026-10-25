@@ -283,6 +283,36 @@ export class VisionFrameSession {
     } finally { bitmap?.close?.(); }
   }
 
+  /** Match the complete claimed recipient/draft/field regions against the
+   * screenshot that was independently reviewed. Target-center checks alone
+   * cannot protect a recipient elsewhere on the page. */
+  async assertCurrentRegions(dataUrl, viewport, { frameId, rects = [] } = {}) {
+    this.assertViewport(viewport);
+    const frame = this.latest, generation = this._generation, reference = this._pixels;
+    if (!frame || frameId !== frame.frameId || !Array.isArray(rects) || rects.length > 250)
+      throw new Error('Stale or invalid visual evidence regions');
+    const boxes = rects.length ? rects : [{ x: 0, y: 0, ...frame.canvas }];
+    for (const box of boxes) if (!box || !['x', 'y', 'width', 'height'].every(key => Number.isFinite(box[key]))
+      || box.x < 0 || box.y < 0 || box.width <= 0 || box.height <= 0
+      || box.x + box.width > frame.canvas.width || box.y + box.height > frame.canvas.height)
+      throw new Error('Visual evidence rectangle exceeds the current canvas');
+    let bitmap;
+    try {
+      bitmap = await decode(dataUrl);
+      if (generation !== this._generation || this.latest !== frame || bitmap.width !== this._source.width || bitmap.height !== this._source.height)
+        throw new Error('Stale screenshot during evidence validation');
+      const { width, height } = frame.canvas;
+      const current = pixels(draw(bitmap, width, height));
+      for (const box of boxes) for (let y = Math.floor(box.y); y < Math.ceil(box.y + box.height); y++)
+        for (let x = Math.floor(box.x); x < Math.ceil(box.x + box.width); x++) {
+          const offset = (y * width + x) * 4;
+          for (let channel = 0; channel < 4; channel++) if (Math.abs(reference[offset + channel] - current[offset + channel]) > this.diffOptions.threshold)
+            throw Object.assign(new Error('Visual evidence changed after review; observe again before acting'), { code: 'vision_stale_frame' });
+        }
+      return true;
+    } finally { bitmap?.close?.(); }
+  }
+
   async capture(dataUrl, viewport, { forceFull = false, reason = '' } = {}) {
     if (this._busy) throw new Error('A vision screenshot capture is already in progress');
     this._busy = true;

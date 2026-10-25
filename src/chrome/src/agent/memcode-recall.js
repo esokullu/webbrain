@@ -242,7 +242,8 @@ export function createMemcodeRecall({ storage, identity, fetcher = fetch, crypto
     return refreshInFlight.promise;
   }
 
-  async function recall(query) {
+  async function recall(query, { signal } = {}) {
+    signal?.throwIfAborted();
     const owner = generation, revision = recallRevision;
     const current = await status();
     if (!current.recallEnabled) return { success: false, error: 'MemCode recall is disabled in Settings.' };
@@ -254,7 +255,9 @@ export function createMemcodeRecall({ storage, identity, fetcher = fetch, crypto
       const lease = { ...await accessToken(), recallRevision: revision };
       requireGeneration(owner);
       await requireRecall(lease);
+      signal?.throwIfAborted();
       const response = await checkedJson(await fetcher(ENDPOINT, {
+        signal,
         method: 'POST', credentials: 'omit',
         headers: { Authorization: `Bearer ${lease.token}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({ query: text, mode: 'memories', top_k: 5,
@@ -262,6 +265,7 @@ export function createMemcodeRecall({ storage, identity, fetcher = fetch, crypto
       }));
       await requireRecall(lease);
       if (response?.status === 'error') throw new Error('MemCode recall failed.');
+      signal?.throwIfAborted();
       const results = response?.data?.results;
       if (!Array.isArray(results)) throw new Error('MemCode returned an invalid search response.');
       const snippets = results.slice(0, 5).map(item => ({

@@ -33,6 +33,9 @@ function setup(module, script, overrides = {}) {
     _throwIfAborted: signal => signal?.throwIfAborted(),
     _checkAbort: () => controller.signal.aborted,
     _activeProvider: () => provider,
+    // The independent reviewer has its own contract/security tests. These
+    // fixtures isolate action lifecycle without consuming scripted act turns.
+    _reviewVisionEvidence: async () => ({ verified: true, allowed: true, provenance: 'independent_visual_review' }),
     getConversation: () => history,
     _newCostRunState: () => ({}),
     async _persistSubmittedTurn() {}, async _persistNow() { return { ok: true }; },
@@ -90,6 +93,19 @@ function setup(module, script, overrides = {}) {
 }
 
 for (const [browser, module] of variants) {
+  test(`${browser}: one oversized historical call/result cannot bypass context bounds or lose pairing`, () => {
+    const messages = [{ role: 'system', content: 'Visual only' },
+      { role: 'assistant', tool_calls: [call('extract_data', { rows: ['x'.repeat(100000)] }, 'huge-call')] },
+      { role: 'tool', tool_call_id: 'huge-call', content: JSON.stringify({ success: true, sourceId: 'visible-source', rows: ['z'.repeat(200000)], nextOffset: 40 }) }];
+    const session = { contextFrames: () => [{ frameId: 'current', canvas: { width: 100, height: 100 }, images: [] }] };
+    const result = module.visionRequestMessages(messages, session);
+    assert.ok(JSON.stringify(result).length < 32000);
+    assert.equal(result[1].tool_calls[0].id, result[2].tool_call_id);
+    assert.equal(JSON.parse(result[2].content).sourceId, 'visible-source');
+    assert.equal(JSON.parse(result[2].content).contextTruncated, true);
+    assert.equal(JSON.parse(result[1].tool_calls[0].function.arguments).contextTruncated, true);
+  });
+
   test(`${browser}: capture recovery retries only transient observations and respects cancellation`, async () => {
     const waits = [], failures = [];
     let count = 0;
@@ -217,9 +233,12 @@ for (const [browser, module] of variants) {
     const baseNames = module.VISION_ACT_TOOLS.map(tool => tool.function.name);
     const fixture = setup(module, ({ index, frame, options }) => {
       const names = options.tools.map(tool => tool.function.name);
-      assert.deepEqual(names.filter(name => !baseNames.includes(name)).sort(), mode === 'dev' ? diagnosticNames : []);
-      if (index === 0) return { toolCalls: [call('read_console', { levels: ['error'], limit: 2 }, 'console-read')] };
-      if (index === 1) return { toolCalls: [call('inspect_network_requests', { methods: ['GET'], statusMin: 400, limit: 2 }, 'network-read')] };
+      assert.ok(names.includes('calculate') && names.includes('vision_enable_tools'));
+      assert.deepEqual(names.filter(name => diagnosticNames.includes(name)).sort(), mode === 'dev' && index > 0 ? diagnosticNames : []);
+      if (mode === 'dev' && index === 0) return { toolCalls: [call('vision_enable_tools', { group: 'dev' })] };
+      const stage = index - (mode === 'dev' ? 1 : 0);
+      if (stage === 0) return { toolCalls: [call('read_console', { levels: ['error'], limit: 2 }, 'console-read')] };
+      if (stage === 1) return { toolCalls: [call('inspect_network_requests', { methods: ['GET'], statusMin: 400, limit: 2 }, 'network-read')] };
       return { toolCalls: [call('done', { frameId: frame.frameId, summary: 'Diagnostics checked without page input.', outcome: 'success' })] };
     });
     fixture.agent.executeTool = () => assert.fail('Visual diagnostics cannot enter the legacy tool executor');
@@ -228,9 +247,9 @@ for (const [browser, module] of variants) {
         beforeConsequentialTool: () => assert.fail('Diagnostic reads cannot enter the mutation checkpoint'),
       } }), 'Diagnostics checked without page input.');
       assert.equal(fixture.actions.length, 0);
-      assert.equal(fixture.requests.length, 3);
-      assert.equal(new Set(fixture.requests.map(request => latestFrame(request).frameId)).size, 3,
-        'Every diagnostic request is followed by a fresh screenshot observation');
+      assert.equal(fixture.requests.length, mode === 'dev' ? 4 : 3);
+      assert.equal(new Set(fixture.requests.map(request => latestFrame(request).frameId)).size, mode === 'dev' ? 1 : 3,
+        'Pure bounded diagnostic reads do not create unnecessary screenshots');
       const results = fixture.events.filter(event => event.type === 'tool_result' && diagnosticNames.includes(event.data.name))
         .map(event => event.data.result);
       assert.equal(results.length, 2);

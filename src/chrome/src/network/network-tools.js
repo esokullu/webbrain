@@ -2096,6 +2096,7 @@ export async function readPageSource(url, opts = {}, ctx = {}) {
  */
 export async function fetchUrl(url, opts = {}, ctx = {}) {
   if (!url) return { success: false, error: 'url is required' };
+  if (ctx.visionOnly && opts.replayRequestId) return { success: false, code: 'vision_fetch_replay_unavailable', error: 'Visual API requests require explicit arguments; captured page requests are not replayed.' };
   const replay = apiReplayOptionsForFetch(url, opts, ctx);
   if (!replay.ok) return { success: false, error: replay.error };
   opts = replay.opts;
@@ -2162,6 +2163,10 @@ export async function fetchUrl(url, opts = {}, ctx = {}) {
       }
     }
     const contentType = (res.headers.get('content-type') || '').toLowerCase();
+    if (ctx.visionOnly && /(?:html|xhtml|svg)/i.test(contentType)) {
+      return { success: false, code: 'vision_page_text_unavailable', status: res.status, contentType,
+        error: 'Rendered page content is unavailable through fetch_url in visual mode. Inspect the browser screenshot or request a direct API/data-file resource.' };
+    }
     const status = res.status;
     const finalUrl = res.url;
     const success = status < 400;
@@ -2172,6 +2177,9 @@ export async function fetchUrl(url, opts = {}, ctx = {}) {
     // JSON
     if (contentType.includes('json')) {
       const text = await readFetchResponseText(res, deadline.signal);
+      if (ctx.visionOnly && /^\s*(?:(?:<!--[\s\S]*?-->|<\?xml[^>]*\?>)\s*)*(?:<!doctype\s+html|<(?:html|head|body|svg|title|meta|link|main|section|article|nav|div|p|span|form|table|ul|ol|li|h[1-6]|script|style|iframe|input|button|a|img)\b)/i.test(text)) {
+        return { success: false, code: 'vision_page_text_unavailable', error: 'This resource contains a rendered page document. Use its screenshot instead.' };
+      }
       let pretty = text;
       try { pretty = JSON.stringify(JSON.parse(text), null, 2); } catch (e) {}
       return constrainFetchTextResult({
@@ -2206,6 +2214,9 @@ export async function fetchUrl(url, opts = {}, ctx = {}) {
         contentType.includes('markdown') ||
         contentType === '') {
       const text = await readFetchResponseText(res, deadline.signal);
+      if (ctx.visionOnly && /^\s*(?:(?:<!--[\s\S]*?-->|<\?xml[^>]*\?>)\s*)*(?:<!doctype\s+html|<(?:html|head|body|svg|title|meta|link|main|section|article|nav|div|p|span|form|table|ul|ol|li|h[1-6]|script|style|iframe|input|button|a|img)\b)/i.test(text)) {
+        return { success: false, code: 'vision_page_text_unavailable', error: 'This resource contains a rendered page document. Use its screenshot instead.' };
+      }
       return constrainFetchTextResult({
         success,
         ...(error ? { error } : {}),

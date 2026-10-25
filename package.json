@@ -111,10 +111,11 @@
     "test:composer-context": "node --test test/page-monitor-inline-post.mjs test/bluesky-composer-context.mjs && node test/quality/inline-social-composer-mv3.mjs && node test/quality/x-compose-dialog-mv3.mjs && node test/quality/bluesky-composer-mv3.mjs",
     "test:bot-memory": "node --test test/bot-memory.mjs test/bot-memory-registries.mjs test/bot-memory-cloud-controller.mjs && node test/bot-memory-dom.mjs && node test/quality/cloud-bot-memory-mv3.mjs",
     "test:shared-action-guards": "node --test test/typing-preparation-geometry.mjs test/resource-mutation-guards.mjs test/completion-steering-receipt-authority.mjs test/social-ui-navigation.mjs test/native-resource-deletion-binding.mjs test/native-mastodon-confirmation.mjs test/trusted-field-preparation-ownership.mjs test/guards-control-classification.mjs test/guards-unbound-deletion.mjs test/guards-steering-receipts.mjs && node test/quality/shared-action-guards-mv3.mjs",
-    "test:vision-act:unit": "node --test test/vision-frames.mjs test/vision-browser.mjs test/vision-redaction.mjs test/vision-act.mjs test/vision-dev.mjs test/vision-provider-options.mjs test/vision-trace-diagnostics.mjs test/vision-recovery-edge-cases.mjs test/vision-privacy-readiness.mjs",
-    "test:vision-act:e2e": "node test/quality/vision-act-mv3.mjs",
-    "test:vision-act": "npm run test:vision-act:unit && npm run test:vision-act:e2e && npm run test:vision-act:firefox",
-    "test:vision-act:firefox": "node --test test/vision-firefox-e2e.mjs"
+    "test:vision-act:unit": "node --test --test-concurrency=1 test/vision-frames.mjs test/vision-browser.mjs test/vision-transport-deadlines.mjs test/vision-redaction.mjs test/vision-act.mjs test/vision-dev.mjs test/vision-provider-options.mjs test/vision-trace-diagnostics.mjs test/vision-recovery-edge-cases.mjs test/vision-privacy-readiness.mjs test/vision-capabilities.mjs test/vision-capability-budget.mjs test/vision-files.mjs test/vision-evidence.mjs test/vision-review.mjs test/vision-pending-chat-runner.mjs test/vision-captcha.mjs test/vision-resume.mjs",
+    "test:vision-act:e2e": "node test/quality/vision-act-mv3.mjs && node test/quality/vision-files-pipeline-mv3.mjs && node test/quality/vision-capabilities-mv3.mjs",
+    "test:vision-act:native": "node --test --test-concurrency=1 test/vision-capabilities-browser.mjs test/vision-evidence-browser.mjs test/vision-dev-capabilities.mjs test/vision-files-chrome-e2e.mjs test/vision-file-chooser.mjs",
+    "test:vision-act": "npm run test:vision-act:unit && npm run test:vision-act:native && npm run test:vision-act:e2e && npm run test:vision-act:firefox",
+    "test:vision-act:firefox": "node --test --test-concurrency=1 test/vision-firefox-e2e.mjs test/vision-files-firefox-e2e.mjs"
   },
   "devDependencies": {
     "c8": "^12.0.0",

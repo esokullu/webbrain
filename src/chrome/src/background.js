@@ -2339,7 +2339,7 @@ async function beginContinuationRunUiSnapshot(tabId, requestId, metadata = {}) {
   const existing = await getRunUiSnapshot(tabId);
   const sameNonTerminalRun = existing
     && String(existing.requestId || '') === String(requestId || '')
-    && !['completed', 'stopped', 'failed', 'cancelled', 'clarification_required'].includes(existing.status);
+    && !['completed', 'stopped', 'failed', 'cancelled', 'clarification_required', 'scheduled'].includes(existing.status);
   if (sameNonTerminalRun) return runUiJournal.resume(tabId, requestId, metadata);
   return beginRunUiSnapshot(tabId, requestId, metadata);
 }
@@ -2377,6 +2377,7 @@ function runUpdatesSucceeded(updates = []) {
   return !updates.some(update => (
     update?.type === 'error' || update?.type === 'quota'
     || isClarificationRequiredRunUpdate(update)
+    || (update?.type === 'run_status' && update?.data?.status === 'scheduled')
     || isPersistenceDegradedRunUpdate(update)
     || isPublicationAuditFailureUpdate(update)
     || isActionPreparationFailureUpdate(update)
@@ -2396,6 +2397,7 @@ function terminalRunUiStatus(content, updates = [], error = null) {
     || isActionPreparationFailureUpdate(update)
     || update?.type === 'quota')) return 'failed';
   if (updates.some(isClarificationRequiredRunUpdate)) return 'clarification_required';
+  if (updates.some(update => update?.type === 'run_status' && update?.data?.status === 'scheduled')) return 'scheduled';
   return 'completed';
 }
 
@@ -2547,7 +2549,7 @@ function notifyPlanReview(tabId, requestId, data, reason = 'plan_review') {
   const isCurrent = () => {
     if (!promptId || runUiJournal.get(tabId) !== snapshot || snapshot?.requestId !== requestId) return false;
     if (!clarification) return snapshot.status === 'awaiting_plan' && snapshot.pendingPlanId === promptId;
-    return !['completed', 'stopped', 'failed', 'cancelled', 'clarification_required'].includes(snapshot.status)
+    return !['completed', 'stopped', 'failed', 'cancelled', 'clarification_required', 'scheduled'].includes(snapshot.status)
       && !!pendingEntry && !pendingEntry.settled
       && agent._pendingClarifications?.get(tabId)?.get(promptId) === pendingEntry;
   };
@@ -2569,7 +2571,7 @@ function notifyPlanReview(tabId, requestId, data, reason = 'plan_review') {
 function sendScheduledAgentUpdate(tabId, type, data, owner) {
   if (tabId == null || !owner?.jobId || !owner?.executionId) return;
   const requestId = `scheduled:${owner.jobId}:${owner.executionId}`;
-  const terminal = new Set(['completed', 'stopped', 'failed', 'cancelled', 'clarification_required']);
+  const terminal = new Set(['completed', 'stopped', 'failed', 'cancelled', 'clarification_required', 'scheduled']);
   let snapshot = runUiJournal.get(tabId);
   if (type === 'scheduled_job' && data?.event === 'running') {
     if (snapshot?.requestId === requestId && terminal.has(snapshot.status)) return;
@@ -2797,7 +2799,7 @@ async function sendAgentRunComplete(tabId, snapshot = null) {
   const isCurrent = () => runUiJournal.get(tabId) === snapshot
     && snapshot.requestId === requestId && snapshot.status === status
     && snapshot.endedAt === endedAt && snapshot.seq === seq;
-  if (endedAt == null || !['completed', 'stopped', 'failed', 'cancelled', 'clarification_required'].includes(status)) return;
+  if (endedAt == null || !['completed', 'stopped', 'failed', 'cancelled', 'clarification_required', 'scheduled'].includes(status)) return;
   clearPlanReviewAttention(tabId, snapshot.requestId);
   await flushRunUiSnapshot(tabId, snapshot.requestId);
   if (!isCurrent()) return;
@@ -3446,7 +3448,7 @@ function isCurrentPlanReviewAudio(message, sender) {
     const pending = agent._pendingClarifications?.get(message.tabId)?.get(message.clarifyId);
     const attention = planReviewAttentionByTab.get(message.tabId);
     return !!message.clarifyId && snapshot?.requestId === message.requestId
-      && !['completed', 'stopped', 'failed', 'cancelled', 'clarification_required'].includes(snapshot.status)
+      && !['completed', 'stopped', 'failed', 'cancelled', 'clarification_required', 'scheduled'].includes(snapshot.status)
       && !!pending && !pending.settled && attention?.requestId === message.requestId
       && attention.clarifyId === message.clarifyId;
   }
@@ -4543,7 +4545,7 @@ async function handleMessage(msg, sender) {
           || !requestedRunUi || pendingClarification.requestId !== requestedRunUi.requestId
           || pendingClarification.runId !== activeState.runId
           || (requestedRunUi.runId && pendingClarification.runId !== requestedRunUi.runId)
-          || ['completed', 'stopped', 'failed', 'cancelled', 'clarification_required'].includes(requestedRunUi.status))) {
+          || ['completed', 'stopped', 'failed', 'cancelled', 'clarification_required', 'scheduled'].includes(requestedRunUi.status))) {
         activeState.pendingCurrentClarification = null;
       }
       const runUiDurable = !runUiSnapshot

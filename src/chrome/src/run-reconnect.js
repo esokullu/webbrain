@@ -1,4 +1,4 @@
-const TERMINAL_RUN_STATUSES = new Set(['completed', 'stopped', 'failed', 'cancelled', 'clarification_required']);
+const TERMINAL_RUN_STATUSES = new Set(['completed', 'stopped', 'failed', 'cancelled', 'clarification_required', 'scheduled']);
 
 export function isBackgroundConnectionError(error) {
   const message = String(error?.message || error || '');

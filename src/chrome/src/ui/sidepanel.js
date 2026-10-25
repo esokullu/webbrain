@@ -6017,7 +6017,7 @@ async function restoreActiveRunState(tabId = currentTabId) {
 }
 
 function isTerminalRunUiStatus(status) {
-  return ['completed', 'stopped', 'failed', 'cancelled', 'clarification_required'].includes(String(status || ''));
+  return ['completed', 'stopped', 'failed', 'cancelled', 'clarification_required', 'scheduled'].includes(String(status || ''));
 }
 
 /**
@@ -6026,7 +6026,7 @@ function isTerminalRunUiStatus(status) {
  * paused awaiting input, so it keeps the live-progress copy.
  */
 function isFinishedRunUiStatus(status) {
-  return isTerminalRunUiStatus(status) && String(status || '') !== 'clarification_required';
+  return isTerminalRunUiStatus(status) && !['clarification_required', 'scheduled'].includes(String(status || ''));
 }
 
 async function adoptRestoredRunState(tabId, state) {
@@ -6385,7 +6385,7 @@ async function applyActiveRunState(numericTabId, state, { shouldContinue = () =>
     const restoredAllowanceCardMissing = (!!parseCostAllowanceError(runUi?.finalContent)
       && !currentAssistantEl?.querySelector('.cost-allowance-error'))
       || (runUi?.quota?.code === 'webbrain_cloud_free_tier_exceeded' && !currentAssistantEl?.querySelector('.compass-quota'));
-    if (runUi && ['completed', 'stopped', 'failed', 'cancelled', 'clarification_required'].includes(runUi.status)
+    if (runUi && ['completed', 'stopped', 'failed', 'cancelled', 'clarification_required', 'scheduled'].includes(runUi.status)
         && (Number(currentAssistantEl?.dataset.lastRenderedSeq || 0) < Number(runUi.seq || 0)
           || restoredAllowanceCardMissing)) {
       handleAgentUpdateMessage({
@@ -11436,7 +11436,7 @@ function handleAgentUpdateMessage(msg) {
         const text = target?.querySelector('.message-text');
         if (text) renderSubscribeError(text, data.finalContent, '', data.quota, { submittedTurnDurable: data.submittedTurnDurable });
       }
-      showActivity(t('tool.done'));
+      showActivity(t(data?.status === 'scheduled' ? 'sp.scheduled.status.pending' : 'tool.done'));
       setMessageCreatedAt(eventAssistantEl || currentAssistantEl, data?.endedAt, { replace: true });
       if (currentAssistantEl) finalizeSteps(currentAssistantEl);
       reconcileRunMessageAttachmentState(

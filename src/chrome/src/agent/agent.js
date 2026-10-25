@@ -46319,7 +46319,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     // the configurable auto-timeout elapses (first option / timeout note).
     // Permission and form-submit prompts use separate helpers and never time out.
     if (name === 'clarify') {
-      args = await this._socialDraftClarificationArgs(tabId, args);
+      if (executionContext?.visionOnly !== true) args = await this._socialDraftClarificationArgs(tabId, args);
       const clarificationGuard = this._planExecutionGuards.get(tabId);
       // Models sometimes copy a JSON-escaped post body into clarify text,
       // leaving literal `\"` after the tool-call JSON is parsed. The card
@@ -48550,8 +48550,11 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
             else this._captchaGateStates.delete(tabId);
             return noDispatchFailure('Could not save the native CAPTCHA dispatch lock. No provider was contacted; retry after session storage is available.');
           }
+          throwIfEarlyCdpAborted();
+          await dispatchContext.visionBeforePaidDispatch?.();
+          throwIfEarlyCdpAborted();
           dispatched = true;
-          const result = await solveNativeCaptchaTasks(prepared, { onAttempt: awsRoute ? async provider => {
+          const result = await solveNativeCaptchaTasks(prepared, { signal: earlyCdpAbortSignal, onAttempt: awsRoute ? async provider => {
             if (record.awsAttempts.includes(`${awsRoute}:${provider}`)) return;
             record.awsAttempts.push(`${awsRoute}:${provider}`);
             if (!(await this._persistNow(tabId)).ok) throw new Error('Could not persist the AWS provider attempt. No further provider was contacted.');
@@ -48826,8 +48829,11 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
           // inherited-origin descendant reached through an injectable ancestor.
           try { await ensureCaptchaCallbackBridge(tabId, detected); } catch (_) {}
         }
+        throwIfEarlyCdpAborted();
+        await dispatchContext.visionBeforePaidDispatch?.();
+        throwIfEarlyCdpAborted();
         dispatched = true;
-        const result = await solveCaptchaWithProviders(providers, params);
+        const result = await solveCaptchaWithProviders(providers, params, { signal: earlyCdpAbortSignal });
         if (automaticAnswer) {
           automaticAnswer.solution = { ...result.solution, token: result.token };
           automaticAnswer.provider = result.provider;

@@ -1,5 +1,35 @@
 import { cdpClient } from '../cdp/cdp-client.js';
 
+// A browser compositor can stop replying while its tab remains alive. Bound
+// observation only: abandoning a read never retries or cancels native input.
+function boundedVisionRead(signal, label, operation) {
+  return new Promise((resolve, reject) => {
+    const deadline = Date.now() + 15000;
+    let settled = false, timer, terminalError;
+    const aborted = () => Object.assign(new Error('Vision run stopped'), { name: 'AbortError', code: 'vision_aborted' });
+    const timedOut = () => Object.assign(new Error(`Vision observation timed out after 15 seconds (${label})`),
+      { name: 'TimeoutError', code: 'vision_capture_timeout' });
+    const finish = (callback, value) => {
+      if (settled) return;
+      settled = true; clearTimeout(timer);
+      signal?.removeEventListener('abort', onAbort);
+      callback(value);
+    };
+    const onAbort = () => { terminalError = aborted(); finish(reject, terminalError); };
+    const guard = () => {
+      if (signal?.aborted) throw aborted();
+      if (terminalError) throw terminalError;
+      if (Date.now() >= deadline) throw timedOut();
+    };
+    if (signal?.aborted) { onAbort(); return; }
+    signal?.addEventListener('abort', onAbort, { once: true });
+    timer = setTimeout(() => { terminalError = timedOut(); finish(reject, terminalError); }, 15000);
+    Promise.resolve().then(() => { guard(); return operation(guard); }).then(value => {
+      try { guard(); finish(resolve, value); } catch (error) { finish(reject, error); }
+    }, error => finish(reject, error));
+  });
+}
+
 const TRANSIENT_CAPTURE_CODES = new Set(['vision_stale_frame', 'vision_capture_context_changed', 'vision_capture_not_ready']);
 export function isTransientVisionCaptureError(error) {
   return error?.name !== 'AbortError' && TRANSIENT_CAPTURE_CODES.has(error?.code);
@@ -37,23 +67,24 @@ export function visionPngDimensions(base64) {
 
 export function createVisionTransport({ signal, viewportExpression }) {
   const check = () => { if (signal?.aborted) throw Object.assign(new Error('Vision run stopped'), { name: 'AbortError' }); };
-  const read = async (tabId, method, params = {}) => {
+  const read = (tabId, method, params = {}) => boundedVisionRead(signal, method, async guard => {
     try {
-      check(); await cdpClient.attach(tabId); check();
-      return await cdpClient.sendCommand(tabId, method, params);
+      guard(); await cdpClient.attach(tabId); guard();
+      return await cdpClient.sendCommand(tabId, method, params, '', { beforeSend: guard });
     } catch (error) {
+      guard();
       const classified = classifyVisionCaptureError(error);
       // CDP uses this one message for both navigation and a closed target.
       // Only retry its read when the extension still owns a live browser tab.
       if (!classified.code && /inspected target navigated or closed/i.test(classified.message)
         && typeof globalThis.chrome?.tabs?.get === 'function') {
         const tab = await chrome.tabs.get(tabId).catch(() => null);
-        check();
+        guard();
         if (tab?.id === tabId && !tab.discarded) classified.code = 'vision_capture_context_changed';
       }
       throw classified;
     }
-  };
+  });
   return {
     async readViewport(tabId) {
       const [metrics, frames, result] = await Promise.all([
@@ -70,7 +101,7 @@ export function createVisionTransport({ signal, viewportExpression }) {
       return { ...local, width: viewport.clientWidth, height: viewport.clientHeight,
         offsetLeft: viewport.offsetX, offsetTop: viewport.offsetY,
         scrollX: viewport.pageX, scrollY: viewport.pageY, scale: viewport.scale, zoom: viewport.zoom || 1,
-        documentId: root.loaderId, url: root.url };
+        documentId: root.loaderId, url: root.urlFragment && !root.url.includes('#') ? root.url + root.urlFragment : root.url };
     },
     async capture(tabId, viewport) {
       // Explicit CSS clipping avoids compositor surface clipping when the

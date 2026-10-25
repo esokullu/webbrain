@@ -2,6 +2,9 @@
 import { BidiSession } from './session.mjs';
 import { nativeReplyMessages } from './native-messages.mjs';
 import { readVisionViewport, captureVision, performVisionInput } from './vision.mjs';
+import { readVisionSavedDownload, bindVisionFileTarget, assertVisionFileTarget, uploadVisionFile,
+  readVisionFileTarget, readVisionBlob, releaseVisionFileTarget,
+  armVisionFileChooser, takeVisionFileChooser, closeVisionFileChooser } from './vision-files.mjs';
 const session = new BidiSession();
 let buffer = Buffer.alloc(0);
 const pendingPageDispatchChecks = new Map();
@@ -45,6 +48,16 @@ async function dispatch(message) {
       case 'visionViewport': result = await readVisionViewport(session, args.runId); break;
       case 'visionCapture': result = await captureVision(session, args.runId); break;
       case 'visionInput': result = await performVisionInput(session, args.runId, args.method, args.params, args.viewport, args.release === true); break;
+      case 'visionReadSavedDownload': result = await readVisionSavedDownload(session, args.runId, args.download, args.options); break;
+      case 'visionFileBind': result = await bindVisionFileTarget(session, args.runId, args.point, args.kind); break;
+      case 'visionFileChooserArm': result = await armVisionFileChooser(session, args.runId, args.point); break;
+      case 'visionFileChooserTake': result = await takeVisionFileChooser(session, args.runId, args.token); break;
+      case 'visionFileChooserClose': result = await closeVisionFileChooser(session, args.runId, args.token, args.release); break;
+      case 'visionFileAssert': result = await assertVisionFileTarget(session, args.runId, args.token); break;
+      case 'visionFileUpload': result = await uploadVisionFile(session, args.runId, args.token, args.source, args.viewport); break;
+      case 'visionFileReadback': result = await readVisionFileTarget(session, args.runId, args.token); break;
+      case 'visionFileBlob': result = await readVisionBlob(session, args.runId, args.token, args.maxBytes); break;
+      case 'visionFileRelease': result = releaseVisionFileTarget(session, args.runId, args.token); break;
       default: throw new Error('Unknown companion command');
     }
     reply({ id, result });
