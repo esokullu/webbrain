@@ -192,7 +192,15 @@ try {
     await panel.waitForFunction(({ id, expected }) => chrome.tabs.get(id).then(tab => tab.url === expected && (!tab.pendingUrl || tab.pendingUrl === expected)),
       { id: created.id, expected }, { timeout: 15000 });
     if (scenario.preserveOwnNewtab && scenario.privacy) {
-      ownPage = context.pages().find(page => page.url() === expected);
+      // chrome.tabs can report the committed URL before Playwright attaches
+      // its Page. Wait for that exact owned target, without navigating it or
+      // substituting another tab; this is fixture setup, before the Act run.
+      const pageDeadline = Date.now() + 15000;
+      do {
+        ownPage = context.pages().find(page => !page.isClosed() && page.url() === expected);
+        if (ownPage) break;
+        await new Promise(resolve => setTimeout(resolve, 50));
+      } while (Date.now() < pageDeadline);
       assert.ok(ownPage, 'The installed extension owns the real newtab fixture page');
       await ownPage.waitForLoadState('domcontentloaded');
       await ownPage.evaluate(() => {

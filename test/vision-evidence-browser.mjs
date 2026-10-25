@@ -121,7 +121,7 @@ test('real screenshot reviewer rejects a fabricated recipient before any native 
   const honest = await control.evaluate(() => window.observeChat({ recipient: 'Mallory' }));
   assert.equal(honest.success, true);
   const blocked = await control.evaluate(id => window.sendChat(id), honest.observationId);
-  assert.equal(blocked.code, 'vision_chat_recipient_unverified'); assert.equal(inputCount, 0);
+  assert.equal(blocked.code, 'vision_chat_recipient_mismatch'); assert.equal(inputCount, 0);
 });
 
 test('real user draft is protected and lying about an empty composer fails pixel review', async () => {

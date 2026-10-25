@@ -420,6 +420,15 @@ export function tracesToMarkdown(runsWithEvents, {
           frame.viewport?.devicePixelRatio ? `DPR ${frame.viewport.devicePixelRatio}` : '', frame.reason,
         ].filter(Boolean).join(' · ');
         md += `- 👁 Vision frame${details ? `: ${details}` : ''}\n`;
+      } else if (ev.kind === 'note' && d.note === 'vision_evidence_review') {
+        const review = projectTraceEventData('note', d).extra;
+        const details = [review.kind, review.category, review.frameId,
+          Number.isFinite(review.durationMs) ? `${review.durationMs} ms` : '',
+          review.missingEvidence?.length ? `missing=${review.missingEvidence.join(',')}` : '',
+          ...Object.entries(review).filter(([, value]) => typeof value === 'boolean')
+            .map(([key, value]) => `${key}=${value}`),
+        ].filter(Boolean).join(' · ');
+        md += `- 🔎 Vision review${details ? `: ${details}` : ''}\n`;
       } else if (ev.kind === 'note' && d.note === 'vision_capture_failure') {
         const failure = projectTraceEventData('note', d).extra;
         const details = [failure.phase, failure.code, failure.reason,

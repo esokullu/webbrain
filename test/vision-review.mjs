@@ -13,7 +13,7 @@ test('both browsers share the closed independent reviewer and no optional proof 
   assert.equal(await readFile(new URL('../src/chrome/src/agent/vision-review.js', import.meta.url), 'utf8'),
     await readFile(new URL('../src/firefox/src/agent/vision-review.js', import.meta.url), 'utf8'));
   for (const review of [reviewVisionEvidence, firefoxReview]) {
-    const result = await review(base(async () => verdict()));
+    const result = await review({ ...base(async () => verdict()), kind: 'native_action' });
     assert.equal(result.verified, true); assert.equal(result.allowed, true); assert.equal(result.provenance, 'independent_visual_review');
     for (const field of ['recipientMatches', 'composerMatches', 'atLatest', 'delivered', 'newOutgoing', 'composerEmpty', 'completionVerified', 'requiresChatProtocol', 'draftProtected', 'navigationOnly'])
       assert.equal(result[field], false, field);
@@ -72,6 +72,7 @@ test('privacy recaptures rebuild screenshot messages inside the shared metered r
     return verdict();
   });
   args.signal = controller.signal; args.observation = () => ({ role: 'user', content: current });
+  args.kind = 'native_action';
   assert.equal((await reviewVisionEvidence(args)).verified, true); assert.equal(requestCalls, 1); assert.equal(costChecks, 1);
 });
 
@@ -94,4 +95,30 @@ test('bounded claims fail before request; budget/provider errors propagate witho
   const budget = Object.assign(new Error('Cost allowance exceeded'), { code: 'cost_limit' });
   await assert.rejects(reviewVisionEvidence(base(async () => { requests++; throw budget; })), error => error === budget);
   assert.equal(requests, 1);
+});
+
+test('closed missing-evidence diagnostics reject contradictory permission and preserve no page prose', async () => {
+  for (const review of [reviewVisionEvidence, firefoxReview]) {
+    const result = await review({ ...base(async () => verdict({ missingEvidence: ['target', 'target'], navigationOnly: true })), kind: 'native_action' });
+    assert.equal(result.verified, false); assert.equal(result.allowed, false); assert.equal(result.navigationOnly, false);
+    assert.equal(result.category, 'evidence_unverified'); assert.deepEqual(result.missingEvidence, ['target']);
+    const invalid = await review(base(async () => verdict({ missingEvidence: ['https://private.test/secret'] })));
+    assert.equal(invalid.category, 'invalid_verdict'); assert.equal(invalid.allowed, false);
+  }
+});
+
+test('publication review requires author and audience without inventing private message history or hidden Send', async () => {
+  const flags = { recipientMatches: true, composerMatches: true, atLatest: true };
+  for (const review of [reviewVisionEvidence, firefoxReview]) {
+    const args = { ...base(async () => verdict(flags)), kind: 'chat_observe', claims: { surface: 'publication' } };
+    const rejected = await review(args);
+    assert.equal(rejected.allowed, false); assert.equal(rejected.verified, false);
+    assert.deepEqual(rejected.missingEvidence, ['author', 'audience']);
+    args.request = async () => verdict({ ...flags, authorMatches: true, audienceMatches: true });
+    const accepted = await review(args);
+    assert.equal(accepted.category, 'accepted'); assert.equal(accepted.allowed, true);
+  }
+  assert.match(VISION_REVIEW_PROMPT, /omission in chat_observe means unavailable/);
+  assert.match(VISION_REVIEW_PROMPT, /do not require fictional message bubbles/);
+  assert.match(VISION_REVIEW_PROMPT, /previews\/optimistic entries/);
 });

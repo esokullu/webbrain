@@ -50,12 +50,101 @@ function fixture(module, tool, proposed, review, pending = true) {
       return { toolCalls: [call('done', { frameId: latest.frameId, outcome: 'partial', summary: 'Pending send preserved.' })] };
     },
   };
-  return { agent, actions, events, reviews, requests, getStored: () => stored, run: () => module.runVisionAct(agent, { tabId: 1, userMessage: 'Find Alice and verify the pending message without sending again.',
+  return { agent, actions, events, reviews, requests, controller, getStored: () => stored, run: () => module.runVisionAct(agent, { tabId: 1, userMessage: 'Find Alice and verify the pending message without sending again.',
     onUpdate: (type, value) => events.push({ type, ...value }) }) };
 }
 const good = { verified: true, allowed: true, navigationOnly: true, provenance: 'independent_visual_review' };
 
 for (const [browser, module] of variants) {
+  const observed = frameId => ({ frameId, recipient: { text: 'Alice', rect: { x: 10, y: 10, width: 150, height: 30 } },
+    composer: { text: '', rect: { x: 10, y: 400, width: 400, height: 80 } },
+    messages: [], atLatest: true, userInputRequired: false });
+
+  test(`${browser}: repeated evidence refusals get fresh frames and terminate without replaying any input`, async () => {
+    const f = fixture(module, 'chat_observe', {}, { ...good, verified: false, allowed: false, missingEvidence: ['recipient'] }, false);
+    const frames = f.agent._createVisionFrameSession();
+    frames.assertCurrentRegions = async () => true;
+    f.agent.maxSteps = 20;
+    f.agent._chatWithCostAllowance = async (_provider, messages) => {
+      f.requests.push(structuredClone(messages));
+      return { toolCalls: [call('chat_observe', observed(frames.latest.frameId))] };
+    };
+    assert.match(await f.run(), /remained inconclusive/);
+    assert.equal(f.actions.length, 0); assert.equal(f.requests.length, 3);
+    const results = f.events.filter(event => event.type === 'tool_result').map(event => event.result);
+    assert.ok(results.every(result => result.noDispatch === true && result.dispatched === false));
+    assert.deepEqual(results.map(result => result.recovery.attempt), [1, 2, 3]);
+    assert.equal(results.at(-1).recovery.exhausted, true);
+    const captured = f.events.filter(event => event.type === 'vision_frame');
+    assert.equal(captured.length, 3); assert.equal(new Set(captured.map(item => item.frameId)).size, 3);
+    assert.ok(captured.every(item => item.kind === 'full'));
+  });
+
+  test(`${browser}: corrected evidence after refresh is reviewed once and can continue`, async () => {
+    let reviewCount = 0, turn = 0;
+    const f = fixture(module, 'chat_observe', {}, () => ({ ...good, verified: ++reviewCount > 1,
+      allowed: reviewCount > 1, recipientMatches: reviewCount > 1, composerMatches: true, atLatest: true }), false);
+    const frames = f.agent._createVisionFrameSession(); frames.assertCurrentRegions = async () => true;
+    f.agent._chatWithCostAllowance = async () => {
+      const args = observed(frames.latest.frameId);
+      if (turn === 0) args.recipient.rect.width = 80;
+      return { toolCalls: [++turn <= 2 ? call('chat_observe', args)
+        : call('done', { frameId: frames.latest.frameId, outcome: 'partial', summary: 'Recipient checked on fresh evidence.' })] };
+    };
+    assert.equal(await f.run(), 'Recipient checked on fresh evidence.');
+    assert.equal(reviewCount, 2); assert.equal(f.actions.length, 0);
+    // Initial frame, denial recovery, then the existing completion check.
+    assert.equal(f.events.filter(event => event.type === 'vision_frame').length, 3);
+    assert.equal(f.events.filter(event => event.type === 'tool_result' && event.name === 'chat_observe').at(-1).result.success, true);
+  });
+
+  test(`${browser}: cancellation during denial refresh prevents another request or input`, async () => {
+    const f = fixture(module, 'vision_click', { x: 30, y: 40 }, { ...good, verified: false, allowed: false }, false);
+    const frames = f.agent._createVisionFrameSession(), original = frames.capture.bind(frames);
+    let captures = 0;
+    frames.capture = async (...args) => {
+      if (++captures === 2) { f.controller.abort(); f.controller.signal.throwIfAborted(); }
+      return original(...args);
+    };
+    assert.equal(await f.run(), '[Stopped by user]');
+    assert.equal(f.requests.length, 1); assert.equal(f.actions.length, 0);
+  });
+
+  test(`${browser}: contradictory explicit missing evidence cannot authorize native dispatch`, async () => {
+    const f = fixture(module, 'vision_click', { x: 30, y: 40 }, { ...good, missingEvidence: ['target'] }, false);
+    await f.run(); assert.equal(f.actions.length, 0);
+    const result = f.events.find(event => event.type === 'tool_result').result;
+    assert.equal(result.reviewCategory, 'evidence_unverified'); assert.deepEqual(result.missingEvidence, ['target']);
+  });
+
+  test(`${browser}: a pending send cannot loop by repeatedly proposing generic composer input`, async () => {
+    const f = fixture(module, 'vision_type', { text: 'duplicate' }, good, true);
+    const frames = f.agent._createVisionFrameSession(); f.agent.maxSteps = 20;
+    f.agent._chatWithCostAllowance = async (_provider, messages) => {
+      f.requests.push(structuredClone(messages));
+      return { toolCalls: [call('vision_type', { frameId: frames.latest.frameId, text: 'duplicate' })] };
+    };
+    assert.match(await f.run(), /remained inconclusive/);
+    assert.equal(f.requests.length, 3); assert.equal(f.actions.length, 0);
+    assert.equal(f.getStored().evidence.chatLedger[0].pending.id, 'uncertain-send');
+    assert.equal(f.getStored().evidence.chatLedger[0].pending.stage, 'uncertain');
+  });
+
+  test(`${browser}: recovery preserves specific closed evidence guidance`, async () => {
+    const f = fixture(module, 'chat_observe', observed('unused'), { ...good, verified: false,
+      allowed: false, missingEvidence: ['send_control'] }, false);
+    const frames = f.agent._createVisionFrameSession(); frames.assertCurrentRegions = async () => true;
+    let turn = 0;
+    f.agent._chatWithCostAllowance = async () => ({ toolCalls: [turn++ === 0
+      ? call('chat_observe', observed(frames.latest.frameId))
+      : call('done', { frameId: frames.latest.frameId, outcome: 'partial', summary: 'Missing visible control.' })] });
+    await f.run();
+    const result = f.events.find(event => event.type === 'tool_result').result;
+    assert.match(result.instruction, /Omit Send while it is unavailable/);
+    assert.match(result.instruction, /Inspect the fresh screenshot/);
+    assert.equal(f.actions.length, 0);
+  });
+
   test(`${browser}: independently reviewed conversation navigation can recover a pending send`, async () => {
     const f = fixture(module, 'vision_click', { x: 30, y: 40 }, good);
     assert.equal(await f.run(), 'Pending send preserved.'); assert.equal(f.actions.length, 1); assert.equal(f.actions[0].name, 'click');

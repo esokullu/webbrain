@@ -94,7 +94,7 @@ const VISION_PHASES = new Set([
   'vision_input', 'vision_privacy', 'vision_setup',
 ]);
 const VISION_FRAME_REASONS = new Set([
-  'initial', 'after-action', 'requested', 'completion-check', 'user-correction', 'privacy-setting-change',
+  'initial', 'after-action', 'requested', 'completion-check', 'user-correction', 'privacy-setting-change', 'evidence-recovery',
   'initial-or-viewport-change', 'keyframe', 'full', 'delta', 'unchanged',
 ]);
 const VISION_FAILURE_REASONS = new Set([
@@ -102,6 +102,22 @@ const VISION_FAILURE_REASONS = new Set([
   'privacy_scan_failed', 'capture_unavailable', 'cancelled', 'unknown',
 ]);
 const VISION_FRAME_ID = /^vf-[a-z0-9]{1,16}-[1-9]\d{0,9}-[1-9]\d{0,9}$/;
+const VISION_REVIEW_KINDS = new Set([
+  'native_action', 'chat_authorization', 'chat_observe', 'chat_focus', 'chat_draft',
+  'chat_delivery', 'upload_target', 'verify_form', 'extract_data', 'find_text',
+  'dev_authorization', 'dev_patch', 'captcha_target', 'captcha_application',
+]);
+const VISION_REVIEW_CATEGORIES = new Set([
+  'accepted', 'authorization_denied', 'evidence_unverified', 'chat_protocol_required',
+  'draft_protected', 'invalid_verdict', 'context_changed',
+]);
+const VISION_REVIEW_FLAGS = [
+  'verified', 'allowed', 'recipientMatches', 'composerMatches', 'atLatest',
+  'delivered', 'newOutgoing', 'composerEmpty', 'completionVerified',
+  'requiresChatProtocol', 'draftProtected', 'navigationOnly', 'authorMatches', 'audienceMatches',
+];
+const VISION_MISSING_EVIDENCE = new Set(['target', 'recipient', 'composer', 'send_control',
+  'latest_context', 'author', 'audience', 'delivery', 'authorization', 'readable_pixels']);
 
 function visionNumber(output, source, key, maximum, { integer = false, positive = false } = {}) {
   const value = source?.[key];
@@ -156,6 +172,24 @@ function projectVisionCaptureFailure(data) {
   const diagnostics = projectVisionCaptureDiagnostics(source.captureDiagnostics);
   if (Object.keys(diagnostics).length) extra.captureDiagnostics = diagnostics;
   return { step: Number.isFinite(data?.step) ? data.step : 0, note: 'vision_capture_failure', extra };
+}
+
+function projectVisionEvidenceReview(data) {
+  // Even opt-in content traces use this closed review record: free-form
+  // reasons can quote private task/recipient text or screenshot contents.
+  const source = data?.extra && typeof data.extra === 'object' && !Array.isArray(data.extra) ? data.extra : {};
+  const extra = {};
+  if (VISION_REVIEW_KINDS.has(source.kind)) extra.kind = source.kind;
+  if (VISION_REVIEW_CATEGORIES.has(source.category)) extra.category = source.category;
+  if (typeof source.frameId === 'string' && VISION_FRAME_ID.test(source.frameId)) extra.frameId = source.frameId;
+  visionNumber(extra, source, 'durationMs', 600_000);
+  for (const flag of VISION_REVIEW_FLAGS) {
+    if (typeof source[flag] === 'boolean') extra[flag] = source[flag];
+  }
+  if (Array.isArray(source.missingEvidence) && source.missingEvidence.length <= 10
+      && Array.from(source.missingEvidence).every(value => VISION_MISSING_EVIDENCE.has(value)))
+    extra.missingEvidence = [...new Set(source.missingEvidence)];
+  return { step: Number.isFinite(data?.step) ? data.step : 0, note: 'vision_evidence_review', extra };
 }
 
 function validationFailureMetadata(value) {
@@ -350,6 +384,7 @@ export function projectTraceEventData(kind, data, { includeContent = false } = {
   }
   if (kind === 'note' && data?.note === 'vision_frame') return projectVisionFrame(data);
   if (kind === 'note' && data?.note === 'vision_capture_failure') return projectVisionCaptureFailure(data);
+  if (kind === 'note' && data?.note === 'vision_evidence_review') return projectVisionEvidenceReview(data);
   if (includeContent || data == null) return data;
   const source = data && typeof data === 'object' && !Array.isArray(data) ? data : {};
 

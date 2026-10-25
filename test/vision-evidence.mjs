@@ -8,18 +8,20 @@ import { reviewVisionEvidence } from '../src/chrome/src/agent/vision-review.js';
 const box = (y = 20) => ({ x: 10, y, width: 200, height: 30 });
 const verified = { verified: true, allowed: true, provenance: 'independent_visual_review', reason: 'Fixture reviewed',
   recipientMatches: true, composerMatches: true, atLatest: true, delivered: true, newOutgoing: true,
-  composerEmpty: true, completionVerified: true };
+  composerEmpty: true, completionVerified: true, authorMatches: true, audienceMatches: true };
 function fixture(Session = VisionEvidenceSession, options = {}) {
   let sequence = 1;
   const state = { current: { frameId: 'frame-1', canvas: { width: 800, height: 600 },
     viewport: { width: 800, height: 600, url: 'https://messages.test/chat', documentId: 'doc-1', scrollX: 0, scrollY: 0 } },
-  recipient: 'Alice', draft: '', messages: [{ direction: 'incoming', text: 'Hello', rect: box(100) }],
+  recipient: 'Alice', draft: '', sendVisible: true, messages: [{ direction: 'incoming', text: 'Hello', rect: box(100) }],
   actions: [], reviews: [], guards: [], saves: [], failSave: false, failGuard: false, loseSendReply: false,
   delivery: true, verdict: verified, persist: true };
   const next = (changes = {}) => state.current = { ...state.current, frameId: `frame-${++sequence}`,
     viewport: { ...state.current.viewport, ...changes } };
   const claims = () => ({ frameId: state.current.frameId, recipient: { text: state.recipient, rect: box(10) },
-    composer: { text: state.draft, rect: box(400) }, sendControl: { rect: { x: 700, y: 400, width: 60, height: 30 } },
+    composer: { text: state.draft, rect: box(400) },
+    ...(state.sendVisible ? { sendControl: { rect: { x: 700, y: 400, width: 60, height: 30 } } } : {}),
+    ...(state.surface ? { surface: state.surface } : {}), ...(state.publication ? { publication: structuredClone(state.publication) } : {}),
     messages: structuredClone(state.messages), atLatest: true, userInputRequired: false });
   const session = new Session({ getFrame: () => state.current, observe: async () => next(),
     assertCurrent: async args => { state.guards.push(args); if (state.failGuard) throw Object.assign(new Error('Changed pixels'), { code: 'vision_stale_frame' }); },
@@ -58,6 +60,179 @@ test('visual evidence mirrors are identical and schemas offer no DOM refs or sel
 });
 
 for (const [name, Session] of [['Chrome', VisionEvidenceSession], ['Firefox', FirefoxEvidence]]) {
+  function publicationFixture(options = {}) {
+    const f = fixture(Session, options);
+    f.state.surface = 'publication'; f.state.recipient = 'Project updates';
+    f.state.publication = { author: { text: '@approved-author', rect: box(40) },
+      audience: { text: 'Public', rect: box(70) } };
+    f.session.authorizeChat = async proposal => {
+      f.state.authorization = proposal;
+      return { allowed: proposal.surface === 'publication' && proposal.recipient === 'Project updates'
+        && proposal.publication?.author.text === '@approved-author' && proposal.publication?.audience.text === 'Public'
+        && proposal.text === 'Approved reply', ...proposal, scopeId: 'explicit-user-publication' };
+    };
+    f.send = (observation, stage = 'prepare', extra = {}) => f.session.execute('chat_send', {
+      frameId: f.state.current.frameId, stage, observationId: observation.observationId,
+      recipient: f.state.recipient, text: 'Approved reply', ...extra });
+    return f;
+  }
+
+  test(`${name}: hidden Send permits verified draft preparation but never submission without newly observed control`, async () => {
+    const f = fixture(Session); f.state.sendVisible = false;
+    const initial = await f.observe(); assert.equal(initial.success, true); assert.equal(initial.sendControlAvailable, false);
+    const prepared = await f.send(initial); assert.equal(prepared.draftPrepared, true);
+    for (const review of f.state.reviews.filter(item => item.kind === 'chat_draft'))
+      assert.equal(review.claims.sendControl, undefined, 'Internal draft reviews must not invent or reuse Send geometry');
+    const observed = await f.observe(), before = f.state.actions.length;
+    const rejected = await f.send(observed, 'submit', { operationId: prepared.operationId });
+    assert.equal(rejected.code, 'vision_chat_send_control_required'); assert.equal(rejected.noDispatch, true);
+    assert.equal(f.state.actions.length, before); assert.ok(f.session.completionBlock());
+    f.state.sendVisible = true; f.next();
+    const ready = await f.observe(); assert.equal(ready.sendControlAvailable, true);
+    assert.equal((await f.send(ready, 'submit', { operationId: prepared.operationId })).sent, true);
+    assert.equal((await f.observe()).deliveryVerified, true);
+    assert.equal(f.state.actions.filter(action => action.x > 650).length, 1);
+  });
+
+  test(`${name}: internal draft reviews discard obsolete visible Send geometry too`, async () => {
+    const f = fixture(Session); const observed = await f.observe();
+    const prepared = await f.send(observed); assert.equal(prepared.draftPrepared, true);
+    assert.ok(f.state.reviews.filter(item => item.kind === 'chat_draft').every(item => !('sendControl' in item.claims)));
+    const stale = await f.send(observed, 'submit', { operationId: prepared.operationId });
+    assert.equal(stale.code, 'vision_chat_observe_required'); assert.equal(f.state.actions.filter(action => action.x > 650).length, 0);
+  });
+
+  test(`${name}: refusals carry closed actionable evidence details without raw reviewer content`, async () => {
+    const f = fixture(Session); f.state.verdict = { ...verified, verified: false, category: 'evidence_unverified',
+      missingEvidence: ['send_control', 'secret@example.test'], reason: 'Secret raw reviewer content', recipientMatches: false };
+    const result = await f.observe();
+    assert.equal(result.code, 'vision_evidence_unverified'); assert.equal(result.reviewCategory, 'evidence_unverified');
+    assert.deepEqual(result.missingEvidence, ['send_control', 'recipient']);
+    assert.match(result.instruction, /Omit Send/); assert.doesNotMatch(JSON.stringify(result), /Secret|secret@/);
+    f.state.verdict = { ...verified, composerMatches: false, category: 'not-a-category', missingEvidence: ['raw-secret'] };
+    const composer = await f.observe(); assert.equal(composer.code, 'vision_chat_unverified');
+    assert.equal(composer.reviewCategory, 'evidence_unverified'); assert.deepEqual(composer.missingEvidence, ['composer']);
+    assert.doesNotMatch(JSON.stringify(composer), /not-a-category|raw-secret/);
+  });
+
+  test(`${name}: recipient mismatch, nonlatest context and unresolved user decision have distinct safe denials`, async () => {
+    for (const [change, code] of [
+      [args => { args.recipient.text = 'Mallory'; }, 'vision_chat_recipient_mismatch'],
+      [args => { args.atLatest = false; }, 'vision_chat_not_latest'],
+      [args => { args.userInputRequired = true; }, 'vision_chat_user_decision_required'],
+    ]) {
+      const f = fixture(Session), claims = f.claims(); change(claims);
+      const observed = await f.session.execute('chat_observe', claims);
+      assert.equal(observed.success, true);
+      assert.equal((await f.send(observed)).code, code); assert.equal(f.state.actions.length, 0);
+    }
+  });
+
+  test(`${name}: publication schema needs visible author and audience, while private conversation forbids them`, async () => {
+    const f = publicationFixture(), base = f.claims();
+    for (const claims of [
+      { ...base, publication: undefined }, { ...base, surface: 'conversation' },
+      { ...base, publication: { ...base.publication, author: { ...base.publication.author, text: '' } } },
+      { ...base, publication: { ...base.publication, audience: { ...base.publication.audience, text: ' ' } } },
+    ]) {
+      if (claims.publication === undefined) delete claims.publication;
+      assert.equal((await f.session.execute('chat_observe', claims)).code, 'vision_chat_surface_invalid');
+    }
+    for (const flag of ['authorMatches', 'audienceMatches']) {
+      f.state.verdict = { ...verified, [flag]: false };
+      const result = await f.observe(); assert.equal(result.code, 'vision_chat_unverified');
+      assert.ok(result.missingEvidence.includes(flag === 'authorMatches' ? 'author' : 'audience'));
+    }
+    assert.equal(f.state.actions.length, 0);
+  });
+
+  test(`${name}: explicit public publication pins reviewed author, audience and destination through one verified delivery`, async () => {
+    const f = publicationFixture(); f.state.sendVisible = false;
+    const initial = await f.observe(), prepared = await f.send(initial);
+    assert.equal(prepared.draftPrepared, true);
+    assert.deepEqual(f.state.authorization.publication, f.state.publication);
+    assert.equal(f.state.authorization.surface, 'publication');
+    f.state.sendVisible = true; f.next();
+    const observed = await f.observe();
+    assert.equal((await f.send(observed, 'submit', { operationId: prepared.operationId })).sent, true);
+    const delivery = await f.observe(); assert.equal(delivery.deliveryVerified, true);
+    const proof = f.state.reviews.find(item => item.kind === 'chat_delivery');
+    assert.equal(proof.expected.surface, 'publication'); assert.equal(proof.expected.recipient, 'Project updates');
+    assert.deepEqual(proof.expected.publication, f.state.publication);
+    assert.equal(f.state.actions.filter(action => action.x > 650).length, 1);
+    assert.equal((await f.send(delivery)).code, 'vision_chat_already_sent');
+  });
+
+  test(`${name}: publication author, audience, destination or surface drift cannot borrow a prepared transaction`, async () => {
+    for (const kind of ['author', 'audience', 'destination', 'surface']) {
+      const f = publicationFixture(), prepared = await f.send(await f.observe()), before = f.state.actions.length;
+      if (kind === 'destination') f.state.recipient = 'Different destination';
+      else if (kind === 'surface') { f.state.surface = 'conversation'; delete f.state.publication; }
+      else f.state.publication[kind].text = `Different ${kind}`;
+      f.next(); const observed = await f.observe(); assert.equal(observed.success, true);
+      assert.equal(observed.pendingTargetChanged, true); assert.equal(observed.pendingOutbound, true);
+      assert.equal((await f.send(observed, 'submit', { operationId: prepared.operationId })).code, 'vision_chat_target_pending');
+      assert.equal(f.state.actions.length, before); assert.ok(f.session.completionBlock());
+    }
+  });
+
+  test(`${name}: publication identity keeps long audience and author suffixes in durable target binding`, async () => {
+    for (const key of ['author', 'audience']) {
+      const f = publicationFixture();
+      f.state.publication[key].text = `${'Shared visible identity '.repeat(20)}original`;
+      f.session.authorizeChat = async proposal => ({ allowed: true, ...proposal, scopeId: 'authorized-long-identity' });
+      const prepared = await f.send(await f.observe()); assert.equal(prepared.draftPrepared, true);
+      const saved = f.session.getState(), before = f.state.actions.length;
+      f.state.publication[key].text = `${'Shared visible identity '.repeat(20)}different`;
+      f.next(); const changed = await f.observe();
+      assert.equal(changed.pendingTargetChanged, true);
+      assert.equal((await f.send(changed, 'submit', { operationId: prepared.operationId })).code, 'vision_chat_target_pending');
+      assert.equal(f.state.actions.length, before);
+      saved.chatLedger[0].pending.publication[key].text = f.state.publication[key].text;
+      assert.throws(() => publicationFixture({ state: saved }), /ledger is invalid/);
+    }
+  });
+
+  test(`${name}: an unresolved private send also blocks another recipient's preparation`, async () => {
+    const f = fixture(Session), prepared = await f.send(await f.observe());
+    f.state.delivery = false; await f.send(await f.observe(), 'submit', { operationId: prepared.operationId });
+    const before = f.state.actions.length;
+    f.state.recipient = 'Bob'; f.next(); const observed = await f.observe();
+    assert.equal((await f.send(observed, 'prepare', { recipient: 'Bob' })).code, 'vision_chat_target_pending');
+    assert.equal(f.state.actions.length, before); assert.ok(f.session.completionBlock());
+  });
+
+  test(`${name}: publication draft and uncertain send survive restart without changing target or replaying`, async () => {
+    const f = publicationFixture(), prepared = await f.send(await f.observe());
+    const restored = publicationFixture({ state: f.session.getState() }); restored.state.draft = 'Approved reply';
+    const observed = await restored.observe();
+    assert.equal((await restored.send(observed, 'submit', { operationId: prepared.operationId })).sent, true);
+    const uncertain = publicationFixture({ state: restored.session.getState() });
+    uncertain.state.messages.push({ direction: 'outgoing', text: 'Unrelated old post', rect: box(160) });
+    const unproven = await uncertain.observe(); assert.equal(unproven.deliveryVerified, false);
+    assert.equal((await uncertain.send(unproven)).code, 'vision_chat_send_pending');
+    assert.equal(uncertain.state.actions.length, 0); assert.ok(uncertain.session.completionBlock());
+    const changed = publicationFixture({ state: restored.session.getState() }); changed.state.publication.audience.text = 'Only me';
+    const drift = await changed.observe(); assert.equal(drift.deliveryVerified, false);
+    assert.equal((await changed.send(drift)).code, 'vision_chat_target_pending'); assert.equal(changed.state.actions.length, 0);
+    const corrupt = f.session.getState(); corrupt.chatLedger[0].pending.publication.author.text = '@different';
+    assert.throws(() => publicationFixture({ state: corrupt }), /ledger is invalid/);
+  });
+
+  test(`${name}: publication user drafts and unverified or optimistic delivery remain protected`, async () => {
+    const existing = publicationFixture(); existing.state.draft = 'My existing public draft';
+    assert.equal((await existing.send(await existing.observe())).code, 'vision_chat_user_draft');
+    assert.equal(existing.state.actions.length, 0);
+    for (const flag of ['authorMatches', 'audienceMatches', 'newOutgoing']) {
+      const f = publicationFixture(), prepared = await f.send(await f.observe());
+      await f.send(await f.observe(), 'submit', { operationId: prepared.operationId });
+      const verify = f.session.verify;
+      f.session.verify = async proposal => proposal.kind === 'chat_delivery' ? { ...verified, [flag]: false } : verify(proposal);
+      const observed = await f.observe(); assert.equal(observed.deliveryVerified, false);
+      assert.ok(f.session.completionBlock()); assert.equal(f.state.actions.filter(action => action.x > 650).length, 1);
+    }
+  });
+
   test(`${name}: prepare, observe, submit once, then separately verify a new outgoing bubble`, async () => {
     const f = fixture(Session), observation = await f.observe();
     const draft = await f.send(observation);
