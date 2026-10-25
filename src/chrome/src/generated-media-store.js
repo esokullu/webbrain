@@ -24,7 +24,7 @@ export async function storeGeneratedMedia(dataUrl) {
   return storeGeneratedMediaBlob(new Blob([bytes], { type: match[1] }));
 }
 
-// `maxBytes` above 20 MB is for a joined video only.
+// `maxBytes` above 20 MB is for videos: one joined from clips, or a clip of one.
 export async function storeGeneratedMediaBlob(blob, { maxBytes = MAX_BYTES } = {}) {
   if (!(blob instanceof Blob) || !MEDIA_MIME.test(blob.type)) throw new Error('Unsupported generated media.');
   const limit = Math.min(maxBytes, blob.type === 'video/mp4' ? MAX_JOINED_VIDEO_BYTES : MAX_BYTES);

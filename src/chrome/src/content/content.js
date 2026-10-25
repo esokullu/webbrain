@@ -8410,7 +8410,12 @@
             identityCandidates: [],
           };
         }
-        if (editable(target) && (target !== composer || twitterConversation)) {
+        // A click into an editor, the composer itself included, only focuses
+        // it; Enter, a submit or a Send control commits the message. Left to
+        // the geometry rule below, the composer is beside itself, so each
+        // focus click counted as a send and armed a pending outbound record
+        // that then refused the real Enter as a duplicate (Discord).
+        if (editable(target)) {
           return { success: true, messageSend: false, conclusive: true, identityCandidates: [] };
         }
         if (verifiedConversationSelection(target, composer)) {
@@ -10395,13 +10400,18 @@
               // selecting anything.
               const roleAttr = (el.getAttribute && el.getAttribute('role') || '').toLowerCase();
               const controls = el.getAttribute && el.getAttribute('aria-controls');
+              // A rich-text message editor is no picker unless its role says
+              // so: its aria-autocomplete, aria-expanded and pop-up lists
+              // belong to @mention and emoji suggestions, where an ArrowDown
+              // before Enter moves the suggestion instead of letting Enter send.
+              const richTextEditor = el.isContentEditable && roleAttr !== 'searchbox' && roleAttr !== 'combobox';
               let isCombobox = roleAttr === 'searchbox' || roleAttr === 'combobox'
-                || (el.getAttribute && el.getAttribute('aria-autocomplete'))
-                || (el.getAttribute && el.getAttribute('aria-expanded') === 'true');
-              if (!isCombobox && controls) {
+                || (!richTextEditor && ((el.getAttribute && el.getAttribute('aria-autocomplete'))
+                  || (el.getAttribute && el.getAttribute('aria-expanded') === 'true')));
+              if (!isCombobox && controls && !richTextEditor) {
                 try { if (document.getElementById(controls)) isCombobox = true; } catch {}
               }
-              if (!isCombobox) {
+              if (!isCombobox && !richTextEditor) {
                 // Last-resort check: any visible listbox on the page?
                 try {
                   const lbs = document.querySelectorAll('[role="listbox"],[role="menu"]');
@@ -10626,9 +10636,13 @@
             el.setSelectionRange(0, String(el.value || '').length);
           }
           const role = (el.getAttribute && el.getAttribute('role') || '').toLowerCase();
+          // A rich-text message editor (Discord's Slate box) carries
+          // aria-autocomplete for its @mention and emoji pop-ups; it is no
+          // picker. An ArrowDown before Enter there moves an open pop-up's
+          // choice, so Enter inserts that instead of sending.
           const isCombobox = role === 'combobox'
-            || !!(el.getAttribute && el.getAttribute('aria-autocomplete'))
-            || (el.getAttribute && el.getAttribute('aria-expanded') === 'true');
+            || (!el.isContentEditable && (!!(el.getAttribute && el.getAttribute('aria-autocomplete'))
+              || (el.getAttribute && el.getAttribute('aria-expanded') === 'true')));
           const rect = el.getBoundingClientRect();
           // Whether a press at the field's centre reaches the field or its
           // plain contents (pressable), and whether what is there instead is

@@ -232,6 +232,59 @@ for (const [kind, engine, AgentClass, policy] of [
           assert.equal(result.success,false);
         } finally {await page.close();}
       });
+      // A focus click on the message box once armed a pending send, so the
+      // real Enter that followed was refused as a duplicate.
+      await t.test('a click into the message box only focuses it; Enter and Send stay guarded',async()=>{
+        const {page,guard,probe}=await setup();
+        try {
+          const clicked=await probe('click',{selector:'#composer'});
+          assert.equal(clicked.messageSend,false,JSON.stringify(clicked));
+          assert.equal(clicked.conclusive,true);
+          assert.equal(await guard('click',{selector:'#composer'}),null);
+          await call(page,'get_accessibility_tree',{filter:'all',maxChars:30000});
+          const ref=await page.locator('#composer').evaluate(el=>window.__wb_ax_ref(el));
+          assert.equal((await probe('click_ax',{ref_id:ref})).messageSend,false);
+          assert.equal(await guard('click_ax',{ref_id:ref}),null);
+          assert.equal((await guard('click',{selector:'#send'}))?.noDispatch,true);
+          await page.locator('#composer').focus();
+          assert.equal((await guard('press_keys',{key:'Enter'}))?.noDispatch,true);
+        } finally {await page.close();}
+      });
+      // Discord's Slate box carries aria-autocomplete for @mentions. Taken
+      // for a picker, its trusted submit pressed ArrowDown before Enter.
+      if (kind==='chrome') await t.test('the trusted submit does not treat the message box as a picker',async()=>{
+        const {page}=await setup('<input id="picker" role="combobox" aria-autocomplete="list" aria-label="City" style="position:fixed;left:10px;top:400px">');
+        try {
+          await page.locator('#composer').evaluate(el=>{
+            el.setAttribute('aria-autocomplete','list');el.setAttribute('aria-haspopup','listbox');el.setAttribute('aria-multiline','true');
+          });
+          await call(page,'get_accessibility_tree',{filter:'all',maxChars:30000});
+          const ref=selector=>page.locator(selector).evaluate(el=>window.__wb_ax_ref(el));
+          const composer=await call(page,'ax_prepare_field_for_trusted_type',{ref_id:await ref('#composer')});
+          assert.equal(composer.success,true,JSON.stringify(composer));
+          assert.equal(composer.contentEditable,true);
+          assert.equal(composer.isCombobox,false,'an @mention pop-up does not make the message box a picker');
+          const picker=await call(page,'ax_prepare_field_for_trusted_type',{ref_id:await ref('#picker')});
+          assert.equal(picker.isCombobox,true,'a real combobox keeps its ArrowDown nudge');
+        } finally {await page.close();}
+      });
+      // The content script's own submit reads a rich-text box the same way:
+      // its open @mention list is no picker, so Enter follows the text.
+      await t.test('a rich-text box with an open suggestion list gets Enter, not a picker ArrowDown',async()=>{
+        const {page}=await setup(`<div id="plain" contenteditable="true" role="textbox" aria-autocomplete="list" aria-expanded="true" aria-label="Plain message" style="position:fixed;left:10px;top:420px;width:300px;min-height:40px"></div>
+<div role="listbox" style="position:fixed;left:10px;top:470px;width:200px;height:40px"><div role="option">@webbrain</div></div>
+<input id="city" role="combobox" aria-autocomplete="list" aria-label="City" style="position:fixed;left:10px;top:520px">`);
+        try {
+          await page.evaluate(()=>{window.qaKeys=[];document.addEventListener('keydown',event=>window.qaKeys.push(`${event.target.id}:${event.key}`),true);});
+          await call(page,'get_accessibility_tree',{filter:'all',maxChars:30000});
+          const ref=selector=>page.locator(selector).evaluate(el=>window.__wb_ax_ref(el));
+          const plain=await call(page,'set_field',{ref_id:await ref('#plain'),text:'Release notes are up',clear:true,submit:true});
+          assert.equal(plain.verified,true,JSON.stringify(plain));
+          const city=await call(page,'set_field',{ref_id:await ref('#city'),text:'Ista',clear:true,submit:true});
+          assert.equal(city.verified,true,JSON.stringify(city));
+          assert.deepEqual(await page.evaluate(()=>window.qaKeys),['plain:Enter','city:ArrowDown','city:Enter']);
+        } finally {await page.close();}
+      });
       await t.test('unknown dialogs and chat editors inside settings never gain management classification',async()=>{
         const {page,probe}=await setup(`<div role="dialog" aria-modal="true" aria-label="Forward"><h1>Forward</h1><input type="text"><button id="forward">Create Channel</button></div>`);
         try {

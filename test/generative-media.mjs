@@ -125,6 +125,102 @@ for (const build of ['chrome', 'firefox']) {
     await assert.rejects(media.runMediaGeneration({ prompt: 'x', media: 'audio', config: openrouter, fetchImpl: async url => assert.fail(url) }), /media must be "image" or "video"/);
   });
 
+  test(`${build}: a video model's lengths, ratios and resolutions are read from its published schema`, () => {
+    // Shaped like the OpenAPI documents fal.ai and Comfy Router publish per model.
+    const fal = (input, extra = {}) => ({
+      openapi: '3.0.4',
+      paths: {
+        '/fal-ai/model/requests/{request_id}/status': { get: {} },
+        '/fal-ai/model': { post: { requestBody: { content: { 'application/json': { schema: { $ref: '#/components/schemas/ModelInput' } } } } } },
+      },
+      components: { schemas: { ModelInput: { type: 'object', required: ['prompt'], properties: { prompt: { type: 'string' }, ...input } }, ...extra } },
+    });
+    const caps = openapi => {
+      const entry = media.videoInputCapabilities(openapi);
+      return entry && { ...entry, encodeDuration: undefined, encoded: entry.supported_durations?.map(seconds => entry.encodeDuration(seconds)) };
+    };
+    const lengths = duration => {
+      const entry = caps(fal({ duration }));
+      return [entry.supported_durations, entry.encoded];
+    };
+    const seconds = (from, to) => Array.from({ length: to - from + 1 }, (_, i) => from + i);
+    // A range of whole seconds, sent as numbers (fal.ai's Grok Imagine).
+    assert.deepEqual(caps(fal({
+      duration: { type: 'integer', minimum: 1, maximum: 15, default: 6 },
+      aspect_ratio: { type: 'string', enum: ['16:9', '4:3', '1:1', '9:16'] },
+      resolution: { type: 'string', enum: ['480p', '720p', '1080p'] },
+    })), {
+      inputs: ['prompt', 'duration', 'aspect_ratio', 'resolution'], encodeDuration: undefined,
+      supported_durations: seconds(1, 15), encoded: seconds(1, 15),
+      supported_aspect_ratios: ['16:9', '4:3', '1:1', '9:16'], supported_resolutions: ['480p', '720p', '1080p'],
+    });
+    // A fractional range covers its whole seconds (MiniMax H3 Max).
+    assert.deepEqual(lengths({ type: 'number', minimum: 0.92, maximum: 6 }), [seconds(1, 6), seconds(1, 6)]);
+    // Listed lengths are sent as listed: "8s" (Veo), "10" (Hailuo 02), 10 (LTX).
+    assert.deepEqual(lengths({ type: 'string', enum: ['4s', '6s', '8s'] }), [[4, 6, 8], ['4s', '6s', '8s']]);
+    assert.deepEqual(lengths({ type: 'string', enum: ['6', '10'], default: '6' }), [[6, 10], ['6', '10']]);
+    assert.deepEqual(lengths({ type: 'integer', enum: [6, 8, 10] }), [[6, 8, 10], [6, 8, 10]]);
+    // "auto" is not a length; the range or the other listed values are (FLUX.3, Seedance).
+    assert.deepEqual(lengths({ enum: ['auto', 5, 6, 7] }), [[5, 6, 7], [5, 6, 7]]);
+    assert.deepEqual(lengths({ oneOf: [{ type: 'integer', minimum: 4, maximum: 6 }, { type: 'string', enum: ['auto'] }] }), [[4, 5, 6], [4, 5, 6]]);
+    assert.deepEqual(lengths({ anyOf: [{ enum: [-1] }, { minimum: 2, maximum: 4 }] }), [[2, 3, 4], [2, 3, 4]]);
+    assert.deepEqual(lengths({ anyOf: [{ type: 'integer', minimum: 2, maximum: 3 }, { type: 'null' }] }), [[2, 3], [2, 3]]);
+    // Exclusive bounds and steps.
+    assert.deepEqual(lengths({ type: 'integer', exclusiveMinimum: 2, exclusiveMaximum: 6 }), [[3, 4, 5], [3, 4, 5]]);
+    assert.deepEqual(lengths({ type: 'number', minimum: 2, exclusiveMinimum: true, maximum: 6, exclusiveMaximum: true }), [[3, 4, 5], [3, 4, 5]]);
+    assert.deepEqual(lengths({ type: 'integer', minimum: 5, maximum: 15, multipleOf: 5 }), [[5, 10, 15], [5, 10, 15]]);
+    // Lengths start at 1 s.
+    assert.deepEqual(lengths({ type: 'integer', maximum: 3 }), [[1, 2, 3], [1, 2, 3]]);
+    assert.deepEqual(lengths({ type: 'number', minimum: 0, maximum: 2 }), [[1, 2], [1, 2]]);
+    // A listed set is the set, whatever bounds it also states; a range is read up to an hour.
+    assert.deepEqual(lengths({ type: 'integer', enum: [6, 8, 10], minimum: 6, maximum: 10 }), [[6, 8, 10], [6, 8, 10]]);
+    assert.deepEqual(lengths({ type: 'integer', minimum: 1, maximum: 1e9 })[0].slice(-2), [3599, 3600]);
+    // Without an upper bound, or as text, a length is unknown.
+    assert.deepEqual(lengths({ type: 'integer', minimum: 1 }), [undefined, undefined]);
+    assert.deepEqual(lengths({ type: 'string', maximum: 10 }), [undefined, undefined]);
+    // An enum lists the values in their own case and type ("768P").
+    assert.deepEqual(caps(fal({ resolution: { type: 'string', enum: ['480P', '768P', null] } })).supported_resolutions, ['480P', '768P']);
+    // Comfy Router: the body schema inline, choices behind $ref and anyOf (Luma).
+    const comfy = (schema, schemas = {}) => ({
+      openapi: '3.0.2',
+      paths: { '/v2/models/provider/model': { post: { requestBody: { content: { 'application/json': { schema } } } } } },
+      components: { schemas },
+    });
+    const luma = caps(comfy({
+      required: ['prompt', 'duration'],
+      properties: { prompt: { type: 'string' }, duration: { $ref: '#/components/schemas/Duration' }, aspect_ratio: { allOf: [{ $ref: '#/components/schemas/Ratio' }], nullable: true }, resolution: { type: 'string' } },
+    }, { Duration: { anyOf: [{ type: 'string', enum: ['5s', '9s'] }, { type: 'string' }] }, Ratio: { type: 'string', enum: ['16:9', '9:16'] } }));
+    assert.deepEqual([luma.supported_durations, luma.encoded, luma.supported_aspect_ratios, luma.supported_resolutions], [[5, 9], ['5s', '9s'], ['16:9', '9:16'], undefined]);
+    // The generation's body is the one that takes the prompt.
+    const upload = caps({
+      ...comfy({ properties: { prompt: { type: 'string' }, duration: { enum: ['5s'] } } }),
+      paths: {
+        '/storage/upload': { post: { requestBody: { content: { 'application/json': { schema: { properties: { file_name: { type: 'string' }, duration: { enum: [30] } } } } } } } },
+        '/v2/models/provider/model': { post: { requestBody: { content: { 'application/json': { schema: { properties: { prompt: { type: 'string' }, duration: { enum: ['5s'] } } } } } } } },
+      },
+    });
+    assert.deepEqual([upload.inputs, upload.encoded], [['prompt', 'duration'], ['5s']]);
+    // A body that takes its prompt inside another field, or is made of parts.
+    const content = caps(comfy({ properties: { content: { type: 'array' }, duration: { type: 'integer', minimum: 4, maximum: 6 }, ratio: { enum: ['16:9'] } } }));
+    assert.deepEqual([content.inputs, content.supported_durations], [['content', 'duration', 'ratio'], [4, 5, 6]]);
+    // allOf parts must all hold: a part narrows the base's range or values.
+    const narrowed = caps(comfy({ allOf: [{ $ref: '#/components/schemas/Base' }, { properties: { duration: { minimum: 5, maximum: 10 } } }] },
+      { Base: { properties: { prompt: { type: 'string' }, duration: { type: 'integer', minimum: 1, maximum: 15 } } } }));
+    assert.deepEqual([narrowed.inputs, narrowed.supported_durations], [['prompt', 'duration'], seconds(5, 10)]);
+    assert.deepEqual(lengths({ allOf: [{ type: 'integer', minimum: 1, maximum: 15 }, { minimum: 5, maximum: 10 }] }), [seconds(5, 10), seconds(5, 10)]);
+    assert.deepEqual(lengths({ allOf: [{ enum: ['5', '10', '15'] }, { enum: ['10', '15', '20'] }] }), [[10, 15], ['10', '15']]);
+    assert.deepEqual(lengths({ allOf: [{ enum: [5, 10] }, { const: 10 }] }), [[10], [10]]);
+    assert.deepEqual(lengths({ type: 'integer', minimum: 1, maximum: 15, anyOf: [{ maximum: 3 }, { enum: [10, 20] }] }), [[1, 2, 3, 10], [1, 2, 3, 10]]);
+    // anyOf or oneOf variants of a body: a length any of them takes.
+    const variants = caps(comfy({ oneOf: [{ properties: { prompt: { type: 'string' }, duration: { enum: [5] } } }, { properties: { prompt: { type: 'string' }, duration: { enum: [10] } } }] }));
+    assert.deepEqual([variants.inputs, variants.supported_durations, variants.encoded], [['prompt', 'duration'], [5, 10], [5, 10]]);
+    // Nothing to read: an open body, no paths, an error instead of a document.
+    assert.equal(media.videoInputCapabilities(comfy({ type: 'object', additionalProperties: true })), null);
+    assert.equal(media.videoInputCapabilities({ openapi: '3.0.4', paths: {} }), null);
+    assert.equal(media.videoInputCapabilities({ error: { code: 'expansion_failed' } }), null);
+    assert.equal(media.videoInputCapabilities(null), null);
+  });
+
   test(`${build}: OpenRouter Image API returns inline media without a chat request`, async () => {
     const calls = [];
     const result = await media.runMediaGeneration({ prompt: 'red apple', config: { provider: 'openrouter', apiKey: 'or-key', model: 'google/gemini-2.5-flash-image' }, fetchImpl: async (url, init) => {

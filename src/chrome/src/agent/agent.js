@@ -30917,7 +30917,44 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     }
   }
 
-  async _confirmPendingChatReconciliation(tabId, prior, observedThreadKey, onUpdate) {
+  // The conversation as its page names it, for WebBrain's own card (plain
+  // text, never sent to the model). The thread key is WebBrain's identifier
+  // ("dom:discord:…") and stays the fallback when the page shows another chat.
+  // The name is page text: invisible and control characters go, and it is
+  // quoted on its own line so a chat's name cannot read as WebBrain speaking.
+  _pendingChatConversationLabel(observation, observedThreadKey, threadKey) {
+    const name = observedThreadKey === threadKey
+      ? String(observation?.conversationIdentity || '').replace(/[\p{Cc}\p{Cf}\u2028\u2029]/gu, ' ')
+        .replace(/\s+/g, ' ').trim().slice(0, 80) : '';
+    if (!name) return threadKey;
+    let host = '';
+    try { host = new URL(String(observation?.url || '')).hostname.replace(/^www\./, ''); } catch {}
+    return host ? `“${name}” on ${host}` : `“${name}”`;
+  }
+
+  // What WebBrain reads now, for the user's card: whether a copy of the
+  // pending text is shown in the conversation, else whether the message box
+  // holds it. Observations, never a verdict on delivery. Any shown copy
+  // counts, seen before or not, so the card never says none is shown when
+  // one is. Telegram and WhatsApp keep their own reconciliation reads.
+  async _pendingChatCardFacts(tabId, pending) {
+    if (!pending?.text || /^dom:(?:telegram|whatsapp):/.test(pending.threadKey || '')) return '';
+    const now = await this._readChatObservation(tabId);
+    if (now?.success !== true || normalizeChatSnapshot(now).threadKey !== pending.threadKey) return '';
+    const body = this._workflowMessageBody(pending.text);
+    if ((now.messages || []).some(message => message?.direction !== 'incoming'
+        && this._workflowMessageBody(message?.authoredText ?? message?.text) === body)) {
+      return 'A message with this exact text is shown in the conversation.';
+    }
+    if (now.composer?.available !== true || now.composer.empty !== false || !now.composer.ref) return '';
+    const draft = await this._textMutationValueDigest(tabId,
+      { locatorType: 'ax', refId: now.composer.ref, frameId: 0 }, pending.text);
+    return draft?.verified === true
+      ? 'The message box currently contains this exact text, and no message with this text is shown in the conversation.'
+      : '';
+  }
+
+  async _confirmPendingChatReconciliation(tabId, prior, observedThreadKey, onUpdate, observation = null) {
     const provider = this._activeProvider(tabId), pending = prior.pendingOutbound;
     const conversationId = this.conversationIds.get(tabId), taskKey = this._progressTaskKeyHash(tabId);
     const taskText = this._progressTaskAnchorText(tabId) || this._originalTaskText(tabId);
@@ -30938,6 +30975,11 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       && context.isCurrent() && !this._checkAbort(tabId) && !this._hasPendingSteering(tabId)
       && !this._hasUnvalidatedSteering(tabId);
     if (!isCurrent()) return null;
+    // Tell the user what WebBrain reads itself. It informs; only the answer
+    // clears this record.
+    const facts = await this._pendingChatCardFacts(tabId, pending);
+    if (!isCurrent()) return null;
+    const conversation = this._pendingChatConversationLabel(observation, observedThreadKey, pending.threadKey);
     const clarifyId = `chat_reconcile_${crypto.randomUUID()}`;
     const approve = 'I verified this message was not delivered; clear this pending send';
     const tabPending = this._pendingClarifications.get(tabId) || new Map();
@@ -30950,7 +30992,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     try {
       try {
         onUpdate('clarify', { promptKind: 'clarify', pendingReconciliation: true, clarifyId, requireExplicitAnswer: true, timeoutSec: 0,
-          question: `An earlier outgoing message has an unknown delivery result. Its conversation is ${pending.threadKey}.\n\n${pending.text}\n\nHave you independently checked that this exact message was not delivered?`,
+          question: `An earlier outgoing message has an unknown delivery result.\nConversation: ${conversation}\n\n${pending.text}\n\n${facts ? `${facts}\n\n` : ''}Have you independently checked that this exact message was not delivered?`,
           options: ['Keep the pending send blocked', approve],
           reason: 'Clearing this record can permit a duplicate. This choice only reconciles the exact pending send; it does not authorize a new message.' });
       } catch { this._settleClarification(entry, { cancelled: true }); }
@@ -31099,7 +31141,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       // A fresh private draft witness proves this explicit Enter was never sent.
       // Keep its pending record; observation/viewport repair authorizes no send.
       if (!knownPreEnterDraft) {
-      const confirmation = await this._confirmPendingChatReconciliation(tabId, prior, observedThreadKey, onUpdate);
+      const confirmation = await this._confirmPendingChatReconciliation(tabId, prior, observedThreadKey, onUpdate, observation);
       if (confirmation?.isCurrent()) {
         observation = confirmation.observation;
         // An actual delivery arriving during the dialog takes the ordinary
@@ -31334,6 +31376,39 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     try { await this._persistNow(tabId); } catch {}
   }
 
+  // A key before Enter was refused by the page-change fence after the exact
+  // draft was verified: the draft is in the composer and Enter was never
+  // dispatched. A stop or a recipient refusal is not this state.
+  _chatSubmitVetoedBeforeEnter(result) {
+    return result?.submissionBlockedBeforeDispatch === true && result.submissionDispatched === false
+      && result.submissionBlockReason === 'page_feedback_pending' && result.verified === true
+      && result.cancelled !== true;
+  }
+
+  // Whether this chat_send's own draft, whose Enter never left, is still
+  // unsent: the composer it typed into, in the same conversation, holds the
+  // whole body, and no new outgoing or unattributed copy of it appeared.
+  // Only where the page empties its composer the moment it sends (Discord)
+  // does a draft still there prove nothing went out; a site that keeps the
+  // text until its server answers could be mid-send. Telegram and WhatsApp
+  // keep their own owned-draft lease. Anything less keeps the pending send.
+  async _unsentChatDraftRetained(tabId, session, composerRef) {
+    const pending = session?.pendingOutbound;
+    if (!pending?.key || !pending.text || !composerRef
+        || !/^dom:discord:/.test(pending.threadKey || '')) return null;
+    const after = await this._readChatObservation(tabId);
+    if (after?.success !== true || after.composer?.available !== true || after.composer.empty !== false
+        || after.composer.ref !== composerRef) return null;
+    const advanced = advanceChatSession(session, after);
+    if (advanced.snapshot.threadKey !== pending.threadKey
+        || advanced.session.pendingOutbound?.key !== pending.key) return null;
+    const body = this._workflowMessageBody(pending.text);
+    if ((advanced.newMessages || []).some(message => message?.direction !== 'incoming'
+        && this._workflowMessageBody(message.authoredText ?? message.text) === body)) return null;
+    const draft = await this._textMutationValueDigest(tabId,
+      { locatorType: 'ax', refId: after.composer.ref, frameId: 0 }, pending.text);
+    return draft?.verified === true ? { after, advanced } : null;
+  }
 
   async _sendChatWorkflow(tabId, args = {}, onUpdate = null, executionContext = null) {
     const originalSendOwner = this._nativeChatOwnerScope(tabId);
@@ -31544,6 +31619,27 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
         messageKey:decision.messageKey, dispatch };
     }
     if (recoverDraft) this._nativeChatPreparedDrafts?.delete(tabId);
+    // Enter never left, and the composer still holds this exact draft with no
+    // sent copy: nothing went out. Kept, the pending record refused every
+    // later Enter as a duplicate and asked the user to certify a
+    // non-delivery WebBrain can read for itself (Discord, where a key before
+    // Enter was vetoed). The draft stays for one guarded Enter.
+    if (!recoverDraft && !preparedDraftBinding?.token && this._chatSubmitVetoedBeforeEnter(dispatch)) {
+      const retained = await this._unsentChatDraftRetained(tabId, pending, composerRef);
+      if (retained) {
+        const session = { ...retained.advanced.session, pendingOutbound: null };
+        this.chatSessions.set(tabId, session);
+        this._persist(tabId);
+        return {
+          ...this._chatObservationResult(retained.after, { ...retained.advanced, session }),
+          success: false, sent: false, dispatched: true,
+          draftMutationDispatched: true, submissionDispatched: false, submissionOutcomeUnknown: false,
+          draftRetained: true, outcomeUnknown: false, deliveryVerified: false, verificationRequired: false,
+          reason: 'chat_submit_not_dispatched',
+          error: 'Nothing was sent: Enter never reached the page, and the exact message is still in the composer with no sent copy in the conversation, so no send is pending. Send it once with press_keys({key:"Enter"}) while the composer has focus (click the composer first if focus moved), then call chat_observe to verify delivery. Do not retype it or call chat_send while it is in the composer.',
+          messageKey: decision.messageKey, dispatch };
+      }
+    }
     // A dispatch that proves it never reached the page is not an uncertain
     // send: keeping the pending record would strand the workflow behind an
     // explicit user reconciliation for a message that was never typed.
@@ -54389,13 +54485,47 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       // set_field({submit:true}) must never submit until the trusted retry has
       // itself settled and verified. Use trusted CDP keys for the submission.
       if (toolName === 'set_field' && args?.submit === true) {
+        // The native-input transport rejected a key before Enter was
+        // dispatched. Keep the exact settled draft proof, but retain
+        // uncertainty from typing: a page-owned beforeinput handler may
+        // already have acted on it.
+        const submissionBlockedBeforeEnter = () => ({
+          ...recovered,
+          success: false,
+          submitted: false,
+          messageDispatched: false,
+          draftMutationDispatched: true,
+          submissionDispatched: false,
+          submissionBlockedBeforeDispatch: true,
+          submissionBlockReason: 'page_feedback_pending',
+          submissionOutcomeUnknown: false,
+          outcomeUnknown: true,
+          mutationMayHaveOccurred: true,
+          repeatBlocked: true,
+          retryable: false,
+          pageFeedbackPending: true,
+          recoveryRequired: 'verify_or_restore_field',
+          error: 'The exact draft was verified, but the browser changed before Enter could be dispatched. Observe the conversation and reconcile any pending send before another mutation; no automatic retry occurred.',
+        });
         this._throwIfAborted(abortSignal);
         if (prepared.isCombobox) {
           await new Promise(resolve => setTimeout(resolve, 80));
           this._throwIfAborted(abortSignal);
-          await cdpClient.sendCommand(tabId, 'Input.dispatchKeyEvent', {
-            type: 'keyDown', key: 'ArrowDown', code: 'ArrowDown', windowsVirtualKeyCode: 40,
-          });
+          // The picker nudge submits nothing, so a veto before it reaches the
+          // page is the same pre-Enter state as a vetoed Enter. Reported as a
+          // generic failure, a chat send kept a possibly-delivered pending
+          // record for a message that was never sent. Once the nudge is sent
+          // it may have changed a combobox's value: later failures stay
+          // uncertain.
+          let nudgeDispatched = false;
+          try {
+            await sendTrusted('Input.dispatchKeyEvent', {
+              type: 'keyDown', key: 'ArrowDown', code: 'ArrowDown', windowsVirtualKeyCode: 40,
+            }, () => { nudgeDispatched = true; });
+          } catch (error) {
+            if (error?.code !== 'page_feedback_pending' || nudgeDispatched) throw error;
+            return submissionBlockedBeforeEnter();
+          }
           await cdpClient.sendCommand(tabId, 'Input.dispatchKeyEvent', {
             type: 'keyUp', key: 'ArrowDown', code: 'ArrowDown', windowsVirtualKeyCode: 40,
           });
@@ -54435,27 +54565,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
           });
         } catch (error) {
           if (error?.code !== 'page_feedback_pending' || enterDispatched) throw error;
-          // The native-input transport rejected Enter before dispatch. Keep
-          // the exact settled draft proof, but retain uncertainty from typing:
-          // a page-owned beforeinput handler may already have acted on it.
-          return {
-            ...recovered,
-            success: false,
-            submitted: false,
-            messageDispatched: false,
-            draftMutationDispatched: true,
-            submissionDispatched: false,
-            submissionBlockedBeforeDispatch: true,
-            submissionBlockReason: 'page_feedback_pending',
-            submissionOutcomeUnknown: false,
-            outcomeUnknown: true,
-            mutationMayHaveOccurred: true,
-            repeatBlocked: true,
-            retryable: false,
-            pageFeedbackPending: true,
-            recoveryRequired: 'verify_or_restore_field',
-            error: 'The exact draft was verified, but the browser changed before Enter could be dispatched. Observe the conversation and reconcile any pending send before another mutation; no automatic retry occurred.',
-          };
+          return submissionBlockedBeforeEnter();
         }
         recovered.submitted = true;
       }

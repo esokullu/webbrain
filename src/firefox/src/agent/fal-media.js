@@ -127,12 +127,17 @@ async function cancelFalRequest(cancelUrl, headers, fetchImpl) {
   }
 }
 
-/** Run a queued generation: submit, poll, then fetch the result. */
+/**
+ * Run a queued generation: submit, poll, then fetch the result. `input` adds
+ * model inputs (such as a video's duration) to the prompt.
+ */
 export async function runFalGeneration({
   prompt,
   config,
+  input = {},
   fetchImpl = fetch,
   timeoutMs = FAL_STATUS_TIMEOUT_MS,
+  pollMs = FAL_STATUS_POLL_INTERVAL_MS,
   signal = null,
 }) {
   const model = normalizeFalModelId(config?.model);
@@ -151,7 +156,7 @@ export async function runFalGeneration({
       method: 'POST',
       redirect: 'error', credentials: 'omit',
       headers,
-      body: JSON.stringify({ prompt: text }),
+      body: JSON.stringify({ prompt: text, ...input }),
       signal: operation.signal,
     });
     if (!submitRes.ok) {
@@ -177,9 +182,10 @@ export async function runFalGeneration({
 
     let status = 'IN_QUEUE';
     while (true) {
-      await abortableDelay(FAL_STATUS_POLL_INTERVAL_MS, operation.signal);
+      await abortableDelay(pollMs, operation.signal);
       const statusRes = await fetchImpl(statusUrl, { headers, signal: operation.signal, redirect: 'error', credentials: 'omit' });
-      if (!statusRes.ok) throw new Error(`fal.ai status check failed (HTTP ${statusRes.status}).`);
+      // HTTP failures keep their status, so a refusal is not tried again.
+      if (!statusRes.ok) throw Object.assign(new Error(`fal.ai status check failed (HTTP ${statusRes.status}).`), { status: statusRes.status });
 
       let statusPayload;
       try {
@@ -190,7 +196,12 @@ export async function runFalGeneration({
       status = String(statusPayload?.status || '').toUpperCase();
       if (status === 'COMPLETED') {
         const resultRes = await fetchImpl(responseUrl, { headers, signal: operation.signal, redirect: 'error', credentials: 'omit' });
-        if (!resultRes.ok) throw new Error(`fal.ai result fetch failed (HTTP ${resultRes.status}).`);
+        if (!resultRes.ok) {
+          // fal.ai reports inputs the model rejects here (HTTP 422), with the reason.
+          let detail = '';
+          try { detail = (await resultRes.text()).slice(0, 300); } catch { /* no body */ }
+          throw Object.assign(new Error(`fal.ai result fetch failed (HTTP ${resultRes.status})${detail ? `: ${detail}` : '.'}`), { status: resultRes.status });
+        }
 
         let payload;
         try {

@@ -429,6 +429,26 @@ automatic answers and timeouts cannot
 approve it. Actual verified delivery can instead clear pending state through
 ordinary `chat_observe`, without manual reconciliation.
 
+A `chat_send` whose Enter never reached the page is not uncertain on a page
+that empties its composer the moment it sends (Discord). When the
+page-change fence refuses a key before Enter after the exact draft was
+verified (`submissionBlockReason: 'page_feedback_pending'`), and a live read
+finds that whole draft still in the same composer of the same conversation
+with no new outgoing or unattributed copy, `chat_send` releases its pending
+record and reports `chat_submit_not_dispatched` with `draftRetained: true`.
+One guarded Enter then sends the draft. A changed draft, a sent copy, a
+recipient refusal, a stopped run or another site keeps the record: a page
+that keeps its text until the server answers could be mid-send. Telegram and
+WhatsApp keep their private owned-draft lease for the same state, and a
+direct `set_field` submit keeps its record for the card.
+
+The confirmation card names the conversation as its page does, quoted on its
+own line (`Conversation: “#announcements” on discord.com`), instead of
+WebBrain's thread key, and states only what WebBrain reads: that a message
+with the exact text is shown in the conversation, or else that the message
+box contains it and no such message is shown. It never says whether the
+message was delivered.
+
 Permission and ordinary clarification cards can be recovered from the actual
 live unanswered Agent entry after the panel reopens or its progress events have
 been acknowledged. Recovery requires the same request, run, task, provider and

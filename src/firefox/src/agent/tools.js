@@ -1343,7 +1343,7 @@ export const AGENT_TOOLS = [
     type: 'function',
     function: {
       name: 'generate_image',
-      description: 'Generate an image, or a video with media "video", from a text prompt using the image or video model the user configured (Providers → Generative). Supports fal.ai, OpenRouter, Comfy Router and local ComfyUI workflows; generation may take several minutes. Returns a media URL or inline media displayed in the chat. With an OpenRouter video model, estimate how long the requested video should run (estimated_duration): one clip can set duration, aspect_ratio and resolution; a longer video passes scenes, which WebBrain fits to the model\'s clip lengths and joins into one video of up to 120 s, asking the user first when the estimate is longer. Not available in Ask mode.',
+      description: 'Generate an image, or a video with media "video", from a text prompt using the image or video model the user configured (Providers → Generative). Supports fal.ai, OpenRouter, Comfy Router and local ComfyUI workflows; generation may take several minutes. Returns a media URL or inline media displayed in the chat. For a video, estimate how long the requested video should run (estimated_duration): one clip can set duration, aspect_ratio and resolution; a longer video passes scenes, which WebBrain fits to the video model\'s clip lengths and joins into one video of up to 120 s, asking the user first when the estimate is longer. Not available in Ask mode.',
       parameters: {
         type: 'object',
         properties: {

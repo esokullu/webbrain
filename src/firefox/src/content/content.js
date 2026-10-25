@@ -7561,7 +7561,12 @@
             identityCandidates: [],
           };
         }
-        if (editable(target) && (target !== composer || twitterConversation)) {
+        // A click into an editor, the composer itself included, only focuses
+        // it; Enter, a submit or a Send control commits the message. Left to
+        // the geometry rule below, the composer is beside itself, so each
+        // focus click counted as a send and armed a pending outbound record
+        // that then refused the real Enter as a duplicate (Discord).
+        if (editable(target)) {
           return { success: true, messageSend: false, conclusive: true, identityCandidates: [] };
         }
         if (verifiedConversationSelection(target, composer)) {
@@ -9423,13 +9428,18 @@
             try {
               const roleAttr = (el.getAttribute && el.getAttribute('role') || '').toLowerCase();
               const controls = el.getAttribute && el.getAttribute('aria-controls');
+              // A rich-text message editor is no picker unless its role says
+              // so: its aria-autocomplete, aria-expanded and pop-up lists
+              // belong to @mention and emoji suggestions, where an ArrowDown
+              // before Enter moves the suggestion instead of letting Enter send.
+              const richTextEditor = el.isContentEditable && roleAttr !== 'searchbox' && roleAttr !== 'combobox';
               let isCombobox = roleAttr === 'searchbox' || roleAttr === 'combobox'
-                || (el.getAttribute && el.getAttribute('aria-autocomplete'))
-                || (el.getAttribute && el.getAttribute('aria-expanded') === 'true');
-              if (!isCombobox && controls) {
+                || (!richTextEditor && ((el.getAttribute && el.getAttribute('aria-autocomplete'))
+                  || (el.getAttribute && el.getAttribute('aria-expanded') === 'true')));
+              if (!isCombobox && controls && !richTextEditor) {
                 try { if (document.getElementById(controls)) isCombobox = true; } catch {}
               }
-              if (!isCombobox) {
+              if (!isCombobox && !richTextEditor) {
                 try {
                   const lbs = document.querySelectorAll('[role="listbox"],[role="menu"]');
                   for (const lb of lbs) {

@@ -285,8 +285,8 @@ they want get a video from it, as before.
 For Comfy Router models with native inputs other than `prompt`, paste their input
 JSON in **Image model input JSON** or **Video model input JSON** and place
 `{{prompt}}` in the text field(s). Other values, such as duration or resolution,
-are preserved. Without a placeholder, WebBrain supplies the tool prompt as
-`prompt`. Refer to the model's
+are preserved unless the agent sets that option for the clip. Without a
+placeholder, WebBrain supplies the tool prompt as `prompt`. Refer to the model's
 [input schema](https://docs.comfy.org/development/comfy-router/schemas).
 
 For local ComfyUI, start the server, export a working workflow **in API format**,
@@ -313,16 +313,27 @@ can charge for a partner generation already in flight. Inline media is limited t
 as media assets, so their previews and save links survive panel reopening without
 putting base64 bytes in the run journal or model context.
 
-With an OpenRouter video model, a video can be longer than one clip. The model
-estimates how long the requested video should run (`estimated_duration`). A
-single clip can set `duration`, `aspect_ratio` and `resolution`, which are
-checked against the model's catalog entry (`supported_durations`,
-`supported_aspect_ratios`, `supported_resolutions`) before anything is
-submitted. A longer video is passed as `scenes`: WebBrain makes one clip per
+With a fal.ai, OpenRouter or Comfy Router video model, a video can be longer
+than one clip. The model estimates how long the requested video should run
+(`estimated_duration`). A single clip can set `duration`, `aspect_ratio` and
+`resolution`, which are checked against what the video model accepts before
+anything is submitted: OpenRouter's catalog entry (`supported_durations`,
+`supported_aspect_ratios`, `supported_resolutions`), or the OpenAPI schema
+fal.ai (`api.fal.ai/v1/models?endpoint_id=…&expand=openapi-3.0`) or Comfy
+Router (`/v2/models/{provider}/{model}/openapi.json`) publishes for the model,
+read once per call that sets any of them. From a schema, WebBrain takes the inputs the model's request
+body has, its listed clip lengths (sent as listed, such as `6`, `"6"` or
+`"8s"`) or the whole seconds of its length range (sent as numbers), and its
+listed aspect ratios and resolutions (matched without regard to case and sent as
+listed, such as `768P`). Without a schema, a single clip's options are sent as
+given and scenes are refused, since the clip lengths are unknown. A local
+ComfyUI workflow sets its own length and shape, so these options are refused
+there. A longer video is passed as `scenes`: WebBrain makes one clip per
 scene at a length the model offers (a scene longer than its longest clip is
 refused, so the agent splits it into scenes with their own prompts), generates
 up to three clips at a time with one retry each (none when the provider refuses
-the request, such as for lack of credit), and joins them into one MP4
+the request, such as for lack of credit, or returns a clip that is not an MP4),
+downloads hosted clips (up to 160 MB each) without the API key, and joins them into one MP4
 without re-encoding (`src/*/src/agent/video-join.js`, which parses
 the clips with the vendored mp4box.js). A clip's sound often ends a little
 before its picture or starts after it; with AAC-LC sound (the usual MP4 audio,

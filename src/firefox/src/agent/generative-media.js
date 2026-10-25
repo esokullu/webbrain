@@ -188,19 +188,151 @@ function clipDurations(entry) {
   return durations.length ? durations : null;
 }
 
-// aspect_ratio and resolution, checked against the model's catalog entry so an
-// unsupported value fails before a paid submission.
+// aspect_ratio and resolution, checked against what the model accepts so an
+// unsupported value fails before a paid submission. A value matches without
+// regard to case and is sent as the model lists it ("768p" as "768P").
 function videoShape(entry, video) {
   const shape = {};
   for (const [name, key] of [['aspect_ratio', 'supported_aspect_ratios'], ['resolution', 'supported_resolutions']]) {
     if (video?.[name] === undefined) continue;
+    if (entry?.inputs && !entry.inputs.includes(name)) throw new Error(`This video model does not take ${name}.`);
     const supported = supportedValues(entry, key);
-    if (supported && !supported.some(value => String(value) === String(video[name]))) {
-      throw new Error(`This video model does not support ${name} "${video[name]}". Supported: ${supported.join(', ')}.`);
-    }
-    shape[name] = String(video[name]);
+    const wanted = String(video[name]);
+    const match = supported ? supported.find(value => String(value).toLowerCase() === wanted.toLowerCase()) : wanted;
+    if (match === undefined) throw new Error(`This video model does not support ${name} "${wanted}". Supported: ${supported.join(', ')}.`);
+    shape[name] = match;
   }
   return shape;
+}
+
+// The JSON Schema types a value has.
+const jsonTypes = value => (typeof value === 'number' ? (Number.isInteger(value) ? ['integer', 'number'] : ['number']) : [typeof value]);
+
+// Whether a value meets every schema of a form: their types, listed values,
+// bounds (exclusive or not) and multipleOf. Other keywords are not checked.
+function formAllows(form, value) {
+  return form.every(schema => {
+    const types = [].concat(schema.type ?? []);
+    if (types.length && !jsonTypes(value).some(type => types.includes(type))) return false;
+    if (Array.isArray(schema.enum) && !schema.enum.includes(value)) return false;
+    if (schema.const !== undefined && schema.const !== value) return false;
+    if (typeof value !== 'number') return true;
+    if (Number.isFinite(schema.maximum) && (schema.exclusiveMaximum === true ? value >= schema.maximum : value > schema.maximum)) return false;
+    if (Number.isFinite(schema.exclusiveMaximum) && value >= schema.exclusiveMaximum) return false;
+    if (Number.isFinite(schema.minimum) && (schema.exclusiveMinimum === true ? value <= schema.minimum : value < schema.minimum)) return false;
+    if (Number.isFinite(schema.exclusiveMinimum) && value <= schema.exclusiveMinimum) return false;
+    const step = schema.multipleOf;
+    return !(step > 0) || Math.abs(value / step - Math.round(value / step)) < 1e-9;
+  });
+}
+
+// The values a form lists (enum or const) that all of its schemas allow; null
+// when it lists none.
+function formValues(form) {
+  const lists = form.filter(schema => Array.isArray(schema.enum) || schema.const !== undefined)
+    .map(schema => (schema.const !== undefined ? [schema.const] : schema.enum));
+  if (!lists.length) return null;
+  return lists[0].filter(value => (typeof value === 'string' || typeof value === 'number') && formAllows(form, value));
+}
+
+// The whole seconds a form without listed values allows, up to an hour; none
+// without an upper bound.
+function formSeconds(form) {
+  if (!form.some(schema => Number.isFinite(schema.maximum) || Number.isFinite(schema.exclusiveMaximum))) return [];
+  const seconds = [];
+  for (let value = 1; value <= 3600; value++) if (formAllows(form, value)) seconds.push(value);
+  return seconds;
+}
+
+/**
+ * What a video model accepts, read from the OpenAPI document fal.ai and Comfy
+ * Router publish for each model, in the form of OpenRouter's catalog entries
+ * (supported_durations, supported_aspect_ratios, supported_resolutions), with
+ * `inputs`, the names its request body takes, and `encodeDuration`, which
+ * writes a clip length the way the model takes it. A model's own values are
+ * sent as it lists them (6, "6", "8s"); a length within a range, as a number.
+ * Null when the document describes no request body.
+ */
+export function videoInputCapabilities(openapi) {
+  const schemas = openapi?.components?.schemas || {};
+  const resolve = (node, depth = 0) => {
+    if (!node || typeof node !== 'object' || depth > 8) return null;
+    return typeof node.$ref === 'string' ? resolve(schemas[node.$ref.split('/').pop()], depth + 1) : node;
+  };
+  // A body's properties by name, with those of its parts. A property in the
+  // body and its allOf parts must meet all their schemas; one in anyOf or
+  // oneOf variants, any of them.
+  const properties = (node, depth = 0) => {
+    const body = resolve(node);
+    const merged = new Map();
+    if (!body || depth > 8) return merged;
+    const add = (into, name, schema, key) => into.set(name, into.has(name) ? { [key]: [into.get(name), schema] } : schema);
+    if (body.properties && typeof body.properties === 'object' && !Array.isArray(body.properties)) {
+      for (const [name, schema] of Object.entries(body.properties)) merged.set(name, schema);
+    }
+    for (const part of Array.isArray(body.allOf) ? body.allOf : []) {
+      for (const [name, schema] of properties(part, depth + 1)) add(merged, name, schema, 'allOf');
+    }
+    for (const key of ['anyOf', 'oneOf']) {
+      const variants = new Map();
+      for (const part of Array.isArray(body[key]) ? body[key] : []) {
+        for (const [name, schema] of properties(part, depth + 1)) add(variants, name, schema, 'anyOf');
+      }
+      for (const [name, schema] of variants) add(merged, name, schema, 'allOf');
+    }
+    return merged;
+  };
+  // The generation request's body: the one that takes a prompt, or else the
+  // first (some models take the prompt inside another field).
+  const bodies = Object.values(openapi?.paths || {})
+    .map(operations => properties(operations?.post?.requestBody?.content?.['application/json']?.schema))
+    .filter(body => body.size);
+  const input = bodies.find(body => body.has('prompt')) || bodies[0];
+  if (!input) return null;
+  // The forms a property can take, each a list of schemas that must all hold:
+  // the property's own keywords, every allOf part, and one anyOf or oneOf part.
+  const forms = (node, depth = 0) => {
+    const schema = resolve(node);
+    if (!schema) return [[]];
+    let result = [[schema]];
+    if (depth >= 8) return result;
+    const all = options => { result = result.flatMap(form => options.map(option => [...form, ...option])).slice(0, 64); };
+    for (const part of Array.isArray(schema.allOf) ? schema.allOf : []) all(forms(part, depth + 1));
+    for (const key of ['anyOf', 'oneOf']) {
+      if (Array.isArray(schema[key]) && schema[key].length) all(schema[key].flatMap(part => forms(part, depth + 1)));
+    }
+    return result;
+  };
+  const listed = name => {
+    const values = new Map();
+    for (const form of forms(input.get(name))) for (const value of formValues(form) ?? []) if (!values.has(String(value))) values.set(String(value), value);
+    return values.size ? [...values.values()] : null;
+  };
+  const entry = { inputs: [...input.keys()] };
+  // Clip lengths in whole seconds, each with the value the model takes for it:
+  // a listed value (6, "6", "6.0" or "8s"; "auto" is not a length), or a
+  // second within a range.
+  const lengths = new Map();
+  for (const value of forms(input.get('duration')).flatMap(form => formValues(form) ?? formSeconds(form))) {
+    const match = /^(\d+)(?:\.0+)?\s*s?$/i.exec(String(value).trim());
+    const seconds = match ? Number(match[1]) : 0;
+    if (seconds > 0 && !lengths.has(seconds)) lengths.set(seconds, value);
+  }
+  if (lengths.size) {
+    entry.supported_durations = [...lengths.keys()].sort((a, b) => a - b);
+    entry.encodeDuration = seconds => lengths.get(seconds);
+  }
+  const aspectRatios = listed('aspect_ratio');
+  if (aspectRatios) entry.supported_aspect_ratios = aspectRatios;
+  const resolutions = listed('resolution');
+  if (resolutions) entry.supported_resolutions = resolutions;
+  return entry;
+}
+
+// A clip's length as the model takes it, ready to merge into its request.
+function clipLength(entry, clip) {
+  if (clip.duration === undefined) return {};
+  return { duration: entry?.encodeDuration ? entry.encodeDuration(clip.duration) : clip.duration };
 }
 
 /**
@@ -262,6 +394,7 @@ function planVideo(prompt, video, entry) {
   }
   let duration;
   if (video?.duration !== undefined) {
+    if (entry?.inputs && !entry.inputs.includes('duration')) throw new Error('This video model does not take duration.');
     if (durations && !durations.includes(video.duration)) {
       throw new Error(`This video model does not make ${video.duration} s clips. Supported: ${durations.join(', ')} s.`);
     }
@@ -301,17 +434,41 @@ function dataUrlBytes(url) {
   return { bytes: Uint8Array.from(binary, char => char.charCodeAt(0)), mime: match[1] };
 }
 
+// A failure that trying the clip again would repeat, such as a model that
+// makes another format.
+const lasting = message => Object.assign(new Error(message), { retry: false });
+
 // A clip that will be joined is kept as bytes, not as a data URL.
 async function videoBytes(response, label) {
   const mime = (response.headers?.get?.('Content-Type') || '').split(';')[0].trim();
   if (response.ok && mime === 'video/mp4') {
     const bytes = new Uint8Array(await response.arrayBuffer());
-    if (bytes.length > MAX_INLINE_BYTES) throw new Error('A generated clip exceeds the 20 MB inline limit.');
+    if (bytes.length > MAX_INLINE_BYTES) throw lasting('A generated clip exceeds the 20 MB inline limit.');
     return bytes;
   }
   const decoded = dataUrlBytes(await mediaResponse(response, label));
-  if (decoded?.mime !== 'video/mp4') throw new Error(`${label} did not return an MP4 video.`);
+  if (decoded?.mime !== 'video/mp4') throw lasting(`${label} did not return an MP4 video.`);
   return decoded.bytes;
+}
+
+// A finished clip as MP4 bytes to join: inline media is decoded, a hosted file
+// downloaded within the deadline. No key is sent with the download, so
+// redirects are allowed.
+async function downloadClip(url, { fetchImpl, signal, timeoutMs, label }) {
+  let bytes = dataUrlBytes(url)?.bytes;
+  if (!bytes) {
+    if (!safeMediaUrl(url)) throw lasting(`${label} returned an unsupported media URL.`);
+    const operation = operationSignal(signal, timeoutMs);
+    try {
+      const res = await fetchImpl(url, { signal: operation.signal, credentials: 'omit' });
+      if (!res.ok) throw Object.assign(new Error(`${label} clip download failed (HTTP ${res.status}).`), { status: res.status });
+      bytes = new Uint8Array(await res.arrayBuffer());
+    } catch (error) { throw operation.signal.aborted ? operation.signal.reason : error; }
+    finally { operation.dispose(); }
+  }
+  if (bytes.length > MAX_JOINED_VIDEO_BYTES) throw lasting('A generated clip is larger than WebBrain can keep in the chat.');
+  if (mp4DurationSeconds(bytes) === null) throw lasting(`${label} did not return an MP4 video.`);
+  return bytes;
 }
 
 // Runs `task` for each item, `limit` at a time. The first failure stops the
@@ -339,6 +496,50 @@ async function mapWithConcurrency(items, limit, signal, task) {
   } finally { signal?.removeEventListener('abort', onAbort); }
 }
 
+/**
+ * Makes a video with a provider's video model, the same way for every
+ * provider: one clip (`single` returns { url }), or the clips of its scenes
+ * (`clip` returns each one's MP4 bytes, to be joined), three at a time with
+ * one retry each. `entry` is what the model accepts. A video longer than
+ * WebBrain makes is generated only if the user agrees on its card.
+ */
+async function runVideo({ model, entry, text, video, signal, onProgress, confirmVideoLength, single, clip }) {
+  const plan = planVideo(text, video, entry);
+  if (!plan.scenes) return { ...(await single(plan.clips[0], plan.shape)), model };
+
+  // The user decides on the card whether a shorter version is worth
+  // generating, before anything is submitted. The card is outside the
+  // generation deadline.
+  const lengthDetails = { estimatedSeconds: plan.estimated, totalSeconds: plan.total, clipCount: plan.clips.length, maxSeconds: MAX_VIDEO_SECONDS };
+  if (plan.estimated > MAX_VIDEO_SECONDS) {
+    const answer = typeof confirmVideoLength === 'function' ? await confirmVideoLength(lengthDetails) : 'unavailable';
+    signal?.throwIfAborted?.();
+    if (answer !== 'once') return { declined: true, answer: answer || 'cancelled', model, ...lengthDetails };
+  }
+  onProgress?.(`Generating ${plan.clips.length} video clips…`);
+  let ready = 0;
+  const clips = await mapWithConcurrency(plan.clips, VIDEO_CLIP_CONCURRENCY, signal, async (item, index, groupSignal) => {
+    for (let attempt = 1; ; attempt++) {
+      try {
+        const bytes = await clip(item, plan.shape, groupSignal);
+        ready += 1;
+        onProgress?.(`Video clips: ${ready} of ${plan.clips.length} ready`);
+        return bytes;
+      } catch (error) {
+        // One retry per clip; a second failure, Stop or another clip's failure
+        // ends the video. A request the provider refused (a 4xx other than a
+        // timeout or rate limit, such as no credit left) would fail again, as
+        // would a clip in another format.
+        const refused = error?.retry === false || (error?.status >= 400 && error.status < 500 && ![408, 429].includes(error.status));
+        if (groupSignal.aborted || attempt >= 2 || refused) {
+          throw groupSignal.aborted ? (groupSignal.reason ?? error) : new Error(`Clip ${index + 1} of ${plan.clips.length} failed: ${error.message}`);
+        }
+      }
+    }
+  });
+  return { clips, model, ...lengthDetails };
+}
+
 async function runOpenRouter({ text, media, config, video, fetchImpl, signal, timeoutMs, pollMs, onProgress, confirmVideoLength }) {
   const headers = { Authorization: `Bearer ${config.apiKey}`, 'Content-Type': 'application/json' };
   // One bounded operation: its own deadline, aborted by Stop as well.
@@ -353,55 +554,91 @@ async function runOpenRouter({ text, media, config, video, fetchImpl, signal, ti
     finally { operation.dispose(); }
   };
   const base = 'https://openrouter.ai/api/v1/videos';
-  let plan = null;
-  let model = '';
-  const single = await bounded(signal, async (request, jobSignal) => {
-    const target = await openRouterTarget(config, media, openRouterCatalogs(headers, request));
-    const { kind, entry } = target;
-    model = target.model;
-    if (kind === 'images') {
+  const target = await bounded(signal, request => openRouterTarget(config, media, openRouterCatalogs(headers, request)));
+  const { model } = target;
+  if (target.kind === 'images') {
+    return bounded(signal, async request => {
       const res = await request('https://openrouter.ai/api/v1/images', { method: 'POST', headers, body: JSON.stringify({ model, prompt: text }) });
       return { url: await mediaResponse(res, 'OpenRouter generation'), model };
-    }
-    plan = planVideo(text, video, entry);
-    if (plan.scenes) return null;
-    const res = await openRouterVideoJob({ base, headers, request, signal: jobSignal, pollMs, body: videoRequestBody(model, plan.clips[0], plan.shape) });
-    return { url: await mediaResponse(res, 'OpenRouter video download'), model };
-  });
-  if (single) return single;
-
-  // A video longer than WebBrain makes: the user decides on its card whether a
-  // shorter version is worth generating, before anything is submitted. The
-  // card is outside the generation deadline.
-  const lengthDetails = { estimatedSeconds: plan.estimated, totalSeconds: plan.total, clipCount: plan.clips.length, maxSeconds: MAX_VIDEO_SECONDS };
-  if (plan.estimated > MAX_VIDEO_SECONDS) {
-    const answer = typeof confirmVideoLength === 'function' ? await confirmVideoLength(lengthDetails) : 'unavailable';
-    signal?.throwIfAborted?.();
-    if (answer !== 'once') return { declined: true, answer: answer || 'cancelled', model, ...lengthDetails };
+    });
   }
-  onProgress?.(`Generating ${plan.clips.length} video clips…`);
-  let ready = 0;
-  const clips = await mapWithConcurrency(plan.clips, VIDEO_CLIP_CONCURRENCY, signal, async (clip, index, groupSignal) => {
-    for (let attempt = 1; ; attempt++) {
-      try {
-        const bytes = await bounded(groupSignal, async (request, jobSignal) => videoBytes(
-          await openRouterVideoJob({ base, headers, request, signal: jobSignal, pollMs, body: videoRequestBody(model, clip, plan.shape) }),
-          'OpenRouter video download'));
-        ready += 1;
-        onProgress?.(`Video clips: ${ready} of ${plan.clips.length} ready`);
-        return bytes;
-      } catch (error) {
-        // One retry per clip; a second failure, Stop or another clip's failure
-        // ends the video. A request the provider refused (a 4xx other than a
-        // timeout or rate limit, such as no credit left) would fail again.
-        const refused = error?.status >= 400 && error.status < 500 && ![408, 429].includes(error.status);
-        if (groupSignal.aborted || attempt >= 2 || refused) {
-          throw groupSignal.aborted ? (groupSignal.reason ?? error) : new Error(`Clip ${index + 1} of ${plan.clips.length} failed: ${error.message}`);
-        }
-      }
-    }
+  const job = (request, jobSignal, clip, shape) => openRouterVideoJob({ base, headers, request, signal: jobSignal, pollMs, body: videoRequestBody(model, clip, shape) });
+  return runVideo({
+    model, entry: target.entry, text, video, signal, onProgress, confirmVideoLength,
+    single: (clip, shape) => bounded(signal, async (request, jobSignal) => ({ url: await mediaResponse(await job(request, jobSignal, clip, shape), 'OpenRouter video download') })),
+    clip: (clip, shape, groupSignal) => bounded(groupSignal, async (request, jobSignal) => videoBytes(await job(request, jobSignal, clip, shape), 'OpenRouter video download')),
   });
-  return { clips, model, ...lengthDetails };
+}
+
+// The OpenAPI document of a fal.ai or Comfy Router model, read within the
+// generation's deadline (at most 30 s). Null when none is published for it.
+async function modelSchema(url, headers, label, fetchImpl, signal, timeoutMs) {
+  const operation = operationSignal(signal, Math.min(timeoutMs, 30000));
+  try {
+    const response = await fetchImpl(url, { headers, signal: operation.signal, redirect: 'error', credentials: 'omit' });
+    return response.status === 404 ? null : await jsonResponse(response, label);
+  } catch (error) { throw operation.signal.aborted ? operation.signal.reason : error; }
+  finally { operation.dispose(); }
+}
+
+// What a fal.ai video model accepts ({} when fal.ai publishes no schema for it).
+async function falVideoEntry(model, apiKey, fetchImpl, signal, timeoutMs) {
+  const query = new URLSearchParams({ endpoint_id: model, expand: 'openapi-3.0' });
+  const listing = await modelSchema(`https://api.fal.ai/v1/models?${query}`, { Authorization: `Key ${apiKey}` }, 'fal.ai model schema', fetchImpl, signal, timeoutMs);
+  const openapi = (Array.isArray(listing?.models) ? listing.models : []).find(item => item?.endpoint_id === model)?.openapi;
+  return videoInputCapabilities(openapi) || {};
+}
+
+// What a Comfy Router video model accepts ({} when Comfy Router publishes no schema for it).
+async function comfyRouterVideoEntry(model, apiKey, fetchImpl, signal, timeoutMs) {
+  const openapi = await modelSchema(`https://api.comfy.org/v2/models/${model}/openapi.json`, { 'X-API-Key': apiKey }, 'Comfy Router model schema', fetchImpl, signal, timeoutMs);
+  return videoInputCapabilities(openapi) || {};
+}
+
+// The saved model input with the prompt bound into it ({{prompt}}), or added as `prompt`.
+function comfyRouterBody(parameters, prompt) {
+  return JSON.stringify(parameters).includes('{{prompt}}') ? bindMediaPrompt(parameters, prompt) : { ...parameters, prompt };
+}
+
+// Submits one Comfy Router request, polls it and returns its media URL (hosted
+// or inline). A failure or Stop before completion cancels the request.
+async function comfyRouterJob({ model, apiKey, body, fetchImpl, signal, timeoutMs, pollMs }) {
+  const operation = operationSignal(signal, timeoutMs);
+  const request = (url, init = {}) => {
+    operation.signal.throwIfAborted();
+    return fetchImpl(url, { ...init, signal: operation.signal, redirect: 'error', credentials: 'omit' });
+  };
+  const base = `https://api.comfy.org/v2/models/${model}/requests`;
+  const headers = { 'X-API-Key': apiKey, 'Content-Type': 'application/json' };
+  let cancelUrl = '';
+  let completed = false;
+  try {
+    const queued = await jsonResponse(await request(base, {
+      method: 'POST', headers: { ...headers, 'Idempotency-Key': crypto.randomUUID() }, body: JSON.stringify(body),
+    }), 'Comfy Router submit');
+    if (!/^[A-Za-z0-9_-]+$/.test(queued.request_id || '')) throw new Error('Comfy Router returned an invalid request ID.');
+    // Build authenticated URLs ourselves; never send the key to returned URLs.
+    const resultUrl = `${base}/${queued.request_id}`;
+    cancelUrl = `${resultUrl}/cancel`;
+    let waitMs = pollMs;
+    while (true) {
+      await delay(waitMs, operation.signal);
+      const res = await request(`${resultUrl}/status`, { headers });
+      const status = await jsonResponse(res, 'Comfy Router status');
+      waitMs = pollDelay(res, pollMs);
+      if (status.status === 'COMPLETED') {
+        const result = await request(resultUrl, { headers });
+        if (result.status === 202) { waitMs = pollDelay(result, pollMs); continue; }
+        const url = await mediaResponse(result, 'Comfy Router generation');
+        completed = true;
+        return url;
+      }
+      if (!['IN_QUEUE', 'IN_PROGRESS'].includes(status.status)) throw new Error('Comfy Router returned an unknown queue status.');
+    }
+  } catch (error) {
+    if (!completed && cancelUrl) await cancelRequest(cancelUrl, { method: 'PUT', headers }, fetchImpl);
+    throw operation.signal.aborted ? operation.signal.reason : error;
+  } finally { operation.dispose(); }
 }
 
 /**
@@ -418,8 +655,8 @@ export async function runMediaGeneration({ prompt, config, media = null, video =
   if (media === 'image' && video) {
     throw new Error('Video length, aspect ratio, resolution and scenes are for videos. Set media to "video" or leave these out.');
   }
-  if (video && provider !== 'openrouter') {
-    throw new Error(`Video length, aspect ratio, resolution and scenes work with OpenRouter video models. Omit them to use the ${MEDIA_PROVIDERS[provider].label} video model's defaults.`);
+  if (video && provider === 'comfyui') {
+    throw new Error('Video length, aspect ratio, resolution and scenes do not work with a local ComfyUI workflow, which sets them itself. Omit them.');
   }
   const kind = media || (video ? 'video' : null);
   const pollMs = pollIntervalMs ?? (provider === 'openrouter' ? 30000 : 2000);
@@ -428,7 +665,32 @@ export async function runMediaGeneration({ prompt, config, media = null, video =
   }
   const slot = mediaSlot(config, kind || 'image');
   const { model } = slot;
-  if (provider === 'fal') return runFalGeneration({ prompt: text, config: { ...config, model }, fetchImpl, signal, timeoutMs });
+  const videoRun = { model, text, video, signal, onProgress, confirmVideoLength };
+  if (provider === 'fal') {
+    const job = (prompt, input, jobSignal) => runFalGeneration({ prompt, config: { ...config, model }, input, fetchImpl, signal: jobSignal, timeoutMs, pollMs });
+    if (kind !== 'video') return job(text, {}, signal);
+    // The model's schema says what it accepts; a plain clip needs none of it.
+    const entry = video ? await falVideoEntry(model, config.apiKey, fetchImpl, signal, timeoutMs) : {};
+    return runVideo({
+      ...videoRun, entry,
+      single: async (clip, shape) => ({ url: (await job(clip.prompt, { ...clipLength(entry, clip), ...shape }, signal)).url }),
+      clip: async (clip, shape, groupSignal) => downloadClip((await job(clip.prompt, { ...clipLength(entry, clip), ...shape }, groupSignal)).url,
+        { fetchImpl, signal: groupSignal, timeoutMs, label: 'fal.ai' }),
+    });
+  }
+  if (provider === 'comfyrouter') {
+    const parameters = parseMediaJson(slot.parameters || '{}', kind === 'video' ? 'Video model input' : 'Image model input');
+    // The clip's own length and shape replace those in the saved model input.
+    const job = (prompt, input, jobSignal) => comfyRouterJob({ model, apiKey: config.apiKey, body: { ...comfyRouterBody(parameters, prompt), ...input }, fetchImpl, signal: jobSignal, timeoutMs, pollMs });
+    if (kind !== 'video') return { url: await job(text, {}, signal), model };
+    const entry = video ? await comfyRouterVideoEntry(model, config.apiKey, fetchImpl, signal, timeoutMs) : {};
+    return runVideo({
+      ...videoRun, entry,
+      single: async (clip, shape) => ({ url: await job(clip.prompt, { ...clipLength(entry, clip), ...shape }, signal) }),
+      clip: async (clip, shape, groupSignal) => downloadClip(await job(clip.prompt, { ...clipLength(entry, clip), ...shape }, groupSignal),
+        { fetchImpl, signal: groupSignal, timeoutMs, label: 'Comfy Router' }),
+    });
+  }
   const operation = operationSignal(signal, timeoutMs);
   const request = (url, init = {}) => {
     operation.signal.throwIfAborted();
@@ -437,35 +699,6 @@ export async function runMediaGeneration({ prompt, config, media = null, video =
   let cancelUrl = '', cancelInit;
   let completed = false;
   try {
-    if (provider === 'comfyrouter') {
-      const base = `https://api.comfy.org/v2/models/${model}/requests`;
-      const headers = { 'X-API-Key': config.apiKey, 'Content-Type': 'application/json' };
-      const parameters = parseMediaJson(slot.parameters || '{}', kind === 'video' ? 'Video model input' : 'Image model input');
-      const usesTemplate = JSON.stringify(parameters).includes('{{prompt}}');
-      const body = usesTemplate ? bindMediaPrompt(parameters, text) : { ...parameters, prompt: text };
-      const queued = await jsonResponse(await request(base, {
-        method: 'POST', headers: { ...headers, 'Idempotency-Key': crypto.randomUUID() }, body: JSON.stringify(body),
-      }), 'Comfy Router submit');
-      if (!/^[A-Za-z0-9_-]+$/.test(queued.request_id || '')) throw new Error('Comfy Router returned an invalid request ID.');
-      // Build authenticated URLs ourselves; never send the key to returned URLs.
-      const resultUrl = `${base}/${queued.request_id}`;
-      cancelUrl = `${resultUrl}/cancel`; cancelInit = { method: 'PUT', headers };
-      let waitMs = pollMs;
-      while (true) {
-        await delay(waitMs, operation.signal);
-        const res = await request(`${resultUrl}/status`, { headers });
-        const status = await jsonResponse(res, 'Comfy Router status');
-        waitMs = pollDelay(res, pollMs);
-        if (status.status === 'COMPLETED') {
-          const result = await request(resultUrl, { headers });
-          if (result.status === 202) { waitMs = pollDelay(result, pollMs); continue; }
-          const url = await mediaResponse(result, 'Comfy Router generation');
-          completed = true;
-          return { url, model };
-        }
-        if (!['IN_QUEUE', 'IN_PROGRESS'].includes(status.status)) throw new Error('Comfy Router returned an unknown queue status.');
-      }
-    }
     const base = comfyBaseUrl(config.baseUrl);
     const headers = { 'Content-Type': 'application/json' };
     const workflow = bindMediaPrompt(parseMediaJson(slot.workflow, 'ComfyUI workflow'), text);
@@ -530,7 +763,8 @@ async function storeVideoClips(clips, onProgress) {
   }
   const stored = [];
   for (const bytes of clips) {
-    const asset = await storeGeneratedMediaBlob(new Blob([bytes], { type: 'video/mp4' }));
+    // A clip may be as large as a joined video: hosted clips are downloaded up to that size.
+    const asset = await storeGeneratedMediaBlob(new Blob([bytes], { type: 'video/mp4' }), { maxBytes: MAX_JOINED_VIDEO_BYTES });
     stored.push({ mediaId: asset.mediaId, mimeType: asset.mimeType, durationSeconds: roundSeconds(mp4DurationSeconds(bytes)) });
   }
   const durationSeconds = roundSeconds(stored.reduce((sum, clip) => sum + (clip.durationSeconds || 0), 0));
@@ -552,7 +786,7 @@ export async function generateImage(args, options = {}) {
     const provider = mediaProvider(config);
     const result = await runMediaGeneration({
       prompt: args?.prompt, media: args?.media ?? null, video: videoArguments(args), config, fetchImpl, signal: options.signal,
-      onProgress: options.onProgress, confirmVideoLength: options.confirmVideoLength,
+      pollIntervalMs: options.pollIntervalMs, onProgress: options.onProgress, confirmVideoLength: options.confirmVideoLength,
     });
     if (result.declined) {
       return { success: false, declined: true, provider, model: result.model, error: declinedVideoMessage(result) };

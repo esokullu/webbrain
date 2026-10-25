@@ -45,7 +45,10 @@ for (const build of ['chrome', 'firefox']) {
       assert.equal(data.pendingReconciliation, true);
       assert.equal(data.timeoutSec, 0);
       assert.match(data.question, /Owned uncertain outgoing body/);
-      assert.match(data.question, /owned-thread/);
+      // The card names the conversation as its page does, quoted on its own
+      // line, not by WebBrain's thread key.
+      assert.match(data.question, /\nConversation: “Owned QA”\n/);
+      assert.doesNotMatch(data.question, /owned-thread/);
       const entry = f.agent._pendingClarifications.get(f.tab).get(data.clarifyId);
       assert.equal(entry.timer, null);
       f.prompt = data;
