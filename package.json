@@ -8,7 +8,7 @@
     "authenticated": "npm --prefix website-tests run cli --",
     "test:authenticated": "npm --prefix website-tests test",
     "test:authenticated:installed": "npm --prefix website-tests run test:installed",
-    "test": "npm run test:failure-recovery && npm run test:shard:quick && npm run test:shard:runtime-unit && npm run test:shard:browser-a && npm run test:shard:browser-b1 && npm run test:shard:browser-b2 && npm run test:shard:browser-c && npm run test:shard:tail",
+    "test": "npm run test:failure-recovery && npm run test:shard:quick && npm run test:shard:runtime-unit && npm run test:shard:browser-a && npm run test:shard:browser-b1 && npm run test:shard:browser-b2 && npm run test:shard:browser-c && npm run test:shard:tail && npm run test:vision-act",
     "test:failure-recovery": "node --test test/failure-recovery.mjs test/failure-recovery-ui.mjs test/clarify-run-end.mjs test/post-submit-model-recovery.mjs test/run-ui-response-retry.mjs test/ask-stream-retry-ui.mjs test/page-monitor-relaxed-retry.mjs && npm run test:quality:relaxed-monitoring-retry",
     "test:quality:relaxed-monitoring-retry": "node test/quality/relaxed-monitoring-retry-mv3.mjs",
     "test:captcha:ui": "node test/captcha-settings-ui.mjs && node test/captcha-application-ui.mjs && node --test test/captcha-draft-content.mjs test/captcha-challenge-surfaces.mjs",
@@ -110,7 +110,11 @@
     "test:shard:tail": "node test/run.js && node test/selection-scope-restoration.mjs && node scripts/benchmark-offline-relevance.mjs && npm run test:security && node --test test/placeholder-submit-probe.mjs",
     "test:composer-context": "node --test test/page-monitor-inline-post.mjs test/bluesky-composer-context.mjs && node test/quality/inline-social-composer-mv3.mjs && node test/quality/x-compose-dialog-mv3.mjs && node test/quality/bluesky-composer-mv3.mjs",
     "test:bot-memory": "node --test test/bot-memory.mjs test/bot-memory-registries.mjs test/bot-memory-cloud-controller.mjs && node test/bot-memory-dom.mjs && node test/quality/cloud-bot-memory-mv3.mjs",
-    "test:shared-action-guards": "node --test test/typing-preparation-geometry.mjs test/resource-mutation-guards.mjs test/completion-steering-receipt-authority.mjs test/social-ui-navigation.mjs test/native-resource-deletion-binding.mjs test/native-mastodon-confirmation.mjs test/trusted-field-preparation-ownership.mjs test/guards-control-classification.mjs test/guards-unbound-deletion.mjs test/guards-steering-receipts.mjs && node test/quality/shared-action-guards-mv3.mjs"
+    "test:shared-action-guards": "node --test test/typing-preparation-geometry.mjs test/resource-mutation-guards.mjs test/completion-steering-receipt-authority.mjs test/social-ui-navigation.mjs test/native-resource-deletion-binding.mjs test/native-mastodon-confirmation.mjs test/trusted-field-preparation-ownership.mjs test/guards-control-classification.mjs test/guards-unbound-deletion.mjs test/guards-steering-receipts.mjs && node test/quality/shared-action-guards-mv3.mjs",
+    "test:vision-act:unit": "node --test test/vision-frames.mjs test/vision-browser.mjs test/vision-redaction.mjs test/vision-act.mjs test/vision-dev.mjs",
+    "test:vision-act:e2e": "node test/quality/vision-act-mv3.mjs",
+    "test:vision-act": "npm run test:vision-act:unit && npm run test:vision-act:e2e && npm run test:vision-act:firefox",
+    "test:vision-act:firefox": "node --test test/vision-firefox-e2e.mjs"
   },
   "devDependencies": {
     "c8": "^12.0.0",

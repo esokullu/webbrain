@@ -129,7 +129,7 @@ try {
   });
   const harness = await context.newPage(); await harness.goto(`chrome-extension://${new URL(worker.url()).host}/src/ui/settings.html`);
   const message = (action, data = {}) => harness.evaluate(({ action, data }) => chrome.runtime.sendMessage({ target: 'background', action, ...data }), { action, data });
-  await harness.evaluate(() => chrome.storage.local.set({ helpImproveWebBrain: false, planBeforeActMode: 'off', planReviewMode: 'never',
+  await harness.evaluate(() => chrome.storage.local.set({ actObservation: 'accessibility', helpImproveWebBrain: false, planBeforeActMode: 'off', planReviewMode: 'never',
     screenshotFallback: false, autoScreenshot: false, maxAgentSteps: 18, systemOneEnabled: false, tracingEnabled: false,
     agentAllowLocalNetwork: true, askBeforeConsequentialActions: false, openaiAskStreamingEnabled: false }));
   assert.equal((await message('update_provider', { providerId: 'openrouter', config: { apiKey: 'owned-fixture-key', baseUrl: `${base}/v1`,

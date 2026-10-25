@@ -190,7 +190,7 @@ try {
   await harness.evaluate(async () => {
     window.mediaEvents = [];
     chrome.runtime.onMessage.addListener(event => { if (event.action === 'agent_update') mediaEvents.push({ type: event.type, tabId: event.tabId, requestId: event.requestId, at: Date.now(), data: event.data }); });
-    await chrome.storage.local.set({ onboardingComplete: true, pinCoachmarkComplete: true, helpImproveWebBrain: false, planBeforeActMode: 'off', planBeforeAct: false, planReviewMode: 'never', screenshotFallback: false, autoScreenshot: false, maxAgentSteps: 8, systemOneEnabled: false, tracingEnabled: false, agentAllowLocalNetwork: true, askBeforeConsequentialActions: false, openaiAskStreamingEnabled: false, language: 'en' });
+    await chrome.storage.local.set({ actObservation: 'accessibility', onboardingComplete: true, pinCoachmarkComplete: true, helpImproveWebBrain: false, planBeforeActMode: 'off', planBeforeAct: false, planReviewMode: 'never', screenshotFallback: false, autoScreenshot: false, maxAgentSteps: 8, systemOneEnabled: false, tracingEnabled: false, agentAllowLocalNetwork: true, askBeforeConsequentialActions: false, openaiAskStreamingEnabled: false, language: 'en' });
   });
   assert.equal((await message('update_provider', { providerId: 'openrouter', config: { apiKey: 'owned-local-llm-not-a-real-key', baseUrl: `${base}/v1`, model: 'owned/media-fixture', contextWindow: 1_000_000, enabled: true, supportsAskStreaming: false } })).ok, true);
   assert.equal((await message('set_active_provider', { providerId: 'openrouter' })).ok, true);

@@ -541,6 +541,14 @@ async function loadClarifyTimeout() {
 // which leaves the safe answer).
 const clarifyTimeoutReady = loadClarifyTimeout().catch(() => {});
 
+// Experimental branch default. A saved 'accessibility' choice restores legacy Act.
+agent.actObservation = 'vision';
+async function loadActObservation() {
+  const stored = await browser.storage.local.get('actObservation');
+  agent.actObservation = stored.actObservation === 'accessibility' ? 'accessibility' : 'vision';
+}
+const actObservationReady = loadActObservation().catch(() => {});
+
 async function loadAutoScreenshot() {
   const stored = await browser.storage.local.get('autoScreenshot');
   if (stored.autoScreenshot != null) agent.autoScreenshot = stored.autoScreenshot;
@@ -1238,6 +1246,9 @@ browser.storage.onChanged.addListener((changes, areaName) => {
   }
   if (changes.clarifyTimeoutPolicy) {
     agent.clarifyTimeoutPolicy = changes.clarifyTimeoutPolicy.newValue === 'safe' ? 'safe' : 'finish';
+  }
+  if (changes.actObservation) {
+    agent.actObservation = changes.actObservation.newValue === 'accessibility' ? 'accessibility' : 'vision';
   }
   if (changes.autoScreenshot) {
     agent.autoScreenshot = changes.autoScreenshot.newValue;
@@ -3156,6 +3167,7 @@ async function handleMessage(msg, sender) {
     await alwaysAllowApiMutationsReady;
     await strictSecretModeReady;
     await screenshotRedactionReady;
+    await actObservationReady;
     await imageBudgetReady;
     await researchEscalationReady;
   }

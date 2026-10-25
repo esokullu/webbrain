@@ -179,7 +179,7 @@ try {
         if (soakEvents.length > 1500) soakEvents.splice(0, soakEvents.length - 1500);
       }
     });
-    await chrome.storage.local.set({ helpImproveWebBrain: false, planBeforeActMode: 'off', planBeforeAct: false, planReviewMode: 'never',
+    await chrome.storage.local.set({ actObservation: 'accessibility', helpImproveWebBrain: false, planBeforeActMode: 'off', planBeforeAct: false, planReviewMode: 'never',
       screenshotFallback: false, autoScreenshot: false, maxAgentSteps: 30, systemOneEnabled: false, tracingEnabled: false,
       agentAllowLocalNetwork: true, askBeforeConsequentialActions: false, openaiAskStreamingEnabled: false,
       scheduledTasksEnabled: true, scheduledRequireConsequentialConfirmation: false });

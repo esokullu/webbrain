@@ -171,7 +171,7 @@ try {
   const settings = await context.newPage(); await settings.goto(`chrome-extension://${id}/src/ui/settings.html`);
   const messageFrom = (page, action, data = {}) => page.evaluate(({ action, data }) =>
     chrome.runtime.sendMessage({ target: 'background', action, ...data }), { action, data });
-  await settings.evaluate(async () => chrome.storage.local.set({ helpImproveWebBrain: false, planBeforeActMode: 'off',
+  await settings.evaluate(async () => chrome.storage.local.set({ actObservation: 'accessibility', helpImproveWebBrain: false, planBeforeActMode: 'off',
     planBeforeAct: false, planReviewMode: 'never', screenshotFallback: false, autoScreenshot: false,
     maxAgentSteps: 10, systemOneEnabled: false, tracingEnabled: false, agentAllowLocalNetwork: true,
     askBeforeConsequentialActions: false, openaiAskStreamingEnabled: false, contextWindowMode: 'full' }));

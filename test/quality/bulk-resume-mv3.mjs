@@ -227,7 +227,7 @@ try {
   await harness.evaluate(async () => {
     window.bulkEvents = [];
     chrome.runtime.onMessage.addListener(event => { if (event.action === 'agent_update') bulkEvents.push({ requestId: event.requestId, type: event.type, data: event.data }); });
-    await chrome.storage.local.set({ helpImproveWebBrain: false, planBeforeActMode: 'off', planBeforeAct: false, planReviewMode: 'never',
+    await chrome.storage.local.set({ actObservation: 'accessibility', helpImproveWebBrain: false, planBeforeActMode: 'off', planBeforeAct: false, planReviewMode: 'never',
       screenshotFallback: false, autoScreenshot: false, maxAgentSteps: 150, systemOneEnabled: false, tracingEnabled: false,
       agentAllowLocalNetwork: true, askBeforeConsequentialActions: false, openaiAskStreamingEnabled: false });
   });

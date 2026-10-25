@@ -72,7 +72,7 @@ export async function launchDriver(build) {
     const invoke=(action,data={})=>execute('sendMessage',{target:'background',action,...data});
     return {
       async configure(config,settings){
-        await execute('setStorage',settings);
+        await execute('setStorage',{...settings,actObservation:'accessibility'});
         await invoke('update_provider',{providerId:'openai',config:{...config,enabled:true,type:'openai',category:'cloud',providerName:'openai-compatible',apiProtocol:'chat_completions',supportsVision:false}});
         await invoke('set_active_provider',{providerId:'openai'});
         await execute('enablePlanApproval');

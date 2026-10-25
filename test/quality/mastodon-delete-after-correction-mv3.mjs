@@ -258,7 +258,7 @@ try {
   const settings = await context.newPage(); await settings.goto(`${extensionOrigin}/src/ui/settings.html`);
   panel = await context.newPage(); await panel.goto(`${extensionOrigin}/src/ui/sidepanel.html`);
   const message = (action, data = {}) => settings.evaluate(({ action, data }) => chrome.runtime.sendMessage({ target: 'background', action, ...data }), { action, data });
-  await settings.evaluate(() => chrome.storage.local.set({ helpImproveWebBrain: false, userMemoryEnabled: false, tracingEnabled: false,
+  await settings.evaluate(() => chrome.storage.local.set({ actObservation: 'accessibility', helpImproveWebBrain: false, userMemoryEnabled: false, tracingEnabled: false,
     autoScreenshot: false, screenshotFallback: false, planBeforeActMode: 'off', planBeforeAct: false, planReviewMode: 'never',
     maxAgentSteps: 40, systemOneEnabled: false, agentAllowLocalNetwork: true, askBeforeConsequentialActions: false,
     openaiAskStreamingEnabled: false }));

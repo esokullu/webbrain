@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { BidiSession } from './session.mjs';
 import { nativeReplyMessages } from './native-messages.mjs';
+import { readVisionViewport, captureVision, performVisionInput } from './vision.mjs';
 const session = new BidiSession();
 let buffer = Buffer.alloc(0);
 const pendingPageDispatchChecks = new Map();
@@ -41,6 +42,9 @@ async function dispatch(message) {
       case 'closeRun': result = await session.closeRun(args.runId); break;
       case 'perform': result = await session.perform(args.runId, args.action, args.payload || {}, validatePageDispatch); break;
       case 'captureFullPage': result = await session.captureFullPage(args.token, args.url); break;
+      case 'visionViewport': result = await readVisionViewport(session, args.runId); break;
+      case 'visionCapture': result = await captureVision(session, args.runId); break;
+      case 'visionInput': result = await performVisionInput(session, args.runId, args.method, args.params, args.viewport, args.release === true); break;
       default: throw new Error('Unknown companion command');
     }
     reply({ id, result });

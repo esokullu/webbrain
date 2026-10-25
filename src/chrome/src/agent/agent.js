@@ -1,3 +1,4 @@
+import { runVisionAct, useVisionAct } from './vision-act.js';
 import { filenameInConfiguredDownloadDirectory } from '../download-directory.js';
 import { historyMessagesForRecovery } from '../chat-history-recovery.js';
 import '../content/file-upload-policy.js';
@@ -1019,6 +1020,8 @@ export class Agent extends LoopDetector {
     this._continuationTaskTokens = new Map(); // tabId -> stashed task token carried only by trusted continuations
     this._latestWorkflowDrafts = new Map(); // tabId -> sanitized, session-scoped workflow draft
     this.currentCostState = new Map(); // tabId -> active cloud/router cost state
+    // The extension selects vision by default; embedders can explicitly choose either runtime.
+    this.actObservation = 'accessibility';
     this.maxSteps = 130; // safety limit for autonomous loops (configurable via settings)
     // Seconds to wait on clarify() before auto-picking the first option.
     // 0 = instant auto-select; 1–1200 = wait N seconds; -1 = Off (wait forever).
@@ -6315,7 +6318,7 @@ export class Agent extends LoopDetector {
       await this._withContentActionDeadline(async signal => {
         await this.assertRunStartAllowed(tabId, defaultKind, runOptions);
         this._throwIfAborted(signal);
-        if (!this._isStandaloneChatRun(runOptions)) {
+        if (!this._isStandaloneChatRun(runOptions) && runOptions._visionAct !== true) {
           await this._beginPageFeedbackRun(tabId, this._runEntryKind(defaultKind, runOptions), signal, monitoringRetry);
         }
         this._throwIfAborted(signal);
@@ -55329,6 +55332,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     let runClaimed = false;
     let messageProcessingStarted = false;
     try {
+    runOptions = { ...runOptions, _visionAct: useVisionAct(this, mode, runOptions) };
     await this._claimRunEntry(tabId, 'interactive', runOptions, onUpdate);
     runClaimed = true;
     let continuationEligible = false;
@@ -55728,6 +55732,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
   }
 
   async _processMessageInner(tabId, userMessage, onUpdate, mode, attachments = [], runOptions = {}) {
+    if (useVisionAct(this, mode, runOptions)) return runVisionAct(this, { tabId, userMessage, onUpdate, mode, attachments, runOptions });
     await this._hydrate(tabId);
     this.pendingAdapterMatchTraces.delete(tabId);
     this.pendingVisionRouteTraces.delete(tabId);
@@ -55805,6 +55810,10 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     );
     if (autoModeRoute) {
       ({ mode, runOptions } = await this._settleAutoModeRun(tabId, autoModeRoute, enriched, onUpdate, runOptions));
+      if (useVisionAct(this, mode, runOptions)) {
+        this._finishPageFeedbackRun(tabId);
+        return runVisionAct(this, { tabId, userMessage, onUpdate, mode, attachments, runOptions });
+      }
     }
     // A turn routed into an action mode reads how it relates to the earlier
     // task the way an action-mode turn does.
@@ -57392,6 +57401,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     }
     let runClaimed = false;
     try {
+    runOptions = { ...runOptions, _visionAct: useVisionAct(this, mode, runOptions) };
     await this._claimRunEntry(tabId, 'interactive', runOptions, onUpdate);
     runClaimed = true;
     let continuationEligible = false;
@@ -57534,6 +57544,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
   }
 
   async _processMessageStreamInner(tabId, userMessage, onUpdate, mode, runOptions = {}) {
+    if (useVisionAct(this, mode, runOptions)) return runVisionAct(this, { tabId, userMessage, onUpdate, mode, runOptions });
     await this._hydrate(tabId);
     this.pendingAdapterMatchTraces.delete(tabId);
     this.pendingVisionRouteTraces.delete(tabId);

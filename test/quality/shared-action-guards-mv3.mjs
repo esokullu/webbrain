@@ -484,7 +484,7 @@ try {
   const settings = await context.newPage(); await settings.goto(`chrome-extension://${new URL(worker.url()).host}/src/ui/settings.html`);
   panel = await context.newPage(); await panel.goto(`chrome-extension://${new URL(worker.url()).host}/src/ui/sidepanel.html`);
   const message = (action, data = {}) => settings.evaluate(({ action, data }) => chrome.runtime.sendMessage({ target: 'background', action, ...data }), { action, data });
-  await settings.evaluate(() => chrome.storage.local.set({ helpImproveWebBrain: false, userMemoryEnabled: false, tracingEnabled: false,
+  await settings.evaluate(() => chrome.storage.local.set({ actObservation: 'accessibility', helpImproveWebBrain: false, userMemoryEnabled: false, tracingEnabled: false,
     autoScreenshot: false, screenshotFallback: false, planBeforeActMode: 'off', planBeforeAct: false, planReviewMode: 'never', maxAgentSteps: 24,
     systemOneEnabled: false, agentAllowLocalNetwork: true, askBeforeConsequentialActions: false, openaiAskStreamingEnabled: false }));
   assert.equal((await message('update_provider', { providerId: 'openrouter', config: { apiKey: 'owned-fixture-key', baseUrl: `${localOrigin}/v1`,

@@ -642,7 +642,7 @@ for (const [object, name, doneOnly] of [[agent, '_executeToolImpl', true], [agen
   const message = (action, data = {}) => harness.evaluate(({ action, data }) => chrome.runtime.sendMessage({ target: 'background', action, ...data }), { action, data });
   await harness.evaluate(async scenario => { window.qaRun = { finished: false, events: [] }; chrome.runtime.onMessage.addListener(event => {
     if (event.action === 'agent_update' && event.requestId === 'owned-wa-contact') qaRun.events.push({ type: event.type, data: event.data }); });
-    await chrome.storage.local.set({ helpImproveWebBrain: false, planBeforeActMode: 'off', planBeforeAct: false, planReviewMode: 'never',
+    await chrome.storage.local.set({ actObservation: 'accessibility', helpImproveWebBrain: false, planBeforeActMode: 'off', planBeforeAct: false, planReviewMode: 'never',
       screenshotFallback: false, autoScreenshot: false, maxAgentSteps: scenario === 'postwrite_debt' ? 32 : scenario === 'bootstrap_native' ? 28 : 20, systemOneEnabled: false, tracingEnabled: false,
       agentAllowLocalNetwork: true, askBeforeConsequentialActions: false, openaiAskStreamingEnabled: false,
       ...(scenario === 'postwrite_debt' ? { onboardingComplete: true, pinCoachmarkPending: false } : {}) }); }, scenario);

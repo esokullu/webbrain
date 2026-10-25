@@ -447,6 +447,7 @@ async function scenarios(name, driver) {
   // and that call carries the note.
   await setMode(null);
   await driver.ext(`${API}.storage.local.set(${JSON.stringify({
+    actObservation: 'accessibility',
     helpImproveWebBrain: false, tracingEnabled: false, autoScreenshot: false, screenshotFallback: false,
     planBeforeActMode: 'off', planReviewMode: 'never', maxAgentSteps: 4, systemOneEnabled: false,
     agentAllowLocalNetwork: true, askBeforeConsequentialActions: false, openaiAskStreamingEnabled: false,

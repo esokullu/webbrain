@@ -87,7 +87,7 @@ try {
   });
   const harness = await context.newPage(); await harness.goto(`chrome-extension://${new URL(worker.url()).host}/src/ui/settings.html`);
   const message = (action, data = {}) => harness.evaluate(({ action, data }) => chrome.runtime.sendMessage({ target: 'background', action, ...data }), { action, data });
-  await harness.evaluate(() => chrome.storage.local.set({ helpImproveWebBrain: false, tracingEnabled: false,
+  await harness.evaluate(() => chrome.storage.local.set({ actObservation: 'accessibility', helpImproveWebBrain: false, tracingEnabled: false,
     autoScreenshot: false, screenshotFallback: false, planBeforeActMode: 'off', planReviewMode: 'never',
     maxAgentSteps: 8, systemOneEnabled: false, agentAllowLocalNetwork: true, askBeforeConsequentialActions: false,
     openaiAskStreamingEnabled: false }));

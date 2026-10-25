@@ -151,7 +151,7 @@ try {
           clarifyId: event.data.clarifyId, answer: 'once', source: 'user' }).catch(() => {});
       }
     });
-    await chrome.storage.local.set({ helpImproveWebBrain: false, planBeforeActMode: 'off', planReviewMode: 'never',
+    await chrome.storage.local.set({ actObservation: 'accessibility', helpImproveWebBrain: false, planBeforeActMode: 'off', planReviewMode: 'never',
       screenshotFallback: false, autoScreenshot: false, systemOneEnabled: false, tracingEnabled: true,
       feedbackDiagnosticsEnabled: false, losslessTrace: true, agentAllowLocalNetwork: true,
       askBeforeConsequentialActions: true, openaiAskStreamingEnabled: false, maxAgentSteps: 10 });

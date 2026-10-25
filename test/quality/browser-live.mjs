@@ -132,7 +132,7 @@ try {
         window.qualityRuns[event.requestId].events.push({ type: event.type, data: event.data, at: performance.now() });
       }
     });
-    await chrome.storage.local.set({ helpImproveWebBrain: false, planBeforeActMode: 'off', planBeforeAct: false,
+    await chrome.storage.local.set({ actObservation: 'accessibility', helpImproveWebBrain: false, planBeforeActMode: 'off', planBeforeAct: false,
       planReviewMode: 'never', screenshotFallback: false, autoScreenshot: false, maxAgentSteps: 30,
       systemOneEnabled: false, tracingEnabled: true, agentAllowLocalNetwork: true,
       askBeforeConsequentialActions: false, openaiAskStreamingEnabled: true });

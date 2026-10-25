@@ -124,6 +124,16 @@
       </div>
       <div class="setting-row">
         <div class="setting-info">
+          <label class="setting-label" for="select-act-observation">Act / Dev interaction mode</label>
+          <div class="setting-desc">Visual mode reads screenshots and uses screen coordinates. Requires a model with image input and tool calling. Accessibility mode restores the previous agent.</div>
+        </div>
+        <select id="select-act-observation">
+          <option value="vision">Visual (experimental)</option>
+          <option value="accessibility">Accessibility</option>
+        </select>
+      </div>
+      <div class="setting-row">
+        <div class="setting-info">
           <div class="setting-label" data-i18n="st.display.auto_screenshot.label"></div>
           <div class="setting-desc" data-i18n="st.display.auto_screenshot.desc"></div>
         </div>

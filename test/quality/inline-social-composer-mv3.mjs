@@ -387,7 +387,7 @@ try {
       if (event.action === 'agent_update' && inlineRunEvents[event.requestId])
         inlineRunEvents[event.requestId].push({ type: event.type, data: event.data });
     });
-    return chrome.storage.local.set({ helpImproveWebBrain: false, tracingEnabled: false,
+    return chrome.storage.local.set({ actObservation: 'accessibility', helpImproveWebBrain: false, tracingEnabled: false,
       autoScreenshot: false, screenshotFallback: false, planBeforeActMode: 'off', planBeforeAct: false,
       planReviewMode: 'never', maxAgentSteps: 10, systemOneEnabled: false, agentAllowLocalNetwork: true,
       askBeforeConsequentialActions: false, openaiAskStreamingEnabled: false });

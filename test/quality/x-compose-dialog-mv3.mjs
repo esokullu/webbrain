@@ -362,7 +362,7 @@ try {
     chrome.runtime.onMessage.addListener(event => {
       if (event.action === 'agent_update' && xRunEvents[event.requestId]) xRunEvents[event.requestId].push({ type: event.type, data: event.data });
     });
-    return chrome.storage.local.set({ helpImproveWebBrain: false, tracingEnabled: false,
+    return chrome.storage.local.set({ actObservation: 'accessibility', helpImproveWebBrain: false, tracingEnabled: false,
       autoScreenshot: false, screenshotFallback: false, planBeforeActMode: 'off', planBeforeAct: false,
       planReviewMode: 'never', maxAgentSteps: 12, systemOneEnabled: false, agentAllowLocalNetwork: true,
       askBeforeConsequentialActions: false, openaiAskStreamingEnabled: false });

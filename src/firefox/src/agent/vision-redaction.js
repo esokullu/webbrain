@@ -1,0 +1,49 @@
+// Privacy scans are local geometry only, never model observations. Solid masks
+// avoid a lossy/failed blur leaking pixels, and failure stops capture entirely.
+export async function captureVisionPrivacySnapshot(agent, tabId) {
+  if (!agent.screenshotRedaction) return null;
+  const scan = await agent.captureScreenshotRedactionSnapshotForUser(tabId, { coordinateSpace: 'page' });
+  if (!scan?.ok || !scan.snapshot || scan.snapshot.coordinateSpace !== 'page') {
+    throw new Error('Screenshot privacy scan failed. No screenshot was sent.');
+  }
+  return scan.snapshot;
+}
+
+export async function redactVisionCapture(agent, tabId, dataUrl, viewport, beforeSnapshot = null) {
+  if (!agent.screenshotRedaction && !beforeSnapshot) return dataUrl;
+  const after = await captureVisionPrivacySnapshot({
+    screenshotRedaction: true,
+    captureScreenshotRedactionSnapshotForUser: (...args) => agent.captureScreenshotRedactionSnapshotForUser(...args),
+  }, tabId);
+  // A field moved/removed during capture must still mask its OLD pixels.
+  const sensitiveRegions = [...(beforeSnapshot?.regions || []), ...after.regions];
+  let bitmap;
+  try {
+    bitmap = await createImageBitmap(await (await fetch(dataUrl)).blob());
+    const scaleX = bitmap.width / viewport.width, scaleY = bitmap.height / viewport.height;
+    const regions = sensitiveRegions.map(({ rect }) => {
+      const x = Math.max(0, Math.floor((rect.x - (viewport.scrollX || 0)) * scaleX));
+      const y = Math.max(0, Math.floor((rect.y - (viewport.scrollY || 0)) * scaleY));
+      const right = Math.min(bitmap.width, Math.ceil((rect.x + rect.w - (viewport.scrollX || 0)) * scaleX));
+      const bottom = Math.min(bitmap.height, Math.ceil((rect.y + rect.h - (viewport.scrollY || 0)) * scaleY));
+      return { x, y, width: right - x, height: bottom - y };
+    }).filter(rect => rect.width > 0 && rect.height > 0);
+    if (!regions.length) return dataUrl;
+    const canvas = typeof OffscreenCanvas !== 'undefined' ? new OffscreenCanvas(bitmap.width, bitmap.height)
+      : Object.assign(document.createElement('canvas'), { width: bitmap.width, height: bitmap.height });
+    const context = canvas.getContext('2d');
+    if (!context) throw new Error('No screenshot privacy canvas');
+    context.drawImage(bitmap, 0, 0);
+    context.fillStyle = '#202124';
+    for (const rect of regions) {
+      context.fillRect(rect.x, rect.y, rect.width, rect.height);
+    }
+    const blob = canvas.convertToBlob ? await canvas.convertToBlob({ type: 'image/png' })
+      : await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
+    if (!blob) throw new Error('Screenshot privacy encoding failed');
+    const bytes = new Uint8Array(await blob.arrayBuffer());
+    let binary = '';
+    for (let i = 0; i < bytes.length; i += 16384) binary += String.fromCharCode(...bytes.subarray(i, i + 16384));
+    return `data:image/png;base64,${btoa(binary)}`;
+  } finally { bitmap?.close?.(); }
+}
