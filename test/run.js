@@ -2348,8 +2348,29 @@ test('redaction collectors filter offscreen fields and report incomplete region 
       `${browserName}: per-frame region overflow must be explicit`);
     assert.match(body, /scanned >= MAX_SCANNED_TEXT_NODES[\s\S]*?collectionComplete = false;/,
       `${browserName}: hitting the text scan ceiling must fail closed`);
-    assert.match(body, /const contributesPixels[\s\S]*?style\.visibility === 'hidden'[\s\S]*?childFrames\.push\(\{[\s\S]*?rendered: contributesPixels\(frame, r\),[\s\S]*?rect:/,
-      `${browserName}: child-frame order should be retained while capture visibility is explicit`);
+    let listener;
+    const frames = [
+      { name: 'visible', left: 10, width: 80 },
+      { name: 'offscreen', left: 900, width: 80 },
+      { name: 'hidden', left: 20, width: 80, hidden: true },
+      { name: 'empty', left: 30, width: 0 },
+    ].map(frame => ({ ...frame, src: `https://${frame.name}.test/`,
+      getBoundingClientRect: () => ({ left: frame.left, right: frame.left + frame.width,
+        top: 10, bottom: 60, width: frame.width, height: 50 }) }));
+    vm.runInNewContext(source, {
+      chrome: { runtime: { onMessage: { addListener: value => { listener = value; } } } },
+      window: { innerWidth: 800, innerHeight: 600, scrollX: 0, scrollY: 0 },
+      document: { querySelectorAll: selector => selector === 'iframe, frame' ? frames : [] },
+      getComputedStyle: element => ({ display: 'block', visibility: element.hidden ? 'hidden' : 'visible', opacity: '1' }),
+    });
+    let snapshot;
+    listener({ target: 'redaction-content', action: 'get_redaction_regions', params: { coordinateSpace: 'viewport' } },
+      {}, response => { snapshot = response; });
+    assert.equal(snapshot.complete, true, `${browserName}: ordinary scanner remains complete`);
+    assert.deepEqual(Array.from(snapshot.childFrames, frame => frame.url), frames.map(frame => frame.src),
+      `${browserName}: child-frame order should be retained`);
+    assert.deepEqual(Array.from(snapshot.childFrames, frame => frame.rendered), [true, false, false, false],
+      `${browserName}: ordinary capture visibility remains explicit`);
   }
 });
 

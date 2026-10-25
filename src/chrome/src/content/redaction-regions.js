@@ -18,8 +18,27 @@
 
   const runtime = globalThis.browser?.runtime || globalThis.chrome?.runtime;
   if (!runtime?.onMessage) return;
+  const ownedDocumentToken = globalThis.crypto?.randomUUID?.() || null;
+
+  function ownedNewtabDocument(params) {
+    try {
+      const expected = new URL(runtime.getURL('newtab/index.html'));
+      const current = new URL(window.location.href);
+      const documentToken = ownedDocumentToken;
+      if (params?.ownedNewtabOnly !== true || window.top !== window
+          || !['chrome-extension:', 'moz-extension:'].includes(expected.protocol)
+          || current.protocol !== expected.protocol || current.host !== expected.host
+          || current.pathname !== expected.pathname || current.username || current.password
+          || current.href !== params.expectedUrl
+          || typeof documentToken !== 'string'
+          || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(documentToken)) return null;
+      return { documentUrl: current.href, documentToken };
+    } catch { return null; }
+  }
 
   function collectRedactionRegions(params) {
+    const ownedDocument = params?.ownedNewtabOnly === true ? ownedNewtabDocument(params) : null;
+    if (params?.ownedNewtabOnly === true && !ownedDocument) return { complete: false };
     const space = params?.coordinateSpace === 'page' ? 'page' : 'viewport';
     const sx = space === 'page' ? (window.scrollX || window.pageXOffset || 0) : 0;
     const sy = space === 'page' ? (window.scrollY || window.pageYOffset || 0) : 0;
@@ -119,7 +138,25 @@
 
     const childFrames = [];
     try {
-      for (const frame of document.querySelectorAll('iframe, frame')) {
+      // This opt-in is confined to the extension's own newtab. Its child
+      // documents may be absent from webNavigation, so mask their whole boxes.
+      if (ownedDocument) {
+        let inspected = 0;
+        for (const element of document.querySelectorAll('*')) {
+          if (++inspected > MAX_SCANNED_TEXT_NODES || element.shadowRoot
+              || String(element.tagName || '').includes('-')) {
+            // Do not claim full coverage of an uninspected shadow document.
+            collectionComplete = false;
+            break;
+          }
+        }
+      }
+      const childSelector = ownedDocument ? 'iframe, frame, object, embed' : 'iframe, frame';
+      for (const frame of document.querySelectorAll(childSelector)) {
+        if (ownedDocument && childFrames.length >= MAX_REGIONS) {
+          overflowed = true;
+          break;
+        }
         const r = frame.getBoundingClientRect();
         const transformX = r.width / (frame.offsetWidth || r.width || 1);
         const transformY = r.height / (frame.offsetHeight || r.height || 1);
@@ -128,8 +165,12 @@
           // Keep non-rendered descriptors so navigation-frame order remains
           // unambiguous, but do not require privacy inspection for frames that
           // contribute no pixels to this capture.
-          rendered: contributesPixels(frame, r),
-          rect: {
+          // The owned fallback masks conservatively from geometry: a child
+          // can override an ancestor's visibility:hidden and remain visible.
+          rendered: ownedDocument ? visible(r) : contributesPixels(frame, r),
+          rect: ownedDocument ? {
+            x: r.left + sx, y: r.top + sy, w: r.width, h: r.height,
+          } : {
             x: r.left + sx + (frame.clientLeft || 0) * transformX,
             y: r.top + sy + (frame.clientTop || 0) * transformY,
             w: (frame.clientWidth || r.width) * transformX,
@@ -142,6 +183,7 @@
     }
 
     return {
+      ...(ownedDocument ? { ...ownedDocument, ownedNewtabCoverage: true } : {}),
       elements: selected,
       viewport,
       childFrames,
@@ -291,6 +333,10 @@
     if (msg?.target !== 'redaction-content') return;
     if (msg.action === 'get_redaction_regions') {
       sendResponse(collectRedactionRegions(msg.params || {}));
+    } else if (msg.action === 'confirm_redaction_document') {
+      const identity = ownedNewtabDocument(msg.params);
+      sendResponse(identity && identity.documentToken === msg.params?.documentToken
+        ? { current: true, ...identity } : { current: false });
     } else if (msg.action === 'wait_for_exact_child_frame_rect') {
       waitForExactChildFrameRect(msg.params || {}).then(sendResponse);
       return true;

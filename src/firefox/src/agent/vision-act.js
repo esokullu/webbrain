@@ -150,6 +150,36 @@ async function pause(milliseconds, signal) {
   });
 }
 
+// A redirect can leave a disposable new tab protected for a few more frames.
+// Retry read-only observation after a no-dispatch recovery; once an update is
+// dispatched (or throws), no further startup navigation may be attempted.
+export async function captureVisionStartup(observe, recover, {
+  signal, assertCurrent = () => {}, wait = pause, now = Date.now,
+  maxRecoveries = 8, maxElapsedMs = 8000,
+} = {}) {
+  const started = now();
+  let recoveries = 0, failure;
+  const current = () => { signal?.throwIfAborted(); assertCurrent(); };
+  for (;;) {
+    current();
+    if (recoveries && now() - started >= maxElapsedMs) throw failure;
+    try { return await observe(); } catch (error) { failure = error; }
+    current();
+    if (recoveries >= maxRecoveries || now() - started >= maxElapsedMs) throw failure;
+    // An unknown native update or a failed checkpoint propagates from here;
+    // neither is eligible for observation-triggered mutation replay.
+    const recovery = await recover(failure);
+    recoveries++;
+    current();
+    if (!recovery.retry) throw failure;
+    if (recovery.dispatched) return await observe();
+    const remaining = maxElapsedMs - (now() - started);
+    if (remaining <= 0) throw failure;
+    await wait(Math.min(150 * recoveries, 750, remaining), signal);
+    current();
+  }
+}
+
 // Retry observation only. A navigation or click must never be replayed just
 // because its resulting page was still replacing the document during capture.
 export async function captureVisionObservation(browser, tabId, {
@@ -559,14 +589,14 @@ export async function runVisionAct(agent, { tabId, userMessage, onUpdate = () =>
       },
     });
     runId = await agent._startTraceRun(tabId, userMessage, mode, provider, null, runOptions);
-    try { await observe(true, 'initial'); }
-    catch (error) {
+    const assertStartupCurrent = () => {
+      agent._throwIfAborted(signal);
+      if (agent._hasPendingSteering(tabId)) throw Object.assign(new Error('The user changed the task before startup navigation. No navigation was dispatched.'),
+        { code: 'vision_request_steered', noDispatch: true });
+    };
+    await captureVisionStartup(() => observe(true, 'initial'), async error => {
       let startupCheckpoint = false;
-      const assertCurrent = () => {
-        agent._throwIfAborted(signal);
-        if (agent._hasPendingSteering(tabId)) throw Object.assign(new Error('The user changed the task before startup navigation. No navigation was dispatched.'),
-          { code: 'vision_request_steered', noDispatch: true });
-      };
+      const assertCurrent = assertStartupCurrent;
       const recovery = await bootstrapVisionNewTab(tabId, error, {
         api: api(), signal, assertCurrent,
         prepareDestination: browser.prepareStartupBootstrap?.bind(browser),
@@ -591,12 +621,9 @@ export async function runVisionAct(agent, { tabId, userMessage, onUpdate = () =>
             : { ok: true };
         },
       });
-      if (!recovery.retry) throw error;
       if (recovery.dispatched) ownedBootstrapBlank = { url: recovery.url, documentId: null };
-      // One bounded recovery only; another protected-page failure stops here.
-      // The model receives no request until this real screenshot succeeds.
-      await observe(true, 'initial');
-    }
+      return recovery;
+    }, { signal, assertCurrent: assertStartupCurrent });
     if (mode === 'dev') await startVisionDevDiagnostics(tabId);
     for (step = 1; step <= (agent.maxSteps > 0 ? agent.maxSteps : 130); step++) {
       if (stepOpen && runId) await trace.recordStepEnd(runId, step - 1, { ok: true });

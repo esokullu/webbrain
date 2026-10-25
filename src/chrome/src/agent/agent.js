@@ -199,6 +199,7 @@ import {
   workflowUrlMatches,
 } from './workflows.js';
 import { mergeRedactionFrameRegions, mapRegionsToImage, pixelateDataUrl } from './screenshot-redaction.js';
+import { captureOwnedNewtabRedaction } from './owned-newtab-redaction.js';
 import { buildTrustedRuntimeContext, stripTrustedRuntimeContext } from './runtime-context.js';
 import {
   fitAnswerToContext,
@@ -8484,10 +8485,13 @@ export class Agent extends LoopDetector {
     try {
       navigationFrames = await chrome.webNavigation.getAllFrames({ tabId });
     } catch {
-      return null;
+      navigationFrames = null;
     }
-    if (!Array.isArray(navigationFrames) || navigationFrames.length === 0) {
-      return null;
+    if (!Array.isArray(navigationFrames) || !navigationFrames.some(frame => frame?.frameId === 0)) {
+      const ownedSnapshot = await captureOwnedNewtabRedaction(
+        chrome, tabId, coordinateSpace, STAGED_SCREENSHOT_REDACTION_MAX_REGIONS,
+      );
+      return this._normalizeScreenshotRedactionSnapshot(ownedSnapshot, coordinateSpace);
     }
     const frameSnapshots = await Promise.all(navigationFrames.map(async (frame) => {
       const frameMetadata = {

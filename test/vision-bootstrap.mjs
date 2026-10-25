@@ -6,6 +6,103 @@ const restricted = () => Object.assign(new Error('Browser protects this target')
 const variants = await Promise.all(['chrome', 'firefox'].map(async browser => [browser,
   await import(`../src/${browser}/src/agent/vision-bootstrap.js`)]));
 
+for (const [browser, bootstrap] of variants) {
+  const { captureVisionStartup } = await import(`../src/${browser}/src/agent/vision-act.js`);
+  function startupFixture() {
+    const controller = new AbortController(), updates = [], waits = [];
+    let tab = { id: 71, url: 'chrome://newtab/', pendingUrl: 'chrome://new-tab-page/' };
+    let captures = 0, recoveries = 0, elapsed = 0, steered = false;
+    const api = { runtime: { getURL: path => `chrome-extension://owned/${path}` }, tabs: {
+      get: async () => ({ ...tab }), update: async (id, args) => { updates.push({ id, ...args }); tab = { id, url: args.url }; },
+    } };
+    const check = () => { controller.signal.throwIfAborted(); if (steered) throw Object.assign(new Error('Steered'), { code: 'vision_request_steered' }); };
+    const observe = async () => {
+      captures++;
+      if (tab.url.startsWith('chrome://')) throw restricted();
+      return { pixels: 'actual screenshot', url: tab.url };
+    };
+    const recover = async error => {
+      recoveries++;
+      return bootstrap.bootstrapVisionNewTab(71, error, { api, signal: controller.signal,
+        assertCurrent: check, beforeDispatch: async () => true, afterDispatch: async () => true });
+    };
+    const options = { signal: controller.signal, assertCurrent: check, now: () => elapsed,
+      wait: async delay => { waits.push(delay); elapsed += delay; } };
+    return { api, controller, updates, waits, observe, recover, options,
+      run: () => captureVisionStartup(observe, recover, options), setTab: value => { tab = { ...tab, ...value }; },
+      steer: () => { steered = true; }, counts: () => ({ captures, recoveries }) };
+  }
+
+  test(`${browser}: pending browser-newtab redirect settles before one startup mutation and real screenshot`, async () => {
+    const f = startupFixture(), wait = f.options.wait;
+    f.options.wait = async delay => { await wait(delay); f.setTab({ url: 'chrome://new-tab-page/', pendingUrl: undefined }); };
+    assert.deepEqual(await f.run(), { pixels: 'actual screenshot', url: 'about:blank' });
+    assert.deepEqual(f.updates, [{ id: 71, url: 'about:blank' }]);
+    assert.deepEqual(f.counts(), { captures: 3, recoveries: 2 });
+    assert.deepEqual(f.waits, [150]);
+  });
+
+  test(`${browser}: pending user website or capturable own-newtab navigation is observed without replacement`, async () => {
+    for (const url of ['https://user-selected.example/', 'chrome-extension://owned/newtab/index.html']) {
+      const f = startupFixture(), wait = f.options.wait;
+      f.options.wait = async delay => { await wait(delay); f.setTab({ url, pendingUrl: undefined }); };
+      assert.deepEqual(await f.run(), { pixels: 'actual screenshot', url });
+      assert.deepEqual(f.updates, []);
+      assert.deepEqual(f.counts(), { captures: 2, recoveries: 1 });
+    }
+  });
+
+  test(`${browser}: perpetual pending startup is bounded by recovery count and total elapsed time`, async () => {
+    const f = startupFixture();
+    await assert.rejects(f.run(), { code: 'vision_capture_restricted_target' });
+    assert.deepEqual(f.counts(), { captures: 9, recoveries: 8 });
+    assert.equal(f.waits.length, 8); assert.equal(f.updates.length, 0);
+    const timed = startupFixture(); let elapsed = 0;
+    timed.options.now = () => elapsed;
+    timed.options.wait = async () => { elapsed += 8000; };
+    await assert.rejects(timed.run(), { code: 'vision_capture_restricted_target' });
+    assert.deepEqual(timed.counts(), { captures: 1, recoveries: 1 });
+    assert.equal(timed.updates.length, 0);
+  });
+
+  test(`${browser}: Stop or steering during the startup wait prevents another capture or mutation`, async () => {
+    for (const kind of ['stop', 'steering']) {
+      const f = startupFixture();
+      f.options.wait = async () => { if (kind === 'stop') f.controller.abort(); else f.steer(); };
+      await assert.rejects(f.run(), error => kind === 'stop' ? error.name === 'AbortError' : error.code === 'vision_request_steered');
+      assert.deepEqual(f.counts(), { captures: 1, recoveries: 1 });
+      assert.equal(f.updates.length, 0);
+    }
+  });
+
+  test(`${browser}: unknown update outcome or failed receipt is never replayed by startup recovery`, async () => {
+    for (const failure of ['update', 'receipt']) {
+      const f = startupFixture(); f.setTab({ pendingUrl: undefined });
+      let mutations = 0;
+      f.api.tabs.update = async () => {
+        mutations++;
+        if (failure === 'update') throw new Error('Native update outcome unknown');
+      };
+      const recover = error => bootstrap.bootstrapVisionNewTab(71, error, {
+        api: f.api, beforeDispatch: async () => true,
+        afterDispatch: async () => { throw new Error('Receipt failed'); },
+      });
+      await assert.rejects(captureVisionStartup(f.observe, recover, f.options),
+        failure === 'update' ? /outcome unknown/ : /Receipt failed/);
+      assert.equal(mutations, 1); assert.equal(f.counts().captures, 1); assert.equal(f.waits.length, 0);
+    }
+  });
+
+  test(`${browser}: another restricted capture after an acknowledged startup update cannot dispatch twice`, async () => {
+    const f = startupFixture(); f.setTab({ pendingUrl: undefined });
+    let updates = 0;
+    f.api.tabs.update = async () => { updates++; };
+    await assert.rejects(f.run(), { code: 'vision_capture_restricted_target' });
+    assert.equal(updates, 1); assert.deepEqual(f.counts(), { captures: 2, recoveries: 1 });
+    assert.equal(f.waits.length, 0);
+  });
+}
+
 function fixture() {
   const controller = new AbortController(), calls = [];
   let tab = { id: 71, url: 'chrome://new-tab-page/' };

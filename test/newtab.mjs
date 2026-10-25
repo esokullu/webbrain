@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { runInNewContext } from 'node:vm';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const nt = (...p) => path.join(root, 'newtab', 'src', ...p);
@@ -14,6 +15,42 @@ const { getTitleFromUrl } = await load(nt('utils/links/getTitleFromUrl.js'));
 const { normalizeLinkUrl } = await load(nt('utils/links/normalizeLinkUrl.js'));
 
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+test('own newtab loads the local screenshot privacy scanner before its application', () => {
+  for (const file of [path.join(root, 'newtab/index.html'), ...['chrome', 'firefox'].map(browser => path.join(root, 'src', browser, 'newtab/index.html'))]) {
+    const html = readFileSync(file, 'utf8');
+    const scanner = html.indexOf('<script src="../src/content/redaction-regions.js"></script>');
+    assert.ok(scanner >= 0, `${file}: own extension pages need an explicit local scanner`);
+    assert.ok(scanner < html.indexOf('<script type="module"'), `${file}: privacy listener registers before the task UI`);
+    assert.equal((html.match(/src="\.\.\/src\/content\/redaction-regions\.js"/g) || []).length, 1);
+  }
+});
+
+for (const browser of ['chrome', 'firefox']) test(`${browser}: own newtab scanner responds once with fresh geometry and no form values`, () => {
+  const listeners = [];
+  let left = 11.4;
+  const field = { tagName: 'INPUT', type: 'password', value: 'PRIVATE-NEWTAB-FORM-VALUE',
+    getBoundingClientRect: () => ({ left, top: 21.8, width: 44, height: 22, right: left + 44, bottom: 43.8 }) };
+  const environment = {
+    chrome: { runtime: { onMessage: { addListener: listener => listeners.push(listener) } } },
+    window: { innerWidth: 800, innerHeight: 600, scrollX: 4, scrollY: 6 },
+    document: { documentElement: { scrollWidth: 800, scrollHeight: 600 },
+      querySelectorAll: selector => selector.startsWith('input:') ? [field] : [] },
+  };
+  const source = readFileSync(path.join(root, 'src', browser, 'src/content/redaction-regions.js'), 'utf8');
+  runInNewContext(source, environment); runInNewContext(source, environment);
+  assert.equal(listeners.length, 1, 'Loading an already registered scanner cannot add duplicate listeners');
+  let response;
+  const message = { target: 'redaction-content', action: 'get_redaction_regions', params: { coordinateSpace: 'page' } };
+  listeners[0](message, {}, value => { response = JSON.parse(JSON.stringify(value)); });
+  assert.equal(response.complete, true); assert.equal(response.overflowed, false);
+  assert.deepEqual(response.viewport, { width: 800, height: 600 });
+  assert.deepEqual(response.elements, [{ kind: 'input', type: 'password', rect: { x: 15, y: 28, w: 44, h: 22 } }]);
+  assert.doesNotMatch(JSON.stringify(response), /PRIVATE|value/);
+  left = 211.4;
+  listeners[0](message, {}, value => { response = value; });
+  assert.equal(response.elements[0].rect.x, 215, 'Post-capture scan reads current geometry rather than a startup snapshot');
+});
 
 function memoryStorage(seed = {}) {
   const map = new Map(Object.entries(seed));

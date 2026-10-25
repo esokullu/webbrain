@@ -14,13 +14,15 @@ const out = path.resolve(process.env.WEBBRAIN_QUALITY_ARTIFACTS || 'ci/artifacts
 await fs.mkdir(out, { recursive: true });
 const temp = await fs.realpath(os.tmpdir());
 const profile = await fs.mkdtemp(path.join(temp, 'webbrain-vision-startup-'));
-const sourceFiles = ['src/background.js', 'src/cdp/cdp-client.js', ...['agent', 'vision-act', 'vision-bootstrap',
+const sourceFiles = ['src/background.js', 'src/cdp/cdp-client.js', 'newtab/index.html', 'src/content/redaction-regions.js',
+  ...(await fs.readdir(path.join(extension, 'newtab/assets'))).filter(file => file.endsWith('.js')).map(file => `newtab/assets/${file}`),
+  ...['agent', 'owned-newtab-redaction', 'vision-act', 'vision-bootstrap',
   'vision-browser', 'vision-transport', 'vision-frames', 'vision-redaction', 'vision-capture-diagnostics'].map(name => `src/agent/${name}.js`)];
 const hashSources = async () => Object.fromEntries(await Promise.all(sourceFiles.map(async file =>
   [file, createHash('sha256').update(await fs.readFile(path.join(extension, file))).digest('hex')])));
 const sourceHashes = await hashSources();
 const scenarios = [], failures = [], fixtureRequests = [];
-let active, context, panel, worker, origin;
+let active, context, panel, worker, origin, ownPage;
 const text = content => typeof content === 'string' ? content : (content || []).filter(block => block.type === 'text').map(block => block.text).join('\n');
 const frames = input => input.messages.flatMap(message => Array.isArray(message.content) ? message.content : [])
   .filter(block => block.type === 'text').flatMap(block => {
@@ -65,7 +67,7 @@ const server = http.createServer(async (request, response) => {
       return send(response, '', { name: 'request_action_mode', args: { mode: 'act', evidence: active.evidence } });
     }
     assert.ok(names.includes('vision_click') || names.length === 1 && names[0] === 'vision_review');
-    assert.doesNotMatch(raw, /STARTUP_HIDDEN_SENTINEL/);
+    assert.doesNotMatch(raw, /STARTUP_HIDDEN_SENTINEL|OWN_NEWTAB_PRIVATE_VALUE/);
     const frame = frames(input).at(-1), suppliedImages = images(input);
     assert.ok(frame && suppliedImages.length, 'Every visual model call receives a real screenshot');
     const tab = await panel.evaluate(id => chrome.tabs.get(id), active.tabId);
@@ -83,7 +85,7 @@ const server = http.createServer(async (request, response) => {
       assert.equal(tab.url, active.preserveOwnNewtab ? active.initialUrl : 'about:blank');
       assert.equal(frame.viewport.url, tab.url);
       const image = suppliedImages[0].image_url.url;
-      const pixels = await panel.evaluate(async dataUrl => {
+      const pixels = await panel.evaluate(async ({ dataUrl, viewport }) => {
         const bitmap = await createImageBitmap(await (await fetch(dataUrl)).blob());
         const canvas = new OffscreenCanvas(bitmap.width, bitmap.height), ctx = canvas.getContext('2d');
         ctx.drawImage(bitmap, 0, 0); bitmap.close();
@@ -92,14 +94,27 @@ const server = http.createServer(async (request, response) => {
           const p = ctx.getImageData(x, y, 1, 1).data; samples++;
           if (p[0] < 245 || p[1] < 245 || p[2] < 245) nonWhite++;
         }
+        const pixelAt = (x, y) => [...ctx.getImageData(Math.floor(x * canvas.width / viewport.width), Math.floor(y * canvas.height / viewport.height), 1, 1).data];
         return { width: canvas.width, height: canvas.height, nonWhite, samples,
+          privateField: pixelAt(200, 80), publicMarker: pixelAt(200, 200),
+          privateChild: pixelAt(550, 100), privateChildBorder: pixelAt(463, 44),
           center: [...ctx.getImageData(Math.floor(canvas.width / 2), Math.floor(canvas.height / 2), 1, 1).data] };
-      }, image);
+      }, { dataUrl: image, viewport: frame.viewport });
       assert.ok(pixels.width > 100 && pixels.height > 100 && pixels.samples > 20);
       if (!active.preserveOwnNewtab && !active.privacy) assert.equal(pixels.nonWhite, 0, 'The first image contains actual blank-page pixels');
-      if (active.privacy) {
+      if (active.privacy && !active.preserveOwnNewtab) {
         assert.equal(pixels.nonWhite, pixels.samples, 'The actual owned blank capture is completely privacy masked');
         assert.ok(pixels.center.every((value, index) => Math.abs(value - [32, 33, 36, 255][index]) <= 3));
+      }
+      if (active.privacy && active.preserveOwnNewtab) {
+        assert.ok(pixels.privateField.every((value, index) => Math.abs(value - [32, 33, 36, 255][index]) <= 3),
+          'The real private input region is locally masked');
+        assert.ok(pixels.publicMarker.every((value, index) => Math.abs(value - [17, 187, 85, 255][index]) <= 8),
+          'The rest of the own newtab remains meaningful visible pixels, not an opaque fallback');
+        for (const key of ['privateChild', 'privateChildBorder']) assert.ok(pixels[key].every((value, index) => Math.abs(value - [32, 33, 36, 255][index]) <= 5),
+          'A visible embedded document is entirely masked, including its border box');
+        assert.equal(await ownPage.evaluate(() => document.querySelector('#owned-private-field').value === 'OWN_NEWTAB_PRIVATE_VALUE'), true,
+          'Redaction never clears or changes the source field');
       }
       active.initialFrame = { frameId: frame.frameId, url: frame.viewport.url, pixels };
       return send(response, '', { name: 'vision_navigate', args: { url: active.destination } });
@@ -146,6 +161,18 @@ try {
         return original(...args);
       };
     }
+    const sendMessage = chrome.tabs.sendMessage.bind(chrome.tabs);
+    chrome.tabs.sendMessage = (...args) => {
+      if (args[1]?.target === 'redaction-content' && args[1]?.action === 'get_redaction_regions')
+        startupProbe.push({ kind: 'privacy-scan', tabId: args[0], frameId: args[2]?.frameId });
+      return sendMessage(...args);
+    };
+    const getTab = chrome.tabs.get.bind(chrome.tabs);
+    chrome.tabs.get = (...args) => {
+      const result = getTab(...args);
+      result?.then?.(tab => startupProbe.push({ kind: 'tab-read', tabId: tab.id, url: tab.url, pendingUrl: tab.pendingUrl, status: tab.status }), () => {});
+      return result;
+    };
   });
   for (const scenario of [
     { name: 'direct-act-default-newtab', mode: 'act' },
@@ -153,6 +180,7 @@ try {
     { name: 'auto-ask-to-act-default-newtab', mode: 'auto' },
     { name: 'direct-dev-default-newtab', mode: 'dev' },
     { name: 'own-enabled-newtab-preserved', mode: 'act', preserveOwnNewtab: true },
+    { name: 'own-enabled-newtab-private-regions', mode: 'act', preserveOwnNewtab: true, privacy: true },
     { name: 'settings-refused-without-mutation', mode: 'act', restricted: true },
   ]) {
     console.log(`Visual startup fixture: ${scenario.name}`);
@@ -163,6 +191,22 @@ try {
     const expected = scenario.restricted ? 'chrome://settings/' : scenario.preserveOwnNewtab ? initialUrl : 'chrome://new-tab-page/';
     await panel.waitForFunction(({ id, expected }) => chrome.tabs.get(id).then(tab => tab.url === expected && (!tab.pendingUrl || tab.pendingUrl === expected)),
       { id: created.id, expected }, { timeout: 15000 });
+    if (scenario.preserveOwnNewtab && scenario.privacy) {
+      ownPage = context.pages().find(page => page.url() === expected);
+      assert.ok(ownPage, 'The installed extension owns the real newtab fixture page');
+      await ownPage.waitForLoadState('domcontentloaded');
+      await ownPage.evaluate(() => {
+        const field = document.createElement('input'); field.id = 'owned-private-field'; field.type = 'text';
+        field.value = 'OWN_NEWTAB_PRIVATE_VALUE';
+        field.style.cssText = 'all:initial;position:fixed;left:40px;top:40px;width:360px;height:80px;z-index:2147483647;background:rgb(240,20,20);color:white;box-sizing:border-box;font:20px Arial';
+        const marker = document.createElement('div'); marker.id = 'owned-public-marker';
+        marker.style.cssText = 'all:initial;position:fixed;left:40px;top:160px;width:360px;height:80px;z-index:2147483647;background:rgb(17,187,85)';
+        const child = document.createElement('iframe'); child.id = 'owned-private-child';
+        child.srcdoc = '<!doctype html><style>html,body{margin:0;background:rgb(120,0,220);color:white}</style>OWN_NEWTAB_PRIVATE_VALUE';
+        child.style.cssText = 'position:fixed;left:460px;top:40px;width:250px;height:120px;z-index:2147483647;border:8px solid rgb(120,0,220);background:rgb(120,0,220)';
+        document.body.append(field, marker, child);
+      });
+    }
     active = { ...scenario, tabId: created.id, initialUrl: expected, destination: `${origin}/result/${scenario.name}`,
       sequence: 0, askCalls: 0, semanticChecks: 0, actingCalls: 0, reviews: 0 };
     active.evidence = `open ${active.destination}`;
@@ -205,6 +249,13 @@ try {
       const providerIndex = probe.findIndex(entry => entry.kind === 'provider' && entry.phase === 'acting');
       assert.ok(probe.slice(0, providerIndex).some(entry => entry.kind === 'command' && entry.method === 'Page.captureScreenshot'));
       assert.ok(!probe.some(entry => entry.kind === 'command' && entry.method.startsWith('Input.')), 'Bootstrap never dispatches input');
+      if (scenario.preserveOwnNewtab && scenario.privacy) {
+        const captureIndex = probe.findIndex(entry => entry.kind === 'command' && entry.method === 'Page.captureScreenshot');
+        assert.ok(probe.slice(0, captureIndex).some(entry => entry.kind === 'privacy-scan' && entry.tabId === active.tabId),
+          'The actual owned page supplies a pre-capture region scan');
+        assert.ok(probe.slice(captureIndex + 1, providerIndex).some(entry => entry.kind === 'privacy-scan' && entry.tabId === active.tabId),
+          'The actual owned page supplies a post-capture region scan');
+      }
       if (scenario.mode === 'auto') {
         assert.equal(active.askCalls, 1); assert.equal(active.semanticChecks, 1);
         assert.deepEqual(events.filter(event => event.type === 'run_mode').map(event => event.data.mode), ['ask', 'act']);
@@ -216,7 +267,7 @@ try {
       }
     }
     await panel.evaluate(id => chrome.tabs.remove(id), active.tabId);
-    active = null;
+    active = null; ownPage = null;
   }
   assert.deepEqual(await hashSources(), sourceHashes, 'No production source is changed by the fixture');
   await fs.writeFile(path.join(out, 'summary.json'), JSON.stringify({ passed: true, installedMV3: true, scenarios, sourceHashes }, null, 2));
