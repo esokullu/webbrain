@@ -42,6 +42,7 @@ async function dispatch(message) {
     switch (command) {
       case 'connect': result = await session.connect(args.port); break;
       case 'openRun': result = await session.openRun(args.runId, args.token, args.url); break;
+      case 'openVisionStartupRun': result = await session.openVisionStartupRun(args.runId, args.url); break;
       case 'closeRun': result = await session.closeRun(args.runId); break;
       case 'perform': result = await session.perform(args.runId, args.action, args.payload || {}, validatePageDispatch); break;
       case 'captureFullPage': result = await session.captureFullPage(args.token, args.url); break;

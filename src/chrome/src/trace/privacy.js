@@ -1,5 +1,6 @@
 import { normalizeRejectedToolResponse } from '../agent/model-output-diagnostics.js';
 import { isErrorCode } from './error-codes.js';
+import { projectVisionCaptureDiagnostics } from '../agent/vision-capture-diagnostics.js';
 
 /**
  * Privacy projection for durable trace records.
@@ -152,6 +153,8 @@ function projectVisionCaptureFailure(data) {
   visionNumber(extra, source, 'attempt', 100, { integer: true, positive: true });
   for (const key of ['captureMs', 'encodingMs', 'durationMs']) visionNumber(extra, source, key, 600_000);
   if (typeof source.retryable === 'boolean') extra.retryable = source.retryable;
+  const diagnostics = projectVisionCaptureDiagnostics(source.captureDiagnostics);
+  if (Object.keys(diagnostics).length) extra.captureDiagnostics = diagnostics;
   return { step: Number.isFinite(data?.step) ? data.step : 0, note: 'vision_capture_failure', extra };
 }
 

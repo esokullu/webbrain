@@ -3,7 +3,8 @@
 // Keep this module byte-identical in the Firefox source tree.
 import { VisionFrameSession } from './vision-frames.js';
 import { VisionBrowser, isTransientVisionCaptureError } from './vision-browser.js';
-import { captureVisionPrivacySnapshot, redactVisionCapture } from './vision-redaction.js';
+import { bootstrapVisionNewTab } from './vision-bootstrap.js';
+import { captureVisionPrivacySnapshot, redactVisionCapture, redactVisionOpaqueCapture } from './vision-redaction.js';
 import { VISION_DEV_TOOLS, startVisionDevDiagnostics, runVisionDevDiagnostic } from './vision-dev.js';
 import { Capability, normalizeHost, capabilitiesFor } from './permission-gate.js';
 import { VISION_CAPABILITY_TOOLS, isVisionCapability, executeVisionCapability, visionTaskMemory } from './vision-capabilities.js';
@@ -174,6 +175,7 @@ export async function captureVisionObservation(browser, tabId, {
 }
 
 function visionTraceCode(error, phase) {
+  if (error?.code === 'vision_capture_restricted_target') return 'VISION_CAPTURE_RESTRICTED_TARGET';
   if (error?.code === 'vision_stale_frame') return 'VISION_STALE_FRAME';
   if (/privacy|redact/i.test(String(error?.code || '') + ' ' + String(error?.message || ''))) return 'VISION_PRIVACY_FAILED';
   if (phase === 'vision_frame_encoding') return 'VISION_FRAME_FAILED';
@@ -270,6 +272,8 @@ export async function runVisionAct(agent, { tabId, userMessage, onUpdate = () =>
   const frames = agent._createVisionFrameSession?.() || new VisionFrameSession();
   let capturePrivacySnapshot = null;
   let contextPrivacyProtected = false;
+  let initialFrameCaptured = false;
+  let ownedBootstrapBlank = null;
   const browserOptions = { signal, beforeDispatch: () => {
     agent._throwIfAborted(signal);
     if (agent._hasPendingSteering(tabId)) throw new Error('The user changed the task; observe again before acting.');
@@ -279,10 +283,31 @@ export async function runVisionAct(agent, { tabId, userMessage, onUpdate = () =>
     if (agent.screenshotRedaction && !capturePrivacySnapshot)
       throw Object.assign(new Error('Screenshot privacy setting changed; recapture with privacy enabled'), { code: 'vision_stale_frame' });
     return Boolean(capturePrivacySnapshot);
-  }, redact: (id, dataUrl, viewport) => redactVisionCapture(agent, id, dataUrl, viewport, capturePrivacySnapshot),
+  }, redact: (id, dataUrl, viewport) => {
+    if (capturePrivacySnapshot?.opaqueBootstrapBlank) {
+      if (viewport.url !== capturePrivacySnapshot.url || viewport.documentId !== capturePrivacySnapshot.documentId)
+        throw Object.assign(new Error('The startup document changed before screenshot privacy masking.'), { code: 'vision_stale_frame' });
+      return redactVisionOpaqueCapture(dataUrl);
+    }
+    return redactVisionCapture(agent, id, dataUrl, viewport, capturePrivacySnapshot);
+  },
     withCapture: (id, capture) => {
       const privateCapture = async () => {
-        capturePrivacySnapshot = await captureVisionPrivacySnapshot(agent, id);
+        let opaqueBootstrap = false;
+        if (agent.screenshotRedaction && (!initialFrameCaptured || ownedBootstrapBlank)) {
+          // Protected browser new-tabs reject native access before their
+          // absent privacy content script can hide the actionable diagnosis.
+          const viewport = await browser.readViewport(id);
+          if (ownedBootstrapBlank) {
+            if (viewport.url === ownedBootstrapBlank.url
+                && (!ownedBootstrapBlank.documentId || viewport.documentId === ownedBootstrapBlank.documentId)) {
+              ownedBootstrapBlank.documentId = viewport.documentId;
+              opaqueBootstrap = true;
+            } else ownedBootstrapBlank = null;
+          }
+        }
+        capturePrivacySnapshot = opaqueBootstrap ? { opaqueBootstrapBlank: true, ...ownedBootstrapBlank }
+          : await captureVisionPrivacySnapshot(agent, id);
         try { return { ...await capture(), privacyProtected: Boolean(capturePrivacySnapshot) }; }
         finally { capturePrivacySnapshot = null; }
       };
@@ -357,17 +382,24 @@ export async function runVisionAct(agent, { tabId, userMessage, onUpdate = () =>
         if (runId) await trace.recordNote(runId, step, 'vision_capture_failure', {
           phase, code: visionTraceCode(error, phase), attempt: details.attempt, durationMs: details.durationMs,
           reason: ['vision_stale_frame', 'vision_capture_context_changed'].includes(error?.code) ? 'page_changed' : 'capture_unavailable',
-          retryable: details.retry,
+          retryable: details.retry, captureDiagnostics: error.captureDiagnostics,
         });
         if (details.retry) onUpdate('thinking', { step, note: 'The page changed during capture. Taking a fresh screenshot.' });
       },
     });
     agent._throwIfAborted(signal);
+    if (ownedBootstrapBlank) {
+      if (captured.viewport.url === ownedBootstrapBlank.url
+          && (!ownedBootstrapBlank.documentId || captured.viewport.documentId === ownedBootstrapBlank.documentId))
+        ownedBootstrapBlank.documentId = captured.viewport.documentId;
+      else ownedBootstrapBlank = null;
+    }
     phase = 'vision_frame_encoding';
     const encodeStartedAt = Date.now();
     const privacyProtected = captured.privacyProtected === true;
     const packet = await frames.capture(captured.dataUrl, captured.viewport,
       { forceFull: forceFull || privacyProtected !== contextPrivacyProtected, reason });
+    initialFrameCaptured = true;
     contextPrivacyProtected = privacyProtected;
     const metadata = visionFrameMetadata(packet);
     onUpdate('vision_frame', metadata);
@@ -526,9 +558,46 @@ export async function runVisionAct(agent, { tabId, userMessage, onUpdate = () =>
         return await observe(true, 'visual-research');
       },
     });
-    if (mode === 'dev') await startVisionDevDiagnostics(tabId);
     runId = await agent._startTraceRun(tabId, userMessage, mode, provider, null, runOptions);
-    await observe(true, 'initial');
+    try { await observe(true, 'initial'); }
+    catch (error) {
+      let startupCheckpoint = false;
+      const assertCurrent = () => {
+        agent._throwIfAborted(signal);
+        if (agent._hasPendingSteering(tabId)) throw Object.assign(new Error('The user changed the task before startup navigation. No navigation was dispatched.'),
+          { code: 'vision_request_steered', noDispatch: true });
+      };
+      const recovery = await bootstrapVisionNewTab(tabId, error, {
+        api: api(), signal, assertCurrent,
+        prepareDestination: browser.prepareStartupBootstrap?.bind(browser),
+        beforeDispatch: async () => {
+          await checkpoint();
+          assertCurrent();
+          if (typeof runOptions.beforeConsequentialTool === 'function') {
+            const saved = await runOptions.beforeConsequentialTool({ name: 'vision_startup_bootstrap' });
+            if (saved !== true && saved?.ok !== true) throw Object.assign(new Error('The startup navigation recovery checkpoint could not be saved. No navigation was dispatched.'),
+              { code: 'vision_checkpoint_failed', noDispatch: true });
+            startupCheckpoint = true;
+          }
+          assertCurrent();
+          return { ok: true };
+        },
+        afterDispatch: async result => {
+          assertCurrent();
+          await checkpoint();
+          assertCurrent();
+          return startupCheckpoint && typeof runOptions.afterConsequentialTool === 'function'
+            ? await runOptions.afterConsequentialTool({ name: 'vision_startup_bootstrap', result, outcomeUnknown: false })
+            : { ok: true };
+        },
+      });
+      if (!recovery.retry) throw error;
+      if (recovery.dispatched) ownedBootstrapBlank = { url: recovery.url, documentId: null };
+      // One bounded recovery only; another protected-page failure stops here.
+      // The model receives no request until this real screenshot succeeds.
+      await observe(true, 'initial');
+    }
+    if (mode === 'dev') await startVisionDevDiagnostics(tabId);
     for (step = 1; step <= (agent.maxSteps > 0 ? agent.maxSteps : 130); step++) {
       if (stepOpen && runId) await trace.recordStepEnd(runId, step - 1, { ok: true });
       stepOpen = true;

@@ -194,7 +194,7 @@ export class BidiSession {
   }
   async connectSession(port) {
     if (!Number.isInteger(port) || port < 1024 || port > 65535) throw new Error('Invalid local Firefox port');
-    if (this.socket?.readyState === 1) return { connected: true };
+    if (this.socket?.readyState === 1) return { connected: true, visionStartupBinding: true };
     const socket = this.socket = new this.WebSocketImpl(`ws://127.0.0.1:${port}/session`);
     socket.addEventListener('message', event => this.receive(JSON.parse(event.data)));
     socket.addEventListener('close', () => {
@@ -208,7 +208,7 @@ export class BidiSession {
     });
     await this.send('session.new', { capabilities: { alwaysMatch: { unhandledPromptBehavior: { default: 'ignore' } } } });
     await this.send('session.subscribe', { events: ['browsingContext.userPromptOpened', 'browsingContext.userPromptClosed', 'browsingContext.contextDestroyed'] });
-    return { connected: true };
+    return { connected: true, visionStartupBinding: true };
   }
   send(method, params) {
     if (this.socket?.readyState !== 1) return Promise.reject(new Error('Firefox BiDi is disconnected'));
@@ -270,11 +270,35 @@ export class BidiSession {
   async openRun(id, token, url) {
     if (!/^[a-f0-9-]{36}$/.test(id) || this.runs.has(id) || this.closedRuns.has(id)) throw new Error('Invalid run');
     const match = await this.locate(token, url);
-    if (this.closedRuns.has(id)) throw new Error('Run stopped during binding');
+    if (this.closedRuns.has(id) || this.runs.has(id)) throw new Error('Run stopped or already bound');
     this.runs.set(id, { context: match.context, navigation: false });
     await this.handleDialog(this.runs.get(id));
     if (this.closedRuns.has(id)) throw new Error('Run stopped during binding');
     await this.call(match, '(el) => { el.removeAttribute("data-webbrain-bidi"); return true; }');
+    return { connected: true };
+  }
+  async openVisionStartupRun(id, url) {
+    if (typeof id !== 'string' || !/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/.test(id)
+      || this.runs.has(id) || this.closedRuns.has(id)
+      || typeof url !== 'string' || !/^about:blank#wb-vision-[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/.test(url))
+      throw new Error('Invalid visual startup binding');
+    // The extension just navigated its already-owned new tab to a fresh nonce.
+    // Match one top-level context, never a generic blank page or a child frame.
+    const tree = await this.send('browsingContext.getTree', { maxDepth: 0 });
+    if (this.closedRuns.has(id) || this.runs.has(id)) throw new Error('Run stopped or already bound');
+    if (!Array.isArray(tree.contexts) || tree.contexts.length > 128) throw new Error('Too many Firefox contexts to bind safely');
+    const matches = tree.contexts.filter(context => context.url === url && !context.parent);
+    if (matches.length !== 1) throw new Error('Visual startup tab is stale or ambiguous');
+    const context = matches[0].context;
+    if (typeof context !== 'string' || !context || context.length > 512) throw new Error('Invalid visual startup context');
+    // Confirm the matched context still contains the nonce immediately before
+    // recording ownership. No page text or DOM binding is involved.
+    const verified = await this.send('browsingContext.getTree', { root: context, maxDepth: 0 });
+    if (this.closedRuns.has(id) || this.runs.has(id)) throw new Error('Run stopped or already bound');
+    if (!Array.isArray(verified.contexts) || verified.contexts.length !== 1 || verified.contexts[0].context !== context
+      || verified.contexts[0].url !== url || verified.contexts[0].parent)
+      throw new Error('Visual startup tab changed before binding');
+    this.runs.set(id, { context, navigation: false });
     return { connected: true };
   }
   async captureFullPage(token, url) {

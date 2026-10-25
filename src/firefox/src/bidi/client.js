@@ -125,7 +125,20 @@ export class FirefoxBidiClient {
     const tab = await this.api.tabs.get(tabId);
     // Internal/new tabs cannot accept content scripts. Keep ownership but defer
     // document binding so the normal authorized navigation can leave that page.
-    if (!/^https?:\/\//.test(tab.url || '')) return;
+    if (this.runs.get(tabId) !== owner || owner.disconnected || owner.signal?.aborted) throw new Error('Run stopped');
+    if (!/^https?:\/\//.test(tab.url || '')) {
+      // Only the blank document minted for this exact live owner can bind
+      // without a content-script marker. Never select an arbitrary blank tab.
+      if (!owner.visionStartupUrl || tab.url !== owner.visionStartupUrl
+        || tab.pendingUrl && tab.pendingUrl !== tab.url) return;
+      await this.request('openVisionStartupRun', { runId: owner.runId, url: owner.visionStartupUrl });
+      if (this.runs.get(tabId) !== owner || owner.disconnected || owner.signal?.aborted) {
+        if (this.port) void this.request('closeRun', { runId: owner.runId }).catch(() => {});
+        throw new Error('Run stopped');
+      }
+      owner.bound = true;
+      return;
+    }
     const [binding] = await this.api.tabs.executeScript(tabId, { frameId: 0, file: '/src/bidi/bind.js' });
     const {token, url} = binding || {};
     if (this.runs.get(tabId) !== owner || owner.disconnected || owner.signal?.aborted) throw new Error('Run stopped');
@@ -135,6 +148,20 @@ export class FirefoxBidiClient {
       throw new Error('Run stopped');
     }
     owner.bound = true;
+  }
+  async prepareVisionStartup(tabId) {
+    const owner = this.runs.get(tabId);
+    const current = () => {
+      if (!owner || this.runs.get(tabId) !== owner || owner.disconnected || owner.signal?.aborted || owner.bound)
+        throw new Error('Firefox startup no longer owns the unbound task.');
+    };
+    current();
+    const capabilities = await this.connect();
+    current();
+    if (capabilities?.visionStartupBinding !== true)
+      throw new Error('Update the Firefox trusted automation companion to start visual tasks from a new tab.');
+    owner.visionStartupUrl ||= `about:blank#wb-vision-${crypto.randomUUID()}`;
+    return { url: owner.visionStartupUrl };
   }
   stopRun(tabId) {
     const owner = this.runs.get(tabId); if (!owner) return;

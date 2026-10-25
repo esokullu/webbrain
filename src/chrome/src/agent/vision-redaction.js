@@ -1,5 +1,34 @@
 // Privacy scans are local geometry only, never model observations. Solid masks
 // avoid a lossy/failed blur leaking pixels, and failure stops capture entirely.
+async function privacyPng(canvas) {
+  const blob = canvas.convertToBlob ? await canvas.convertToBlob({ type: 'image/png' })
+    : await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
+  if (!blob) throw new Error('Screenshot privacy encoding failed');
+  const bytes = new Uint8Array(await blob.arrayBuffer());
+  let binary = '';
+  for (let i = 0; i < bytes.length; i += 16384) binary += String.fromCharCode(...bytes.subarray(i, i + 16384));
+  return `data:image/png;base64,${btoa(binary)}`;
+}
+
+// A newly owned blank document has no content-script privacy scanner. Its
+// real compositor capture can still be shared after every pixel is covered.
+// The runner owns the exact URL/document fence; this never scans page data.
+export async function redactVisionOpaqueCapture(dataUrl) {
+  let bitmap;
+  try {
+    bitmap = await createImageBitmap(await (await fetch(dataUrl)).blob());
+    if (!(bitmap.width > 0 && bitmap.height > 0)) throw new Error('Empty screenshot privacy bitmap');
+    const canvas = typeof OffscreenCanvas !== 'undefined' ? new OffscreenCanvas(bitmap.width, bitmap.height)
+      : Object.assign(document.createElement('canvas'), { width: bitmap.width, height: bitmap.height });
+    const context = canvas.getContext('2d');
+    if (!context) throw new Error('No screenshot privacy canvas');
+    context.drawImage(bitmap, 0, 0);
+    context.fillStyle = '#202124';
+    context.fillRect(0, 0, bitmap.width, bitmap.height);
+    return await privacyPng(canvas);
+  } finally { bitmap?.close?.(); }
+}
+
 export async function captureVisionPrivacySnapshot(agent, tabId) {
   if (!agent.screenshotRedaction) return null;
   const scan = await agent.captureScreenshotRedactionSnapshotForUser(tabId, { coordinateSpace: 'page' });
@@ -50,12 +79,6 @@ export async function redactVisionCapture(agent, tabId, dataUrl, viewport, befor
     for (const rect of regions) {
       context.fillRect(rect.x, rect.y, rect.width, rect.height);
     }
-    const blob = canvas.convertToBlob ? await canvas.convertToBlob({ type: 'image/png' })
-      : await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
-    if (!blob) throw new Error('Screenshot privacy encoding failed');
-    const bytes = new Uint8Array(await blob.arrayBuffer());
-    let binary = '';
-    for (let i = 0; i < bytes.length; i += 16384) binary += String.fromCharCode(...bytes.subarray(i, i + 16384));
-    return `data:image/png;base64,${btoa(binary)}`;
+    return await privacyPng(canvas);
   } finally { bitmap?.close?.(); }
 }

@@ -423,6 +423,7 @@ export function tracesToMarkdown(runsWithEvents, {
       } else if (ev.kind === 'note' && d.note === 'vision_capture_failure') {
         const failure = projectTraceEventData('note', d).extra;
         const details = [failure.phase, failure.code, failure.reason,
+          failure.captureDiagnostics?.browser, failure.captureDiagnostics?.stage, failure.captureDiagnostics?.reason,
           failure.attempt ? `attempt ${failure.attempt}` : '',
           Number.isFinite(failure.durationMs) ? `${failure.durationMs} ms` : '',
         ].filter(Boolean).join(' · ');

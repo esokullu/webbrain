@@ -20,6 +20,7 @@ before(async () => {
   await page.evaluate(async () => {
     const privacy = await import('/vision-redaction.js');
     window.redact = privacy.redactVisionCapture;
+    window.redactOpaque = privacy.redactVisionOpaqueCapture;
     window.capturePrivacySnapshot = privacy.captureVisionPrivacySnapshot;
     window.sourceImage = (width = 400, height = 200) => {
       const canvas = document.createElement('canvas'); canvas.width = width; canvas.height = height;
@@ -56,6 +57,33 @@ test('disabled redaction returns pixels unchanged without scanning or decoding',
     return { url: await redact(agent, 7, url, {}), snapshot: await capturePrivacySnapshot(agent, 7), scans };
   });
   assert.deepEqual(result, { url: 'not-an-image-no-decode-expected', snapshot: null, scans: 0 });
+});
+
+test('owned startup blank masking covers every actual captured pixel with opaque color', async () => {
+  const result = await page.evaluate(async () => {
+    const output = await redactOpaque(sourceImage(113, 79));
+    const bitmap = await createImageBitmap(await (await fetch(output)).blob());
+    const canvas = new OffscreenCanvas(bitmap.width, bitmap.height), context = canvas.getContext('2d');
+    context.drawImage(bitmap, 0, 0); bitmap.close();
+    const pixels = context.getImageData(0, 0, canvas.width, canvas.height).data;
+    let mismatches = 0;
+    for (let index = 0; index < pixels.length; index += 4)
+      if (pixels[index] !== 32 || pixels[index + 1] !== 33 || pixels[index + 2] !== 36 || pixels[index + 3] !== 255) mismatches++;
+    return { width: canvas.width, height: canvas.height, mismatches };
+  });
+  assert.deepEqual(result, { width: 113, height: 79, mismatches: 0 });
+});
+
+test('opaque startup masking cannot replace a failed ordinary-page privacy scan or return undecodable bytes', async () => {
+  const result = await page.evaluate(async () => {
+    let opaqueFailed = false, pageFailed = false;
+    try { await redactOpaque('data:image/png;base64,broken'); } catch { opaqueFailed = true; }
+    try { await redact({ screenshotRedaction: true, captureScreenshotRedactionSnapshotForUser: async () => ({ ok: false }) },
+      71, sourceImage(), { width: 200, height: 100, url: 'https://owned.example/', documentId: 'page' }); }
+    catch (error) { pageFailed = error.code === 'vision_privacy_scan_failed'; }
+    return { opaqueFailed, pageFailed };
+  });
+  assert.deepEqual(result, { opaqueFailed: true, pageFailed: true });
 });
 
 test('retina and pinch-pan captures mask page regions at their actual visual viewport offsets', async () => {

@@ -91,6 +91,13 @@ export class VisionBrowser {
       || !viewport.documentId || typeof viewport.url !== 'string') throw failure('Browser viewport metadata is not ready', 'vision_capture_not_ready');
     return viewport;
   }
+  async prepareStartupBootstrap(tabId) {
+    checkAbort(this.signal);
+    const prepared = this.transport.prepareStartupBootstrap
+      ? await this.transport.prepareStartupBootstrap(tabId) : { url: 'about:blank' };
+    checkAbort(this.signal);
+    return prepared;
+  }
   async capture(tabId) {
     if (this.capturing.has(tabId)) throw failure('A screenshot capture is already in progress', 'vision_capture_busy');
     this.capturing.add(tabId);

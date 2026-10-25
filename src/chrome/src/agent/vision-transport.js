@@ -1,8 +1,9 @@
 import { cdpClient } from '../cdp/cdp-client.js';
+import { annotateVisionCaptureError } from './vision-capture-diagnostics.js';
 
 // A browser compositor can stop replying while its tab remains alive. Bound
 // observation only: abandoning a read never retries or cancels native input.
-function boundedVisionRead(signal, label, operation) {
+function boundedVisionRead(signal, label, operation, diagnostics) {
   return new Promise((resolve, reject) => {
     const deadline = Date.now() + 15000;
     let settled = false, timer, terminalError;
@@ -13,7 +14,7 @@ function boundedVisionRead(signal, label, operation) {
       if (settled) return;
       settled = true; clearTimeout(timer);
       signal?.removeEventListener('abort', onAbort);
-      callback(value);
+      callback(callback === reject ? annotateVisionCaptureError(value, diagnostics) : value);
     };
     const onAbort = () => { terminalError = aborted(); finish(reject, terminalError); };
     const guard = () => {
@@ -40,6 +41,12 @@ export function classifyVisionCaptureError(error) {
   const failure = error instanceof Error ? error : new Error(String(error));
   if (failure.name === 'AbortError' || failure.code) return failure;
   const message = failure.message;
+  // Native Chromium refusal only. Do not infer a recoverable new-tab case
+  // from arbitrary permission errors or from the page's URL alone.
+  if (/cannot access (?:a )?(?:chrome(?:-extension|-untrusted)?|devtools):\/\/ URL\b/i.test(message)) {
+    failure.code = 'vision_capture_restricted_target';
+    return failure;
+  }
   if (/permission|denied|not allowed|restricted|not attached|disconnected|no tab|target closed|session closed|tab (?:was |is )?closed|browser.*closed/i.test(message)) return failure;
   if (/execution context (?:was )?destroyed|cannot find (?:default )?(?:execution )?context|cannot find context with specified id|no such (?:realm|frame)|context.*discarded/i.test(message)) {
     failure.code = 'vision_capture_context_changed';
@@ -67,9 +74,13 @@ export function visionPngDimensions(base64) {
 
 export function createVisionTransport({ signal, viewportExpression }) {
   const check = () => { if (signal?.aborted) throw Object.assign(new Error('Vision run stopped'), { name: 'AbortError' }); };
-  const read = (tabId, method, params = {}) => boundedVisionRead(signal, method, async guard => {
+  const read = (tabId, method, params = {}) => {
+    const diagnostics = { browser: 'chrome', stage: 'debugger_attach' };
+    return boundedVisionRead(signal, method, async guard => {
     try {
       guard(); await cdpClient.attach(tabId); guard();
+      diagnostics.stage = { 'Page.getLayoutMetrics': 'viewport_metrics', 'Page.getFrameTree': 'document_tree',
+        'Runtime.evaluate': 'viewport_evaluate', 'Page.captureScreenshot': 'screenshot' }[method];
       return await cdpClient.sendCommand(tabId, method, params, '', { beforeSend: guard });
     } catch (error) {
       guard();
@@ -84,7 +95,8 @@ export function createVisionTransport({ signal, viewportExpression }) {
       }
       throw classified;
     }
-  });
+    }, diagnostics);
+  };
   return {
     async readViewport(tabId) {
       const [metrics, frames, result] = await Promise.all([
@@ -92,12 +104,14 @@ export function createVisionTransport({ signal, viewportExpression }) {
         read(tabId, 'Runtime.evaluate', { expression: viewportExpression, returnByValue: true, timeout: 2000 }),
       ]);
       if (result?.exceptionDetails || !result?.result?.value)
-        throw Object.assign(new Error('Cannot read viewport geometry while the page is loading'), { code: 'vision_capture_not_ready' });
+        throw annotateVisionCaptureError(Object.assign(new Error('Cannot read viewport geometry while the page is loading'), { code: 'vision_capture_not_ready' }),
+          { browser: 'chrome', stage: 'viewport_evaluate' });
       const local = result.result.value;
       const viewport = metrics.cssVisualViewport;
       const root = frames.frameTree?.frame;
       if (!viewport || !root?.loaderId)
-        throw Object.assign(new Error('Browser has not provided a committed document and CSS viewport yet'), { code: 'vision_capture_not_ready' });
+        throw annotateVisionCaptureError(Object.assign(new Error('Browser has not provided a committed document and CSS viewport yet'), { code: 'vision_capture_not_ready' }),
+          { browser: 'chrome', stage: !viewport ? 'viewport_metrics' : 'document_tree' });
       return { ...local, width: viewport.clientWidth, height: viewport.clientHeight,
         offsetLeft: viewport.offsetX, offsetTop: viewport.offsetY,
         scrollX: viewport.pageX, scrollY: viewport.pageY, scale: viewport.scale, zoom: viewport.zoom || 1,
@@ -112,13 +126,16 @@ export function createVisionTransport({ signal, viewportExpression }) {
       const pinched = Math.abs(viewport.scale - 1) > 0.001;
       const result = await read(tabId, 'Page.captureScreenshot', { format: 'png', fromSurface: true, captureBeyondViewport: !pinched,
         ...(!pinched ? { clip: { x: viewport.scrollX, y: viewport.scrollY, width: viewport.width, height: viewport.height, scale: 1 } } : {}) });
-      if (!result?.data) throw Object.assign(new Error('Browser returned an empty screenshot'), { code: 'vision_capture_not_ready' });
+      if (!result?.data) throw annotateVisionCaptureError(Object.assign(new Error('Browser returned an empty screenshot'), { code: 'vision_capture_not_ready' }),
+        { browser: 'chrome', stage: 'screenshot' });
       if (pinched) {
-        const size = visionPngDimensions(result.data);
+        let size;
+        try { size = visionPngDimensions(result.data); }
+        catch (error) { throw annotateVisionCaptureError(error, { browser: 'chrome', stage: 'screenshot' }); }
         const pixelScale = viewport.scale * viewport.devicePixelRatio;
         if (Math.abs(size.width - viewport.width * pixelScale) > 2 || Math.abs(size.height - viewport.height * pixelScale) > 2) {
-          throw Object.assign(new Error('The pinched viewport screenshot was clipped. Resize the browser window or reset pinch zoom before continuing.'),
-            { code: 'vision_capture_clipped' });
+          throw annotateVisionCaptureError(Object.assign(new Error('The pinched viewport screenshot was clipped. Resize the browser window or reset pinch zoom before continuing.'),
+            { code: 'vision_capture_clipped' }), { browser: 'chrome', stage: 'screenshot' });
         }
       }
       return `data:image/png;base64,${result.data}`;

@@ -1,8 +1,9 @@
 import { firefoxBidi } from '../bidi/client.js';
+import { annotateVisionCaptureError } from './vision-capture-diagnostics.js';
 
 // A browser compositor can stop replying while its tab remains alive. Bound
 // observation only: abandoning a read never retries or cancels native input.
-function boundedVisionRead(signal, label, operation) {
+function boundedVisionRead(signal, label, operation, diagnostics) {
   return new Promise((resolve, reject) => {
     const deadline = Date.now() + 15000;
     let settled = false, timer, terminalError;
@@ -13,7 +14,7 @@ function boundedVisionRead(signal, label, operation) {
       if (settled) return;
       settled = true; clearTimeout(timer);
       signal?.removeEventListener('abort', onAbort);
-      callback(value);
+      callback(callback === reject ? annotateVisionCaptureError(value, diagnostics) : value);
     };
     const onAbort = () => { terminalError = aborted(); finish(reject, terminalError); };
     const guard = () => {
@@ -54,9 +55,10 @@ export function classifyVisionCaptureError(error) {
 export function createVisionTransport({ signal }) {
   const pending = new Map();
   const check = () => { if (signal?.aborted) throw Object.assign(new Error('Vision run stopped'), { name: 'AbortError' }); };
-  const ownerFor = async (tabId, guard = check) => {
+  const ownerFor = async (tabId, guard = check, stage = () => {}) => {
     guard();
     if (!firefoxBidi.runs.has(tabId)) {
+      stage('companion_start');
       if (!pending.has(tabId)) pending.set(tabId, firefoxBidi.startRun(tabId, signal).finally(() => pending.delete(tabId)));
       await pending.get(tabId);
     }
@@ -64,19 +66,33 @@ export function createVisionTransport({ signal }) {
     const owner = firefoxBidi.runs.get(tabId);
     if (!owner || owner.disconnected || owner.signal?.aborted)
       throw new Error('Vision input requires the Firefox trusted automation companion; enable it in Settings → Advanced');
+    stage('companion_bind');
     await firefoxBidi.bindRun(tabId, owner);
     guard();
-    if (!owner.bound) throw new Error('Navigate to a regular web page before vision capture');
+    if (!owner.bound) throw Object.assign(new Error('Navigate to a regular web page before vision capture'),
+      { code: 'vision_capture_restricted_target' });
     return owner;
   };
-  const read = (tabId, command) => boundedVisionRead(signal, command, async guard => {
+  const read = (tabId, command) => {
+    const diagnostics = { browser: 'firefox', stage: firefoxBidi.runs.has(tabId) ? 'companion_bind' : 'companion_start' };
+    return boundedVisionRead(signal, command, async guard => {
     try {
-      const owner = await ownerFor(tabId, guard);
+      const owner = await ownerFor(tabId, guard, stage => { diagnostics.stage = stage; });
       guard();
+      diagnostics.stage = command === 'visionViewport' ? 'viewport_native' : 'screenshot';
       return await firefoxBidi.request(command, { runId: owner.runId });
     } catch (error) { guard(); throw classifyVisionCaptureError(error); }
-  });
+    }, diagnostics);
+  };
   return {
+    async prepareStartupBootstrap(tabId) {
+      return boundedVisionRead(signal, 'vision startup bootstrap', async guard => {
+        guard();
+        const prepared = await firefoxBidi.prepareVisionStartup(tabId);
+        guard();
+        return prepared;
+      }, { browser: 'firefox', stage: 'companion_bind' });
+    },
     validateText(text) {
       if (/[\uE000-\uE05D]/u.test(text)) throw new Error('Firefox cannot type reserved WebDriver control characters as literal text');
     },
@@ -85,7 +101,8 @@ export function createVisionTransport({ signal }) {
     },
     async capture(tabId) {
       const result = await read(tabId, 'visionCapture');
-      if (!result?.data) throw Object.assign(new Error('Browser returned an empty screenshot'), { code: 'vision_capture_not_ready' });
+      if (!result?.data) throw annotateVisionCaptureError(Object.assign(new Error('Browser returned an empty screenshot'), { code: 'vision_capture_not_ready' }),
+        { browser: 'firefox', stage: 'screenshot' });
       return `data:image/png;base64,${result.data}`;
     },
     async sendInput(tabId, method, params, { viewport, release = false } = {}) {

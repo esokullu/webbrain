@@ -134,6 +134,168 @@ for (const [browser, module] of variants) {
     assert.equal(count, 1, 'Stop interrupts recovery before another capture');
   });
 
+  for (const mode of ['act', 'dev']) test(`${browser}: ${mode} recovers a protected new tab once before its first screenshot-backed request`, async () => {
+    const originalGet = api.tabs.get, originalUpdate = api.tabs.update;
+    let url = 'chrome://new-tab-page/', captures = 0;
+    const hooks = [];
+    const fixture = setup(module, ({ frame }) => {
+      assert.equal(frame.viewport.url, 'about:blank');
+      assert.ok(fixture.order.includes('capture-blank'));
+      return { toolCalls: [call('done', { frameId: frame.frameId, summary: 'Startup recovered visually.', outcome: 'success' })] };
+    });
+    api.tabs.get = async id => ({ id, url });
+    api.tabs.update = async (id, args) => {
+      assert.equal(id, 71); assert.deepEqual(args, { url: 'about:blank' });
+      fixture.order.push('bootstrap'); url = args.url; return { id, url };
+    };
+    const create = fixture.agent._createVisionBrowser;
+    fixture.agent._createVisionBrowser = options => ({ ...create(options), async capture() {
+      captures++;
+      if (url !== 'about:blank') throw Object.assign(new Error('Browser protects this target'), { code: 'vision_capture_restricted_target' });
+      fixture.order.push('capture-blank');
+      return { dataUrl: IMAGE, viewport: { ...viewport, url } };
+    } });
+    try {
+      assert.equal(await fixture.run({ mode, runOptions: {
+        beforeConsequentialTool: async ({ name }) => { hooks.push(['before', name]); return true; },
+        afterConsequentialTool: async ({ name, result }) => { hooks.push(['after', name, result.dispatched]); return true; },
+      } }), 'Startup recovered visually.');
+      assert.equal(fixture.requests.length, 1); assert.equal(fixture.actions.length, 0);
+      assert.equal(fixture.order.filter(item => item === 'bootstrap').length, 1);
+      assert.ok(fixture.order.indexOf('bootstrap') < fixture.order.indexOf('capture-blank'));
+      assert.ok(fixture.order.indexOf('capture-blank') < fixture.order.indexOf('model'));
+      assert.equal(captures, 3, 'Initial refusal, actual first screenshot, completion screenshot');
+      assert.deepEqual(hooks, [['before', 'vision_startup_bootstrap'], ['after', 'vision_startup_bootstrap', true]]);
+    } finally { api.tabs.get = originalGet; api.tabs.update = originalUpdate; }
+  });
+
+  test(`${browser}: capturable own newtab is preserved and does not enter bootstrap`, async () => {
+    const originalGet = api.tabs.get, originalUpdate = api.tabs.update;
+    const fixture = setup(module, ({ frame }) => ({ toolCalls: [call('done', {
+      frameId: frame.frameId, summary: 'Own newtab preserved.', outcome: 'success',
+    })] }));
+    api.tabs.get = async id => ({ id, url: 'chrome-extension://owned/newtab/index.html' });
+    api.tabs.update = async () => assert.fail('A capturable newtab must never be replaced');
+    try {
+      assert.equal(await fixture.run({ runOptions: {
+        beforeConsequentialTool: async () => assert.fail('A successful initial capture requires no mutation checkpoint'),
+      } }), 'Own newtab preserved.');
+      assert.equal(fixture.requests.length, 1);
+    } finally { api.tabs.get = originalGet; api.tabs.update = originalUpdate; }
+  });
+
+  test(`${browser}: privacy startup uses a native preflight and masks only its owned blank document`, async () => {
+    const originalGet = api.tabs.get, originalUpdate = api.tabs.update;
+    const bitmap = globalThis.createImageBitmap, Canvas = globalThis.OffscreenCanvas;
+    try {
+      for (const scenario of ['success', 'url-change', 'document-change', 'privacy-off', 'ordinary-page']) {
+        let url = scenario === 'ordinary-page' ? 'https://owned.example/' : 'chrome://new-tab-page/';
+        let documentId = 'blank-document', scans = 0, captures = 0, masks = 0, updates = 0;
+        const fixture = setup(module, ({ index, frame }) => {
+          assert.equal(scans, 0, 'The owned blank must be fully masked without a missing content-script scan');
+          assert.ok(masks > 0, 'No request precedes local masking of actual captured pixels');
+          if (index === 0 && ['url-change', 'document-change'].includes(scenario)) {
+            if (scenario === 'url-change') url = 'https://user-selected.example/';
+            else documentId = 'replacement-blank';
+            return { toolCalls: [call('vision_observe', {})] };
+          }
+          return { toolCalls: [call('done', { frameId: frame.frameId, summary: 'Private startup verified.', outcome: 'success' })] };
+        });
+        fixture.agent.screenshotRedaction = true;
+        fixture.agent.captureScreenshotRedactionSnapshotForUser = async () => { scans++; return { ok: false }; };
+        api.tabs.get = async id => ({ id, url, status: 'complete' });
+        api.tabs.update = async (_id, args) => { updates++; url = args.url; };
+        globalThis.createImageBitmap = async () => ({ width: 1200, height: 800, close() {} });
+        globalThis.OffscreenCanvas = class {
+          getContext() { return { drawImage() {}, set fillStyle(color) { assert.equal(color, '#202124'); },
+            fillRect(x, y, width, height) { assert.deepEqual([x, y, width, height], [0, 0, 1200, 800]); masks++; } }; }
+          async convertToBlob() { return new Blob(['OPAQUE MASK']); }
+        };
+        fixture.agent._createVisionBrowser = options => ({
+          async readViewport() {
+            if (url.startsWith('chrome:')) throw Object.assign(new Error('Browser protects this target'), { code: 'vision_capture_restricted_target' });
+            return { ...viewport, url, documentId };
+          },
+          async capture() {
+            return options.withCapture(71, async () => {
+              captures++;
+              const current = { ...viewport, url, documentId };
+              if (scenario === 'privacy-off') fixture.agent.screenshotRedaction = false;
+              const dataUrl = options.shouldRedact(71) ? await options.redact(71, IMAGE, current) : IMAGE;
+              if (captures === 1) assert.equal(dataUrl, 'data:image/png;base64,T1BBUVVFIE1BU0s=');
+              return { dataUrl, viewport: current };
+            });
+          },
+        });
+        // The fixture's generic frame assertion expects its original document.
+        const createFrames = fixture.agent._createVisionFrameSession;
+        fixture.agent._createVisionFrameSession = () => { const session = createFrames(); session.assertViewport = () => {}; return session; };
+        const response = await fixture.run();
+        if (['success', 'privacy-off'].includes(scenario)) assert.equal(response, 'Private startup verified.');
+        else {
+          assert.match(response, /privacy scan failed/);
+          assert.equal(scans, 1, 'A different URL/document uses ordinary fail-closed privacy again');
+        }
+        assert.equal(updates, scenario === 'ordinary-page' ? 0 : 1);
+        assert.equal(fixture.requests.length, scenario === 'ordinary-page' ? 0 : scenario === 'privacy-off' ? 2 : 1, scenario);
+        if (scenario === 'ordinary-page') assert.equal(captures, 0, 'No screenshot before a required ordinary-page privacy scan');
+      }
+    } finally {
+      api.tabs.get = originalGet; api.tabs.update = originalUpdate;
+      if (bitmap === undefined) delete globalThis.createImageBitmap; else globalThis.createImageBitmap = bitmap;
+      if (Canvas === undefined) delete globalThis.OffscreenCanvas; else globalThis.OffscreenCanvas = Canvas;
+    }
+  });
+
+  test(`${browser}: initial bootstrap rejects checkpoint failure, Stop and repeated restricted capture without a model call`, async () => {
+    const originalGet = api.tabs.get, originalUpdate = api.tabs.update;
+    try {
+      for (const scenario of ['checkpoint', 'stop', 'still-restricted', 'settlement']) {
+        let updates = 0, captures = 0;
+        api.tabs.get = async id => ({ id, url: 'chrome://new-tab-page/' });
+        api.tabs.update = async () => { updates++; };
+        const fixture = setup(module, () => assert.fail('Failed startup cannot invoke the model'));
+        fixture.agent._createVisionBrowser = () => ({ async capture() {
+          captures++; throw Object.assign(new Error('Browser protects this target'), { code: 'vision_capture_restricted_target' });
+        } });
+        const response = await fixture.run({ runOptions: {
+          beforeConsequentialTool: async () => {
+            if (scenario === 'stop') fixture.controller.abort();
+            return scenario !== 'checkpoint';
+          },
+          afterConsequentialTool: async () => scenario !== 'settlement',
+        } });
+        assert.match(response, scenario === 'stop' ? /Stopped by user/ : /failed:/);
+        assert.equal(fixture.requests.length, 0);
+        assert.equal(updates, ['still-restricted', 'settlement'].includes(scenario) ? 1 : 0);
+        assert.equal(captures, scenario === 'still-restricted' ? 2 : 1, 'Startup recovery is bounded to one new capture');
+      }
+    } finally { api.tabs.get = originalGet; api.tabs.update = originalUpdate; }
+  });
+
+  test(`${browser}: a user navigation during bootstrap checkpoint is recaptured without being overwritten`, async () => {
+    const originalGet = api.tabs.get, originalUpdate = api.tabs.update;
+    let url = 'chrome://new-tab-page/';
+    api.tabs.get = async id => ({ id, url });
+    api.tabs.update = async () => assert.fail('The user-selected page must not be replaced');
+    const fixture = setup(module, ({ frame }) => {
+      assert.equal(frame.viewport.url, 'https://user-selected.example/');
+      return { toolCalls: [call('done', { frameId: frame.frameId, summary: 'User navigation preserved.', outcome: 'success' })] };
+    });
+    const create = fixture.agent._createVisionBrowser;
+    fixture.agent._createVisionBrowser = options => ({ ...create(options), async capture() {
+      if (url.startsWith('chrome:')) throw Object.assign(new Error('Restricted'), { code: 'vision_capture_restricted_target' });
+      return { dataUrl: IMAGE, viewport: { ...viewport, url } };
+    } });
+    try {
+      assert.equal(await fixture.run({ runOptions: {
+        beforeConsequentialTool: async () => { url = 'https://user-selected.example/'; return true; },
+        afterConsequentialTool: async ({ result }) => { assert.equal(result.noDispatch, true); return true; },
+      } }), 'User navigation preserved.');
+      assert.equal(fixture.requests.length, 1);
+    } finally { api.tabs.get = originalGet; api.tabs.update = originalUpdate; }
+  });
+
   test(`${browser}: batched navigation and wait recover capture races without replay and use a fresh frame for the next action`, async () => {
     let navigations = 0, failedCaptures = 0;
     const originalUpdate = api.tabs.update;

@@ -175,3 +175,119 @@ test('Chrome: ambiguous-navigation live-tab proof stays inside the observation d
   for (let index = 0; index < 10; index++) await Promise.resolve();
   assert.equal(proofs, 1); assert.equal(run.counts.model, 0); assert.equal(run.counts.native, 0);
 });
+
+for (const [method, message, stage, reason, code] of [
+  ['attach', 'Cannot access a chrome:// URL; private detail https://private.test/', 'debugger_attach', 'restricted_target', 'vision_capture_restricted_target'],
+  ['attach', 'Another debugger is already attached to the tab', 'debugger_attach', 'debugger_conflict', undefined],
+  ['attach', 'Permission denied for https://private.test/', 'debugger_attach', 'permission_denied', undefined],
+  ['attach', 'Cannot access a restricted page', 'debugger_attach', 'restricted_target', undefined],
+  ['Page.getLayoutMetrics', 'No tab with id: 999', 'viewport_metrics', 'tab_closed', undefined],
+  ['Page.getFrameTree', 'Cannot find context with specified id', 'document_tree', 'context_changed', 'vision_capture_context_changed'],
+  ['Runtime.evaluate', 'Execution context was destroyed.', 'viewport_evaluate', 'context_changed', 'vision_capture_context_changed'],
+  ['Page.captureScreenshot', 'Unable to capture screenshot', 'screenshot', 'not_ready', 'vision_capture_not_ready'],
+  ['Page.captureScreenshot', 'Unexpected protocol failure containing PRIVATE', 'screenshot', 'unknown', undefined],
+]) test(`Chrome capture diagnostics identify ${stage}/${reason} without changing retry policy`, async t => {
+  const run = fixture(t, 'chrome'), original = cdpClient.sendCommand;
+  const native = Object.assign(new Error(message), { captureDiagnostics: { stage: 'PRIVATE', browser: 'PRIVATE', reason: 'PRIVATE', url: 'https://private.test/' } });
+  if (method === 'attach') t.mock.method(cdpClient, 'attach', async () => { throw native; });
+  else t.mock.method(cdpClient, 'sendCommand', async (...args) => {
+    if (args[1] === method) throw native;
+    return original(...args);
+  });
+  const operation = method === 'Page.captureScreenshot' ? run.transport.capture(run.tabId, view) : run.transport.readViewport(run.tabId);
+  await assert.rejects(operation, error => {
+    assert.equal(error, native); assert.equal(error.code, code);
+    assert.deepEqual(error.captureDiagnostics, { browser: 'chrome', stage, reason });
+    assert.doesNotMatch(JSON.stringify(error.captureDiagnostics), /PRIVATE|private|https:|url|message/);
+    assert.equal(isTransientVisionCaptureError(error), ['vision_capture_context_changed', 'vision_capture_not_ready'].includes(code));
+    return true;
+  });
+  assert.equal(run.counts.native, 0);
+});
+
+for (const [boundary, message, stage, reason, code] of [
+  ['start', 'Permission denied by companion', 'companion_start', 'permission_denied', undefined],
+  ['bind', 'No tab with id: 999', 'companion_bind', 'tab_closed', undefined],
+  ['visionViewport', 'no such realm', 'viewport_native', 'context_changed', 'vision_capture_context_changed'],
+  ['visionCapture', 'Unable to capture screenshot', 'screenshot', 'not_ready', 'vision_capture_not_ready'],
+]) test(`Firefox capture diagnostics identify ${stage}/${reason} without changing retry policy`, async t => {
+  const run = fixture(t, 'firefox'), native = new Error(message), request = firefoxBidi.request;
+  if (boundary === 'start') {
+    firefoxBidi.runs.delete(run.tabId);
+    t.mock.method(firefoxBidi, 'startRun', async () => { throw native; });
+  } else if (boundary === 'bind') t.mock.method(firefoxBidi, 'bindRun', async () => { throw native; });
+  else t.mock.method(firefoxBidi, 'request', async (...args) => {
+    if (args[0] === boundary) throw native;
+    return request(...args);
+  });
+  const operation = boundary === 'visionCapture' ? run.transport.capture(run.tabId) : run.transport.readViewport(run.tabId);
+  await assert.rejects(operation, error => {
+    assert.equal(error, native); assert.equal(error.code, code);
+    assert.deepEqual(error.captureDiagnostics, { browser: 'firefox', stage, reason });
+    assert.equal(isTransientVisionCaptureError(error), ['vision_capture_context_changed', 'vision_capture_not_ready'].includes(code));
+    return true;
+  });
+  assert.equal(run.counts.native, 0);
+});
+
+for (const engine of ['chrome', 'firefox']) for (const pendingBinding of [false, true]) {
+  test(`${engine}: deadline and Stop retain the active ${pendingBinding ? 'attachment' : 'screenshot'} boundary`, async t => {
+    const run = fixture(t, engine, { pendingBinding });
+    const pending = run.transport.capture(run.tabId, view);
+    await drain(() => pendingBinding ? run.counts.bindings > 0 : run.counts.screenshots === 1);
+    const stage = pendingBinding ? engine === 'chrome' ? 'debugger_attach' : 'companion_bind' : 'screenshot';
+    const rejection = assert.rejects(pending, error => {
+      assert.equal(timedOut(error), true);
+      assert.deepEqual(error.captureDiagnostics, { browser: engine, stage, reason: 'timeout' }); return true;
+    });
+    t.mock.timers.tick(15000); await rejection;
+    // Stop is still a distinct permanent outcome, even on the same transport.
+    run.controller.abort();
+    await assert.rejects(run.transport.capture(run.tabId, view), error => {
+      assert.equal(aborted(error), true);
+      assert.deepEqual(error.captureDiagnostics, { browser: engine,
+        stage: engine === 'chrome' ? 'debugger_attach' : 'companion_bind', reason: 'cancelled' }); return true;
+    });
+  });
+}
+
+test('Firefox: an enabled unbound owner is restricted, while an unavailable companion keeps its ordinary failure', async t => {
+  const run = fixture(t, 'firefox'), owner = firefoxBidi.runs.get(run.tabId);
+  owner.bound = false;
+  await assert.rejects(run.transport.readViewport(run.tabId), error => {
+    assert.equal(error.code, 'vision_capture_restricted_target');
+    assert.deepEqual(error.captureDiagnostics, { browser: 'firefox', stage: 'companion_bind', reason: 'restricted_target' });
+    assert.equal(isTransientVisionCaptureError(error), false); return true;
+  });
+  owner.disconnected = true;
+  await assert.rejects(run.transport.readViewport(run.tabId), error => {
+    assert.equal(error.code, undefined); assert.match(error.message, /trusted automation companion/);
+    assert.equal(error.captureDiagnostics.reason, 'unknown'); return true;
+  });
+  assert.equal(run.counts.reads, 0);
+});
+
+for (const terminal of ['success', 'abort', 'timeout']) {
+  test(`Firefox: startup preparation is guarded through ${terminal} and never dispatches input`, async t => {
+    const run = fixture(t, 'firefox'), prepared = deferred();
+    let calls = 0;
+    t.mock.method(firefoxBidi, 'prepareVisionStartup', async tabId => { assert.equal(tabId, run.tabId); calls++; return prepared.promise; });
+    const pending = run.transport.prepareStartupBootstrap(run.tabId);
+    await drain(() => calls === 1);
+    if (terminal === 'success') {
+      prepared.resolve({ url: 'about:blank#wb-vision-owned' });
+      assert.deepEqual(await pending, { url: 'about:blank#wb-vision-owned' });
+    } else {
+      const rejected = assert.rejects(pending, error => {
+        assert.equal((terminal === 'abort' ? aborted : timedOut)(error), true);
+        assert.deepEqual(error.captureDiagnostics, { browser: 'firefox', stage: 'companion_bind',
+          reason: terminal === 'abort' ? 'cancelled' : 'timeout' }); return true;
+      });
+      if (terminal === 'abort') run.controller.abort(); else t.mock.timers.tick(15000);
+      await rejected;
+      prepared.resolve({ url: 'about:blank#wb-vision-late' });
+      await Promise.resolve(); await Promise.resolve();
+    }
+    assert.equal(calls, 1); assert.equal(run.counts.native, 0); assert.equal(run.counts.screenshots, 0);
+  });
+}

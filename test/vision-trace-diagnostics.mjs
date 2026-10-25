@@ -30,11 +30,14 @@ const safeFrame = {
 const failure = {
   phase: 'vision_after_action_capture', code: 'VISION_STALE_FRAME', reason: 'page_changed',
   attempt: 2, durationMs: 340, retryable: true,
+  captureDiagnostics: { browser: 'chrome', stage: 'viewport_evaluate', reason: 'context_changed',
+    message: PRIVATE, url: `https://${PRIVATE}.test/`, screenshot: PRIVATE },
   error: PRIVATE, message: PRIVATE, url: `https://${PRIVATE}.test/`, dataUrl: `data:image/png;base64,${PRIVATE}`,
 };
 const safeFailure = {
   phase: 'vision_after_action_capture', code: 'VISION_STALE_FRAME', reason: 'page_changed',
   attempt: 2, durationMs: 340, retryable: true,
+  captureDiagnostics: { browser: 'chrome', stage: 'viewport_evaluate', reason: 'context_changed' },
 };
 
 for (const [build, engine] of [['chrome', chromium], ['firefox', firefox]]) {
@@ -98,6 +101,26 @@ for (const [build, engine] of [['chrome', chromium], ['firefox', firefox]]) {
       { step: 3, phase: end.phase, code: end.code });
   });
 
+  test(`${build}: native capture diagnostics admit only closed labels through repeated feedback projection`, () => {
+    for (const includeContent of [false, true]) {
+      const projected = projectTraceEventData('note', { note: 'vision_capture_failure', extra: {
+        captureDiagnostics: { browser: build, stage: 'debugger_attach', reason: 'restricted_target',
+          url: PRIVATE, message: PRIVATE, pageClass: PRIVATE, nativeCode: PRIVATE },
+      } }, { includeContent });
+      assert.deepEqual(projected.extra.captureDiagnostics, { browser: build, stage: 'debugger_attach', reason: 'restricted_target' });
+      assert.deepEqual(projectTraceEventData('note', projected, { includeContent }), projected);
+      assert.doesNotMatch(JSON.stringify(projected), /PRIVATE|url|message|pageClass|nativeCode/);
+      for (const diagnostics of [PRIVATE, [PRIVATE], { browser: PRIVATE, stage: PRIVATE, reason: PRIVATE },
+        { browser: { toString: () => 'chrome' }, stage: 12, reason: ['unknown'] }]) {
+        assert.deepEqual(projectTraceEventData('note', { note: 'vision_capture_failure', extra: { captureDiagnostics: diagnostics } }, { includeContent }),
+          { step: 0, note: 'vision_capture_failure', extra: {} });
+      }
+      assert.deepEqual(projectTraceEventData('note', { note: 'ordinary_note', extra: {
+        captureDiagnostics: { browser: build, stage: 'screenshot', reason: 'timeout' },
+      } }, { includeContent: false }), { note: 'ordinary_note' });
+    }
+  });
+
   test(`${build}: visual Act and Dev prompt provenance recognizes the trusted image observation envelope`, () => {
     for (const mode of ['act', 'dev']) {
       const messages = [
@@ -147,6 +170,7 @@ for (const [build, engine] of [['chrome', chromium], ['firefox', firefox]]) {
     const { markdown } = tracesToMarkdown(sanitized.runs);
     assert.match(markdown, /Vision frame: delta.*1280×720.*9800 bytes.*170 image tokens.*DPR 2/);
     assert.match(markdown, /Vision capture failed: vision_after_action_capture.*VISION_STALE_FRAME.*page_changed.*attempt 2/);
+    assert.match(markdown, /Vision capture failed:.*chrome.*viewport_evaluate.*context_changed/);
     assert.match(markdown, /error \(vision_after_action_capture\): VISION_CAPTURE_FAILED/);
     assert.doesNotMatch(markdown, /PRIVATE|data:image|https:/);
     const trace = await prepareFeedbackTrace({ listRuns: async () => diagnostic.runs.map(entry => entry.run),
@@ -242,7 +266,7 @@ for (const [build, engine] of [['chrome', chromium], ['firefox', firefox]]) {
         await route.fulfill({ contentType: 'text/javascript', body: await readFile(file) });
       });
       await page.goto(prefix);
-      const outcomes = await page.evaluate(async ({ prefix, PRIVATE }) => {
+      const outcomes = await page.evaluate(async ({ prefix, PRIVATE, build }) => {
         const settings = { tracingEnabled: false, feedbackDiagnosticsEnabled: true };
         let navigations = 0;
         globalThis.chrome = globalThis.browser = {
@@ -283,7 +307,11 @@ for (const [build, engine] of [['chrome', chromium], ['firefox', firefox]]) {
             _createVisionBrowser: () => ({
               capture: async () => {
                 captures++;
-                if (scenario === 'initial' || navigations) throw Object.assign(new Error(PRIVATE), { code: 'vision_capture_failed' });
+                if (scenario === 'initial' || navigations) throw Object.assign(new Error(PRIVATE), {
+                  code: 'vision_capture_failed', captureDiagnostics: { browser: build,
+                    stage: scenario === 'initial' ? build === 'chrome' ? 'debugger_attach' : 'companion_bind' : 'screenshot',
+                    reason: 'permission_denied', url: `https://${PRIVATE}.test/`, message: PRIVATE },
+                });
                 return { dataUrl: screenshot.toDataURL('image/png'), viewport };
               },
               perform: () => { throw new Error('Navigation must not dispatch a pointer action'); },
@@ -302,7 +330,7 @@ for (const [build, engine] of [['chrome', chromium], ['firefox', firefox]]) {
             events: await trace.getRunEvents(runId), json: await attachment.blob.text() });
         }
         return outcomes;
-      }, { prefix, PRIVATE });
+      }, { prefix, PRIVATE, build });
       for (const outcome of outcomes) {
         const initial = outcome.scenario === 'initial', phase = initial ? 'vision_initial_capture' : 'vision_after_action_capture';
         assert.equal(outcome.captures, initial ? 1 : 2, 'Permanent capture failure cannot trigger a capture retry');
@@ -317,6 +345,8 @@ for (const [build, engine] of [['chrome', chromium], ['firefox', firefox]]) {
         assert.equal(failure.data.extra.phase, phase);
         assert.equal(failure.data.extra.code, 'VISION_CAPTURE_FAILED');
         assert.equal(failure.data.extra.attempt, 1);
+        assert.deepEqual(failure.data.extra.captureDiagnostics, { browser: build,
+          stage: initial ? build === 'chrome' ? 'debugger_attach' : 'companion_bind' : 'screenshot', reason: 'permission_denied' });
         const errors = exported.filter(event => event.kind === 'error');
         assert.equal(errors.length, 1);
         assert.equal(errors[0].data.phase, phase);
@@ -368,6 +398,7 @@ for (const [build, engine] of [['chrome', chromium], ['firefox', firefox]]) {
           storage: { local: { get: async () => settings, set: async value => Object.assign(settings, value) },
             session: { get: async () => ({}), set: async () => {} } },
           runtime: { id: 'vision-privacy-fixture', getURL: file => prefix + file, getManifest: () => ({ version: 'test' }) },
+          tabs: { update: async () => {} },
         };
         const trace = await import('./src/trace/recorder.js');
         const { prepareFeedbackTrace } = await import('./src/trace/feedback-export.js');
@@ -381,7 +412,7 @@ for (const [build, engine] of [['chrome', chromium], ['firefox', firefox]]) {
         const viewport = { width: 320, height: 200, devicePixelRatio: 2, scale: 1, zoom: 1,
           scrollX: 0, scrollY: 0, url: `https://${PRIVATE}.test/`, documentId: PRIVATE };
         const outcomes = [];
-        for (const scenario of ['disabled', 'enabled-stale', 'enable-during-native', 'disable-during-native', 'disable-during-prescan', 'enable-after-observation', 'enable-before-model']) {
+        for (const scenario of ['disabled', 'enabled-stale', 'enabled-navigation', 'enable-during-native', 'disable-during-native', 'disable-during-prescan', 'enable-after-observation', 'enable-before-model']) {
           let runId, captures = 0, modelCalls = 0, activeCapture = null, firstSamples, modelsAfterAttempts, enabledAfterObservation = false;
           const captureAttempts = [], frames = [], history = [{ role: 'system', content: 'Previous prompt' }];
           const controller = new AbortController(), provider = { name: 'owned model', model: 'owned-vision', supportsVision: true, supportsTools: true };
@@ -390,13 +421,21 @@ for (const [build, engine] of [['chrome', chromium], ['firefox', firefox]]) {
             readViewport: async () => {
               if (activeCapture) {
                 activeCapture.reads++;
-                if (scenario === 'enabled-stale' && captureAttempts.length === 0 && activeCapture.reads === 3)
-                  return { ...viewport, scrollY: 1 };
+                if (agent.screenshotRedaction && !activeCapture.nativeStarted && activeCapture.scans === 0)
+                  activeCapture.preflights++;
+                if (activeCapture.nativeStarted && activeCapture.scans === 2) {
+                  activeCapture.postPrivacyChecks++;
+                  // Fail the final native fence after BOTH local privacy scans,
+                  // independent of the extra startup geometry preflight.
+                  if (scenario === 'enabled-stale' && captureAttempts.length === 0)
+                    return { ...viewport, scrollY: 1 };
+                }
               }
               return { ...viewport };
             },
             capture: async () => {
               captures++;
+              activeCapture.nativeStarted = true;
               if (captures === 1 && scenario === 'enable-during-native') agent.screenshotRedaction = true;
               if (captures === 1 && scenario === 'disable-during-native') agent.screenshotRedaction = false;
               return raw;
@@ -404,7 +443,7 @@ for (const [build, engine] of [['chrome', chromium], ['firefox', firefox]]) {
             sendInput: () => { throw new Error('Visual completion must not dispatch input'); },
           };
           const agent = {
-            screenshotRedaction: ['enabled-stale', 'disable-during-native', 'disable-during-prescan'].includes(scenario),
+            screenshotRedaction: ['enabled-stale', 'enabled-navigation', 'disable-during-native', 'disable-during-prescan'].includes(scenario),
             maxSteps: 5, currentCostState: new Map(), providerManager: { prepareActiveProviderCapabilities: async () => {} },
             permissions: { beginTurn() {} }, _skipPermissionGate: true,
             _runAbortSignal: () => controller.signal, _throwIfAborted: signal => signal?.throwIfAborted(),
@@ -420,7 +459,7 @@ for (const [build, engine] of [['chrome', chromium], ['firefox', firefox]]) {
             _withResponseItems: message => message,
             _createVisionBrowser: options => new VisionBrowser({ ...options, transport }),
             _withIndicatorsHidden: async (_tabId, action) => {
-              const attempt = { reads: 0, scans: 0, error: null }; activeCapture = attempt;
+              const attempt = { reads: 0, scans: 0, preflights: 0, postPrivacyChecks: 0, nativeStarted: false, error: null }; activeCapture = attempt;
               try { return await action(); }
               catch (error) { attempt.error = error.code || error.name; throw error; }
               finally { captureAttempts.push(attempt); activeCapture = null; }
@@ -449,6 +488,8 @@ for (const [build, engine] of [['chrome', chromium], ['firefox', firefox]]) {
                 firstSamples = { old: pixel(30, 30), moved: pixel(80, 30), background: pixel(200, 100),
                   imageCount: observation.filter(block => block.type === 'image_url').length };
               }
+              if (scenario === 'enabled-navigation' && modelCalls === 1) return { toolCalls: [{ id: 'navigate-once', type: 'function',
+                function: { name: 'vision_navigate', arguments: JSON.stringify({ url: viewport.url }) } }] };
               const latest = observation.filter(block => block.type === 'text').flatMap(block => {
                 try { const packet = JSON.parse(block.text); return packet.frameId ? [packet] : []; } catch { return []; }
               }).at(-1);
@@ -474,13 +515,14 @@ for (const [build, engine] of [['chrome', chromium], ['firefox', firefox]]) {
         return outcomes;
       }, { prefix, PRIVATE });
       const expected = {
-        disabled: { reads: [2, 2], scans: [0, 0], models: 1, beforeModel: 1, masked: false },
-        'enabled-stale': { reads: [3, 3, 3], scans: [2, 2, 2], models: 1, beforeModel: 2, masked: true, retry: true },
-        'enable-during-native': { reads: [2, 3, 3], scans: [0, 2, 2], models: 1, beforeModel: 2, masked: true, retry: true },
-        'disable-during-native': { reads: [3, 2, 2], scans: [2, 0, 0], models: 2, beforeModel: 1, masked: true },
-        'disable-during-prescan': { reads: [3, 2, 2], scans: [2, 0, 0], models: 2, beforeModel: 1, masked: true },
-        'enable-after-observation': { reads: [2, 3, 3], scans: [0, 2, 2], models: 1, beforeModel: 2, masked: true },
-        'enable-before-model': { reads: [2, 3, 3], scans: [0, 2, 2], models: 1, beforeModel: 2, masked: true },
+        disabled: { reads: [2, 2], scans: [0, 0], preflights: [0, 0], postPrivacyChecks: [0, 0], models: 1, beforeModel: 1, masked: false },
+        'enabled-stale': { reads: [4, 4, 3], scans: [2, 2, 2], preflights: [1, 1, 0], postPrivacyChecks: [1, 1, 1], models: 1, beforeModel: 2, masked: true, retry: true },
+        'enabled-navigation': { reads: [4, 3, 3], scans: [2, 2, 2], preflights: [1, 0, 0], postPrivacyChecks: [1, 1, 1], models: 2, beforeModel: 1, masked: true },
+        'enable-during-native': { reads: [2, 4, 3], scans: [0, 2, 2], preflights: [0, 1, 0], postPrivacyChecks: [0, 1, 1], models: 1, beforeModel: 2, masked: true, retry: true },
+        'disable-during-native': { reads: [4, 2, 2], scans: [2, 0, 0], preflights: [1, 0, 0], postPrivacyChecks: [1, 0, 0], models: 2, beforeModel: 1, masked: true },
+        'disable-during-prescan': { reads: [4, 2, 2], scans: [2, 0, 0], preflights: [1, 0, 0], postPrivacyChecks: [1, 0, 0], models: 2, beforeModel: 1, masked: true },
+        'enable-after-observation': { reads: [2, 3, 3], scans: [0, 2, 2], preflights: [0, 0, 0], postPrivacyChecks: [0, 1, 1], models: 1, beforeModel: 2, masked: true },
+        'enable-before-model': { reads: [2, 3, 3], scans: [0, 2, 2], preflights: [0, 0, 0], postPrivacyChecks: [0, 1, 1], models: 1, beforeModel: 2, masked: true },
       };
       const near = (actual, desired) => actual.every((value, index) => Math.abs(value - desired[index]) < 15);
       for (const outcome of outcomes) {
@@ -491,6 +533,8 @@ for (const [build, engine] of [['chrome', chromium], ['firefox', firefox]]) {
         assert.equal(outcome.modelsAfterAttempts, rules.beforeModel, `${outcome.scenario}: model waits for safe capture`);
         assert.deepEqual(outcome.captureAttempts.map(attempt => attempt.reads), rules.reads, outcome.scenario);
         assert.deepEqual(outcome.captureAttempts.map(attempt => attempt.scans), rules.scans, outcome.scenario);
+        assert.deepEqual(outcome.captureAttempts.map(attempt => attempt.preflights), rules.preflights, `${outcome.scenario}: extra geometry is startup-only`);
+        assert.deepEqual(outcome.captureAttempts.map(attempt => attempt.postPrivacyChecks), rules.postPrivacyChecks, `${outcome.scenario}: final privacy fence remains enforced`);
         assert.equal(outcome.firstSamples.imageCount, 1, `${outcome.scenario}: protected full frame replaces earlier unprotected context`);
         const expectedColor = rules.masked ? [32, 33, 36] : [230, 35, 35];
         assert.ok(near(outcome.firstSamples.old, expectedColor), `${outcome.scenario}: old sensitive region ${outcome.firstSamples.old}`);
