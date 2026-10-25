@@ -1,5 +1,26 @@
 import { cdpClient } from '../cdp/cdp-client.js';
 
+const TRANSIENT_CAPTURE_CODES = new Set(['vision_stale_frame', 'vision_capture_context_changed', 'vision_capture_not_ready']);
+export function isTransientVisionCaptureError(error) {
+  return error?.name !== 'AbortError' && TRANSIENT_CAPTURE_CODES.has(error?.code);
+}
+// Classification is confined to read-only viewport/screenshot requests. In
+// particular, never apply these patterns to native input or privacy failures.
+export function classifyVisionCaptureError(error) {
+  const failure = error instanceof Error ? error : new Error(String(error));
+  if (failure.name === 'AbortError' || failure.code) return failure;
+  const message = failure.message;
+  if (/permission|denied|not allowed|restricted|not attached|disconnected|no tab|target closed|session closed|tab (?:was |is )?closed|browser.*closed/i.test(message)) return failure;
+  if (/execution context (?:was )?destroyed|cannot find (?:default )?(?:execution )?context|cannot find context with specified id|no such (?:realm|frame)|context.*discarded/i.test(message)) {
+    failure.code = 'vision_capture_context_changed';
+  } else if (/page changed during screenshot capture/i.test(message)) {
+    failure.code = 'vision_stale_frame';
+  } else if (/unable to capture screenshot|cannot take screenshot with 0 (?:width|height)|cannot read (?:Firefox )?viewport geometry|empty screenshot/i.test(message)) {
+    failure.code = 'vision_capture_not_ready';
+  }
+  return failure;
+}
+
 // Inspect only the 24-byte PNG signature/IHDR prefix, without decoding or
 // allocating a screenshot bitmap. CaptureScreenshot always returns PNG here.
 export function visionPngDimensions(base64) {
@@ -17,8 +38,21 @@ export function visionPngDimensions(base64) {
 export function createVisionTransport({ signal, viewportExpression }) {
   const check = () => { if (signal?.aborted) throw Object.assign(new Error('Vision run stopped'), { name: 'AbortError' }); };
   const read = async (tabId, method, params = {}) => {
-    check(); await cdpClient.attach(tabId); check();
-    return cdpClient.sendCommand(tabId, method, params);
+    try {
+      check(); await cdpClient.attach(tabId); check();
+      return await cdpClient.sendCommand(tabId, method, params);
+    } catch (error) {
+      const classified = classifyVisionCaptureError(error);
+      // CDP uses this one message for both navigation and a closed target.
+      // Only retry its read when the extension still owns a live browser tab.
+      if (!classified.code && /inspected target navigated or closed/i.test(classified.message)
+        && typeof globalThis.chrome?.tabs?.get === 'function') {
+        const tab = await chrome.tabs.get(tabId).catch(() => null);
+        check();
+        if (tab?.id === tabId && !tab.discarded) classified.code = 'vision_capture_context_changed';
+      }
+      throw classified;
+    }
   };
   return {
     async readViewport(tabId) {
@@ -26,11 +60,13 @@ export function createVisionTransport({ signal, viewportExpression }) {
         read(tabId, 'Page.getLayoutMetrics'), read(tabId, 'Page.getFrameTree'),
         read(tabId, 'Runtime.evaluate', { expression: viewportExpression, returnByValue: true, timeout: 2000 }),
       ]);
-      if (result?.exceptionDetails || !result?.result?.value) throw new Error('Cannot read viewport geometry');
+      if (result?.exceptionDetails || !result?.result?.value)
+        throw Object.assign(new Error('Cannot read viewport geometry while the page is loading'), { code: 'vision_capture_not_ready' });
       const local = result.result.value;
       const viewport = metrics.cssVisualViewport;
       const root = frames.frameTree?.frame;
-      if (!viewport || !root?.loaderId) throw new Error('Browser did not provide CSS viewport metrics');
+      if (!viewport || !root?.loaderId)
+        throw Object.assign(new Error('Browser has not provided a committed document and CSS viewport yet'), { code: 'vision_capture_not_ready' });
       return { ...local, width: viewport.clientWidth, height: viewport.clientHeight,
         offsetLeft: viewport.offsetX, offsetTop: viewport.offsetY,
         scrollX: viewport.pageX, scrollY: viewport.pageY, scale: viewport.scale, zoom: viewport.zoom || 1,
@@ -45,7 +81,7 @@ export function createVisionTransport({ signal, viewportExpression }) {
       const pinched = Math.abs(viewport.scale - 1) > 0.001;
       const result = await read(tabId, 'Page.captureScreenshot', { format: 'png', fromSurface: true, captureBeyondViewport: !pinched,
         ...(!pinched ? { clip: { x: viewport.scrollX, y: viewport.scrollY, width: viewport.width, height: viewport.height, scale: 1 } } : {}) });
-      if (!result?.data) throw new Error('Browser returned an empty screenshot');
+      if (!result?.data) throw Object.assign(new Error('Browser returned an empty screenshot'), { code: 'vision_capture_not_ready' });
       if (pinched) {
         const size = visionPngDimensions(result.data);
         const pixelScale = viewport.scale * viewport.devicePixelRatio;

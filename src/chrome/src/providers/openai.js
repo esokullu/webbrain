@@ -18,6 +18,7 @@ import {
   shouldUseOpenAIResponsesApi,
   supportsOpenAIAskStreaming,
   applyOpenRouterRoutingVariant,
+  applyOpenAIParallelToolCallPreference,
   openRouterMuseToolOptions,
   mandatoryReasoningOptions,
 } from './provider-compatibility.js';
@@ -627,6 +628,7 @@ export class OpenAICompatibleProvider extends BaseLLMProvider {
       body.tool_choice = options.toolChoice || 'auto';
     }
     body = this._mergeConfiguredRequestBody(body, options);
+    body = applyOpenAIParallelToolCallPreference(body, options, this.baseUrl);
     body = applyOpenRouterRoutingVariant(body, this.config);
     this._addWebBrainCloudContext(body, options);
     if (stream && body.tools && this.config.supportsToolStreamOption === true) {
@@ -766,6 +768,7 @@ export class OpenAICompatibleProvider extends BaseLLMProvider {
     // base Responses shape. Reserved keys like model/input/stream/tools are
     // filtered out by mergeProviderRequestBody.
     body = this._mergeConfiguredRequestBody(body, options);
+    body = applyOpenAIParallelToolCallPreference(body, options, this.baseUrl);
     body = applyOpenRouterRoutingVariant(body, this.config);
 
     // Normalize Chat Completions-style reasoning_effort if a preset emitted it.

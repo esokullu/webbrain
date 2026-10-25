@@ -90,6 +90,98 @@ function setup(module, script, overrides = {}) {
 }
 
 for (const [browser, module] of variants) {
+  test(`${browser}: capture recovery retries only transient observations and respects cancellation`, async () => {
+    const waits = [], failures = [];
+    let count = 0;
+    const captured = await module.captureVisionObservation({ async capture() {
+      if (++count < 3) throw Object.assign(new Error('Document replaced'), { code: 'vision_capture_context_changed' });
+      return { dataUrl: IMAGE, viewport };
+    } }, 71, { wait: async delay => { waits.push(delay); }, onFailure: (error, detail) => failures.push(detail) });
+    assert.equal(count, 3); assert.equal(captured.attempts, 3);
+    assert.deepEqual(waits, [150, 300]); assert.ok(failures.every(item => item.retry));
+    for (const code of ['vision_privacy_failed', 'vision_capture_clipped', 'vision_capture_failed']) {
+      count = 0;
+      await assert.rejects(module.captureVisionObservation({ async capture() {
+        count++; throw Object.assign(new Error('Permanent capture failure'), { code });
+      } }, 71, { wait: async () => assert.fail('Permanent errors cannot retry') }), error => error.code === code);
+      assert.equal(count, 1);
+    }
+    count = 0;
+    await assert.rejects(module.captureVisionObservation({ async capture() {
+      count++; throw Object.assign(new Error('Still loading'), { code: 'vision_capture_not_ready' });
+    } }, 71, { wait: async () => {} }), /Still loading/);
+    assert.equal(count, 8, 'Transient observation recovery is finite');
+    const controller = new AbortController(); count = 0;
+    await assert.rejects(module.captureVisionObservation({ async capture() {
+      count++; throw Object.assign(new Error('Page changed'), { code: 'vision_stale_frame' });
+    } }, 71, { signal: controller.signal, wait: async () => controller.abort() }), error => error.name === 'AbortError');
+    assert.equal(count, 1, 'Stop interrupts recovery before another capture');
+  });
+
+  test(`${browser}: batched navigation and wait recover capture races without replay and use a fresh frame for the next action`, async () => {
+    let navigations = 0, failedCaptures = 0;
+    const originalUpdate = api.tabs.update;
+    api.tabs.update = async () => { navigations++; };
+    const fixture = setup(module, ({ index, frame, options, messages }) => {
+      assert.equal(options.parallelToolCalls, false, 'The model request must explicitly disable parallel tool calls');
+      if (index === 0) return { toolCalls: [call('vision_navigate', { url: 'https://owned.example/next' }, 'navigate-once'),
+        call('vision_wait', { milliseconds: 3000 }, 'deferred-wait')] };
+      if (index === 1) {
+        const receipts = messages.filter(message => message.role === 'tool');
+        assert.deepEqual(receipts.map(message => message.tool_call_id), ['navigate-once', 'deferred-wait']);
+        assert.equal(JSON.parse(receipts[0].content).navigated, true);
+        assert.deepEqual(Object.fromEntries(Object.entries(JSON.parse(receipts[1].content))
+          .filter(([key]) => ['success', 'code', 'noDispatch', 'dispatched', 'outcomeUnknown'].includes(key))),
+        { success: false, code: 'vision_batch_deferred', noDispatch: true, dispatched: false, outcomeUnknown: false });
+        return { toolCalls: [call('vision_click', { frameId: frame.frameId, x: 30, y: 40 }, 'fresh-click')] };
+      }
+      return { toolCalls: [call('done', { frameId: frame.frameId, summary: 'Navigation recovered once.', outcome: 'success' })] };
+    });
+    const create = fixture.agent._createVisionBrowser;
+    fixture.agent._createVisionBrowser = options => {
+      const instance = create(options), capture = instance.capture;
+      instance.capture = async () => {
+        if (navigations && failedCaptures++ < 2)
+          throw Object.assign(new Error('Page changed during screenshot capture; capture again'), { code: 'vision_stale_frame' });
+        return capture();
+      };
+      return instance;
+    };
+    try {
+      assert.equal(await fixture.run(), 'Navigation recovered once.');
+      assert.equal(navigations, 1); assert.equal(fixture.requests.length, 3);
+      assert.equal(fixture.actions.length, 1);
+      assert.equal(fixture.actions[0].name, 'click');
+      assert.equal(fixture.actions[0].args.frameId, latestFrame(fixture.requests[1]).frameId);
+      assert.notEqual(fixture.actions[0].args.frameId, latestFrame(fixture.requests[0]).frameId);
+      assert.equal(fixture.events.filter(event => event.type === 'tool_result' && event.data.name === 'vision_navigate').length, 1);
+      assert.equal(fixture.events.filter(event => event.type === 'tool_call' && event.data.name === 'vision_wait').length, 0);
+      assert.equal(latestFrame(fixture.requests[1]).kind, 'full');
+    } finally { api.tabs.update = originalUpdate; }
+  });
+
+  test(`${browser}: a permanent capture failure after navigation retains the receipt and stops without replay`, async () => {
+    let navigations = 0, failedCaptures = 0, status;
+    const originalUpdate = api.tabs.update;
+    api.tabs.update = async () => { navigations++; };
+    const fixture = setup(module, () => ({ toolCalls: [call('vision_navigate', { url: 'https://owned.example/next' })] }));
+    const create = fixture.agent._createVisionBrowser;
+    fixture.agent._createVisionBrowser = options => {
+      const instance = create(options), capture = instance.capture;
+      instance.capture = async () => {
+        if (navigations) { failedCaptures++; throw Object.assign(new Error('Privacy scan failed'), { code: 'vision_privacy_failed' }); }
+        return capture();
+      };
+      return instance;
+    };
+    try {
+      assert.match(await fixture.run({ runOptions: { onRunFinished: value => { status = value; } } }), /Privacy scan failed/);
+      assert.equal(status, 'error'); assert.equal(navigations, 1); assert.equal(failedCaptures, 1);
+      assert.equal(fixture.requests.length, 1);
+      assert.ok(fixture.history.some(message => message.role === 'tool' && JSON.parse(message.content).navigated === true));
+    } finally { api.tabs.update = originalUpdate; }
+  });
+
   test(`${browser}: Act and Dev share visual routing and honor the compatibility override`, () => {
     const agent = { actObservation: 'vision', _isStandaloneChatRun: options => options?.standaloneChat === true };
     assert.equal(module.useVisionAct(agent, 'act'), true);
@@ -383,16 +475,60 @@ for (const [browser, module] of variants) {
     assert.ok(module.VISION_ACT_TOOLS.every(tool => !/accessibility|read_page|execute_js|click_ax/.test(tool.function.name)));
   });
 
-  test(`${browser}: multiple tools from one frame are all rejected with complete tool-result pairs`, async () => {
+  test(`${browser}: a multi-tool response executes only its first action and pairs deferred calls before a fresh request`, async () => {
     const fixture = setup(module, ({ index, frame, messages }) => {
       if (!index) return { toolCalls: [call('vision_click', { frameId: frame.frameId, x: 10, y: 10 }, 'first'),
         call('vision_type', { frameId: frame.frameId, text: 'must not type' }, 'second')] };
-      const tools = messages.filter(message => message.role === 'tool');
-      assert.deepEqual(tools.map(message => message.tool_call_id), ['first', 'second']);
-      assert.ok(tools.every(message => JSON.parse(message.content).success === false));
-      return { toolCalls: [call('done', { frameId: frame.frameId, summary: 'Safe batch rejection.', outcome: 'blocked' })] };
+      if (index === 1) {
+        const tools = messages.filter(message => message.role === 'tool');
+        assert.deepEqual(tools.map(message => message.tool_call_id), ['first', 'second']);
+        assert.equal(JSON.parse(tools[0].content).success, true);
+        const deferred = JSON.parse(tools[1].content);
+        assert.equal(deferred.code, 'vision_batch_deferred'); assert.equal(deferred.noDispatch, true);
+        assert.equal(deferred.dispatched, false); assert.equal(deferred.outcomeUnknown, false);
+        return { toolCalls: [call('vision_type', { frameId: frame.frameId, text: 'new frame approved typing' }, 'fresh-type')] };
+      }
+      return { toolCalls: [call('done', { frameId: frame.frameId, summary: 'Fresh frame used after batch.', outcome: 'success' })] };
     });
-    assert.equal(await fixture.run(), 'Safe batch rejection.'); assert.equal(fixture.actions.length, 0);
+    assert.equal(await fixture.run(), 'Fresh frame used after batch.');
+    assert.deepEqual(fixture.actions.map(action => action.name), ['click', 'type']);
+    assert.equal(fixture.actions[1].args.text, 'new frame approved typing');
+    assert.notEqual(fixture.actions[0].args.frameId, fixture.actions[1].args.frameId);
+    assert.equal(fixture.actions[1].args.frameId, latestFrame(fixture.requests[1]).frameId);
+  });
+
+  for (const doneFirst of [true, false]) test(`${browser}: a batch with done ${doneFirst ? 'first' : 'last'} cannot claim completion`, async () => {
+    const fixture = setup(module, ({ index, frame, messages }) => {
+      if (!index) {
+        const premature = call('done', { frameId: frame.frameId, summary: 'Premature batch completion.', outcome: 'success' }, 'premature-done');
+        const action = call('vision_click', { frameId: frame.frameId, x: 10, y: 10 }, 'batch-click');
+        return { toolCalls: doneFirst ? [premature, action] : [action, premature] };
+      }
+      const receipts = messages.filter(message => message.role === 'tool');
+      assert.deepEqual(receipts.map(message => message.tool_call_id), doneFirst ? ['premature-done', 'batch-click'] : ['batch-click', 'premature-done']);
+      const doneReceipt = JSON.parse(receipts.find(message => message.tool_call_id === 'premature-done').content);
+      assert.equal(doneReceipt.code, 'vision_batch_deferred'); assert.equal(doneReceipt.noDispatch, true);
+      assert.equal(doneReceipt.outcomeUnknown, false); assert.notEqual(doneReceipt.done, true);
+      if (doneFirst) assert.equal(JSON.parse(receipts[1].content).code, 'vision_batch_deferred');
+      else assert.equal(JSON.parse(receipts[0].content).success, true);
+      return { toolCalls: [call('done', { frameId: frame.frameId, summary: 'Individually verified completion.', outcome: 'success' })] };
+    });
+    assert.equal(await fixture.run(), 'Individually verified completion.');
+    assert.equal(fixture.actions.length, doneFirst ? 0 : 1);
+    assert.equal(fixture.requests.length, 2);
+    assert.ok(!fixture.events.some(event => event.type === 'text' && event.data.content === 'Premature batch completion.'));
+  });
+
+  test(`${browser}: an invalid first batch call cannot authorize a later action from the same frame`, async () => {
+    const fixture = setup(module, ({ index, frame, messages }) => {
+      if (!index) return { toolCalls: [call('vision_click', { frameId: frame.frameId, x: -10, y: 10 }, 'invalid-first'),
+        call('vision_click', { frameId: frame.frameId, x: 10, y: 10 }, 'deferred-second')] };
+      const receipts = messages.filter(message => message.role === 'tool').map(message => JSON.parse(message.content));
+      assert.equal(receipts[0].success, false); assert.equal(receipts[1].code, 'vision_batch_deferred');
+      assert.equal(receipts[1].noDispatch, true);
+      return { toolCalls: [call('done', { frameId: frame.frameId, summary: 'No action dispatched.', outcome: 'blocked' })] };
+    });
+    assert.equal(await fixture.run(), 'No action dispatched.'); assert.equal(fixture.actions.length, 0);
   });
 
   test(`${browser}: stale model coordinates refresh observation before allowing a corrected action`, async () => {

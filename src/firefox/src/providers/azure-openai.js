@@ -1,6 +1,6 @@
 import { BaseLLMProvider } from './base.js';
 import { fetchWithTimeout } from './fetch-timeout.js';
-import { configuredMaxTokensField } from './provider-compatibility.js';
+import { applyOpenAIParallelToolCallPreference, configuredMaxTokensField } from './provider-compatibility.js';
 
 /**
  * Azure OpenAI provider (deployment-based OpenAI-compatible API).
@@ -104,6 +104,7 @@ export class AzureOpenAIProvider extends BaseLLMProvider {
       body.tool_choice = options.toolChoice || 'auto';
     }
     body = this._mergeConfiguredRequestBody(body, options);
+    body = applyOpenAIParallelToolCallPreference(body, options, this.endpoint);
     if (stream) this._addStreamUsageOptions(body);
     return body;
   }

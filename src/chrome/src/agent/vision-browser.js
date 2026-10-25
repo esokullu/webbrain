@@ -1,4 +1,5 @@
 import { createVisionTransport } from './vision-transport.js';
+export { isTransientVisionCaptureError } from './vision-transport.js';
 
 // This layer only observes viewport geometry and sends native input. Page
 // semantics, selectors, accessibility nodes and synthetic DOM events are not
@@ -72,9 +73,10 @@ export function visionKeyChord(value, platform = '') {
 }
 
 export class VisionBrowser {
-  constructor({ transport, redact, signal, beforeDispatch, withCapture } = {}) {
+  constructor({ transport, redact, shouldRedact, signal, beforeDispatch, withCapture } = {}) {
     this.transport = transport || createVisionTransport({ signal, viewportExpression: VISION_VIEWPORT_EXPRESSION });
     this.redact = redact;
+    this.shouldRedact = shouldRedact || (() => Boolean(this.redact));
     this.signal = signal;
     this.beforeDispatch = beforeDispatch;
     this.withCapture = withCapture || ((_tabId, capture) => capture());
@@ -86,7 +88,7 @@ export class VisionBrowser {
     const viewport = await this.transport.readViewport(tabId);
     checkAbort(this.signal);
     if (!(Number.isFinite(viewport?.width) && viewport.width > 0 && Number.isFinite(viewport?.height) && viewport.height > 0)
-      || !viewport.documentId || typeof viewport.url !== 'string') throw failure('Invalid browser viewport metadata', 'vision_capture_failed');
+      || !viewport.documentId || typeof viewport.url !== 'string') throw failure('Browser viewport metadata is not ready', 'vision_capture_not_ready');
     return viewport;
   }
   async capture(tabId) {
@@ -98,10 +100,10 @@ export class VisionBrowser {
         let dataUrl = await this.transport.capture(tabId, before);
         const after = await this.readViewport(tabId);
         if (!sameVisionViewport(before, after)) throw failure('Page changed during screenshot capture; capture again', 'vision_stale_frame');
-        if (this.redact) {
+        if (this.redact && this.shouldRedact(tabId)) {
           dataUrl = await this.redact(tabId, dataUrl, before);
           if (!sameVisionViewport(before, await this.readViewport(tabId)))
-            throw failure('Page changed during screenshot privacy processing; capture again', 'vision_stale_frame');
+            throw failure('Page changed while finalizing screenshot; capture again', 'vision_stale_frame');
         }
         checkAbort(this.signal);
         if (typeof dataUrl !== 'string' || !/^data:image\/(?:png|jpeg|webp);base64,/.test(dataUrl))

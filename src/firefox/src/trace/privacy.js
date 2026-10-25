@@ -1,4 +1,5 @@
 import { normalizeRejectedToolResponse } from '../agent/model-output-diagnostics.js';
+import { isErrorCode } from './error-codes.js';
 
 /**
  * Privacy projection for durable trace records.
@@ -82,6 +83,77 @@ const ACTION_PREDICATES = new Set(['target_changed', 'target_unresolved', 'targe
   'target_hidden', 'target_disabled', 'target_detached', 'parent_changed', 'form_changed',
   'relaxed_grant_expired', 'relaxed_target_changed', 'target_not_actionable', 'semantic_binding_changed',
   'target_hit_changed']);
+
+// Visual observations have their own closed metadata protocol. Never feed
+// their nested viewport/image objects through the generic note allowlist:
+// those objects may also carry URLs, document IDs or screenshot bytes.
+const VISION_PHASES = new Set([
+  'vision_initial_capture', 'vision_after_action_capture', 'vision_requested_capture',
+  'vision_completion_capture', 'vision_frame_encoding', 'vision_model',
+  'vision_input', 'vision_privacy', 'vision_setup',
+]);
+const VISION_FRAME_REASONS = new Set([
+  'initial', 'after-action', 'requested', 'completion-check', 'user-correction', 'privacy-setting-change',
+  'initial-or-viewport-change', 'keyframe', 'full', 'delta', 'unchanged',
+]);
+const VISION_FAILURE_REASONS = new Set([
+  'page_changed', 'viewport_changed', 'decode_failed', 'encode_failed', 'budget_exceeded',
+  'privacy_scan_failed', 'capture_unavailable', 'cancelled', 'unknown',
+]);
+const VISION_FRAME_ID = /^vf-[a-z0-9]{1,16}-[1-9]\d{0,9}-[1-9]\d{0,9}$/;
+
+function visionNumber(output, source, key, maximum, { integer = false, positive = false } = {}) {
+  const value = source?.[key];
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0
+      || (positive && value === 0) || (integer && !Number.isSafeInteger(value))) return;
+  output[key] = Math.min(value, maximum);
+}
+
+function visionDimensions(source) {
+  const output = {};
+  for (const key of ['width', 'height']) visionNumber(output, source, key, 65536, { positive: true });
+  return output;
+}
+
+function projectVisionFrame(data) {
+  const source = data?.extra || {}, extra = {};
+  if (source.protocol === 'vision-frame-v1') extra.protocol = source.protocol;
+  if (['full', 'delta', 'unchanged'].includes(source.kind)) extra.kind = source.kind;
+  for (const key of ['frameId', 'baseFrameId', 'previousFrameId']) {
+    if (typeof source[key] === 'string' && VISION_FRAME_ID.test(source[key])) extra[key] = source[key];
+    else if (key === 'previousFrameId' && source[key] === null) extra[key] = null;
+  }
+  for (const key of ['canvas', 'source']) {
+    const dimensions = visionDimensions(source[key]);
+    if (Object.keys(dimensions).length) extra[key] = dimensions;
+  }
+  const viewport = visionDimensions(source.viewport);
+  for (const key of ['devicePixelRatio', 'zoom', 'scale']) {
+    visionNumber(viewport, source.viewport, key, 64, { positive: true });
+  }
+  if (Object.keys(viewport).length) extra.viewport = viewport;
+  for (const key of ['bytes', 'estimatedTokens']) visionNumber(extra, source, key, 100_000_000, { integer: true });
+  visionNumber(extra, source, 'capturedAt', 8_640_000_000_000_000, { integer: true });
+  for (const key of ['captureMs', 'encodingMs', 'durationMs']) visionNumber(extra, source, key, 600_000);
+  visionNumber(extra, source, 'attempt', 100, { integer: true, positive: true });
+  const imageCount = Number.isSafeInteger(source.imageCount) ? source.imageCount
+    : Array.isArray(source.images) ? source.images.length : undefined;
+  visionNumber(extra, { imageCount }, 'imageCount', 64, { integer: true });
+  if (VISION_FRAME_REASONS.has(source.reason)) extra.reason = source.reason;
+  if (VISION_PHASES.has(source.phase)) extra.phase = source.phase;
+  return { step: Number.isFinite(data?.step) ? data.step : 0, note: 'vision_frame', extra };
+}
+
+function projectVisionCaptureFailure(data) {
+  const source = data?.extra || {}, extra = {};
+  if (VISION_PHASES.has(source.phase)) extra.phase = source.phase;
+  if (isErrorCode(source.code)) extra.code = source.code;
+  if (VISION_FAILURE_REASONS.has(source.reason)) extra.reason = source.reason;
+  visionNumber(extra, source, 'attempt', 100, { integer: true, positive: true });
+  for (const key of ['captureMs', 'encodingMs', 'durationMs']) visionNumber(extra, source, key, 600_000);
+  if (typeof source.retryable === 'boolean') extra.retryable = source.retryable;
+  return { step: Number.isFinite(data?.step) ? data.step : 0, note: 'vision_capture_failure', extra };
+}
 
 function validationFailureMetadata(value) {
   if (VALIDATION_FAILURE_CODES.has(value) || PUBLICATION_CONTRACT_CODES.has(value)) return value;
@@ -273,6 +345,8 @@ export function projectTraceEventData(kind, data, { includeContent = false } = {
   if (kind === 'note' && data?.note === 'predispatch_timing') {
     return projectPredispatchTiming(data);
   }
+  if (kind === 'note' && data?.note === 'vision_frame') return projectVisionFrame(data);
+  if (kind === 'note' && data?.note === 'vision_capture_failure') return projectVisionCaptureFailure(data);
   if (includeContent || data == null) return data;
   const source = data && typeof data === 'object' && !Array.isArray(data) ? data : {};
 
@@ -343,7 +417,9 @@ export function projectTraceEventData(kind, data, { includeContent = false } = {
     return pick(source, ['step', 'context', 'visionRoute', 'captureId', 'model', 'fallbackReason']);
   }
   if (kind === 'turn_start' || kind === 'turn_end' || kind === 'step_start' || kind === 'step_end') {
-    return pick(source, STEP_METADATA_FIELDS);
+    const projected = pick(source, STEP_METADATA_FIELDS);
+    if (VISION_PHASES.has(source.phase)) projected.phase = source.phase;
+    return projected;
   }
   if (kind === 'terminal_runtime') {
     return pick(source, ['step', 'status', 'toolName', 'callId', 'errorCode', 'durationMs', 'success']);

@@ -708,6 +708,23 @@ export function plannerRequestBody(config = {}, {
   return body;
 }
 
+/** Per-call opt-out; leave legacy requests and unsupported Google endpoints alone. */
+export function applyOpenAIParallelToolCallPreference(body, options = {}, baseUrl = '') {
+  if (options.parallelToolCalls !== false || !body.tools?.length) return body;
+  // Gemini's direct OpenAI compatibility APIs do not document this parameter.
+  // A Gemini model reached through an OpenAI-compatible router still uses the
+  // router's contract, so identify the endpoint rather than the model name.
+  try {
+    const host = new URL(baseUrl).hostname.toLowerCase();
+    if (host === 'generativelanguage.googleapis.com'
+      || /^(?:[a-z0-9-]+-)?aiplatform\.googleapis\.com$/.test(host)
+      || /^aiplatform\.[a-z0-9-]+\.rep\.googleapis\.com$/.test(host)) return body;
+  } catch { /* Custom/local endpoints retain the OpenAI-compatible contract. */ }
+  // Apply after compatibility extras: an explicit per-call limit takes priority.
+  body.parallel_tool_calls = false;
+  return body;
+}
+
 export function mergeProviderRequestBody(body, config = {}, perRequestExtraBody = undefined) {
   let extras = compatibilityRequestBody(config);
   extras = deepMerge(extras, safeExtraBody(config.extraBody));

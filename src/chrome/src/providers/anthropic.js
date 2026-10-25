@@ -85,6 +85,11 @@ export class AnthropicProvider extends BaseLLMProvider {
         delete prepared.top_p;
       }
     }
+    if (options.parallelToolCalls === false && prepared.tools?.length) {
+      // Set this after thinking/tool-choice normalization, including the
+      // forced-choice -> auto conversion required by newer Claude models.
+      prepared.tool_choice = { ...(prepared.tool_choice || { type: 'auto' }), disable_parallel_tool_use: true };
+    }
     return prepared;
   }
 

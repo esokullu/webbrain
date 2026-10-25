@@ -4,6 +4,12 @@ This branch makes the extension's **Act and Dev** modes use screenshots and nati
 
 Every new Act or Dev request, including a follow-up, begins with a fresh full screenshot. The model receives one current visual context and issues one tool call at a time. A native action is followed by another capture. Completion takes a final screenshot and asks the model to reassess if the screen changed before it could finish.
 
+Model requests explicitly disable parallel tool calls on providers that support this option. If a provider still returns several calls, only the first action is eligible to run. Remaining calls receive a deferred receipt and require a new model decision after a fresh screenshot; `done` must be issued alone. A document replacement, redirect or viewport change during capture retries only the observation, up to eight attempts with backoff capped at one second and no further retry after eight elapsed seconds; it never replays the preceding input or navigation. Missing privacy scans retry only while the browser confirms the tab is loading, allowing privacy content scripts to initialize at document idle. Permanent privacy failures, closed tabs and clipped captures stop without uploading an unsafe image.
+
+With screenshot redaction disabled, capture skips the privacy scan and its extra viewport check. With redaction enabled, both pre-capture and post-capture regions are masked. Enabling privacy during capture or model preparation forces a fresh protected full frame, discarding any raw base-and-patch context. A final synchronous check after cost approval prevents a previously prepared raw image from reaching the provider. Disabling privacy during a capture preserves its existing masks. Cancellation and user corrections also interrupt capture/model retry waits without replaying browser input.
+
+Trace exports retain safe frame dimensions, byte/token counts, capture timings, retry attempts and terminal failure phases/codes. These visual diagnostic records omit screenshot bytes, page URLs and private text, including in lossless exports.
+
 ## Enabling and comparing
 
 The extension background defaults `actObservation` to `vision` on this branch. Existing embedding code that constructs `Agent` directly keeps the accessibility default, unless it selects visual mode explicitly:

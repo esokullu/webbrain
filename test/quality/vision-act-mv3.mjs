@@ -89,6 +89,7 @@ const server = http.createServer(async (request, response) => {
       response.writeHead(200, { 'Content-Type': 'application/json' }); response.end(JSON.stringify({ choices: [{ message: { role: 'assistant', content: 'Hi' }, finish_reason: 'stop' }] })); return;
     }
     assert.ok(activeCase, 'Task inference requires an active owned case');
+    assert.equal(input.parallel_tool_calls, false, 'Real provider requests must ask for one visual tool call');
     assert.ok(input.tools?.some(tool => tool.function.name === 'vision_click'), `${activeCase.mode || 'act'} must advertise vision tools`);
     assert.ok(!input.tools.some(tool => /^(get_accessibility_tree|click_ax|type_ax|read_page|execute_js|browser_batch)$/.test(tool.function.name)));
     const images = screenshotsIn(input.messages), frames = framesIn(input.messages), frame = frames.at(-1);
@@ -99,6 +100,20 @@ const server = http.createServer(async (request, response) => {
     assert.doesNotMatch(plain, /AX_HIDDEN_SENTINEL_NEVER_SEND|DOM_ONLY_SENTINEL_NEVER_SEND/);
     const count = requests.filter(item => item.case === activeCase.id).length;
     assert.ok(count < 12, 'The fixture cannot silently retry forever');
+    const navigationRequest = requests.find(item => item.case === activeCase.id && item.next.name === 'vision_navigate');
+    if (navigationRequest) {
+      const receipts = input.messages.filter(message => message.role === 'tool');
+      const navigation = receipts.find(message => message.tool_call_id === `vision-${activeCase.id}-${navigationRequest.index}`);
+      const deferred = receipts.find(message => message.tool_call_id === `vision-${activeCase.id}-${navigationRequest.index}-wait`);
+      assert.equal(JSON.parse(navigation.content).navigated, true, 'The next request must retain the one navigation receipt');
+      const deferredResult = JSON.parse(deferred.content);
+      assert.equal(deferredResult.code, 'vision_batch_deferred');
+      assert.equal(deferredResult.noDispatch, true); assert.equal(deferredResult.dispatched, false);
+      assert.equal(deferredResult.outcomeUnknown, false);
+      assert.notEqual(frame.frameId, navigationRequest.frames.at(-1).frameId, 'The next request must use a new navigation frame');
+      assert.equal(frame.viewport.url, origin + '/finished');
+      assert.ok(frames.some(packet => packet.kind === 'full' && packet.viewport.url === origin + '/finished'));
+    }
     if (activeCase.mode === 'dev' && count === 0) {
       // Owned fixture activity after the real Dev collectors start. The agent
       // receives only its bounded diagnostic tools, never this test script.
@@ -139,14 +154,19 @@ const server = http.createServer(async (request, response) => {
       tools: input.tools.map(tool => tool.function.name), next: step, input };
     requests.push(record);
     const call = { id: `vision-${activeCase.id}-${count}`, type: 'function', function: { name: step.name, arguments: JSON.stringify(step.args) } };
+    // Reproduce a provider ignoring parallel_tool_calls:false. Only navigation
+    // may execute; the wait is explicitly deferred until a new screenshot.
+    const calls = step.name === 'vision_navigate' ? [call, { id: `${call.id}-wait`, type: 'function',
+      function: { name: 'vision_wait', arguments: JSON.stringify({ milliseconds: 3000 }) } }] : [call];
+    record.returnedTools = calls.map(item => item.function.name);
     if (input.stream) {
       response.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache' });
-      response.write('data: ' + JSON.stringify({ choices: [{ index: 0, delta: { role: 'assistant', tool_calls: [{ index: 0, ...call }] }, finish_reason: null }] }) + '\n\n');
+      response.write('data: ' + JSON.stringify({ choices: [{ index: 0, delta: { role: 'assistant', tool_calls: calls.map((item, index) => ({ index, ...item })) }, finish_reason: null }] }) + '\n\n');
       response.write('data: ' + JSON.stringify({ choices: [{ index: 0, delta: {}, finish_reason: 'tool_calls' }], usage: { prompt_tokens: 100, completion_tokens: 20 } }) + '\n\n');
       response.end('data: [DONE]\n\n');
     } else {
       response.writeHead(200, { 'Content-Type': 'application/json' });
-      response.end(JSON.stringify({ choices: [{ message: { role: 'assistant', content: '', tool_calls: [call] }, finish_reason: 'tool_calls' }], usage: { prompt_tokens: 100, completion_tokens: 20 } }));
+      response.end(JSON.stringify({ choices: [{ message: { role: 'assistant', content: '', tool_calls: calls }, finish_reason: 'tool_calls' }], usage: { prompt_tokens: 100, completion_tokens: 20 } }));
     }
   } catch (error) {
     failures.push(error.stack); if (!response.headersSent) response.writeHead(500, { 'Content-Type': 'application/json' });
@@ -207,19 +227,50 @@ try {
         width: viewport.width, height: viewport.height, deviceScaleFactor: dpr, mobile: false,
       });
     }, { tabId, viewport: entry.viewport, dpr: entry.dpr });
-    await worker.evaluate(() => {
-      globalThis.visionProbe = { cdp: [], messages: [] };
+    await worker.evaluate(({ finishedUrl }) => {
+      globalThis.visionProbe = { cdp: [], messages: [], navigationCount: 0, captureFailuresInjected: 0, recoveredCaptures: 0 };
+      let failNextNavigationCapture = false;
+      const updateTab = chrome.tabs.update.bind(chrome.tabs);
+      chrome.tabs.update = async (tabId, properties, ...extra) => {
+        if (properties?.url === finishedUrl) {
+          visionProbe.navigationCount++; failNextNavigationCapture = true;
+        }
+        return updateTab(tabId, properties, ...extra);
+      };
       const sendCommand = chrome.debugger.sendCommand.bind(chrome.debugger);
       chrome.debugger.sendCommand = async (target, method, params, ...extra) => {
         visionProbe.cdp.push({ tabId: target.tabId, method, expression: params?.expression });
-        return sendCommand(target, method, params, ...extra);
+        // The native bridge simulates one destroyed document context after
+        // navigation. Product capture recovery must take a new screenshot,
+        // without replaying navigation or making another model request first.
+        if (method === 'Page.captureScreenshot' && failNextNavigationCapture) {
+          failNextNavigationCapture = false; visionProbe.captureFailuresInjected++;
+          // Use a genuinely missing native execution context so Chrome's
+          // callback API supplies runtime.lastError exactly as it does during
+          // document replacement. Rejecting this async wrapper alone would
+          // leave callback consumers waiting forever.
+          return sendCommand(target, 'Runtime.evaluate', {
+            expression: 'void 0', contextId: 2147483647, returnByValue: true,
+          }, ...extra);
+        }
+        if (method === 'Page.captureScreenshot' && typeof extra[0] === 'function') {
+          const callback = extra[0];
+          return sendCommand(target, method, params, result => {
+            if (!chrome.runtime.lastError && visionProbe.captureFailuresInjected) visionProbe.recoveredCaptures++;
+            callback(result);
+          });
+        }
+        const result = await sendCommand(target, method, params, ...extra);
+        if (method === 'Page.captureScreenshot' && visionProbe.captureFailuresInjected) visionProbe.recoveredCaptures++;
+        return result;
       };
       const sendMessage = chrome.tabs.sendMessage.bind(chrome.tabs);
       chrome.tabs.sendMessage = async (tabId, message, ...extra) => {
         visionProbe.messages.push({ tabId, action: message.action }); return sendMessage(tabId, message, ...extra);
       };
-    });
+    }, { finishedUrl: origin + '/finished' });
     beforeNavigation = [];
+    const startedAt = Date.now();
     const started = performance.now();
     console.log(`Starting owned visual ${entry.mode || 'act'} on tab ${tabId}`);
     const result = await message(entry.action, { tabId, requestId: `vision-owned-${entry.id}`, mode: entry.mode || 'act', locale: 'en',
@@ -228,13 +279,39 @@ try {
     const elapsedMs = Math.round(performance.now() - started);
     const events = await panel.evaluate(() => visionEvents);
     const probe = await worker.evaluate(() => visionProbe);
+    const recorded = await panel.evaluate(async startedAt => {
+      const trace = await import(chrome.runtime.getURL('src/trace/recorder.js'));
+      const runs = (await trace.listRuns({ limit: 20 })).filter(run => run.startedAt >= startedAt);
+      return Promise.all(runs.map(async run => ({ run, events: await trace.getRunEvents(run.runId) })));
+    }, startedAt);
     const caseRequests = requests.filter(item => item.case === entry.id);
-    const evidence = { case: entry, result, elapsedMs, events, probe, beforeNavigation, requests: caseRequests };
+    const evidence = { case: entry, result, elapsedMs, events, probe, recorded, beforeNavigation, requests: caseRequests };
     results.push(evidence);
     await fs.writeFile(path.join(out, `${entry.id}.json`), JSON.stringify(evidence,
       (_key, value) => typeof value === 'string' && value.startsWith('data:image/') ? '[owned screenshot omitted]' : value, 2));
     assert.deepEqual(failures, [], failures.join('\n'));
     assert.equal(result.content, 'Owned visual task complete.', JSON.stringify(result));
+    assert.equal(probe.navigationCount, 1, 'A batched provider reply and screenshot retry must navigate exactly once');
+    assert.equal(probe.captureFailuresInjected, 1, 'Every installed case exercises the post-navigation capture race');
+    assert.ok(probe.recoveredCaptures >= 1, 'A native screenshot must succeed after the injected failure');
+    const visualRun = recorded.find(entry => entry.events.some(event => event.data?.note === 'vision_capture_failure'));
+    assert.ok(visualRun, 'Automatic feedback trace must retain capture retry diagnostics');
+    const captureFailure = visualRun.events.find(event => event.data?.note === 'vision_capture_failure');
+    assert.equal(captureFailure.data.extra.phase, 'vision_after_action_capture');
+    assert.equal(captureFailure.data.extra.reason, 'page_changed');
+    assert.equal(captureFailure.data.extra.retryable, true);
+    assert.equal(visualRun.run.status, 'done'); assert.equal(visualRun.run.errorCount, 0);
+    assert.equal(visualRun.events.filter(event => event.kind === 'tool' && event.data.name === 'vision_navigate').length, 1);
+    assert.equal(visualRun.events.find(event => event.kind === 'tool' && event.data.name === 'vision_wait')?.data.resultErrorCode,
+      'vision_batch_deferred');
+    const runtimeUpdates = result.updates || events;
+    // Streaming UI deliberately keeps only success/error; the complete safe
+    // delivery receipt must still be sent to the model and retained in trace.
+    const deferredWait = JSON.parse(caseRequests.at(-1).input.messages.find(message =>
+      message.role === 'tool' && message.tool_call_id.endsWith('-wait')).content);
+    assert.equal(deferredWait.code, 'vision_batch_deferred');
+    assert.equal(deferredWait.noDispatch, true); assert.equal(deferredWait.outcomeUnknown, false);
+    assert.ok(!runtimeUpdates.some(event => event.type === 'tool_call' && event.data.name === 'vision_wait'));
     assert.ok(caseRequests.length >= (entry.mode === 'dev' ? 10 : 8) && caseRequests.length <= 11,
       'Completion may reobserve loading, but must stay bounded');
     if (entry.mode === 'dev') {
@@ -268,9 +345,11 @@ try {
     await context.close(); context = null;
   }
   assert.deepEqual(await hashSources(), sourceBefore, 'The browser harness must not patch product source');
-  const summary = { passed: true, cases: results.map(({ case: entry, elapsedMs, requests }) => ({
+  const summary = { passed: true, cases: results.map(({ case: entry, elapsedMs, requests, probe }) => ({
     id: entry.id, mode: entry.mode || 'act', viewport: entry.viewport, dpr: entry.dpr, zoom: entry.zoom || 1, elapsedMs, modelCalls: requests.length,
     maxImageBytes: Math.max(...requests.map(item => item.imageBytes)), maxImageCount: Math.max(...requests.map(item => item.imageCount)),
+    navigationCount: probe.navigationCount, captureFailuresInjected: probe.captureFailuresInjected,
+    recoveredCaptures: probe.recoveredCaptures,
   })), submissions, sourceHashes: sourceBefore };
   await fs.writeFile(path.join(out, 'summary.json'), JSON.stringify(summary, null, 2));
   console.log(JSON.stringify(summary, null, 2));

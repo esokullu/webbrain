@@ -1,11 +1,13 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { createServer } from 'node:http';
 import { chromium } from 'playwright';
-import { VisionBrowser, sameVisionViewport, visionKeyChord } from '../src/chrome/src/agent/vision-browser.js';
+import { VisionBrowser, sameVisionViewport, visionKeyChord, isTransientVisionCaptureError } from '../src/chrome/src/agent/vision-browser.js';
 import { VisionBrowser as FirefoxVisionBrowser } from '../src/firefox/src/agent/vision-browser.js';
 import { VisionFrameSession, normalizeVisionViewport } from '../src/chrome/src/agent/vision-frames.js';
 import { cdpClient } from '../src/chrome/src/cdp/cdp-client.js';
-import { createVisionTransport, visionPngDimensions } from '../src/chrome/src/agent/vision-transport.js';
+import { createVisionTransport, visionPngDimensions, classifyVisionCaptureError } from '../src/chrome/src/agent/vision-transport.js';
+import { classifyVisionCaptureError as classifyFirefoxCaptureError } from '../src/firefox/src/agent/vision-transport.js';
 import { readVisionViewport, performVisionInput, captureVision } from '../firefox-companion/vision.mjs';
 
 const viewport = { width: 800, height: 600, devicePixelRatio: 2, scale: 1, zoom: 1,
@@ -45,6 +47,54 @@ test('capture rejects a resize/navigation during image transfer and redacts befo
   browser.redact = async (_tab, image, metadata) => { assert.equal(metadata.devicePixelRatio, 2); return image.replace('aGVsbG8=', 'cmVkYWN0ZWQ='); };
   assert.match((await browser.capture(1)).dataUrl, /cmVkYWN0ZWQ=/);
 });
+test('only recognized read-only capture transitions are retryable across both browser transports', () => {
+  for (const classify of [classifyVisionCaptureError, classifyFirefoxCaptureError]) {
+    for (const [message, code] of [
+      ['Execution context was destroyed.', 'vision_capture_context_changed'],
+      ['Cannot find context with specified id', 'vision_capture_context_changed'],
+      ['no such realm', 'vision_capture_context_changed'],
+      ['Page changed during screenshot capture', 'vision_stale_frame'],
+      ['Unable to capture screenshot', 'vision_capture_not_ready'],
+      ['Cannot read Firefox viewport geometry', 'vision_capture_not_ready'],
+    ]) {
+      const error = classify(new Error(message));
+      assert.equal(error.code, code); assert.equal(isTransientVisionCaptureError(error), true);
+    }
+    for (const message of ['No tab with id: 15', 'Target closed', 'Debugger not attached', 'Permission denied',
+      'Cannot access a restricted page', 'Firefox companion disconnected', 'Screenshot privacy scan failed',
+      'Screenshot privacy encoding failed', 'Unexpected protocol error', 'Inspected target navigated or closed']) {
+      assert.equal(isTransientVisionCaptureError(classify(new Error(message))), false, message);
+    }
+    assert.equal(isTransientVisionCaptureError(classify(Object.assign(new Error('Unable to capture screenshot'), { name: 'AbortError' }))), false);
+    assert.equal(isTransientVisionCaptureError(classify(Object.assign(new Error('Unable to capture screenshot'), { code: 'vision_capture_clipped' }))), false);
+  }
+});
+test('capture leaves privacy failures permanent and rejects incomplete geometry with a typed transient code', async () => {
+  const { browser, transport } = fake();
+  transport.readViewport = async () => ({ ...viewport, width: 0 });
+  await assert.rejects(browser.capture(1), error => error.code === 'vision_capture_not_ready');
+  transport.readViewport = async () => ({ ...viewport });
+  const privacyError = new Error('Unable to capture screenshot privacy scan');
+  browser.redact = async () => { throw privacyError; };
+  await assert.rejects(browser.capture(1), error => error === privacyError && !isTransientVisionCaptureError(error));
+});
+test('ambiguous CDP navigation-or-closure errors retry only with a live tab', async () => {
+  const previousChrome = globalThis.chrome;
+  let live = true;
+  globalThis.chrome = { runtime: { lastError: null }, tabs: { get: async id => {
+    if (!live) throw new Error('No tab with that id'); return { id };
+  } }, debugger: { sendCommand(_target, _method, _params, callback) {
+    globalThis.chrome.runtime.lastError = { message: 'Inspected target navigated or closed' };
+    callback(); globalThis.chrome.runtime.lastError = null;
+  } } };
+  cdpClient.sessions.set(103, { attached: true });
+  try {
+    const transport = createVisionTransport({});
+    await assert.rejects(transport.capture(103, viewport), error => error.code === 'vision_capture_context_changed');
+    live = false;
+    await assert.rejects(transport.capture(103, viewport), error => !isTransientVisionCaptureError(error));
+  } finally { globalThis.chrome = previousChrome; cdpClient.sessions.delete(103); }
+});
 test('capture fences navigation during privacy work and hides indicators for both ordinary and action preflight screenshots', async () => {
   let hidden = false, wraps = 0, redacted = false;
   const { browser, transport } = fake(VisionBrowser, {
@@ -53,7 +103,7 @@ test('capture fences navigation during privacy work and hides indicators for bot
   });
   transport.capture = async () => { assert.equal(hidden, true); return 'data:image/png;base64,aGVsbG8='; };
   transport.readViewport = async () => ({ ...viewport, documentId: redacted ? 'navigated' : viewport.documentId });
-  await assert.rejects(browser.capture(1), /privacy processing/);
+  await assert.rejects(browser.capture(1), /finalizing screenshot/);
   assert.equal(hidden, false);
   browser.redact = undefined;
   transport.readViewport = async () => ({ ...viewport });
@@ -64,6 +114,65 @@ test('capture fences navigation during privacy work and hides indicators for bot
   assert.equal(freshnessChecks, 1);
   assert.equal(wraps, 2);
 });
+for (const Browser of [VisionBrowser, FirefoxVisionBrowser]) {
+  test(`${Browser === VisionBrowser ? 'Chrome' : 'Firefox'} screenshot privacy predicate skips inactive processing and can require a fresh capture`, async () => {
+    let reads = 0, redactions = 0, enabled = false, policyChanged = false;
+    const { browser, transport, calls } = fake(Browser, {
+      shouldRedact: tabId => {
+        assert.equal(tabId, 1);
+        assert.equal(reads, enabled ? 4 : 2, 'Policy is evaluated immediately after screenshot geometry is checked');
+        if (policyChanged) throw Object.assign(new Error('Privacy setting changed'), { code: 'vision_stale_frame' });
+        return enabled;
+      },
+      redact: async (_tabId, dataUrl) => { redactions++; return dataUrl; },
+    });
+    transport.readViewport = async () => { reads++; return { ...viewport }; };
+    await browser.capture(1);
+    assert.equal(reads, 2);
+    assert.equal(redactions, 0);
+    enabled = true;
+    await browser.capture(1);
+    assert.equal(reads, 5);
+    assert.equal(redactions, 1);
+    reads = 0;
+    enabled = false;
+    policyChanged = true;
+    await assert.rejects(browser.capture(1), error => isTransientVisionCaptureError(error));
+    assert.equal(reads, 2);
+    assert.equal(redactions, 1, 'Changed policy rejects before processing pixels from the old policy');
+    assert.deepEqual(calls, []);
+  });
+  test(`${Browser === VisionBrowser ? 'Chrome' : 'Firefox'} final screenshot geometry fence retries without input for masked and identity redaction`, async () => {
+    for (const masking of [true, false]) {
+      let reads = 0, redactions = 0, captures = 0;
+      const { browser, transport, calls } = fake(Browser, {
+        redact: async (_tabId, dataUrl) => {
+          redactions++;
+          assert.equal(reads, redactions === 1 ? 2 : 5, 'Final geometry is read after the redaction callback');
+          return masking ? dataUrl.replace('aGVsbG8=', 'cmVkYWN0ZWQ=') : dataUrl;
+        },
+      });
+      transport.readViewport = async () => ({ ...viewport, scrollY: ++reads >= 3 ? 24 : 0 });
+      transport.capture = async () => {
+        captures++;
+        return 'data:image/png;base64,aGVsbG8=';
+      };
+      await assert.rejects(browser.capture(1), error => {
+        assert.equal(error.code, 'vision_stale_frame');
+        assert.equal(error.message, 'Page changed while finalizing screenshot; capture again');
+        return isTransientVisionCaptureError(error);
+      });
+      assert.equal(reads, 3, 'Only the final geometry read detects this transition');
+      const observation = await browser.capture(1);
+      assert.equal(observation.viewport.scrollY, 24);
+      assert.equal(observation.dataUrl, `data:image/png;base64,${masking ? 'cmVkYWN0ZWQ=' : 'aGVsbG8='}`);
+      assert.equal(reads, 6);
+      assert.equal(redactions, 2);
+      assert.equal(captures, 2);
+      assert.deepEqual(calls, [], 'Retrying screenshot observation never dispatches native input');
+    }
+  });
+}
 test('stale ids, retina changes, zoom, navigation, and offscreen points never dispatch', async () => {
   for (const change of [{ width: 801 }, { devicePixelRatio: 1 }, { zoom: 1.25 }, { scale: 2 },
     { offsetLeft: 25 }, { scrollY: 10 }, { url: 'https://elsewhere.test/' }, { documentId: 'document-2' }]) {
@@ -232,4 +341,72 @@ test('real Chromium: DPR 1/2 and pinch zoom capture, click, Unicode typing, keys
       await context.close(); cdpClient.sessions.delete(99);
     }
   } finally { globalThis.chrome = previousChrome; cdpClient.sessions.delete(99); await browser.close(); }
+});
+
+test('real Chromium: redirect or resize across screenshot transfer rejects once, then observation-only retry succeeds', { timeout: 30000 }, async () => {
+  const browser = await chromium.launch({ headless: true });
+  const previousChrome = globalThis.chrome;
+  const tabId = 102;
+  const server = createServer((request, response) => {
+    if (request.url === '/redirect') { response.writeHead(302, { location: '/final' }); response.end(); return; }
+    response.setHeader('Content-Type', 'text/html'); response.end('<h1>Stable destination</h1><button>Ready</button>');
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  try {
+    const context = await browser.newContext({ viewport: { width: 800, height: 600 } });
+    const page = await context.newPage(); await page.goto(`${origin}/start`);
+    const protocol = await context.newCDPSession(page);
+    await protocol.send('Emulation.setDeviceMetricsOverride', { width: 800, height: 600, deviceScaleFactor: 1, mobile: false });
+    const commands = [];
+    let transition = null;
+    globalThis.chrome = { runtime: { lastError: null }, debugger: { sendCommand(_target, method, params, callback) {
+      commands.push(method);
+      void (async () => {
+        try {
+          const result = await protocol.send(method, params);
+          // A real capture's pixels have left the compositor, but its reply is
+          // still in flight while a real page navigation/resize takes place.
+          if (method === 'Page.captureScreenshot' && transition) {
+            const change = transition; transition = null; await change();
+          }
+          callback(result);
+        } catch (error) {
+          globalThis.chrome.runtime.lastError = { message: error.message }; callback(); globalThis.chrome.runtime.lastError = null;
+        }
+      })();
+    } } };
+    cdpClient.sessions.set(tabId, { attached: true });
+    const adapter = new VisionBrowser();
+    let navigations = 0;
+    const changes = [
+      async () => { navigations++; await page.goto(`${origin}/redirect`); },
+      async () => { await protocol.send('Emulation.setDeviceMetricsOverride', { width: 900, height: 650, deviceScaleFactor: 1, mobile: false }); },
+    ];
+    for (const change of changes) {
+      transition = change;
+      let attempts = 0, caught;
+      let observation;
+      while (!observation && attempts < 3) {
+        attempts++;
+        try { observation = await adapter.capture(tabId); }
+        catch (error) {
+          caught = error;
+          assert.equal(isTransientVisionCaptureError(error), true, `${error.code}: ${error.message}`);
+        }
+      }
+      assert.equal(attempts, 2, 'Retry captures observation, never navigation or input');
+      assert.equal(caught.code, 'vision_stale_frame');
+      assert.equal(observation.viewport.url, `${origin}/final`);
+    }
+    assert.equal((await adapter.readViewport(tabId)).width, 900);
+    assert.equal(navigations, 1);
+    assert.equal(commands.filter(method => method === 'Page.captureScreenshot').length, 4);
+    assert.equal(commands.some(method => method.startsWith('Input.')), false);
+    assert.equal(commands.some(method => /^(Accessibility|DOM)\./.test(method)), false);
+    await context.close();
+  } finally {
+    globalThis.chrome = previousChrome; cdpClient.sessions.delete(tabId); await browser.close();
+    await new Promise(resolve => server.close(resolve));
+  }
 });

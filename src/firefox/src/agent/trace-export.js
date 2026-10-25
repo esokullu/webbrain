@@ -21,6 +21,7 @@
 
 import { isKnownKind } from '../trace/event-model.js';
 import { isErrorCode } from '../trace/error-codes.js';
+import { projectTraceEventData } from '../trace/privacy.js';
 
 const ARGS_LIMIT = 300;
 const RESULT_LIMIT = 600;
@@ -372,7 +373,8 @@ export function tracesToMarkdown(runsWithEvents, {
       } else if (ev.kind === 'streaming') {
         md += renderStreaming(d);
       } else if (ev.kind === 'error') {
-        md += `- ⚠️ error${d.phase ? ` (${d.phase})` : ''}: ${oneLine(d.message || '')}\n`;
+        const details = [isErrorCode(d.code) ? d.code : '', oneLine(d.message || '')].filter(Boolean).join(' · ');
+        md += `- ⚠️ error${d.phase ? ` (${d.phase})` : ''}: ${details}\n`;
       } else if (ev.kind === 'screenshot') {
         md += `- 📷 Visual capture: ${oneLine(d.caption || 'viewport screenshot')}\n`;
       } else if (ev.kind === 'vision_sub_call') {
@@ -408,6 +410,23 @@ export function tracesToMarkdown(runsWithEvents, {
         const details = [oneLine(status.context), oneLine(status.visionRoute), oneLine(status.status), progress, bytes]
           .filter(Boolean).join(' · ');
         md += `- 👁 Vision status${details ? `: ${details}` : ''}${status.error ? ` · error=${oneLine(status.error)}` : ''}\n`;
+      } else if (ev.kind === 'note' && d.note === 'vision_frame') {
+        const frame = projectTraceEventData('note', d).extra;
+        const details = [frame.kind, frame.frameId,
+          frame.canvas?.width && frame.canvas?.height ? `${frame.canvas.width}×${frame.canvas.height}` : '',
+          Number.isFinite(frame.imageCount) ? `${frame.imageCount} image(s)` : '',
+          Number.isFinite(frame.bytes) ? `${frame.bytes} bytes` : '',
+          Number.isFinite(frame.estimatedTokens) ? `~${frame.estimatedTokens} image tokens` : '',
+          frame.viewport?.devicePixelRatio ? `DPR ${frame.viewport.devicePixelRatio}` : '', frame.reason,
+        ].filter(Boolean).join(' · ');
+        md += `- 👁 Vision frame${details ? `: ${details}` : ''}\n`;
+      } else if (ev.kind === 'note' && d.note === 'vision_capture_failure') {
+        const failure = projectTraceEventData('note', d).extra;
+        const details = [failure.phase, failure.code, failure.reason,
+          failure.attempt ? `attempt ${failure.attempt}` : '',
+          Number.isFinite(failure.durationMs) ? `${failure.durationMs} ms` : '',
+        ].filter(Boolean).join(' · ');
+        md += `- ⚠️ Vision capture failed${details ? `: ${details}` : ''}\n`;
       } else if (ev.kind === 'note' && d.note === 'planner_attempt_failed') {
         const attempt = Number(d.extra?.attempt) || 1;
         const phase = oneLine(d.extra?.phase || 'planner');

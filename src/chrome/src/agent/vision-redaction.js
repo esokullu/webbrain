@@ -4,7 +4,19 @@ export async function captureVisionPrivacySnapshot(agent, tabId) {
   if (!agent.screenshotRedaction) return null;
   const scan = await agent.captureScreenshotRedactionSnapshotForUser(tabId, { coordinateSpace: 'page' });
   if (!scan?.ok || !scan.snapshot || scan.snapshot.coordinateSpace !== 'page') {
-    throw new Error('Screenshot privacy scan failed. No screenshot was sent.');
+    const error = Object.assign(new Error('Screenshot privacy scan failed. No screenshot was sent.'),
+      { code: 'vision_privacy_scan_failed' });
+    // Content scripts may not answer while a document is being replaced.
+    // Retry only a missing scan with live-tab evidence of that transition;
+    // malformed snapshots and explicit failures must still fail closed.
+    if (!scan?.snapshot && !scan?.error && !scan?.code) {
+      try {
+        const tab = await (globalThis.browser || globalThis.chrome)?.tabs?.get(tabId);
+        if (tab?.id === tabId && tab.status === 'loading' && !tab.discarded)
+          error.code = 'vision_capture_not_ready';
+      } catch { /* A closed or inaccessible tab is not a capture transition. */ }
+    }
+    throw error;
   }
   return scan.snapshot;
 }

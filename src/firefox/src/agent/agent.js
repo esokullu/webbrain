@@ -9518,6 +9518,10 @@ export class Agent extends LoopDetector {
     const before = await this._checkCostAllowance(provider, costState, { signal: options.signal, hold });
     if (before) throw this._costAllowanceError(before);
     this._throwIfAborted(options?.signal);
+    // The allowance gate can outlive its request context (for example when
+    // screenshot privacy changes). Keep this last validation synchronous so
+    // an obsolete request cannot cross the provider boundary after a wait.
+    requestContext?.validateBeforeProviderRequest?.();
     const result = await provider.chat(messages, requestContext
       ? this._cloudGenerationOptions(provider, options, requestContext)
       : options);

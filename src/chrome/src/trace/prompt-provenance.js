@@ -23,6 +23,8 @@ function systemPromptVariant(prompt) {
   if (text.startsWith("You are WebBrain's on-device page assistant")) return 'tiny_ask';
   if (text.startsWith("You are WebBrain's standalone chat assistant")) return 'standalone_chat';
   if (text.startsWith('You are WebBrain, a helpful AI browser assistant running in Ask mode.')) return 'ask';
+  if (text.startsWith('You are WebBrain in visual Act mode.')) return 'act_vision';
+  if (text.startsWith('You are WebBrain in visual Dev mode.')) return 'dev_vision';
 
   let actTier = '';
   if (text.startsWith('You are WebBrain, an AI browser agent running in Act mode. You can read web pages')) actTier = 'full';
