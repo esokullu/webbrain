@@ -19,7 +19,6 @@ import {
   getActiveAdapter,
   UNIVERSAL_PREAMBLE,
 } from '../../src/chrome/src/agent/adapters.js';
-import { OpenAICompatibleProvider } from '../../src/chrome/src/providers/openai.js';
 import {
   highlightCode,
   escapeCodeHtml,
@@ -43,10 +42,10 @@ export const EXTENSION_PATHS = Object.freeze({
   activityBrain: path.resolve(EXTENSION_ROOT, 'src/ui/activity-brain.js'),
   markdownRender: path.resolve(EXTENSION_ROOT, 'src/ui/markdown-render.js'),
   calculator: path.resolve(EXTENSION_ROOT, 'src/agent/calculator.js'),
-  sidepanelCss: path.resolve(EXTENSION_ROOT, 'styles/sidepanel.css'),
+  readPageWindow: path.resolve(EXTENSION_ROOT, 'src/agent/read-page-window.js'),
+  credentialFields: path.resolve(EXTENSION_ROOT, 'src/agent/credential-fields.js'),
   icon128: path.resolve(EXTENSION_ROOT, 'icons/icon128.png'),
   icon48: path.resolve(EXTENSION_ROOT, 'icons/icon48.png'),
-  packageJson: path.resolve(REPO_ROOT, 'package.json'),
 });
 
 /**
@@ -124,8 +123,9 @@ export function buildEmbedSystemPrompt(mode = 'ask', siteConfig = {}, pageUrl = 
   if (pageUrl) {
     try {
       const adapter = getActiveAdapter(pageUrl);
-      if (adapter?.prompt) {
-        parts.push(`SITE ADAPTER NOTES (${adapter.name || adapter.id || 'matched'}):\n${adapter.prompt}`);
+      const notes = String(adapter?.notes || '').trim();
+      if (notes) {
+        parts.push(`SITE ADAPTER NOTES (${adapter.name || adapter.id || 'matched'}):\n${notes}`);
       }
     } catch {
       // Ignore adapter lookup errors on synthetic URLs
@@ -137,15 +137,6 @@ export function buildEmbedSystemPrompt(mode = 'ask', siteConfig = {}, pageUrl = 
   }
 
   return parts.filter(Boolean).join('\n\n');
-}
-
-/**
- * Wrap untrusted page-derived content in WebBrain's `<untrusted_page_content>` boundary.
- */
-export function wrapUntrustedPageContent(content, label = 'page_data') {
-  const text = typeof content === 'string' ? content : JSON.stringify(content, null, 2);
-  const safeText = String(text || '').replace(/<\/?untrusted_page_content>/gi, '[stripped_boundary_tag]');
-  return `<untrusted_page_content source="${sanitizeText(label, 60, { collapseWhitespace: true })}">\n${safeText}\n</untrusted_page_content>`;
 }
 
 export {
@@ -161,7 +152,6 @@ export {
   repairDoubleEscapedAssistantText,
   getActiveAdapter,
   UNIVERSAL_PREAMBLE,
-  OpenAICompatibleProvider,
   highlightCode,
   escapeCodeHtml,
   renderMarkdownBlockquotes,

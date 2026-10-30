@@ -14,6 +14,7 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import vm from 'node:vm';
 import { execFileSync } from 'node:child_process';
 import { PROJECT_ROOT, REPO_ROOT, EXTENSION_PATHS } from '../src/webbrain.js';
 import { buildEmbedBundle } from '../src/bundle.js';
@@ -25,9 +26,11 @@ fs.mkdirSync(distDir, { recursive: true });
 
 const write = (name, contents) => fs.writeFileSync(path.join(distDir, name), contents);
 
-const bundle = buildEmbedBundle({ force: true });
+const bundle = buildEmbedBundle();
+// Parse with the grammar of a classic <script>, the way sites load embed.js.
+// (`node --check` would parse it as an ES module, since this package is "type": "module".)
+new vm.Script(bundle, { filename: 'embed.js' });
 write('embed.js', bundle);
-execFileSync(process.execPath, ['--check', path.join(distDir, 'embed.js')], { stdio: 'inherit' });
 
 write('tools.json', `${JSON.stringify(buildAgentSpec(), null, 2)}\n`);
 fs.copyFileSync(EXTENSION_PATHS.icon48, path.join(distDir, 'icon48.png'));

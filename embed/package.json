@@ -7,7 +7,8 @@
   "license": "GPL-3.0-or-later",
   "scripts": {
     "build": "node scripts/build.mjs",
-    "test": "node --no-warnings --test test/*.test.mjs"
+    "test": "node --no-warnings --test test/*.test.mjs",
+    "test:browser": "node --no-warnings --test test/browser.mjs"
   },
   "repository": {
     "type": "git",

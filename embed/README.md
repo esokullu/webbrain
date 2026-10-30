@@ -18,10 +18,19 @@ widget reads and acts on pages exactly the way the extension does:
 | `src/ui/activity-brain.js` | The thinking animation |
 | `src/ui/markdown-render.js` | Rendering answers |
 | `src/agent/calculator.js` | Exact arithmetic |
+| `src/agent/read-page-window.js` | Paging `read_page` results |
+| `src/agent/credential-fields.js` | Keeping credential field values out of tool results |
 | `src/agent/tools.js`, `adapters.js` | The Ask and Act tools and prompts in `tools.json` |
 
 `src/widget-runtime.js` adds the launcher, the chat panel and the agent loop
-that talks to the server.
+that talks to the server. The widget only runs the tools `tools.json` lists
+for the turn's mode, and Act is off unless the site's config sets
+`modePolicy: "ask_and_act"`.
+
+Elements with `data-webbrain-ask="…"` start an Ask run when a visitor clicks
+them. `data-webbrain-act="…"` only puts its prompt in the composer for the
+visitor to send, since any markup on the page, including content the site's
+users wrote, can carry the attribute.
 
 The widget is licensed GPL-3.0-or-later, like the rest of WebBrain. Every copy
 of `embed.js` states its license and links back to this folder.
@@ -34,6 +43,7 @@ No dependencies to install; Node 20 or newer.
 cd embed
 npm run build   # writes dist/
 npm test
+npm run test:browser   # loads embed.js in Chrome; needs `npm ci` at the repository root
 ```
 
 `dist/` contains:

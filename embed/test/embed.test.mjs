@@ -3,13 +3,13 @@ import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import vm from 'node:vm';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import {
   getEmbedToolsForMode,
   buildEmbedSystemPrompt,
   calculateExpression,
-  OpenAICompatibleProvider,
 } from '../src/webbrain.js';
 import { buildEmbedBundle } from '../src/bundle.js';
 import { buildAgentSpec } from '../src/agent-spec.js';
@@ -32,14 +32,6 @@ test('the extension modules load and the widget gets Ask and Act tools', () => {
 
   assert.equal(calculateExpression('(49 - 39) * 12 * 12').result, '1440');
 
-  const provider = new OpenAICompatibleProvider({
-    providerName: 'openai-compatible',
-    baseUrl: 'https://api.openai.com/v1',
-    apiKey: 'sk-test',
-    model: 'gpt-4o-mini',
-  });
-  assert.equal(provider.model, 'gpt-4o-mini');
-
   const askPrompt = buildEmbedSystemPrompt('ask', {
     name: 'Acme Docs',
     domain: 'https://docs.acme.dev',
@@ -49,11 +41,21 @@ test('the extension modules load and the widget gets Ask and Act tools', () => {
   assert.ok(askPrompt.includes('Acme Docs'));
   assert.ok(askPrompt.includes('Always cite the pricing tier table.'));
   assert.ok(askPrompt.includes('Ask mode only (read-only)'));
+
+  const githubPrompt = buildEmbedSystemPrompt('ask', { name: 'Docs' }, 'https://github.com/webbrain-one/webbrain/issues');
+  assert.match(githubPrompt, /SITE ADAPTER NOTES \(.+\):\n\S/, 'Site adapter notes reach the prompt');
 });
 
 test('the bundle carries the extension content scripts and leaves extension-only parts out', () => {
-  const bundle = buildEmbedBundle({ force: true });
+  const bundle = buildEmbedBundle();
   assert.ok(bundle.length > 50000);
+  // Sites load embed.js with a classic <script>, not as a module.
+  assert.doesNotThrow(() => new vm.Script(bundle, { filename: 'embed.js' }));
+  const toolNames = {
+    ask: getEmbedToolsForMode('ask').map((t) => t.function.name),
+    act: getEmbedToolsForMode('act').map((t) => t.function.name),
+  };
+  assert.ok(bundle.includes(`toolNames: ${JSON.stringify(toolNames)}`), 'The widget enforces the tools.json tool lists');
   assert.ok(bundle.includes('License: GPL-3.0-or-later'), 'The bundle states its license');
   assert.ok(bundle.includes('https://github.com/webbrain-one/webbrain/tree/main/embed'), 'The bundle links its source');
   assert.ok(bundle.includes('__generateAccessibilityTree'), 'accessibility-tree.js');

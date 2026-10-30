@@ -1,13 +1,15 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { PROJECT_ROOT, EXTENSION_PATHS } from './webbrain.js';
+import { PROJECT_ROOT, EXTENSION_PATHS, getEmbedToolsForMode } from './webbrain.js';
 
 const WIDGET_RUNTIME_PATH = path.resolve(PROJECT_ROOT, 'src/widget-runtime.js');
 
 /**
  * Strips top-level ES module `export ` keywords from pure upstream helper files
- * (`calculator.js`, `activity-brain.js`, `markdown-render.js`) so they can run inside
+ * (`calculator.js`, `activity-brain.js`, `markdown-render.js`, ...) so they can run inside
  * a classic `<script src="/embed.js">` tag without requiring bundler dependencies.
+ * Anything else module-only (an `import`, `export default`, `import.meta`) is left in
+ * place and fails the classic-script parse in scripts/build.mjs.
  */
 function stripEsModuleExports(source) {
   return String(source)
@@ -15,29 +17,53 @@ function stripEsModuleExports(source) {
     .replace(/^export\s+\{[^}]*\};?\s*$/gm, '');
 }
 
-let cachedBundle = null;
-let cachedAt = 0;
+/**
+ * Reads an upstream helper module and wraps it so it returns `names`. Fails the
+ * build when the module no longer declares one of them, instead of shipping a
+ * bundle that throws a ReferenceError on every customer site.
+ */
+function helperModule(file, names) {
+  const source = stripEsModuleExports(fs.readFileSync(file, 'utf8'));
+  for (const name of names) {
+    if (!new RegExp(`^(?:async\\s+)?(?:function\\*?|const|let|var|class)\\s+${name}\\b`, 'm').test(source)) {
+      throw new Error(`embed bundle: ${path.relative(PROJECT_ROOT, file)} no longer declares ${name}`);
+    }
+  }
+  return `(function() {
+${source}
+      return { ${names.join(', ')} };
+    })()`;
+}
 
 /**
  * Builds the self-contained `<script src="/embed.js">` bundle from the WebBrain
  * extension's own content scripts and helpers (src/chrome) plus
  * `embed/src/widget-runtime.js`.
  */
-export function buildEmbedBundle({ force = false } = {}) {
-  const now = Date.now();
-  if (!force && cachedBundle && now - cachedAt < 3000) {
-    return cachedBundle;
-  }
-
+export function buildEmbedBundle() {
   const accessibilityTreeJs = fs.readFileSync(EXTENSION_PATHS.accessibilityTree, 'utf8');
   const visualIndicatorJs = fs.readFileSync(EXTENSION_PATHS.visualIndicator, 'utf8');
   const contentScriptJs = fs.readFileSync(EXTENSION_PATHS.contentScript, 'utf8');
-  const calculatorJs = stripEsModuleExports(fs.readFileSync(EXTENSION_PATHS.calculator, 'utf8'));
-  const activityBrainJs = stripEsModuleExports(fs.readFileSync(EXTENSION_PATHS.activityBrain, 'utf8'));
-  const markdownRenderJs = stripEsModuleExports(fs.readFileSync(EXTENSION_PATHS.markdownRender, 'utf8'));
+  const calculatorJs = helperModule(EXTENSION_PATHS.calculator, ['calculateExpression']);
+  const activityBrainJs = helperModule(EXTENSION_PATHS.activityBrain, ['mountActivityBrain']);
+  const markdownRenderJs = helperModule(EXTENSION_PATHS.markdownRender, [
+    'highlightCode',
+    'escapeCodeHtml',
+    'renderMarkdownBlockquotes',
+    'renderMarkdownHeadings',
+    'renderMarkdownTables',
+    'createMarkdownPlaceholders',
+  ]);
+  const readPageWindowJs = helperModule(EXTENSION_PATHS.readPageWindow, ['applyReadPageWindow', 'fitReadPageWindowResult']);
+  const credentialFieldsJs = helperModule(EXTENSION_PATHS.credentialFields, ['SENSITIVE_NAME_RE', 'REDACTED_CREDENTIAL']);
   const widgetRuntimeJs = fs.readFileSync(WIDGET_RUNTIME_PATH, 'utf8');
+  // The widget refuses any tool call outside these lists, which are the tools.json lists.
+  const toolNames = JSON.stringify({
+    ask: getEmbedToolsForMode('ask').map((tool) => tool.function.name),
+    act: getEmbedToolsForMode('act').map((tool) => tool.function.name),
+  });
 
-  const bundle = `/**
+  return `/**
  * WebBrain for Websites — Embeddable AI Agent Bundle
  * Source: https://github.com/webbrain-one/webbrain/tree/main/embed
  * License: GPL-3.0-or-later
@@ -118,7 +144,7 @@ export function buildEmbedBundle({ force = false } = {}) {
     }
   };
 
-  function dispatchMessageToListeners(msg) {
+  function dispatchMessageToListeners(msg, timeoutMs = 8000) {
     return new Promise((resolve) => {
       let settled = false;
       const done = (res) => {
@@ -126,7 +152,11 @@ export function buildEmbedBundle({ force = false } = {}) {
         settled = true;
         resolve(res);
       };
-      const timeoutId = setTimeout(() => done({ error: 'Content action timed out' }), 8000);
+      const timeoutId = setTimeout(() => done({
+        success: false,
+        outcomeUnknown: true,
+        error: 'Content action timed out. It may still have taken effect: check the page before repeating it.',
+      }), timeoutMs);
       const sendResponse = (res) => {
         clearTimeout(timeoutId);
         done(res);
@@ -151,36 +181,50 @@ export function buildEmbedBundle({ force = false } = {}) {
   }
 
   // Build upstream helper namespace directly from WebBrain extension modules (isolated per file)
-  const upstreamHelpers = (function() {
-    const calcMod = (function() {
-      ${calculatorJs}
-      return { calculateExpression };
-    })();
-    const brainMod = (function() {
-      ${activityBrainJs}
-      return { mountActivityBrain };
-    })();
-    const mdMod = (function() {
-      ${markdownRenderJs}
-      return {
-        highlightCode,
-        escapeCodeHtml,
-        renderMarkdownBlockquotes,
-        renderMarkdownHeadings,
-        renderMarkdownTables,
-        createMarkdownPlaceholders,
-      };
-    })();
-    return {
-      ...calcMod,
-      ...brainMod,
-      ...mdMod,
-    };
-  })();
+  const upstreamHelpers = {
+    ...${calculatorJs},
+    ...${activityBrainJs},
+    ...${markdownRenderJs},
+    ...${readPageWindowJs},
+    ...${credentialFieldsJs},
+  };
+
+  // Waits get their own timeout plus a margin; everything else answers well within 8s.
+  const WAIT_ACTIONS = new Set(['wait_for_element', 'wait_for_stable']);
+  function contentActionTimeoutMs(action, params) {
+    if (!WAIT_ACTIONS.has(action)) return 8000;
+    const requested = Number(params && params.timeout) || 5000;
+    return Math.min(25000, Math.max(8000, requested + 2000));
+  }
+
+  // The widget host is hidden from the AX tree and from hit-testing while the
+  // content scripts read or act on the page. Calls can overlap (two runs, or a
+  // click that starts a new run), so the host is restored when the last one ends.
+  // Waits only poll the DOM, so they leave the host usable: the visitor can
+  // still press Stop during them.
+  let hostHiddenDepth = 0;
+  let hostSavedAriaHidden = null;
+  let hostSavedInert = false;
+
+  function hideWidgetHost() {
+    if (hostHiddenDepth++ > 0 || !widgetHostEl) return;
+    hostSavedAriaHidden = widgetHostEl.getAttribute('aria-hidden');
+    hostSavedInert = widgetHostEl.inert;
+    widgetHostEl.setAttribute('aria-hidden', 'true');
+    widgetHostEl.inert = true;
+  }
+
+  function restoreWidgetHost() {
+    if (--hostHiddenDepth > 0 || !widgetHostEl) return;
+    if (hostSavedAriaHidden === null) widgetHostEl.removeAttribute('aria-hidden');
+    else widgetHostEl.setAttribute('aria-hidden', hostSavedAriaHidden);
+    widgetHostEl.inert = hostSavedInert;
+  }
 
   window.__wbEmbedRuntime = {
     chrome: inPageChrome,
     upstream: upstreamHelpers,
+    toolNames: ${toolNames},
     setWidgetHost(el) {
       widgetHostEl = el;
     },
@@ -188,25 +232,19 @@ export function buildEmbedBundle({ force = false } = {}) {
       if (typeof fn === 'function') stopCallbacks.push(fn);
     },
     async dispatchContentAction(action, params = {}) {
-      // Hide widget host from AX tree & DOM queries during read/action pass
-      const prevAriaHidden = widgetHostEl ? widgetHostEl.getAttribute('aria-hidden') : null;
-      const prevInert = widgetHostEl ? widgetHostEl.inert : false;
-      if (widgetHostEl) {
-        widgetHostEl.setAttribute('aria-hidden', 'true');
-        widgetHostEl.inert = true;
-      }
+      const hideHost = !WAIT_ACTIONS.has(action);
+      const timeoutMs = contentActionTimeoutMs(action, params);
+      if (hideHost) hideWidgetHost();
       try {
         return await dispatchMessageToListeners({
           target: 'content',
           action,
           params,
-        });
+          // content.js stops before dispatching once the widget has given up waiting.
+          actionDeadlineAt: Date.now() + timeoutMs - 250,
+        }, timeoutMs);
       } finally {
-        if (widgetHostEl) {
-          if (prevAriaHidden === null) widgetHostEl.removeAttribute('aria-hidden');
-          else widgetHostEl.setAttribute('aria-hidden', prevAriaHidden);
-          widgetHostEl.inert = prevInert;
-        }
+        if (hideHost) restoreWidgetHost();
       }
     },
     dispatchIndicator(type, extra = {}) {
@@ -225,8 +263,4 @@ export function buildEmbedBundle({ force = false } = {}) {
   ${widgetRuntimeJs}
 })();
 `;
-
-  cachedBundle = bundle;
-  cachedAt = now;
-  return bundle;
 }

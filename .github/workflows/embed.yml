@@ -1,31 +1,28 @@
 name: Embed widget
 
 # Builds and tests the WebBrain for websites widget (embed/) whenever it or
-# the extension code it bundles changes. Pushing a tag like embed-v1.0.0
-# publishes a GitHub release with embed.js, tools.json, the icons,
-# VERSION.json and SHA256SUMS, which sites.webbrain.one pins by version.
+# the extension code it bundles changes, including loading embed.js in Chrome.
+# Pushing a tag like embed-v1.0.0 publishes a GitHub release with embed.js,
+# tools.json, the icons, VERSION.json and SHA256SUMS, which sites.webbrain.one
+# pins by version.
 
 on:
   pull_request:
     paths:
       - ".github/workflows/embed.yml"
       - "embed/**"
-      - "src/chrome/src/content/**"
-      - "src/chrome/src/agent/**"
-      - "src/chrome/src/providers/**"
-      - "src/chrome/src/ui/activity-brain.js"
-      - "src/chrome/src/ui/markdown-render.js"
+      - "package.json"
+      - "package-lock.json"
+      - "src/chrome/**"
   push:
     branches:
       - main
     paths:
       - ".github/workflows/embed.yml"
       - "embed/**"
-      - "src/chrome/src/content/**"
-      - "src/chrome/src/agent/**"
-      - "src/chrome/src/providers/**"
-      - "src/chrome/src/ui/activity-brain.js"
-      - "src/chrome/src/ui/markdown-render.js"
+      - "package.json"
+      - "package-lock.json"
+      - "src/chrome/**"
     tags:
       - "embed-v*"
 
@@ -39,7 +36,7 @@ concurrency:
 jobs:
   test:
     runs-on: ubuntu-24.04
-    timeout-minutes: 5
+    timeout-minutes: 10
     defaults:
       run:
         working-directory: embed
@@ -49,11 +46,22 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+          cache: npm
 
       - name: Build and test
         run: |
           npm run build
           npm test
+
+      # Playwright comes from the repository root; the widget itself has no dependencies.
+      - name: Install Playwright
+        working-directory: .
+        run: npm ci
+
+      - name: Run embed.js in Chrome
+        env:
+          EMBED_CHROME_PATH: /usr/bin/google-chrome
+        run: npm run test:browser
 
   release:
     if: startsWith(github.ref, 'refs/tags/embed-v')
