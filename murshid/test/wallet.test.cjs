@@ -302,6 +302,52 @@ test('transactions are estimated before approval and signed only after it', asyn
   await assert.rejects(provider.handle(SITE, 'eth_sendTransaction', [{ to: EVM_ADDRESS, chainId: '0x89' }]), { code: -32602 });
 });
 
+test('a transaction is signed with the gas and fee caps the user approved, and the site\'s nonce', async () => {
+  const wallet = await readyWallet();
+  const provider = new Provider(wallet);
+  wallet.connect(SITE.origin);
+  const prepared = [];
+  let price = 10n;
+  wallet.evm.prepare = async (net, account, input) => {
+    const tx = Object.fromEntries(Object.entries(input).filter(([, v]) => v !== undefined)); // as EvmClient.prepare does
+    prepared.push(tx);
+    // Fees are only estimated when they are missing; they rise between the two calls.
+    const fees = tx.maxFeePerGas === undefined ? { maxFeePerGas: price, maxPriorityFeePerGas: 1n } : {};
+    price = 99n;
+    return { request: { gas: 21000n, ...tx, ...fees }, fee: 21000n * 10n, l1Fee: 0n };
+  };
+  wallet.evm.send = async () => `0x${'cd'.repeat(32)}`;
+  const queued = nextRequest(wallet);
+  const answer = provider.handle(SITE, 'eth_sendTransaction', [{ to: '0x000000000000000000000000000000000000dEaD', value: '0x1', nonce: '0x7' }]);
+  await wallet.approve((await queued).id);
+  await answer;
+  assert.equal(prepared.length, 2);
+  assert.equal(prepared[0].nonce, 7);
+  const signed = prepared[1];
+  assert.equal(signed.nonce, 7);
+  assert.equal(signed.gas, 21000n);
+  assert.equal(signed.maxFeePerGas, 10n, 'the approved cap, not the risen price');
+  assert.equal(signed.maxPriorityFeePerGas, 1n);
+  await assert.rejects(provider.handle(SITE, 'eth_sendTransaction', [{ to: EVM_ADDRESS, nonce: '0x20000000000000' }]), { code: -32602 });
+});
+
+test('a request whose page navigated while it was being prepared is never queued', async () => {
+  const wallet = await readyWallet();
+  const provider = new Provider(wallet);
+  wallet.connect(SITE.origin);
+  let current = true;
+  wallet.evm.prepare = async (net, account, tx) => {
+    current = false; // the page navigates during the estimate
+    return { request: { ...tx, gas: 21000n, maxFeePerGas: 1n, maxPriorityFeePerGas: 1n }, fee: 21000n, l1Fee: 0n };
+  };
+  let queued = 0;
+  wallet.on('request', () => { queued += 1; });
+  const site = { ...SITE, isCurrent: () => current };
+  await assert.rejects(provider.handle(site, 'eth_sendTransaction', [{ to: EVM_ADDRESS, value: '0x1' }]), { code: 4001 });
+  assert.equal(queued, 0);
+  assert.equal(wallet.pendingCount(), 0);
+});
+
 test('read-only calls go to the node; requests from a page that went away are dropped', async () => {
   const wallet = await readyWallet();
   const provider = new Provider(wallet);

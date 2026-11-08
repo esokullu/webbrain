@@ -219,23 +219,39 @@ class Provider {
     const net = this.wallet.evmNetwork();
     if (tx.chainId !== undefined && Number(quantity(tx.chainId, 'chainId')) !== net.chainId) throw invalid(`The wallet is on ${net.name} (chain ${net.chainId}).`);
     if (tx.to !== undefined && tx.to !== null && !validAddress(tx.to)) throw invalid('Invalid "to" address.');
+    // A nonce the site chose (to replace or cancel a pending transaction) is kept.
+    const nonce = quantity(tx.nonce, 'nonce');
+    if (nonce !== undefined && nonce > BigInt(Number.MAX_SAFE_INTEGER)) throw invalid('Invalid nonce.');
     const request = {
       to: tx.to ? viem.getAddress(tx.to) : undefined,
       value: quantity(tx.value, 'value') ?? 0n,
       data: hexData(tx.data ?? tx.input),
       gas: quantity(tx.gas ?? tx.gasLimit, 'gas'),
+      nonce: nonce === undefined ? undefined : Number(nonce),
       maxFeePerGas: quantity(tx.maxFeePerGas, 'maxFeePerGas'),
       maxPriorityFeePerGas: quantity(tx.maxPriorityFeePerGas, 'maxPriorityFeePerGas'),
       gasPrice: quantity(tx.gasPrice, 'gasPrice'),
     };
     if (!request.to && !request.data) throw invalid('A transaction needs a recipient or data.');
-    // Estimate now, to show the fee and say if it would fail.
+    // Estimate now, to show the fee and say if it would fail. The gas limit and
+    // fee caps estimated here are the ones signed later, so the transaction
+    // can never cost more than the "up to" the user approved.
     let fee = null;
     let failure = null;
     try {
       const prepared = await this.wallet.evm.prepare(net, this.address(), request);
       fee = prepared.fee;
-      request.gas = prepared.request.gas;
+      const p = prepared.request;
+      request.gas = p.gas;
+      if (p.maxFeePerGas !== undefined) {
+        request.maxFeePerGas = p.maxFeePerGas;
+        request.maxPriorityFeePerGas = p.maxPriorityFeePerGas;
+        request.gasPrice = undefined;
+      } else if (p.gasPrice !== undefined) {
+        request.gasPrice = p.gasPrice;
+        request.maxFeePerGas = undefined;
+        request.maxPriorityFeePerGas = undefined;
+      }
     } catch (error) {
       failure = error?.detail || error?.code || String(error);
     }

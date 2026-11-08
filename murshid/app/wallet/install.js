@@ -120,6 +120,11 @@ function installWallet(ctx) {
   ipcMain.handle(SITE_CHANNEL, async (event, method, params) => {
     const site = siteOf(event);
     if (!site) return { error: { code: 4100, message: 'This page cannot use the wallet.' } };
+    // Pin the request to the document that made it: if the page navigates
+    // while the request is still being prepared, it is dropped, not queued.
+    watch(event.sender);
+    const generation = documents.get(site.contentsId);
+    site.isCurrent = () => documents.get(site.contentsId) === generation;
     try {
       const result = await provider.handle(site, method, params);
       return { result: result === undefined ? null : result };
@@ -140,19 +145,22 @@ function installWallet(ctx) {
   };
 
   // A request goes with the page that made it, when that page closes or leaves.
-  const watched = new Set();
-  const watch = (contentsId) => {
-    if (contentsId === null || watched.has(contentsId)) return;
-    const wc = allWebContents.fromId(contentsId);
-    if (!wc || wc.isDestroyed()) {
-      wallet.dropRequestsFrom(contentsId);
-      return;
-    }
-    watched.add(contentsId);
-    const drop = () => wallet.dropRequestsFrom(contentsId);
-    const onNavigate = (details) => { if (details?.isMainFrame && !details.isSameDocument) drop(); };
-    wc.on('did-start-navigation', onNavigate);
-    wc.once('destroyed', () => { watched.delete(contentsId); drop(); });
+  // Each page's main-frame navigations are counted, so a request knows whether
+  // the document that asked is still the one shown.
+  const documents = new Map(); // webContents id -> navigation count
+  const watch = (wc) => {
+    if (documents.has(wc.id)) return;
+    const id = wc.id;
+    documents.set(id, 0);
+    wc.on('did-start-navigation', (details) => {
+      if (!details?.isMainFrame || details.isSameDocument) return;
+      documents.set(id, documents.get(id) + 1);
+      wallet.dropRequestsFrom(id);
+    });
+    wc.once('destroyed', () => {
+      documents.delete(id);
+      wallet.dropRequestsFrom(id);
+    });
   };
 
   // ---------------------------------------------------------------- events
@@ -166,7 +174,6 @@ function installWallet(ctx) {
   wallet.on('created', syncPreload);
   wallet.on('reset', syncPreload);
   wallet.on('request', (request) => {
-    watch(request.contentsId);
     const wc = request.contentsId !== null ? allWebContents.fromId(request.contentsId) : null;
     const w = ctx.windowForContents(wc) || ctx.lastFocusedWindow();
     w?.openWallet();

@@ -408,12 +408,14 @@ class Wallet extends EventEmitter {
    * approves (with the wallet unlocked); what it returns goes to the site.
    *
    * @param {string} kind connect | sign | typed | transaction | switch
-   * @param {{origin: string, contentsId?: number}} site
+   * @param {{origin: string, contentsId?: number, isCurrent?: () => boolean}} site
    * @param {object} details what the approval card shows (plain data)
    * @param {() => Promise<any>} perform
    */
   request(kind, site, details, perform) {
     if (!this.exists) return Promise.reject(new WalletError('disconnected'));
+    // The page went elsewhere while the request was being prepared.
+    if (site.isCurrent && !site.isCurrent()) return Promise.reject(new WalletError('rejected'));
     const fromSite = [...this.requests.values()].filter((r) => r.origin === site.origin);
     if (kind === 'connect') {
       // A second "connect" while one is waiting answers with the first.
