@@ -9,6 +9,9 @@ This changelog was generated from the repository Git history and release tags. V
 ### Added
 - Murshid has a wallet next to WebBrain in the toolbar: Bitcoin and Ethereum (also Arbitrum, OP Mainnet, Base, Polygon and the Sepolia test network) from one recovery phrase, encrypted with a password on the computer. It receives, shows the balance and sends, and lets websites connect and sign in through `window.ethereum`, with every connection, signature, transaction and network switch approved in the side panel.
 
+### Fixed
+- Sign-in password guard: instead of refusing, WebBrain now asks on a card ("Type this into a sign-in password field on <site>?", with the text masked, or hidden under strict secret handling) before typing a sign-in password you never gave. The card names the field's own site, including a sign-in frame from another site. "Type it" types that text into that field and accepts it on that site for the rest of the run; "Don't type it" keeps the refusal, and unattended runs still refuse. A login you saved yourself with /memory --add (or edited in Settings) counts as given, while notes WebBrain captured automatically do not. A lone password field with no sign-in around it, such as a "Password" with "Submit", asks once before a made-up value goes in, a Wi-Fi or other network key is typed unasked, and sign-in forms stay guarded, including web-component and form-less logins, re-authentication prompts and forms that mark their password field new-password. Chrome and Firefox.
+
 ## [47.0.0] - 2026-11-08
 
 ### Added
