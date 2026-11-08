@@ -45,7 +45,9 @@ function displayFee(value, decimals) {
 function parseAmount(text, decimals) {
   let s = String(text ?? '').trim().replace(/\s/g, '');
   if (s.includes(',') && !s.includes('.')) s = s.replace(',', '.');
-  if (!/^(\d+\.?\d*|\.\d+)$/.test(s)) throw new WalletError('invalidAmount');
+  // No amount needs more than this, and the pattern has one way to match each
+  // string, so a long input cannot make it backtrack.
+  if (s.length > 80 || !/^(?:\d+(?:\.\d*)?|\.\d+)$/.test(s)) throw new WalletError('invalidAmount');
   const fraction = s.split('.')[1] || '';
   if (fraction.length > decimals) throw new WalletError('invalidAmount');
   const value = parseUnits(s.startsWith('.') ? `0${s}` : s, decimals);

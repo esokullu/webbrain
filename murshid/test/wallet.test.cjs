@@ -111,6 +111,12 @@ test('amounts are read and shown exactly', () => {
   assert.throws(() => parseAmount('0', 8), { code: 'invalidAmount' });
   assert.throws(() => parseAmount('1e5', 8), { code: 'invalidAmount' });
   assert.throws(() => parseAmount('-1', 8), { code: 'invalidAmount' });
+  assert.equal(parseAmount('2.', 8), 200000000n);
+  assert.throws(() => parseAmount('1.2.3', 8), { code: 'invalidAmount' });
+  const started = Date.now();
+  assert.throws(() => parseAmount(`${'0'.repeat(50000)}x`, 8), { code: 'invalidAmount' });
+  assert.throws(() => parseAmount('1'.repeat(81), 8), { code: 'invalidAmount' });
+  assert.ok(Date.now() - started < 50, 'a long input is refused at once');
   assert.equal(displayAmount(123000n, 8), '0.00123');
   assert.equal(displayAmount(10n ** 18n, 18), '1');
   assert.equal(displayAmount(1234567891234567891n, 18, 6), '1.234567');
