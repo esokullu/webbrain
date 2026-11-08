@@ -135,15 +135,29 @@ class EvmClient {
     return { request: prepared, fee: prepared.gas * price + l1Fee, l1Fee };
   }
 
-  /** Everything but the fee (with room for it to rise), for "Max". */
+  /**
+   * Everything but the fee, for "Max". Gas is always estimated for a transfer
+   * that carries value (a contract can need more gas for one, or refuse an
+   * empty one), and the fee is reserved from the estimate for the value sent.
+   */
   async prepareMax(net, account, to, balance) {
-    const probe = await this.prepare(net, account, { to, value: 0n });
-    const reserve = probe.fee + probe.l1Fee; // the L1 data fee moves the most; count it twice
-    const value = balance - reserve;
-    if (value <= 0n) throw new WalletError('insufficient');
-    // Same gas and prices as the probe, so the fee it reserved is the fee it pays.
-    const { gas, nonce, maxFeePerGas, maxPriorityFeePerGas, gasPrice } = probe.request;
-    return this.prepare(net, account, { to, value, gas, nonce, maxFeePerGas, maxPriorityFeePerGas, gasPrice });
+    if (balance <= 0n) throw new WalletError('insufficient');
+    // First estimate: half the balance, a nonzero amount the account can afford.
+    const probe = await this.prepare(net, account, { to, value: balance / 2n });
+    const { nonce, maxFeePerGas, maxPriorityFeePerGas, gasPrice } = probe.request;
+    const prices = maxFeePerGas !== undefined ? { maxFeePerGas, maxPriorityFeePerGas } : { gasPrice };
+    const price = maxFeePerGas ?? gasPrice ?? 0n;
+    let gas = probe.request.gas;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      // The L1 data fee moves the most; reserve it twice.
+      const value = balance - gas * price - probe.l1Fee * 2n;
+      if (value <= 0n) throw new WalletError('insufficient');
+      // Estimate again for exactly this value, at the same prices.
+      const prepared = await this.prepare(net, account, { to, value, nonce, ...prices });
+      if (prepared.request.gas <= gas) return prepared; // the reserve covers it
+      gas = prepared.request.gas; // needs more gas than reserved: reserve that and retry
+    }
+    throw new WalletError('failed', 'the gas estimate kept rising');
   }
 
   async send(net, account, prepared) {

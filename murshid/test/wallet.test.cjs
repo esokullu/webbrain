@@ -434,6 +434,28 @@ test('a request whose page navigated while it was being prepared is never queued
   assert.equal(wallet.pendingCount(), 0);
 });
 
+test('Send all estimates gas for the value it sends, and reserves the fee from that estimate', async () => {
+  const { EvmClient } = require('../app/wallet/evm');
+  const client = new EvmClient(noNetwork);
+  const net = networks.byId('base');
+  const calls = [];
+  // A contract that needs more gas the more value it is sent, and refuses an empty call.
+  client.prepare = async (n, account, tx) => {
+    calls.push(tx);
+    if (!tx.value) throw new Error('refuses zero value');
+    const gas = tx.value > 6n * 10n ** 17n ? 60000n : 40000n; // the half-balance probe gets 40000, the real value 60000
+    const maxFeePerGas = tx.maxFeePerGas ?? 10n ** 9n;
+    return { request: { ...tx, gas, maxFeePerGas, maxPriorityFeePerGas: tx.maxPriorityFeePerGas ?? 1n, nonce: tx.nonce ?? 3 }, fee: gas * maxFeePerGas + 1000n, l1Fee: 1000n };
+  };
+  const balance = 10n ** 18n;
+  const prepared = await client.prepareMax(net, EVM_ADDRESS, EVM_ADDRESS, balance);
+  assert.ok(calls.every((tx) => tx.value > 0n), 'never estimated with zero value');
+  assert.equal(prepared.request.gas, 60000n, 'the gas for the value actually sent');
+  assert.ok(prepared.request.value + prepared.fee + prepared.l1Fee <= balance, 'value, fee and the L1 reserve fit the balance');
+  assert.equal(prepared.request.value, balance - 60000n * 10n ** 9n - 2000n);
+  await assert.rejects(client.prepareMax(net, EVM_ADDRESS, EVM_ADDRESS, 0n), { code: 'insufficient' });
+});
+
 test('read-only calls go to the node; requests from a page that went away are dropped', async () => {
   const wallet = await readyWallet();
   const provider = new Provider(wallet);
