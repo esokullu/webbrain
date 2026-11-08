@@ -63,8 +63,8 @@ function installWallet(ctx) {
   const commands = {
     state: () => wallet.state(),
     createPhrase: () => wallet.createPhrase(),
-    cancelCreate: () => wallet.cancelCreate(),
-    finishCreate: (password) => wallet.finishCreate(str(password)),
+    cancelCreate: (id) => wallet.cancelCreate(str(id)),
+    finishCreate: (id, password) => wallet.finishCreate(str(id), str(password)),
     importPhrase: (phrase, password) => wallet.importPhrase(str(phrase), str(password)),
     unlock: (password) => wallet.unlock(str(password)),
     lock: () => wallet.lock(),

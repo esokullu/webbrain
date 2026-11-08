@@ -103,6 +103,26 @@ test('an unreadable wallet file is set aside, never overwritten', async () => {
   }
 });
 
+test('a new wallet is created with the words its panel showed, even with two panels open', async () => {
+  const dir = tempDir();
+  try {
+    const wallet = new Wallet({ dir, fetchFn: noNetwork });
+    const first = wallet.createPhrase();
+    const second = wallet.createPhrase(); // another window's panel
+    assert.equal(second.id, first.id);
+    assert.deepEqual(second.words, first.words);
+    assert.equal(wallet.state().creating, first.id);
+    await assert.rejects(wallet.finishCreate('some other id', 'correct horse'), { code: 'failed' });
+    wallet.cancelCreate('some other id'); // not this flow: nothing happens
+    assert.equal(wallet.state().creating, first.id);
+    await wallet.finishCreate(first.id, 'correct horse');
+    assert.equal(wallet.data.addresses.evm, vault.deriveKeys(first.words.join(' ')).evm.address);
+    assert.deepEqual(await wallet.revealPhrase('correct horse'), first.words);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('amounts are read and shown exactly', () => {
   assert.equal(parseAmount('0.0001', 8), 10000n);
   assert.equal(parseAmount('0,5', 8), 50000000n);
@@ -335,6 +355,42 @@ test('a transaction is signed with the gas and fee caps the user approved, and t
   assert.equal(signed.maxFeePerGas, 10n, 'the approved cap, not the risen price');
   assert.equal(signed.maxPriorityFeePerGas, 1n);
   await assert.rejects(provider.handle(SITE, 'eth_sendTransaction', [{ to: EVM_ADDRESS, nonce: '0x20000000000000' }]), { code: -32602 });
+});
+
+test('the approval card gets everything that is signed, and requests too large to show are refused', async () => {
+  const wallet = await readyWallet();
+  const provider = new Provider(wallet);
+  wallet.connect(SITE.origin);
+  let queued = 0;
+  wallet.on('request', () => { queued += 1; });
+
+  const bigTyped = {
+    types: { Batch: [{ name: 'items', type: 'string[]' }] },
+    primaryType: 'Batch',
+    domain: { name: 'Token', chainId: 1 },
+    message: { items: Array.from({ length: 6000 }, (_, i) => `permit ${i} to 0xspender`) },
+  };
+  await assert.rejects(provider.handle(SITE, 'eth_signTypedData_v4', [EVM_ADDRESS, JSON.stringify(bigTyped)]), { code: -32602 });
+  await assert.rejects(provider.handle(SITE, 'personal_sign', [`0x${'ff'.repeat(60000)}`, EVM_ADDRESS]), { code: -32602 });
+  assert.equal(queued, 0);
+
+  // Below the limit, the card is given all of it.
+  const hex = `0x${'ff'.repeat(30000)}`;
+  const shown = new Promise((resolve) => wallet.once('request', resolve));
+  const answer = provider.handle(SITE, 'personal_sign', [hex, EVM_ADDRESS]);
+  const request = await shown;
+  assert.equal(request.details.hex, hex);
+  wallet.reject(request.id);
+  await assert.rejects(answer, { code: 4001 });
+
+  wallet.evm.prepare = async (net, account, tx) => ({ request: { ...tx, gas: 90000n, maxFeePerGas: 1n, maxPriorityFeePerGas: 1n }, fee: 90000n, l1Fee: 0n });
+  const data = `0x${'ab'.repeat(20000)}`;
+  const shownTx = new Promise((resolve) => wallet.once('request', resolve));
+  const txAnswer = provider.handle(SITE, 'eth_sendTransaction', [{ to: EVM_ADDRESS, data }]);
+  const txRequest = await shownTx;
+  assert.equal(txRequest.details.data, data);
+  wallet.reject(txRequest.id);
+  await assert.rejects(txAnswer, { code: 4001 });
 });
 
 test('a request whose page navigated while it was being prepared is never queued', async () => {

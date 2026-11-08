@@ -20,10 +20,12 @@
 
   let state = null;
   let mode = null; // 'create' | 'import' | 'more' while one of those is open
+  let createId = null; // the new phrase this panel shows
   let active = 'balance'; // the open column when they are stacked
   let balanceFor = null;
   let receiveFor = null;
   let review = null;
+  let sendSeq = 0; // bumped whenever the send form starts over
   let shownRequest = null;
   let approveTimer = null;
   let toastTimer = null;
@@ -77,7 +79,8 @@
     refreshTimer = null;
     if (!state.exists) {
       if (state.unreadable) $('unreadable').hidden = false;
-      if (mode === 'create' && state.creating) show('v-create');
+      // Another panel may have gone back, or started over with other words.
+      if (mode === 'create' && state.creating && state.creating === createId) show('v-create');
       else if (mode === 'import') show('v-import');
       else { mode = null; show('v-welcome'); }
       return;
@@ -124,10 +127,11 @@
 
   $('start-create').addEventListener('click', async () => {
     try {
-      const words = await call('createPhrase');
+      const created = await call('createPhrase');
+      createId = created.id;
       const list = $('words');
       list.textContent = '';
-      for (const word of words) {
+      for (const word of created.words) {
         const li = document.createElement('li');
         li.textContent = word;
         list.append(li);
@@ -155,7 +159,8 @@
 
   for (const button of document.querySelectorAll('[data-back]')) {
     button.addEventListener('click', () => {
-      if (mode === 'create') call('cancelCreate').catch(() => {});
+      if (mode === 'create') call('cancelCreate', createId).catch(() => {});
+      createId = null;
       $('words').textContent = '';
       mode = null;
       render();
@@ -178,7 +183,8 @@
     if (problem) { setError('create-error', problem); return; }
     busy($('create-submit'), true);
     try {
-      await call('finishCreate', $('create-password').value);
+      await call('finishCreate', createId, $('create-password').value);
+      createId = null;
       $('words').textContent = '';
       mode = null;
       await refreshState();
@@ -266,6 +272,7 @@
 
   function renderMain() {
     fillNetworks();
+    if (review && review.network !== state.network) resetSend(); // a site switched networks
     setActive(active);
     const net = networkOf(state.network);
     const isBitcoin = net.kind === 'bitcoin';
@@ -353,6 +360,7 @@
   // ------------------------------------------------------------------- send
 
   function resetSend() {
+    sendSeq += 1; // a review still being prepared is no longer wanted
     if (review) call('cancelReview', review.id).catch(() => {});
     review = null;
     $('send-form').hidden = false;
@@ -369,9 +377,18 @@
     const amount = $('send-amount').value.trim();
     const speed = document.querySelector('input[name="speed"]:checked')?.value || 'normal';
     const button = max ? $('send-max') : $('send-review');
+    const seq = ++sendSeq;
     busy(button, true);
     try {
-      review = await call('review', { network: net.id, to, amount, max, speed });
+      const prepared = await call('review', { network: net.id, to, amount, max, speed });
+      // The network changed (here or from a site) while it was being prepared:
+      // this review is for the old one, so it is dropped, never shown.
+      if (seq !== sendSeq || state.network !== net.id) {
+        call('cancelReview', prepared.id).catch(() => {});
+        return;
+      }
+      review = prepared;
+      $('review-network').textContent = networkName(net);
       $('review-to').textContent = review.to;
       $('review-amount').textContent = `${review.amount} ${review.symbol}`;
       $('review-fee').textContent = `${review.fee} ${review.symbol}`;
@@ -384,7 +401,7 @@
       setError('confirm-error', null);
       $('send-now').focus();
     } catch (error) {
-      setError('send-error', error, { network: networkName(net) });
+      if (seq === sendSeq && state.network === net.id) setError('send-error', error, { network: networkName(net) });
     } finally {
       busy(button, false);
     }
@@ -398,6 +415,10 @@
   $('send-cancel').addEventListener('click', resetSend);
   $('send-now').addEventListener('click', async () => {
     if (!review) return;
+    if (review.network !== state.network) {
+      resetSend();
+      return;
+    }
     const id = review.id;
     busy($('send-now'), true);
     busy($('send-cancel'), true);

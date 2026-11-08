@@ -44,6 +44,12 @@ function toProviderError(error) {
   return new ProviderError(-32603, String(error?.shortMessage || error?.message || error));
 }
 
+// The approval card shows what is signed in full, never a cut-down copy: a
+// request too large to show that way is refused instead. Transaction data
+// gets more room, since contract deployments and batched calls are long.
+const MAX_SHOWN = 100000; // characters of a message or typed data
+const MAX_DATA = 262144; // hex characters of transaction data
+
 const CONTROL = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/;
 
 /** A personal_sign message as text, when it is text. */
@@ -175,13 +181,14 @@ class Provider {
     // Some sites still send [address, message].
     if (validAddress(first) && !validAddress(second) && sameAddress(first, this.address())) [message, address] = [second, first];
     if (typeof message !== 'string') throw invalid('personal_sign needs a message.');
+    if (message.length > MAX_SHOWN) throw invalid('The message is too long to show for approval.');
     if (!sameAddress(address, this.address())) throw unauthorized();
     const text = messageText(message);
     const domain = siweDomain(text);
     const host = new URL(site.origin).host.toLowerCase();
     const details = {
       text,
-      hex: text === null ? message.slice(0, 20000) : null,
+      hex: text === null ? message : null,
       siwe: domain ? { domain, mismatch: domain !== host } : null,
     };
     return this.wallet.request('sign', site, details, async () => {
@@ -198,6 +205,8 @@ class Provider {
       try { parsed = JSON.parse(parsed); } catch { throw invalid('Typed data is not JSON.'); }
     }
     if (!parsed || typeof parsed !== 'object' || !parsed.types || !parsed.primaryType || !parsed.message) throw invalid('Incomplete typed data.');
+    const json = JSON.stringify(parsed.message, null, 2);
+    if (json.length > MAX_SHOWN) throw invalid('The typed data is too large to show for approval.');
     const chain = typedDataChain(parsed);
     const current = this.wallet.evmNetwork();
     const details = {
@@ -207,7 +216,7 @@ class Provider {
       chainMismatch: chain !== null && chain !== current.chainId ? (networks.byChainId(chain)?.name || String(chain)) : null,
       // Permit, Permit2 and the like move tokens later, with no transaction to approve.
       permit: /permit/i.test(String(parsed.primaryType)),
-      json: JSON.stringify(parsed.message, null, 2).slice(0, 20000),
+      json,
     };
     return this.wallet.request('typed', site, details, async () => signTypedData(this.wallet.requireKeys().evm.account, parsed));
   }
@@ -233,6 +242,7 @@ class Provider {
       gasPrice: quantity(tx.gasPrice, 'gasPrice'),
     };
     if (!request.to && !request.data) throw invalid('A transaction needs a recipient or data.');
+    if (request.data && request.data.length > MAX_DATA) throw invalid('The transaction data is too large to show for approval.');
     // Estimate now, to show the fee and say if it would fail. The gas limit and
     // fee caps estimated here are the ones signed later, so the transaction
     // can never cost more than the "up to" the user approved.
@@ -261,7 +271,7 @@ class Provider {
       to: request.to || null,
       value: displayAmount(request.value, 18),
       fee: fee === null ? null : displayFee(fee, 18),
-      data: request.data ? request.data.slice(0, 4000) : null,
+      data: request.data || null,
       dataBytes: request.data ? (request.data.length - 2) / 2 : 0,
       call: describeCall(request.data),
       failure,

@@ -124,22 +124,30 @@ class Wallet extends EventEmitter {
 
   // --------------------------------------------------------------- setup
 
-  /** Twelve new words, held until the wallet is created with them. */
+  /**
+   * Twelve new words, held until the wallet is created with them. A panel that
+   * asks while another is already showing words gets the same ones, and the
+   * id ties "Continue" to the words that panel showed.
+   */
   createPhrase() {
     if (this.exists) throw new WalletError('failed', 'a wallet already exists');
-    this.pendingPhrase = vault.newPhrase();
-    this.changed();
-    return this.pendingPhrase.split(' ');
+    if (!this.pendingPhrase) {
+      this.pendingPhrase = { id: randomUUID(), phrase: vault.newPhrase() };
+      this.changed();
+    }
+    return { id: this.pendingPhrase.id, words: this.pendingPhrase.phrase.split(' ') };
   }
 
-  cancelCreate() {
+  cancelCreate(id) {
+    if (this.pendingPhrase?.id !== id) return;
     this.pendingPhrase = null;
     this.changed();
   }
 
-  async finishCreate(password) {
-    if (!this.pendingPhrase) throw new WalletError('failed', 'no recovery phrase to save');
-    await this.setup(this.pendingPhrase, password);
+  async finishCreate(id, password) {
+    const pending = this.pendingPhrase;
+    if (!pending || pending.id !== id) throw new WalletError('failed', 'no recovery phrase to save');
+    await this.setup(pending.phrase, password);
     this.pendingPhrase = null;
     this.changed();
   }
@@ -496,7 +504,7 @@ class Wallet extends EventEmitter {
       exists: this.exists,
       unreadable: this.unreadable,
       unlocked: this.unlocked,
-      creating: Boolean(this.pendingPhrase),
+      creating: this.pendingPhrase?.id || null, // which words are being shown, not the words
       network: this.exists ? this.network().id : networks.BITCOIN.id,
       evmChainId: this.evmNetwork().chainId,
       networks: networks.describe(),
