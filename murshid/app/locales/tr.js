@@ -188,7 +188,6 @@ module.exports = {
   'ui.findCount': '{current}/{total}',
   'ui.closePanel': 'Yan paneli kapat',
   'ui.closeTab': 'Sekmeyi kapat',
-  'ui.wallet': 'Cüzdan',
   'ui.walletTip': 'Cüzdan: Bitcoin ve Ethereum',
   'ui.openWallet': 'Cüzdanı aç',
   'ui.walletWaiting': 'Bir site cüzdanda yanıtınızı bekliyor',

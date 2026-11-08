@@ -190,7 +190,6 @@ module.exports = {
   'ui.findCount': '{current}/{total}',
   'ui.closePanel': 'بستن پنل کناری',
   'ui.closeTab': 'بستن برگه',
-  'ui.wallet': 'کیف پول',
   'ui.walletTip': 'کیف پول: Bitcoin و Ethereum',
   'ui.openWallet': 'باز کردن کیف پول',
   'ui.walletWaiting': 'یک سایت در کیف پول منتظر پاسخ شماست',

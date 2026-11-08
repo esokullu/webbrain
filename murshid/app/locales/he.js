@@ -199,7 +199,6 @@ module.exports = {
   'ui.findCount': '{current}/{total}',
   'ui.closePanel': 'סגור את הפאנל הצדדי',
   'ui.closeTab': 'סגור לשונית',
-  'ui.wallet': 'ארנק',
   'ui.walletTip': 'ארנק: Bitcoin ו־Ethereum',
   'ui.openWallet': 'פתח את הארנק',
   'ui.walletWaiting': 'אתר ממתין לתשובתך בארנק',

@@ -188,7 +188,6 @@ module.exports = {
   'ui.findCount': '{current}/{total}',
   'ui.closePanel': 'साइड पैनल बंद करें',
   'ui.closeTab': 'टैब बंद करें',
-  'ui.wallet': 'वॉलेट',
   'ui.walletTip': 'वॉलेट: Bitcoin और Ethereum',
   'ui.openWallet': 'वॉलेट खोलें',
   'ui.walletWaiting': 'एक साइट वॉलेट में आपके जवाब का इंतज़ार कर रही है',

@@ -201,7 +201,6 @@ module.exports = {
   'ui.findCount': '{current}/{total}',
   'ui.closePanel': 'Close side panel',
   'ui.closeTab': 'Close tab',
-  'ui.wallet': 'Wallet',
   'ui.walletTip': 'Wallet: Bitcoin and Ethereum',
   'ui.openWallet': 'Open wallet',
   'ui.walletWaiting': 'A site is waiting for your answer in the wallet',

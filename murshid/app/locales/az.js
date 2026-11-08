@@ -188,7 +188,6 @@ module.exports = {
   'ui.findCount': '{current}/{total}',
   'ui.closePanel': 'Yan paneli bağla',
   'ui.closeTab': 'Sekməni bağla',
-  'ui.wallet': 'Pul kisəsi',
   'ui.walletTip': 'Pul kisəsi: Bitcoin və Ethereum',
   'ui.openWallet': 'Pul kisəsini aç',
   'ui.walletWaiting': 'Bir sayt pul kisəsində cavabınızı gözləyir',

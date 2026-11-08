@@ -67,8 +67,6 @@ const els = {
   caption: $('caption'),
 };
 
-$('wallet-label').textContent = t('ui.wallet');
-
 let state = { tabs: [], activeId: null, panel: null };
 let editing = false; // the address bar holds what the user is typing
 const tabEls = new Map();

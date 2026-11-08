@@ -188,7 +188,6 @@ module.exports = {
   'ui.findCount': '{current}/{total}',
   'ui.closePanel': 'Κλείσιμο πλευρικού πίνακα',
   'ui.closeTab': 'Κλείσιμο καρτέλας',
-  'ui.wallet': 'Πορτοφόλι',
   'ui.walletTip': 'Πορτοφόλι: Bitcoin και Ethereum',
   'ui.openWallet': 'Άνοιγμα πορτοφολιού',
   'ui.walletWaiting': 'Ένας ιστότοπος περιμένει την απάντησή σας στο πορτοφόλι',

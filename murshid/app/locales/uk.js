@@ -189,7 +189,6 @@ module.exports = {
   'ui.findCount': '{current}/{total}',
   'ui.closePanel': 'Закрити бічну панель',
   'ui.closeTab': 'Закрити вкладку',
-  'ui.wallet': 'Гаманець',
   'ui.walletTip': 'Гаманець: Bitcoin та Ethereum',
   'ui.openWallet': 'Відкрити гаманець',
   'ui.walletWaiting': 'Сайт чекає на вашу відповідь у гаманці',

@@ -188,7 +188,6 @@ module.exports = {
   'ui.findCount': '{current}/{total}',
   'ui.closePanel': 'Закрыть боковую панель',
   'ui.closeTab': 'Закрыть вкладку',
-  'ui.wallet': 'Кошелёк',
   'ui.walletTip': 'Кошелёк: Bitcoin и Ethereum',
   'ui.openWallet': 'Открыть кошелёк',
   'ui.walletWaiting': 'Сайт ждёт вашего ответа в кошельке',

@@ -191,7 +191,6 @@ module.exports = {
   'ui.findCount': '{current}/{total}',
   'ui.closePanel': 'إغلاق اللوحة الجانبية',
   'ui.closeTab': 'إغلاق علامة التبويب',
-  'ui.wallet': 'المحفظة',
   'ui.walletTip': 'المحفظة: Bitcoin وEthereum',
   'ui.openWallet': 'فتح المحفظة',
   'ui.walletWaiting': 'هناك موقع ينتظر ردّك في المحفظة',
