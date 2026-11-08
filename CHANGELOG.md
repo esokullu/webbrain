@@ -6,6 +6,9 @@ This changelog was generated from the repository Git history and release tags. V
 
 ## [Unreleased]
 
+### Added
+- Murshid has a wallet next to WebBrain in the toolbar: Bitcoin and Ethereum (also Arbitrum, OP Mainnet, Base, Polygon and the Sepolia test network) from one recovery phrase, encrypted with a password on the computer. It receives, shows the balance and sends, and lets websites connect and sign in through `window.ethereum`, with every connection, signature, transaction and network switch approved in the side panel.
+
 ## [47.0.0] - 2026-11-08
 
 ### Added

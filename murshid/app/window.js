@@ -16,6 +16,9 @@ const PANEL_HEADER_HEIGHT = 40;
 const SPLITTER_WIDTH = 5;
 const PANEL_MIN = 320;
 const PANEL_MAX_FRACTION = 0.6;
+// The wallet shares the side panel with WebBrain. While it is open it is shown
+// instead, for every tab of the window; closing it brings back what was there.
+const WALLET_PANEL = Object.freeze({ key: 'wallet', url: 'murshid://wallet/', kind: 'wallet' });
 
 const THEME = {
   dark: { strip: '#140f0d', symbol: '#f1e6d0' },
@@ -39,6 +42,7 @@ class MurshidWindow {
     this.htmlFullscreen = false;
     this.panelViews = new Map(); // key -> { view, url }
     this.visiblePanelKey = null;
+    this.walletOpen = false;
     this.closedTabs = [];
     this.stateTimer = null;
     this.uiReady = false;
@@ -282,7 +286,7 @@ class MurshidWindow {
 
   /** Show whichever panel the side panel state says belongs to the active tab. */
   syncPanel() {
-    const want = this.ctx.crx?.panelFor(this) || null; // { key, url } | null
+    const want = (this.walletOpen ? WALLET_PANEL : null) || this.ctx.crx?.panelFor(this) || null; // { key, url } | null
     if (!want) {
       this.hidePanel();
       return;
@@ -308,7 +312,7 @@ class MurshidWindow {
       view.webContents.on('page-title-updated', () => this.scheduleState());
       entry = { view, url: null, key: want.key };
       this.panelViews.set(want.key, entry);
-      this.ctx.crx?.trackPanelContents(view.webContents, this, want);
+      if (want.extId) this.ctx.crx?.trackPanelContents(view.webContents, this, want);
     }
     if (entry.url !== want.url) {
       entry.url = want.url;
@@ -347,6 +351,19 @@ class MurshidWindow {
   panelContents() {
     const entry = this.visiblePanelKey && this.panelViews.get(this.visiblePanelKey);
     return entry ? entry.view.webContents : null;
+  }
+
+  openWallet() {
+    if (this.walletOpen) return;
+    this.walletOpen = true;
+    this.syncPanel();
+  }
+
+  closeWallet() {
+    if (!this.walletOpen) return;
+    this.walletOpen = false;
+    this.destroyPanel(WALLET_PANEL.key);
+    this.syncPanel();
   }
 
   resizePanel(clientX) {
@@ -392,8 +409,10 @@ class MurshidWindow {
     if (this.win.isDestroyed() || !this.uiReady) return;
     const newTabUrls = this.ctx.newTabUrls();
     const panelEntry = this.visiblePanelKey && this.panelViews.get(this.visiblePanelKey);
+    const panelKind = this.visiblePanelKey === WALLET_PANEL.key ? 'wallet' : 'webbrain';
     let panelTitle = 'WebBrain';
     try { panelTitle = panelEntry?.view.webContents.getTitle() || 'WebBrain'; } catch {}
+    if (panelKind === 'wallet') panelTitle = i18n.t('wallet.title');
     this.ui.send('murshid:state', {
       platform: process.platform,
       maximized: this.win.isMaximized(),
@@ -404,8 +423,9 @@ class MurshidWindow {
         const s = tab.state();
         return { ...s, displayUrl: displayUrl(s.url, newTabUrls) };
       }),
-      panel: this.panelGeometry ? { ...this.panelGeometry, title: /^chrome-extension:/.test(panelTitle) ? 'WebBrain' : panelTitle } : null,
+      panel: this.panelGeometry ? { ...this.panelGeometry, kind: panelKind, title: /^chrome-extension:/.test(panelTitle) ? 'WebBrain' : panelTitle } : null,
       webBrain: this.ctx.webBrainInfo(),
+      wallet: { pending: this.ctx.wallet?.pendingCount() || 0 },
       downloads: this.ctx.downloads?.summary() || null,
     });
   }

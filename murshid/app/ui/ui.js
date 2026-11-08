@@ -51,6 +51,10 @@ const els = {
   zoom: $('zoom-chip'),
   webbrain: $('webbrain'),
   webbrainIcon: $('webbrain-icon'),
+  wallet: $('wallet'),
+  walletBadge: $('wallet-badge'),
+  panelIcon: $('panel-icon'),
+  panelGlyph: $('panel-glyph'),
   downloads: $('downloads'),
   downloadRing: $('download-ring'),
   menu: $('menu'),
@@ -62,6 +66,8 @@ const els = {
   splitter: $('splitter'),
   caption: $('caption'),
 };
+
+$('wallet-label').textContent = t('ui.wallet');
 
 let state = { tabs: [], activeId: null, panel: null };
 let editing = false; // the address bar holds what the user is typing
@@ -255,9 +261,14 @@ function renderToolbar() {
   if (state.webBrain?.icon && els.webbrainIcon.dataset.src !== state.webBrain.icon) {
     els.webbrainIcon.dataset.src = state.webBrain.icon;
     els.webbrainIcon.src = state.webBrain.icon;
-    els.panelHeader.querySelector('img').src = state.webBrain.icon;
+    els.panelIcon.src = state.webBrain.icon;
   }
-  els.webbrain.classList.toggle('open', Boolean(state.panel));
+  els.webbrain.classList.toggle('open', state.panel?.kind === 'webbrain');
+  els.wallet.classList.toggle('open', state.panel?.kind === 'wallet');
+  // A site is waiting for an answer and the wallet is not on screen to show it.
+  const waiting = (state.wallet?.pending || 0) > 0 && state.panel?.kind !== 'wallet';
+  els.walletBadge.hidden = !waiting;
+  els.wallet.title = waiting ? t('ui.walletWaiting') : t('ui.walletTip');
 
   const dl = state.downloads;
   els.downloads.hidden = !dl || dl.count === 0;
@@ -277,6 +288,8 @@ function renderPanel() {
   els.panelHeader.style.top = `${top}px`;
   els.panelHeader.style.width = `${p.width}px`;
   els.panelTitle.textContent = p.title || 'WebBrain';
+  els.panelIcon.hidden = p.kind === 'wallet';
+  els.panelGlyph.toggleAttribute('hidden', p.kind !== 'wallet'); // an SVG element has no .hidden
   els.splitter.style.top = `${top}px`;
   // The panel is at the end of the line (the left in right-to-left languages).
   els.splitter.style.insetInlineEnd = `${p.width}px`;
@@ -299,6 +312,7 @@ els.back.addEventListener('click', () => api.invoke('back'));
 els.forward.addEventListener('click', () => api.invoke('forward'));
 els.reload.addEventListener('click', () => api.invoke(activeTab()?.loading ? 'stop' : 'reload'));
 els.webbrain.addEventListener('click', () => api.invoke('webBrain'));
+els.wallet.addEventListener('click', () => api.invoke('wallet'));
 els.menu.addEventListener('click', () => {
   const r = els.menu.getBoundingClientRect();
   api.invoke('mainMenu', { x: r.right - 4, y: r.bottom + 2 });

@@ -27,6 +27,7 @@
       <symbol id="i-down" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></symbol>
       <symbol id="i-min" viewBox="0 0 24 24"><path d="M6 12h12"/></symbol>
       <symbol id="i-max" viewBox="0 0 24 24"><rect x="6.5" y="6.5" width="11" height="11"/></symbol>
+      <symbol id="i-wallet" viewBox="0 0 24 24"><path d="M5 8.2V7a2 2 0 0 1 2-2h9.5v3.2"/><rect x="4" y="8.2" width="16" height="10.8" rx="2.4"/><path d="M20 11.6h-3.4a2 2 0 0 0 0 4H20"/><circle cx="16.8" cy="13.6" r="0.9"/></symbol>
     </defs>
   </svg>
 
@@ -60,6 +61,11 @@
         <img id="webbrain-icon" src="../../assets/icons/webbrain-mark.svg" alt="" draggable="false">
         <span>WebBrain</span>
       </button>
+      <button id="wallet" class="toolbar-pill" title="Wallet" aria-label="Open wallet" data-t-title="ui.walletTip" data-t-aria-label="ui.openWallet">
+        <svg><use href="#i-wallet"/></svg>
+        <span id="wallet-label">Wallet</span>
+        <i id="wallet-badge" hidden></i>
+      </button>
       <button id="downloads" class="icon-button" title="Downloads" aria-label="Downloads" data-t-title="ui.downloads" data-t-aria-label="ui.downloads" hidden>
         <svg><use href="#i-download"/></svg>
         <i id="download-ring"></i>
@@ -78,7 +84,8 @@
   </header>
 
   <aside id="panel-header" hidden>
-    <img src="../../assets/icons/webbrain-mark.svg" alt="" draggable="false">
+    <img id="panel-icon" src="../../assets/icons/webbrain-mark.svg" alt="" draggable="false">
+    <svg id="panel-glyph" hidden><use href="#i-wallet"/></svg>
     <span id="panel-title">WebBrain</span>
     <button id="panel-close" class="icon-button" title="Close side panel" aria-label="Close side panel" data-t-title="ui.closePanel" data-t-aria-label="ui.closePanel"><svg><use href="#i-close"/></svg></button>
   </aside>

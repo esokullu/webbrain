@@ -331,6 +331,21 @@ html[dir="rtl"] .tab .title { mask-image: linear-gradient(270deg, #000 calc(100%
   transition: background-color 120ms ease, box-shadow 120ms ease;
 }
 .toolbar-pill img { width: 20px; height: 20px; border-radius: 5px; }
+.toolbar-pill > svg { width: 19px; height: 19px; color: var(--gold); }
+#wallet { position: relative; }
+#wallet-badge {
+  position: absolute;
+  top: 5px;
+  inset-inline-start: 21px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--gold);
+  box-shadow: 0 0 0 2px var(--toolbar);
+  animation: wallet-wait 1.6s ease-in-out infinite;
+}
+@keyframes wallet-wait { 50% { opacity: 0.35; } }
+@media (prefers-reduced-motion: reduce) { #wallet-badge { animation: none; } }
 .toolbar-pill:hover { background: var(--hover); }
 .toolbar-pill.open { background: var(--gold-soft); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--gold) 55%, transparent); }
 .toolbar-pill[disabled] { opacity: 0.45; }
@@ -394,6 +409,7 @@ html[dir="rtl"] .tab .title { mask-image: linear-gradient(270deg, #000 calc(100%
 }
 #panel-header[hidden], #splitter[hidden] { display: none; }
 #panel-header img { width: 18px; height: 18px; border-radius: 4px; }
+#panel-header > svg { width: 18px; height: 18px; color: var(--gold); flex: none; }
 #panel-title { flex: 1; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 #panel-header .icon-button { width: 28px; height: 28px; }
 

@@ -27,6 +27,7 @@ const { registerSchemes, handleProtocol } = require('./protocol');
 const { resolveInput } = require('./url');
 const { urlsFromArgs } = require('./open-arguments');
 const identity = require('./identity');
+const { installWallet } = require('./wallet/install');
 
 const PERSISTENT_PARTITION = 'persist:murshid';
 const TEMPORARY_PARTITION = 'murshid-temporary';
@@ -84,6 +85,7 @@ const ctx = {
   ses: null,
   extensions: null,
   crx: null,
+  wallet: null,
   downloads: null,
   companion: null,
   commands: null,
@@ -152,6 +154,11 @@ const ctx = {
   },
   refreshAllWindows() {
     this.windows.forEach((w) => w.scheduleState());
+  },
+  toggleWallet(w) {
+    if (!w) return;
+    if (w.walletOpen) w.closeWallet();
+    else w.openWallet();
   },
   sendExtensionCommand(w, name) {
     if (!this.webBrainId || !w?.activeTab) return;
@@ -230,6 +237,7 @@ async function start() {
   ses.registerPreloadScript({ id: 'murshid-pages', type: 'frame', filePath: path.join(__dirname, 'pages', 'preload.js') });
 
   ctx.crx = new CrxBridge(ctx);
+  ctx.wallet = installWallet(ctx);
   ctx.omnibox = new Omnibox(ctx);
   ctx.downloads = new Downloads(ctx);
   ctx.downloads.on('update', () => ctx.refreshAllWindows());
@@ -413,6 +421,9 @@ function installUiIpc() {
       case 'home': return ctx.commands.run.home(w);
       case 'webBrain':
         ctx.crx.togglePanelForActiveTab(w);
+        return null;
+      case 'wallet':
+        ctx.toggleWallet(w);
         return null;
       case 'panelClose':
         ctx.crx.closePanelInWindow(w);

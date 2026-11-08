@@ -1,0 +1,239 @@
+<!doctype html>
+<html lang="{{lang}}" dir="{{dir}}">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' murshid: data:; style-src 'self'; script-src 'self'">
+<meta name="color-scheme" content="light dark">
+<title>{{t:wallet.title}}</title>
+<link rel="stylesheet" href="pages.css">
+<link rel="stylesheet" href="wallet.css">
+</head>
+<body data-page="wallet" class="wallet">
+<svg class="sprite" aria-hidden="true">
+  <defs>
+    <symbol id="w-lock" viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></symbol>
+    <symbol id="w-open" viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 7.6-1.7"/></symbol>
+    <symbol id="w-more" viewBox="0 0 24 24"><circle cx="5.5" cy="12" r="1.4"/><circle cx="12" cy="12" r="1.4"/><circle cx="18.5" cy="12" r="1.4"/></symbol>
+    <symbol id="w-back" viewBox="0 0 24 24"><path d="M19 12H5M11 18l-6-6 6-6"/></symbol>
+    <symbol id="w-copy" viewBox="0 0 24 24"><rect x="8.5" y="8.5" width="11" height="11" rx="2"/><path d="M15.5 8.5V6.5a2 2 0 0 0-2-2h-7a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h2"/></symbol>
+    <symbol id="w-check" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></symbol>
+    <symbol id="w-out" viewBox="0 0 24 24"><path d="M14 5h5v5M19 5l-8 8M17 14v4a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 5 18V8.5A1.5 1.5 0 0 1 6.5 7H10"/></symbol>
+    <symbol id="w-refresh" viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/></symbol>
+    <symbol id="w-warn" viewBox="0 0 24 24"><path d="M12 4l9 16H3z"/><path d="M12 10v4M12 17.2v.1"/></symbol>
+    <symbol id="w-globe" viewBox="0 0 24 24"><circle class="ring" cx="12" cy="12" r="8.5"/><path d="M3.5 12h17M12 3.5c2.6 2.7 2.6 14.3 0 17M12 3.5c-2.6 2.7-2.6 14.3 0 17"/></symbol>
+  </defs>
+</svg>
+
+<!-- Opened in a tab, where it has no access to the wallet. -->
+<section id="v-elsewhere" class="view center" hidden>
+  <div class="setup-inner">
+    <div class="mark"><img src="murshid://assets/icons/murshid.svg" alt=""><span>{{t:wallet.title}}</span></div>
+    <p class="lede">{{t:wallet.tabNote}}</p>
+  </div>
+</section>
+
+<!-- No wallet yet -->
+<section id="v-welcome" class="view setup" hidden>
+  <div class="setup-inner">
+    <div class="mark"><img src="murshid://assets/icons/murshid.svg" alt=""><span>{{t:wallet.title}}</span></div>
+    <h1>{{rich:wallet.welcomeHeading}}</h1>
+    <p class="lede">{{t:wallet.welcomeLede}}</p>
+    <div class="stack">
+      <button class="button primary" id="start-create" type="button">{{t:wallet.create}}</button>
+      <button class="button" id="start-import" type="button">{{t:wallet.import}}</button>
+    </div>
+    <p class="note warn" id="unreadable" hidden>{{t:wallet.unreadable}}</p>
+  </div>
+</section>
+
+<!-- New wallet: the recovery phrase, then a password -->
+<section id="v-create" class="view setup" hidden>
+  <div class="setup-inner">
+    <button class="link back" type="button" data-back><svg><use href="#w-back"/></svg>{{t:wallet.back}}</button>
+    <h2>{{t:wallet.phraseHeading}}</h2>
+    <p class="lede">{{t:wallet.phraseLede}}</p>
+    <ol class="words" id="words" dir="ltr" translate="no"></ol>
+    <label class="check"><input type="checkbox" id="written"><span>{{t:wallet.phraseWritten}}</span></label>
+    <form class="form" id="create-form" autocomplete="off" novalidate>
+      <label class="field"><span>{{t:wallet.password}}</span><input type="password" id="create-password" autocomplete="new-password"></label>
+      <label class="field"><span>{{t:wallet.passwordRepeat}}</span><input type="password" id="create-repeat" autocomplete="new-password"></label>
+      <p class="hint">{{t:wallet.passwordHelp}}</p>
+      <p class="error" id="create-error" role="alert"></p>
+      <button class="button primary" type="submit" id="create-submit">{{t:wallet.continue}}</button>
+    </form>
+  </div>
+</section>
+
+<!-- Restore from a recovery phrase -->
+<section id="v-import" class="view setup" hidden>
+  <div class="setup-inner">
+    <button class="link back" type="button" data-back><svg><use href="#w-back"/></svg>{{t:wallet.back}}</button>
+    <h2>{{t:wallet.importHeading}}</h2>
+    <p class="lede">{{t:wallet.importLede}}</p>
+    <form class="form" id="import-form" autocomplete="off" novalidate>
+      <textarea id="import-phrase" rows="4" dir="ltr" spellcheck="false" autocapitalize="off" translate="no" placeholder="{{t:wallet.importPlaceholder}}" aria-label="{{t:wallet.importHeading}}"></textarea>
+      <label class="field"><span>{{t:wallet.password}}</span><input type="password" id="import-password" autocomplete="new-password"></label>
+      <label class="field"><span>{{t:wallet.passwordRepeat}}</span><input type="password" id="import-repeat" autocomplete="new-password"></label>
+      <p class="hint">{{t:wallet.passwordHelp}}</p>
+      <p class="error" id="import-error" role="alert"></p>
+      <button class="button primary" type="submit" id="import-submit">{{t:wallet.continue}}</button>
+    </form>
+  </div>
+</section>
+
+<!-- Locked -->
+<section id="v-locked" class="view setup" hidden>
+  <div class="setup-inner">
+    <div class="mark"><img src="murshid://assets/icons/murshid.svg" alt=""><span>{{t:wallet.title}}</span></div>
+    <h2>{{t:wallet.unlockHeading}}</h2>
+    <p class="note" id="locked-waiting" hidden></p>
+    <form class="form" id="unlock-form" autocomplete="off" novalidate>
+      <label class="field"><span>{{t:wallet.password}}</span><input type="password" id="unlock-password" autocomplete="current-password"></label>
+      <p class="error" id="unlock-error" role="alert"></p>
+      <button class="button primary" type="submit" id="unlock-submit">{{t:wallet.unlock}}</button>
+    </form>
+    <p class="hint"><button class="link" type="button" id="forgot">{{t:wallet.forgot}}</button></p>
+  </div>
+</section>
+
+<!-- The wallet: receive, balance, send -->
+<section id="v-main" class="view main" hidden>
+  <header class="bar">
+    <label class="network">
+      <span class="sr">{{t:wallet.network}}</span>
+      <select id="network"></select>
+    </label>
+    <span class="bar-fill"></span>
+    <button class="icon" type="button" id="lock" title="{{t:wallet.lock}}" aria-label="{{t:wallet.lock}}"><svg><use href="#w-open"/></svg></button>
+    <button class="icon" type="button" id="more" title="{{t:wallet.more}}" aria-label="{{t:wallet.more}}"><svg><use href="#w-more"/></svg></button>
+  </header>
+
+  <div class="columns" id="columns">
+    <article class="col" id="col-receive" data-col="receive">
+      <button class="col-head" type="button" aria-controls="body-receive">
+        <h3>{{t:wallet.receive}}</h3>
+        <span class="col-sum" id="sum-receive" dir="ltr"></span>
+      </button>
+      <div class="col-body" id="body-receive">
+        <div class="qr"><img id="qr" alt=""></div>
+        <code class="address" id="address" dir="ltr" translate="no"></code>
+        <div class="row-actions">
+          <button class="button small" type="button" id="copy"><svg><use href="#w-copy"/></svg><span id="copy-label">{{t:wallet.copy}}</span></button>
+          <a class="button small quiet" id="explorer" target="_blank" rel="noreferrer"><svg><use href="#w-out"/></svg>{{t:wallet.explorer}}</a>
+        </div>
+        <p class="hint" id="receive-note"></p>
+      </div>
+    </article>
+
+    <article class="col active" id="col-balance" data-col="balance">
+      <button class="col-head" type="button" aria-controls="body-balance">
+        <h3>{{t:wallet.balance}}</h3>
+        <span class="col-sum" id="sum-balance" dir="ltr"></span>
+      </button>
+      <div class="col-body" id="body-balance">
+        <p class="amount" dir="ltr"><span id="balance-value">…</span> <span class="symbol" id="balance-symbol"></span></p>
+        <p class="hint" id="balance-pending" hidden></p>
+        <p class="error" id="balance-error" role="alert"></p>
+        <button class="link" type="button" id="refresh"><svg><use href="#w-refresh"/></svg>{{t:wallet.refresh}}</button>
+        <p class="note" id="testnet-note" hidden>{{t:wallet.testnetNote}}</p>
+      </div>
+    </article>
+
+    <article class="col" id="col-send" data-col="send">
+      <button class="col-head" type="button" aria-controls="body-send">
+        <h3>{{t:wallet.send}}</h3>
+        <span class="col-sum" id="sum-send"></span>
+      </button>
+      <div class="col-body" id="body-send">
+        <form class="form" id="send-form" autocomplete="off" novalidate>
+          <label class="field"><span>{{t:wallet.to}}</span><input id="send-to" dir="auto" spellcheck="false" autocapitalize="off" translate="no"></label>
+          <label class="field"><span>{{t:wallet.amount}}</span>
+            <span class="amount-input"><input id="send-amount" inputmode="decimal" dir="ltr" placeholder="0.00"><span class="symbol" id="send-symbol"></span></span>
+          </label>
+          <fieldset class="speeds" id="speeds">
+            <legend>{{t:wallet.speed}}</legend>
+            <label><input type="radio" name="speed" value="slow"><span>{{t:wallet.speedSlow}}</span></label>
+            <label><input type="radio" name="speed" value="normal" checked><span>{{t:wallet.speedNormal}}</span></label>
+            <label><input type="radio" name="speed" value="fast"><span>{{t:wallet.speedFast}}</span></label>
+          </fieldset>
+          <p class="error" id="send-error" role="alert"></p>
+          <div class="row-actions">
+            <button class="button primary" type="submit" id="send-review">{{t:wallet.review}}</button>
+            <button class="button quiet" type="button" id="send-max" title="{{t:wallet.maxHelp}}">{{t:wallet.max}}</button>
+          </div>
+        </form>
+
+        <div class="review" id="send-confirm" hidden>
+          <dl>
+            <dt>{{t:wallet.to}}</dt><dd><code id="review-to" dir="ltr"></code></dd>
+            <dt>{{t:wallet.amount}}</dt><dd dir="ltr" id="review-amount"></dd>
+            <dt>{{t:wallet.fee}}</dt><dd dir="ltr" id="review-fee"></dd>
+            <dt>{{t:wallet.total}}</dt><dd dir="ltr" id="review-total"></dd>
+          </dl>
+          <p class="hint" id="review-fee-note"></p>
+          <p class="error" id="confirm-error" role="alert"></p>
+          <div class="row-actions">
+            <button class="button primary" type="button" id="send-now">{{t:wallet.confirmSend}}</button>
+            <button class="button quiet" type="button" id="send-cancel">{{t:wallet.cancel}}</button>
+          </div>
+        </div>
+
+        <div class="review done" id="send-done" hidden>
+          <p class="done-mark"><svg><use href="#w-check"/></svg></p>
+          <p>{{t:wallet.sent}}</p>
+          <div class="row-actions">
+            <a class="button small quiet" id="send-tx" target="_blank" rel="noreferrer"><svg><use href="#w-out"/></svg>{{t:wallet.viewTx}}</a>
+            <button class="button small" type="button" id="send-again">{{t:wallet.done}}</button>
+          </div>
+        </div>
+      </div>
+    </article>
+  </div>
+</section>
+
+<!-- More: connected sites, recovery phrase, reset -->
+<section id="v-more" class="view sheet" hidden>
+  <header class="bar">
+    <button class="link back" type="button" id="more-back"><svg><use href="#w-back"/></svg>{{t:wallet.back}}</button>
+  </header>
+  <div class="sheet-inner">
+    <h3>{{t:wallet.sites}}</h3>
+    <ul class="sites" id="sites"></ul>
+    <p class="hint" id="sites-none">{{t:wallet.sitesNone}}</p>
+
+    <h3>{{t:wallet.showPhrase}}</h3>
+    <p class="hint">{{t:wallet.showPhraseLede}}</p>
+    <form class="form inline" id="reveal-form" autocomplete="off" novalidate>
+      <input type="password" id="reveal-password" autocomplete="current-password" aria-label="{{t:wallet.password}}" placeholder="{{t:wallet.password}}">
+      <button class="button small" type="submit">{{t:wallet.showPhrase}}</button>
+    </form>
+    <p class="error" id="reveal-error" role="alert"></p>
+    <ol class="words" id="reveal-words" dir="ltr" translate="no" hidden></ol>
+
+    <h3>{{t:wallet.reset}}</h3>
+    <p class="hint">{{t:wallet.resetHelp}}</p>
+    <button class="button danger" type="button" id="reset">{{t:wallet.reset}}</button>
+  </div>
+</section>
+
+<!-- A website is asking -->
+<section id="v-request" class="view request" hidden aria-live="polite">
+  <div class="request-inner">
+    <p class="request-count" id="request-count"></p>
+    <h2 id="request-title"></h2>
+    <p class="site" id="request-site"><svg><use href="#w-lock"/></svg><span id="request-host" dir="ltr" translate="no"></span></p>
+    <p class="note warn" id="request-insecure" hidden><svg><use href="#w-warn"/></svg><span>{{t:wallet.req.insecure}}</span></p>
+    <div class="request-body" id="request-body"></div>
+    <p class="error" id="request-error" role="alert"></p>
+    <div class="request-actions">
+      <button class="button" type="button" id="request-reject">{{t:wallet.reject}}</button>
+      <button class="button primary" type="button" id="request-approve"></button>
+    </div>
+  </div>
+</section>
+
+<div class="toast" id="toast" role="status" hidden><span id="toast-text"></span><a id="toast-link" target="_blank" rel="noreferrer" hidden>{{t:wallet.viewTx}}</a></div>
+
+<script src="wallet.js"></script>
+</body>
+</html>
