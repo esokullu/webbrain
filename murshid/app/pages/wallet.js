@@ -22,6 +22,9 @@
   let mode = null; // 'create' | 'import' | 'more' while one of those is open
   let createId = null; // the new phrase this panel shows
   let active = 'balance'; // the open column when they are stacked
+  // What the receive and balance columns show is for one network of one
+  // wallet: "network|address". Another wallet (restored in another window)
+  // never inherits the old one's address or QR code.
   let balanceFor = null;
   let receiveFor = null;
   let review = null;
@@ -78,6 +81,7 @@
     clearInterval(refreshTimer);
     refreshTimer = null;
     if (!state.exists) {
+      forgetShown();
       if (state.unreadable) $('unreadable').hidden = false;
       // Another panel may have gone back, or started over with other words.
       if (mode === 'create' && state.creating && state.creating === createId) show('v-create');
@@ -270,6 +274,25 @@
     }
   }
 
+  /** The wallet and network the columns should be showing now. */
+  function shownKey() {
+    const net = networkOf(state.network);
+    const address = net.kind === 'bitcoin' ? state.addresses.bitcoin : state.addresses.evm;
+    return `${net.id}|${address}`;
+  }
+
+  /** Clears the receive and balance columns, so nothing stale can be copied or scanned. */
+  function forgetShown() {
+    receiveFor = null;
+    balanceFor = null;
+    $('qr').removeAttribute('src');
+    $('qr').alt = '';
+    $('address').textContent = '';
+    $('explorer').removeAttribute('href');
+    $('balance-value').textContent = '…';
+    $('sum-balance').textContent = '';
+  }
+
   function renderMain() {
     fillNetworks();
     if (review && review.network !== state.network) resetSend(); // a site switched networks
@@ -284,16 +307,23 @@
     $('receive-note').textContent = isBitcoin ? t('wallet.receiveNoteBtc') : t('wallet.receiveNoteEvm', { network: networkName(net) });
     const address = isBitcoin ? state.addresses.bitcoin : state.addresses.evm;
     $('sum-receive').textContent = `${address.slice(0, 6)}…${address.slice(-4)}`;
-    if (receiveFor !== state.network) loadReceive();
-    if (balanceFor !== state.network) loadBalance();
+    const key = shownKey();
+    if (receiveFor !== key) loadReceive();
+    if (balanceFor !== key) loadBalance();
   }
 
   async function loadReceive() {
     const id = state.network;
-    receiveFor = id;
+    const key = shownKey();
+    if (receiveFor !== key) {
+      $('qr').removeAttribute('src');
+      $('address').textContent = '';
+      $('explorer').removeAttribute('href');
+    }
+    receiveFor = key;
     try {
       const info = await call('receive', id);
-      if (state.network !== id) return;
+      if (!state?.exists || shownKey() !== key || info.address !== key.split('|')[1]) return;
       $('qr').src = info.qr;
       $('qr').alt = info.address;
       $('address').textContent = info.address;
@@ -306,8 +336,9 @@
 
   async function loadBalance(quiet = false) {
     const id = state?.network;
-    if (!id || !state.unlocked) return;
-    balanceFor = id;
+    if (!id || !state.unlocked || !state.exists) return;
+    const key = shownKey();
+    balanceFor = key;
     if (!quiet) {
       $('balance-value').textContent = '…';
       $('sum-balance').textContent = '';
@@ -315,7 +346,7 @@
     setError('balance-error', null);
     try {
       const info = await call('balance', id);
-      if (state.network !== id) return;
+      if (!state?.exists || shownKey() !== key) return;
       const net = networkOf(id);
       $('balance-value').textContent = info.value;
       $('balance-value').title = `${info.exact} ${info.symbol}`;
@@ -323,7 +354,7 @@
       $('balance-pending').hidden = !info.pending;
       if (info.pending) $('balance-pending').textContent = t('wallet.pending', { amount: `${info.pending} ${net.symbol}` });
     } catch (error) {
-      if (state.network !== id) return;
+      if (!state?.exists || shownKey() !== key) return;
       if (!quiet) $('balance-value').textContent = '—';
       setError('balance-error', error);
     }

@@ -71,6 +71,7 @@ class Wallet extends EventEmitter {
     this.unreadable = false;
     this.keys = null;
     this.pendingPhrase = null;
+    this.settingUp = false; // a create or restore is encrypting
     this.requests = new Map(); // id -> request from a website
     this.reviews = new Map(); // id -> transfer shown for confirmation
     this.lockTimer = null;
@@ -158,9 +159,18 @@ class Wallet extends EventEmitter {
   }
 
   async setup(phrase, password) {
-    if (this.exists) throw new WalletError('failed', 'a wallet already exists');
+    // Claimed before the slow encryption: two panels finishing at once must not
+    // both succeed, the second quietly replacing the first wallet.
+    if (this.exists || this.settingUp) throw new WalletError('failed', 'a wallet already exists');
     vault.checkPassword(password);
-    const box = await vault.seal(phrase, password);
+    this.settingUp = true;
+    let box;
+    try {
+      box = await vault.seal(phrase, password);
+    } finally {
+      this.settingUp = false;
+    }
+    if (this.exists) throw new WalletError('failed', 'a wallet already exists');
     const keys = vault.deriveKeys(phrase);
     if (this.unreadable && fs.existsSync(this.file)) {
       fs.renameSync(this.file, `${this.file}.unreadable-${this.now()}`);
@@ -184,7 +194,10 @@ class Wallet extends EventEmitter {
 
   async unlock(password) {
     if (!this.exists) throw new WalletError('failed', 'no wallet');
-    const phrase = await vault.open(this.data.vault, password);
+    const vaultBox = this.data.vault;
+    const phrase = await vault.open(vaultBox, password);
+    // Reset, or replaced from another window, while the password was checked.
+    if (!this.exists || this.data.vault !== vaultBox) throw new WalletError('failed', 'the wallet changed');
     const keys = vault.deriveKeys(phrase);
     if (keys.bitcoin.address !== this.data.addresses.bitcoin || keys.evm.address !== this.data.addresses.evm) {
       vault.wipeKeys(keys);

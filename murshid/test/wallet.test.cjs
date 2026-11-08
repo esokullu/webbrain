@@ -123,6 +123,30 @@ test('a new wallet is created with the words its panel showed, even with two pan
   }
 });
 
+test('two panels finishing setup at once cannot both create a wallet', async () => {
+  const dir = tempDir();
+  try {
+    const wallet = new Wallet({ dir, fetchFn: noNetwork });
+    const other = 'zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo wrong';
+    const results = await Promise.allSettled([
+      wallet.importPhrase(PHRASE, 'correct horse'),
+      wallet.importPhrase(other, 'another password'),
+    ]);
+    assert.deepEqual(results.map((r) => r.status), ['fulfilled', 'rejected']);
+    assert.equal(results[1].reason.code, 'failed');
+    assert.equal(wallet.data.addresses.evm, EVM_ADDRESS, 'the first wallet stays');
+    assert.equal(new Wallet({ dir, fetchFn: noNetwork }).data.addresses.evm, EVM_ADDRESS);
+    // An unlock that was checking the password when the wallet was reset fails cleanly.
+    wallet.lock();
+    const unlocking = wallet.unlock('correct horse');
+    wallet.reset();
+    await assert.rejects(unlocking, { code: 'failed' });
+    assert.equal(wallet.unlocked, false);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('amounts are read and shown exactly', () => {
   assert.equal(parseAmount('0.0001', 8), 10000n);
   assert.equal(parseAmount('0,5', 8), 50000000n);
