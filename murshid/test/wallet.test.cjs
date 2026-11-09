@@ -515,6 +515,29 @@ test('a site request still being prepared when the wallet is replaced is never q
   assert.notEqual(wallet.data.addresses.evm, EVM_ADDRESS);
 });
 
+test('a transfer review prepared while the wallet is replaced is not kept for the new one', async () => {
+  const wallet = await readyWallet();
+  wallet.evm.balance = async () => 10n ** 18n;
+  let replace = true;
+  const sent = [];
+  wallet.evm.prepare = async (net, account, tx) => {
+    if (replace) {
+      replace = false;
+      wallet.reset();
+      await wallet.importPhrase(vault.newPhrase(), 'another password');
+    }
+    return { request: { ...tx, gas: 21000n, maxFeePerGas: 1n, maxPriorityFeePerGas: 1n, nonce: 9 }, fee: 21000n, l1Fee: 0n };
+  };
+  wallet.evm.send = async (net, account, prepared) => { sent.push(account.address); return `0x${'ef'.repeat(32)}`; };
+  const transfer = { network: 'base', to: '0x000000000000000000000000000000000000dEaD', amount: '0.01' };
+  await assert.rejects(wallet.review(transfer), { code: 'failed' });
+  assert.equal(wallet.reviews.size, 0);
+  // A review made by the new wallet still works.
+  const fresh = await wallet.review(transfer);
+  await wallet.confirm(fresh.id);
+  assert.deepEqual(sent, [wallet.data.addresses.evm]);
+});
+
 test('read-only calls go to the node; requests from a page that went away are dropped', async () => {
   const wallet = await readyWallet();
   const provider = new Provider(wallet);

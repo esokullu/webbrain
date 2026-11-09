@@ -89,6 +89,7 @@
       walletKey = key;
       clearRevealed();
       forgetShown();
+      resetSend(); // a review on its way was for the old wallet
     }
     if (!state.exists) {
       forgetShown();

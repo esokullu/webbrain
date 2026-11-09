@@ -367,6 +367,7 @@ class Wallet extends EventEmitter {
   /** Builds a transfer and keeps it, unsigned, for the user to confirm. */
   async review({ network, to, amount, max = false, speed = 'normal' } = {}) {
     const keys = this.requireKeys();
+    const identity = this.identity();
     const net = networks.byId(network);
     if (!net) throw new WalletError('failed', 'unknown network');
     const target = String(to || '').trim();
@@ -394,8 +395,11 @@ class Wallet extends EventEmitter {
       }
       review = { net, prepared, amount: prepared.request.value, fee: prepared.fee };
     }
+    // Reset, replaced or locked while the network answered: this review was
+    // built from the old wallet's keys and coins, and is not kept.
+    if (this.identity() !== identity || this.keys !== keys) throw new WalletError('failed', 'the wallet changed');
     const id = randomUUID();
-    this.reviews.set(id, { ...review, id, to: target, expires: this.now() + REVIEW_TTL_MS });
+    this.reviews.set(id, { ...review, id, identity, to: target, expires: this.now() + REVIEW_TTL_MS });
     for (const [other, r] of this.reviews) if (r.expires < this.now()) this.reviews.delete(other);
     return {
       id,
@@ -429,7 +433,7 @@ class Wallet extends EventEmitter {
     const keys = this.requireKeys();
     const review = this.reviews.get(id);
     this.reviews.delete(id);
-    if (!review || review.expires < this.now()) throw new WalletError('expired');
+    if (!review || review.expires < this.now() || review.identity !== this.identity()) throw new WalletError('expired');
     this.dropReviews(review.net.id);
     let hash;
     if (review.net.kind === 'bitcoin') {
