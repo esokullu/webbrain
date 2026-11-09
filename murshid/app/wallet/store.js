@@ -406,12 +406,23 @@ class Wallet extends EventEmitter {
     this.reviews.delete(id);
   }
 
+  /**
+   * Forgets every review on a network a transfer is about to be sent on. They
+   * were built before it: an Ethereum one holds the same nonce, a Bitcoin one
+   * the same coins, so sending it as well would fail or replace this one.
+   * Their panels get "review again" when they try to confirm.
+   */
+  dropReviews(networkId) {
+    for (const [id, review] of this.reviews) if (review.net.id === networkId) this.reviews.delete(id);
+  }
+
   /** Signs and sends a transfer the user reviewed. */
   async confirm(id) {
     const keys = this.requireKeys();
     const review = this.reviews.get(id);
     this.reviews.delete(id);
     if (!review || review.expires < this.now()) throw new WalletError('expired');
+    this.dropReviews(review.net.id);
     let hash;
     if (review.net.kind === 'bitcoin') {
       const signed = signPayment(review.payment, keys.bitcoin.privateKey);

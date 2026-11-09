@@ -456,6 +456,47 @@ test('Send all estimates gas for the value it sends, and reserves the fee from t
   await assert.rejects(client.prepareMax(net, EVM_ADDRESS, EVM_ADDRESS, 0n), { code: 'insufficient' });
 });
 
+test('sending one transfer makes other reviews on that network be prepared again', async () => {
+  const wallet = await readyWallet();
+  const nonces = new Map(); // each chain counts its own
+  const sent = [];
+  wallet.evm.balance = async () => 10n ** 18n;
+  wallet.evm.prepare = async (net, account, tx) => ({ request: { ...tx, gas: 21000n, maxFeePerGas: 1n, maxPriorityFeePerGas: 1n, nonce: tx.nonce ?? (nonces.get(net.id) ?? 4) }, fee: 21000n, l1Fee: 0n });
+  wallet.evm.send = async (net, account, prepared) => {
+    sent.push(`${net.id}:${prepared.request.nonce}`);
+    nonces.set(net.id, prepared.request.nonce + 1);
+    return `0x${String(sent.length).padStart(64, '0')}`;
+  };
+  const transfer = { network: 'base', to: '0x000000000000000000000000000000000000dEaD', amount: '0.01' };
+
+  // Two windows review a transfer each, with the same next nonce.
+  const a = await wallet.review(transfer);
+  const b = await wallet.review(transfer);
+  const other = await wallet.review({ ...transfer, network: 'arbitrum' });
+  await wallet.confirm(a.id);
+  await assert.rejects(wallet.confirm(b.id), { code: 'expired' });
+  await wallet.confirm(other.id); // another network is unaffected
+  assert.deepEqual(sent, ['base:4', 'arbitrum:4']);
+
+  // Confirming two at the same moment sends one.
+  const c = await wallet.review(transfer);
+  const d = await wallet.review(transfer);
+  const results = await Promise.allSettled([wallet.confirm(c.id), wallet.confirm(d.id)]);
+  assert.deepEqual(results.map((r) => r.status).sort(), ['fulfilled', 'rejected']);
+  assert.equal(sent.length, 3);
+
+  // A site's transaction on the same network does the same.
+  const provider = new Provider(wallet);
+  wallet.connect(SITE.origin);
+  wallet.setEvmChain(8453);
+  const e = await wallet.review(transfer);
+  const queued = nextRequest(wallet);
+  const answer = provider.handle(SITE, 'eth_sendTransaction', [{ to: EVM_ADDRESS, value: '0x1' }]);
+  await wallet.approve((await queued).id);
+  await answer;
+  await assert.rejects(wallet.confirm(e.id), { code: 'expired' });
+});
+
 test('read-only calls go to the node; requests from a page that went away are dropped', async () => {
   const wallet = await readyWallet();
   const provider = new Provider(wallet);

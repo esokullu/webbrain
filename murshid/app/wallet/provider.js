@@ -282,6 +282,7 @@ class Provider {
       if (details.blocked) throw new WalletError('willFail', failure);
       if (this.wallet.evmNetwork().chainId !== net.chainId) throw new WalletError('failed', 'the network changed');
       const { account } = this.wallet.requireKeys().evm;
+      this.wallet.dropReviews(net.id); // transfers reviewed in the panel would reuse this nonce
       const prepared = await this.wallet.evm.prepare(net, account, request);
       const hash = await this.wallet.evm.send(net, account, prepared);
       this.wallet.emit('notice', { kind: 'sent', url: net.txUrl(hash) });
