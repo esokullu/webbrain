@@ -66,6 +66,9 @@ class EvmClient {
   constructor(fetchFn) {
     this.fetchFn = fetchFn;
     this.clients = new Map();
+    // The two node calls a transfer is prepared with (replaceable in tests).
+    this.fill = (client, request) => actions.prepareTransactionRequest(client, request);
+    this.l1DataFee = (client, args) => estimateL1Fee(client, args);
   }
 
   client(net) {
@@ -120,7 +123,7 @@ class EvmClient {
     for (const key of Object.keys(request)) if (request[key] === undefined) delete request[key];
     let prepared;
     try {
-      prepared = await actions.prepareTransactionRequest(client, request);
+      prepared = await this.fill(client, request);
     } catch (error) {
       if (/insufficient funds/i.test(String(error?.message))) throw new WalletError('insufficient');
       throw new WalletError('willFail', reason(error));
@@ -128,9 +131,14 @@ class EvmClient {
     const price = prepared.maxFeePerGas ?? prepared.gasPrice ?? 0n;
     let l1Fee = 0n;
     if (net.opStack) {
+      // OP chains also charge for posting the transaction to Ethereum. An
+      // unknown fee is not a free one: without it the "up to" shown would be
+      // too low and Send all would leave nothing to pay it with.
       try {
-        l1Fee = await estimateL1Fee(client, { account, chain: client.chain, to: prepared.to, value: prepared.value, data: prepared.data, gasPriceOracleAddress: OP_STACK_GAS_ORACLE });
-      } catch {}
+        l1Fee = await this.l1DataFee(client, { account, chain: client.chain, to: prepared.to, value: prepared.value, data: prepared.data, gasPriceOracleAddress: OP_STACK_GAS_ORACLE });
+      } catch (error) {
+        throw new WalletError('network', `L1 data fee: ${reason(error)}`);
+      }
     }
     return { request: prepared, fee: prepared.gas * price + l1Fee, l1Fee };
   }

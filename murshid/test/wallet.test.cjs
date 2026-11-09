@@ -538,6 +538,38 @@ test('a transfer review prepared while the wallet is replaced is not kept for th
   assert.deepEqual(sent, [wallet.data.addresses.evm]);
 });
 
+test('on OP chains an L1 data fee that cannot be estimated stops the transfer instead of counting as zero', async () => {
+  const { EvmClient } = require('../app/wallet/evm');
+  const client = new EvmClient(noNetwork);
+  client.fill = async (c, request) => ({ ...request, gas: 21000n, maxFeePerGas: 10n, maxPriorityFeePerGas: 1n, nonce: 0, type: 'eip1559' });
+  let l1Calls = 0;
+  client.l1DataFee = async () => { l1Calls += 1; throw new Error('oracle unreachable'); };
+  const to = '0x000000000000000000000000000000000000dEaD';
+  await assert.rejects(client.prepare(networks.byId('base'), EVM_ADDRESS, { to, value: 1n }), { code: 'network' });
+  await assert.rejects(client.prepareMax(networks.byId('optimism'), EVM_ADDRESS, to, 10n ** 18n), { code: 'network' });
+  // Ethereum has no L1 data fee to ask about.
+  const mainnet = await client.prepare(networks.byId('ethereum'), EVM_ADDRESS, { to, value: 1n });
+  assert.equal(mainnet.fee, 210000n);
+  assert.equal(l1Calls, 2);
+  client.l1DataFee = async () => 5000n;
+  const base = await client.prepare(networks.byId('base'), EVM_ADDRESS, { to, value: 1n });
+  assert.equal(base.fee, 210000n + 5000n);
+  const max = await client.prepareMax(networks.byId('base'), EVM_ADDRESS, to, 10n ** 18n);
+  assert.equal(max.request.value, 10n ** 18n - 210000n - 10000n, 'the L1 fee is reserved, twice');
+
+  // A site's transaction on Base gets an error, not a card with a fee that is too low.
+  const wallet = await readyWallet();
+  const provider = new Provider(wallet);
+  wallet.connect(SITE.origin);
+  wallet.setEvmChain(8453);
+  wallet.evm.fill = client.fill;
+  wallet.evm.l1DataFee = async () => { throw new Error('oracle unreachable'); };
+  let queued = 0;
+  wallet.on('request', () => { queued += 1; });
+  await assert.rejects(provider.handle(SITE, 'eth_sendTransaction', [{ to, value: '0x1' }]), { code: -32603 });
+  assert.equal(queued, 0);
+});
+
 test('read-only calls go to the node; requests from a page that went away are dropped', async () => {
   const wallet = await readyWallet();
   const provider = new Provider(wallet);

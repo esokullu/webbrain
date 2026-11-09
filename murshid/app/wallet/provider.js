@@ -266,6 +266,8 @@ class Provider {
         request.maxPriorityFeePerGas = undefined;
       }
     } catch (error) {
+      // The network could not be asked (or could not price it): nothing reliable to show.
+      if (error?.code === 'network') throw error;
       failure = error?.detail || error?.code || String(error);
     }
     const details = {
