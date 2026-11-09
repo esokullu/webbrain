@@ -570,6 +570,39 @@ test('on OP chains an L1 data fee that cannot be estimated stops the transfer in
   assert.equal(queued, 0);
 });
 
+test('Send all still works when the fee is more than half the balance', async () => {
+  const { EvmClient } = require('../app/wallet/evm');
+  const { WalletError } = require('../app/wallet/vault');
+  const client = new EvmClient(noNetwork);
+  const balance = 30000n;
+  const probes = [];
+  client.prepare = async (n, account, tx) => {
+    probes.push(tx.value);
+    const fee = 21000n;
+    if (tx.value + fee > balance) throw new WalletError('insufficient');
+    return { request: { ...tx, gas: 21000n, maxFeePerGas: tx.maxFeePerGas ?? 1n, maxPriorityFeePerGas: 1n, nonce: 0 }, fee, l1Fee: 0n };
+  };
+  const max = await client.prepareMax(networks.byId('ethereum'), EVM_ADDRESS, EVM_ADDRESS, balance);
+  assert.equal(probes[0], 15000n);
+  assert.equal(probes[1], 1n, 'asked again with the smallest amount');
+  assert.equal(max.request.value, 9000n);
+  await assert.rejects(client.prepareMax(networks.byId('ethereum'), EVM_ADDRESS, EVM_ADDRESS, 20000n), { code: 'insufficient' });
+});
+
+test('the wallet\'s network timeout covers the whole answer, body included', async () => {
+  const { createFetch } = require('../app/wallet/http');
+  const stalled = async () => new Response(new ReadableStream({ start(c) { c.enqueue(new TextEncoder().encode('{"partial":')); } }), { status: 200 });
+  const started = Date.now();
+  await assert.rejects(createFetch(stalled, { timeoutMs: 150 })('https://example.test/'), /no complete answer/);
+  assert.ok(Date.now() - started < 2000);
+  const fine = await createFetch(async () => new Response('{"ok":true}', { status: 201, headers: { 'content-type': 'application/json' } }), { timeoutMs: 150 })('https://example.test/');
+  assert.equal(fine.status, 201);
+  assert.equal(fine.headers.get('content-type'), 'application/json');
+  assert.deepEqual(await fine.json(), { ok: true });
+  const empty = await createFetch(async () => new Response(null, { status: 204 }))('https://example.test/');
+  assert.equal(empty.status, 204);
+});
+
 test('read-only calls go to the node; requests from a page that went away are dropped', async () => {
   const wallet = await readyWallet();
   const provider = new Provider(wallet);

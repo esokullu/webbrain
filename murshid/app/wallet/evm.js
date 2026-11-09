@@ -150,8 +150,18 @@ class EvmClient {
    */
   async prepareMax(net, account, to, balance) {
     if (balance <= 0n) throw new WalletError('insufficient');
-    // First estimate: half the balance, a nonzero amount the account can afford.
-    const probe = await this.prepare(net, account, { to, value: balance / 2n });
+    // First estimate: half the balance, a nonzero amount the account can usually
+    // afford. When the fee takes more than the other half, ask again with the
+    // smallest amount, before concluding there is nothing to send.
+    let probe;
+    for (const value of [balance / 2n > 0n ? balance / 2n : 1n, 1n]) {
+      try {
+        probe = await this.prepare(net, account, { to, value });
+        break;
+      } catch (error) {
+        if (error?.code !== 'insufficient' || value === 1n) throw error;
+      }
+    }
     const { nonce, maxFeePerGas, maxPriorityFeePerGas, gasPrice } = probe.request;
     const prices = maxFeePerGas !== undefined ? { maxFeePerGas, maxPriorityFeePerGas } : { gasPrice };
     const price = maxFeePerGas ?? gasPrice ?? 0n;
