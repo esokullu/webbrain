@@ -497,6 +497,24 @@ test('sending one transfer makes other reviews on that network be prepared again
   await assert.rejects(wallet.confirm(e.id), { code: 'expired' });
 });
 
+test('a site request still being prepared when the wallet is replaced is never queued for the new one', async () => {
+  const wallet = await readyWallet();
+  const provider = new Provider(wallet);
+  wallet.connect(SITE.origin);
+  let queued = 0;
+  wallet.on('request', () => { queued += 1; });
+  wallet.evm.prepare = async (net, account, tx) => {
+    // Reset and restored with another phrase from another window, mid-estimate.
+    wallet.reset();
+    await wallet.importPhrase(vault.newPhrase(), 'another password');
+    wallet.connect(SITE.origin);
+    return { request: { ...tx, gas: 21000n, maxFeePerGas: 1n, maxPriorityFeePerGas: 1n }, fee: 21000n, l1Fee: 0n };
+  };
+  await assert.rejects(provider.handle(SITE, 'eth_sendTransaction', [{ from: EVM_ADDRESS, to: EVM_ADDRESS, value: '0x1' }]), { code: 4900 });
+  assert.equal(queued, 0);
+  assert.notEqual(wallet.data.addresses.evm, EVM_ADDRESS);
+});
+
 test('read-only calls go to the node; requests from a page that went away are dropped', async () => {
   const wallet = await readyWallet();
   const provider = new Provider(wallet);

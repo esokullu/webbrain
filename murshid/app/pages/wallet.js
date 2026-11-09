@@ -27,6 +27,8 @@
   // never inherits the old one's address or QR code.
   let balanceFor = null;
   let receiveFor = null;
+  let walletKey = null; // the wallet this panel last drew (its addresses)
+  let revealSeq = 0; // bumped whenever shown recovery words are cleared
   let review = null;
   let sendSeq = 0; // bumped whenever the send form starts over
   let shownRequest = null;
@@ -80,6 +82,14 @@
     if (!state) return;
     clearInterval(refreshTimer);
     refreshTimer = null;
+    // Reset, or replaced from another window: nothing of the old wallet stays
+    // on screen, its recovery words least of all.
+    const key = state.exists ? `${state.addresses.bitcoin}|${state.addresses.evm}` : null;
+    if (key !== walletKey) {
+      walletKey = key;
+      clearRevealed();
+      forgetShown();
+    }
     if (!state.exists) {
       forgetShown();
       if (state.unreadable) $('unreadable').hidden = false;
@@ -91,6 +101,7 @@
     }
     if (mode === 'create' || mode === 'import') mode = null;
     if (!state.unlocked) {
+      clearRevealed(); // locking puts the recovery words away too
       const waiting = state.requests[0];
       $('locked-waiting').hidden = !waiting;
       if (waiting) $('locked-waiting').textContent = t('wallet.waitingUnlock', { host: waiting.host });
@@ -495,18 +506,28 @@
     $('sites-none').hidden = state.sites.length > 0;
   }
 
-  $('more-back').addEventListener('click', () => {
-    mode = null;
+  /** Hides shown recovery words, and drops an answer still on its way. */
+  function clearRevealed() {
+    revealSeq += 1;
     $('reveal-words').hidden = true;
     $('reveal-words').textContent = '';
+    $('reveal-password').value = '';
+    setError('reveal-error', null);
+  }
+
+  $('more-back').addEventListener('click', () => {
+    mode = null;
+    clearRevealed();
     render();
   });
 
   $('reveal-form').addEventListener('submit', async (event) => {
     event.preventDefault();
     setError('reveal-error', null);
+    const seq = revealSeq;
     try {
       const words = await call('revealPhrase', $('reveal-password').value);
+      if (seq !== revealSeq) return; // the wallet changed while the password was checked
       const list = $('reveal-words');
       list.textContent = '';
       for (const word of words) {
@@ -623,6 +644,7 @@
         if (call.name === 'setApprovalForAll' && call.approved && call.spender) body.append(warning(t('wallet.req.approveAll', { spender: call.spender })));
         const dl = document.createElement('dl');
         row(dl, t('wallet.network'), d.network, { mono: false });
+        if (d.from) row(dl, t('wallet.account'), d.from);
         row(dl, t('wallet.to'), d.to || t('wallet.req.newContract'));
         row(dl, t('wallet.amount'), `${d.value} ${d.symbol}`);
         row(dl, t('wallet.fee'), d.fee ? t('wallet.upTo', { amount: `${d.fee} ${d.symbol}` }) : '—');

@@ -84,8 +84,11 @@ class Provider {
 
   /** One request from a page. `site` is { origin, contentsId }, from the main process. */
   async handle(site, method, params) {
+    // Tied to the wallet that exists now, so a request still being prepared
+    // when the wallet is reset or replaced is never queued or signed by another.
+    const bound = { ...site, identity: this.wallet.identity() };
     try {
-      return await this.dispatch(site, String(method), params === undefined ? [] : params);
+      return await this.dispatch(bound, String(method), params === undefined ? [] : params);
     } catch (error) {
       throw toProviderError(error);
     }
@@ -268,6 +271,7 @@ class Provider {
     const details = {
       network: net.name,
       symbol: net.symbol,
+      from: this.address(),
       to: request.to || null,
       value: displayAmount(request.value, 18),
       fee: fee === null ? null : displayFee(fee, 18),

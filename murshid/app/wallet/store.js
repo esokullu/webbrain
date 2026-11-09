@@ -115,6 +115,14 @@ class Wallet extends EventEmitter {
     return Boolean(this.data);
   }
 
+  /**
+   * Which wallet this is: a new value whenever one is created, restored or
+   * reset. A site's request belongs to the wallet it was made to.
+   */
+  identity() {
+    return this.data ? this.data.vault : null;
+  }
+
   get unlocked() {
     return Boolean(this.keys);
   }
@@ -450,6 +458,8 @@ class Wallet extends EventEmitter {
     if (!this.exists) return Promise.reject(new WalletError('disconnected'));
     // The page went elsewhere while the request was being prepared.
     if (site.isCurrent && !site.isCurrent()) return Promise.reject(new WalletError('rejected'));
+    // Reset, or replaced by another wallet, while the request was being prepared.
+    if (site.identity !== undefined && site.identity !== this.identity()) return Promise.reject(new WalletError('disconnected'));
     const fromSite = [...this.requests.values()].filter((r) => r.origin === site.origin);
     if (kind === 'connect') {
       // A second "connect" while one is waiting answers with the first.
@@ -465,6 +475,7 @@ class Wallet extends EventEmitter {
         host: originHost(site.origin),
         secure: /^https:/.test(site.origin) || /^http:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/.test(site.origin),
         contentsId: site.contentsId ?? null,
+        identity: site.identity ?? this.identity(),
         details,
         perform,
         createdAt: this.now(),
@@ -493,6 +504,10 @@ class Wallet extends EventEmitter {
     const request = this.requests.get(id);
     if (!request || request.busy) return false;
     this.requireKeys();
+    if (request.identity !== this.identity()) {
+      this.settle(request, new WalletError('disconnected')); // made to a wallet that is gone
+      return false;
+    }
     request.busy = true;
     this.changed();
     try {
