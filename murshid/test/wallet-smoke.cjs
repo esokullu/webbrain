@@ -167,6 +167,13 @@ const DAPP = `<!doctype html><meta charset="utf-8"><title>dApp</title><body>dApp
     await until('the address error', () => p.executeJavaScript("document.getElementById('send-error').textContent.length > 0"));
     await shot(p, '8-send-error');
 
+    // The wallet's own network session is in use by now (balances); WebBrain's
+    // service worker must still register and run alongside it.
+    if (ctx.webBrainId) {
+      const worker = await ctx.ses.serviceWorkers.startWorkerForScope(`chrome-extension://${ctx.webBrainId}/`);
+      assert.ok(worker && !worker.isDestroyed(), "WebBrain's service worker runs");
+    }
+
     // Locking hides the account from the site.
     await p.executeJavaScript("document.getElementById('lock').click()");
     await until('accountsChanged []', () => tab.wc.executeJavaScript("window.events.some((e) => e[0] === 'accountsChanged' && e[1].length === 0)"));

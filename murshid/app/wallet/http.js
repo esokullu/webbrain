@@ -23,7 +23,10 @@ function defaultFetch() {
  * and handed on in full.
  */
 function createFetch(base = null, { timeoutMs = TIMEOUT_MS } = {}) {
-  const inner = base || defaultFetch();
+  // The wallet's session is made on its first request, not while Murshid
+  // starts: a session created before WebBrain loads stops WebBrain's
+  // service worker from registering.
+  const inner = base || ((url, init) => defaultFetch()(url, init));
   return async function walletFetch(url, init = {}) {
     const controller = new AbortController();
     let timer;
