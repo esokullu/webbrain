@@ -117,8 +117,11 @@ class EvmClient {
       data: tx.data,
       gas: tx.gas,
       nonce: tx.nonce,
-      ...(tx.maxFeePerGas !== undefined ? { maxFeePerGas: tx.maxFeePerGas, maxPriorityFeePerGas: tx.maxPriorityFeePerGas } : {}),
-      ...(tx.maxFeePerGas === undefined && tx.gasPrice !== undefined ? { gasPrice: tx.gasPrice } : {}),
+      // EIP-1559 when either cap is given: a tip set on its own (zero
+      // included) is kept and only the missing cap is estimated.
+      ...(tx.maxFeePerGas !== undefined || tx.maxPriorityFeePerGas !== undefined
+        ? { maxFeePerGas: tx.maxFeePerGas, maxPriorityFeePerGas: tx.maxPriorityFeePerGas }
+        : tx.gasPrice !== undefined ? { gasPrice: tx.gasPrice } : {}),
     };
     for (const key of Object.keys(request)) if (request[key] === undefined) delete request[key];
     let prepared;
@@ -127,6 +130,11 @@ class EvmClient {
     } catch (error) {
       if (/insufficient funds/i.test(String(error?.message))) throw new WalletError('insufficient');
       throw new WalletError('willFail', reason(error));
+    }
+    // What was asked for is what gets signed: a node filling the transaction
+    // (eth_fillTransaction) may answer with its own tip or caps.
+    for (const key of ['gas', 'nonce', 'maxFeePerGas', 'maxPriorityFeePerGas', 'gasPrice']) {
+      if (request[key] !== undefined) prepared[key] = request[key];
     }
     const price = prepared.maxFeePerGas ?? prepared.gasPrice ?? 0n;
     let l1Fee = 0n;

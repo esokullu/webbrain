@@ -603,6 +603,41 @@ test('the wallet\'s network timeout covers the whole answer, body included', asy
   assert.equal(empty.status, 204);
 });
 
+test('a priority fee the site sets on its own is kept, zero included', async () => {
+  const { EvmClient } = require('../app/wallet/evm');
+  const client = new EvmClient(noNetwork);
+  const asked = [];
+  // A node that fills in its own tip and caps whatever it is given.
+  client.fill = async (c, request) => {
+    asked.push(request);
+    return { ...request, gas: 21000n, maxFeePerGas: 50n, maxPriorityFeePerGas: 7n, nonce: 1, type: 'eip1559' };
+  };
+  const to = '0x000000000000000000000000000000000000dEaD';
+  const tipOnly = await client.prepare(networks.byId('ethereum'), EVM_ADDRESS, { to, value: 1n, maxPriorityFeePerGas: 0n });
+  assert.equal(asked[0].maxPriorityFeePerGas, 0n, 'the tip reaches the preparer');
+  assert.equal(asked[0].maxFeePerGas, undefined, 'only the missing cap is estimated');
+  assert.equal(asked[0].gasPrice, undefined);
+  assert.equal(tipOnly.request.maxPriorityFeePerGas, 0n, 'and is what gets signed');
+  assert.equal(tipOnly.request.maxFeePerGas, 50n);
+  const legacy = await client.prepare(networks.byId('ethereum'), EVM_ADDRESS, { to, value: 1n, gasPrice: 3n });
+  assert.equal(asked[1].gasPrice, 3n);
+  assert.equal(asked[1].maxPriorityFeePerGas, undefined);
+  assert.equal(legacy.request.gasPrice, 3n);
+
+  // Through window.ethereum: both the estimate and the signed transaction keep the zero tip.
+  const wallet = await readyWallet();
+  const provider = new Provider(wallet);
+  wallet.connect(SITE.origin);
+  wallet.evm.fill = client.fill;
+  const signed = [];
+  wallet.evm.send = async (net, account, prepared) => { signed.push(prepared.request); return `0x${'aa'.repeat(32)}`; };
+  const queued = nextRequest(wallet);
+  const answer = provider.handle(SITE, 'eth_sendTransaction', [{ to, value: '0x1', maxPriorityFeePerGas: '0x0' }]);
+  await wallet.approve((await queued).id);
+  await answer;
+  assert.equal(signed[0].maxPriorityFeePerGas, 0n);
+});
+
 test('read-only calls go to the node; requests from a page that went away are dropped', async () => {
   const wallet = await readyWallet();
   const provider = new Provider(wallet);
