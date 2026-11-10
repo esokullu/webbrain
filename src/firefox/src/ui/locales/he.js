@@ -8,6 +8,8 @@ import { getApocalypseModeCopy } from './apocalypse-copy.mjs';
 import { getEmergencyBoxCopy } from './emergency-copy.mjs';
 
 export default {
+  "st.display.action_guards.label": "הפעלת בדיקות לפני פעולה",
+  "st.display.action_guards.desc": "בדיקת הנמען ופעולות משמעותיות לפני הביצוע. כשהאפשרות כבויה, המודל מחליט אם לשלוח, לנסות שוב, למחוק או לפרסם. הרשאות האתר עדיין חלות. השינוי ייכנס לתוקף בהרצה הבאה.",
   'st.providers.title': 'שם הספק',
   ...getGenerativeMediaCopy('he'),
   ...bidiCopy,
@@ -1288,7 +1290,8 @@ export default {
   'sp.response.incomplete_retrying': "תשובה חלקית · מנסה שוב…",
   'sp.response.incomplete': "תשובה חלקית",
   "st.display.agent_indicator.label": "אפקט פעילות הסוכן",
-  "st.display.agent_indicator.desc": "איך נראים שולי הדף בזמן ש-WebBrain עובד בכרטיסייה. כל הסגנונות מעבירים את הלחיצות שלך לדף ואינם מופיעים בצילומי מסך.",
+  "st.display.agent_indicator.desc": "המצב האקראי בוחר אפקט שונה בכל הרצה. בחרו סגנון מסוים כדי לשמור עליו קבוע.",
+  "st.display.agent_indicator.random": "אקראי בכל הרצה (ברירת מחדל)",
   "st.display.agent_indicator.circuit": "מעגל עצבי",
   "st.display.agent_indicator.aurora": "זוהר קוטבי",
   "st.display.agent_indicator.scan": "סריקה",

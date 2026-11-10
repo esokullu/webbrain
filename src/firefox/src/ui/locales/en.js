@@ -6,6 +6,8 @@ import apocalypseModeCopy from './apocalypse-copy.mjs';
 import emergencyCopy from './emergency-copy.mjs';
 
 export default {
+  "st.display.action_guards.label": "Enforce action guards",
+  "st.display.action_guards.desc": "Check recipients and other consequential actions before acting. Turning this off lets the model decide whether to send, retry, delete or publish. Site permissions still apply. Takes effect on the next run.",
   'st.providers.title': 'Provider title',
   ...getGenerativeMediaCopy('en'),
   ...bidiCopy,
@@ -1369,7 +1371,8 @@ export default {
   'st.sync.consent.denied': 'Encrypted sync permission was not granted.',
   'st.providers.webgpu_note.body': '{modelLink} runs entirely in Chrome with no API endpoint. Download it in Providers > WebGPU or Apocalypse Mode, then use the nuclear control in standalone chat.',
   "st.display.agent_indicator.label": "Agent activity effect",
-  "st.display.agent_indicator.desc": "How the page edges look while WebBrain works on a tab. Every style lets your clicks through and stays out of screenshots.",
+  "st.display.agent_indicator.desc": "Random chooses a different effect for each run. Select a specific style to keep it fixed.",
+  "st.display.agent_indicator.random": "Random each run (default)",
   "st.display.agent_indicator.circuit": "Neural circuit",
   "st.display.agent_indicator.aurora": "Aurora",
   "st.display.agent_indicator.scan": "Scan",

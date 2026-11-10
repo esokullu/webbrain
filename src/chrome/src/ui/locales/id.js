@@ -8,6 +8,8 @@ import { getApocalypseModeCopy } from './apocalypse-copy.mjs';
 import { getEmergencyBoxCopy } from './emergency-copy.mjs';
 
 export default {
+  "st.display.action_guards.label": "Terapkan pemeriksaan tindakan",
+  "st.display.action_guards.desc": "Memeriksa penerima dan tindakan penting sebelum dijalankan. Jika dinonaktifkan, model memutuskan kapan harus mengirim, mencoba lagi, menghapus, atau menerbitkan. Izin situs tetap berlaku. Berlaku mulai tugas berikutnya.",
   'st.providers.title': 'Nama penyedia',
   ...getGenerativeMediaCopy('id'),
   ...bidiCopy,
@@ -1401,7 +1403,8 @@ export default {
   'sp.response.incomplete_retrying': "Jawaban belum lengkap · mencoba ulang…",
   'sp.response.incomplete': "Jawaban belum lengkap",
   "st.display.agent_indicator.label": "Efek aktivitas agen",
-  "st.display.agent_indicator.desc": "Tampilan tepi halaman saat WebBrain bekerja di sebuah tab. Semua gaya meneruskan klik Anda ke halaman dan tidak muncul di tangkapan layar.",
+  "st.display.agent_indicator.desc": "Mode acak memilih efek berbeda setiap proses. Pilih gaya tertentu agar tetap sama.",
+  "st.display.agent_indicator.random": "Acak setiap proses (default)",
   "st.display.agent_indicator.circuit": "Sirkuit saraf",
   "st.display.agent_indicator.aurora": "Aurora",
   "st.display.agent_indicator.scan": "Pindai",

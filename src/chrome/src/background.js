@@ -747,9 +747,13 @@ async function loadImageBudget() {
 // chat must not race ahead of the persisted image-budget settings (issue #311).
 const imageBudgetReady = loadImageBudget().catch(() => {});
 
+let actionGuardsSettingsRevision = 0;
 async function loadStrictSecretMode() {
-  const stored = await chrome.storage.local.get(['strictSecretMode', 'strictGuards', 'leanMode']).catch(() => ({}));
+  const revision = ++actionGuardsSettingsRevision;
+  const stored = await chrome.storage.local.get(['strictSecretMode', 'enforceActionGuards', 'strictGuards', 'leanMode']).catch(() => null);
   agent.strictSecretMode = stored?.strictSecretMode === true;
+  // A settings change can arrive while the worker is loading storage.
+  if (stored && revision === actionGuardsSettingsRevision) agent.enforceActionGuards = stored.enforceActionGuards !== false;
   agent.strictGuards = stored?.strictGuards === true;
   agent.leanMode = normalizeLeanModeSetting(stored?.leanMode);
 }
@@ -1478,6 +1482,10 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
   if (areaName === 'local' && changes.browserBatchEnabled) {
     browserBatchSettingsRevision++;
     agent.setBrowserBatchEnabled(changes.browserBatchEnabled.newValue !== false);
+  }
+  if (areaName === 'local' && changes.enforceActionGuards) {
+    actionGuardsSettingsRevision++;
+    agent.enforceActionGuards = changes.enforceActionGuards.newValue !== false;
   }
   if (changes.strictGuards) {
     agent.strictGuards = changes.strictGuards.newValue === true;
@@ -2219,6 +2227,11 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
  * await — these are decorative and shouldn't block the run.
  */
 const activeIndicatorTabs = new Set();
+// Retain the last choice until the tab closes so consecutive runs differ.
+const indicatorRandomStyles = new Map();
+const INDICATOR_EFFECT_STYLES = ['circuit', 'aurora', 'scan', 'gears', 'classic'];
+// The agent leads a click with its cursor only on a tab that shows the run.
+agent.isAgentIndicatorShown = tabId => activeIndicatorTabs.has(tabId);
 const indicatorHeartbeatTimers = new Map();
 const INDICATOR_HEARTBEAT_INTERVAL_MS = 20_000;
 
@@ -2254,6 +2267,10 @@ function startIndicatorHeartbeat(tabId) {
 function sendIndicatorMessage(tabId, type) {
   if (tabId == null || !type) return;
   if (type === 'WB_SHOW_AGENT_INDICATORS') {
+    if (!activeIndicatorTabs.has(tabId)) {
+      const choices = INDICATOR_EFFECT_STYLES.filter(style => style !== indicatorRandomStyles.get(tabId));
+      indicatorRandomStyles.set(tabId, choices[Math.floor(Math.random() * choices.length)]);
+    }
     activeIndicatorTabs.add(tabId);
     startIndicatorHeartbeat(tabId);
   } else if (type === 'WB_HIDE_AGENT_INDICATORS') {
@@ -2261,7 +2278,9 @@ function sendIndicatorMessage(tabId, type) {
     stopIndicatorHeartbeat(tabId);
   }
   try {
-    chrome.tabs.sendMessage(tabId, { type }).catch(() => { /* expected */ });
+    const message = type === 'WB_SHOW_AGENT_INDICATORS'
+      ? { type, randomStyle: indicatorRandomStyles.get(tabId) } : { type };
+    chrome.tabs.sendMessage(tabId, message).catch(() => { /* expected */ });
   } catch { /* ignore */ }
 }
 
@@ -2291,6 +2310,7 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
 
 chrome.tabs.onRemoved.addListener((tabId) => {
   activeIndicatorTabs.delete(tabId);
+  indicatorRandomStyles.delete(tabId);
   stopIndicatorHeartbeat(tabId);
   withTeacherSessionStoreLock(() => teacherSessionStore.clear(tabId)).catch(() => {});
 });

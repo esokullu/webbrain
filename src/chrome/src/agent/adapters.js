@@ -16397,10 +16397,13 @@ const ADAPTERS = [
     fullPageCapture: { infiniteScroll: isRedditInfiniteScrollUrl },
     notes: `
 - Prefer old.reddit.com — its DOM is simpler and easier to automate. If you land on www.reddit.com or new.reddit.com, navigate to the old.reddit.com equivalent first (swap the subdomain, keep the path).
-- old.reddit.com and new.reddit.com have completely different DOMs. Check the URL before assuming selectors.
-- Comments are nested deeply; "load more comments" links require clicking to expand.
-- Voting requires being logged in; the up/down arrows are siblings of each post/comment.
-- Post composer: title, body (markdown editor), flair selector. "Submit" button is at the bottom.`,
+- On old.reddit.com /r/<subreddit>/submit, choose the "text" tab for a text/self post before filling the separate title and Markdown body textareas. Modern Reddit has a different composer; check the URL first.
+- Before opening old Reddit's flair picker, scroll the "choose a flair" row into the upper half of the viewport so the popup and its bottom button fit. After scrolling, observe the new positions before clicking.
+- Old Reddit post flair is a two-step popup, not a native select: click "select", choose the appropriate flair, then explicitly click the popup's "apply" button. Clicking an option only previews it; clicking outside dismisses the popup without applying it.
+- Choosing a flair inserts a preview and "(remove flair)" row ABOVE "apply", moving that button DOWN. Re-read the picker for a fresh AX reference in element mode, or call take_screenshot in vision mode, then single-click the actual current "apply" button. Do not reuse its pre-selection coordinates, press Enter on the option, or double-click the option to apply it.
+- A flair chip can appear on the main form even before it is applied. After explicitly clicking "apply", verify that the popup closes and the intended flair remains. If submit reports "Your post must contain post flair.", preserve the title/body, reopen the picker and explicitly apply the intended flair before retrying submit.
+- Submit only after applying any required flair. Verify the resulting /r/<subreddit>/comments/<id>/ permalink and posted title/body in the intended community before marking that item published or moving to the next subreddit; observe the result before retrying a submit.
+- Comments are nested deeply; "load more comments" links require clicking to expand.`,
   },
   {
     name: 'youtube',
@@ -17667,6 +17670,7 @@ const ADAPTERS = [
 - First-time setup REQUIRES the user to scan a QR code with their phone's WhatsApp app. The agent CANNOT scan a QR code — if the QR is on screen, surface it to the user and stop. Don't loop waiting for it to disappear.
 - Once linked, layout is: conversation list on the LEFT (chats sorted by recency), active conversation on the RIGHT.
 - Message input is a contenteditable div at the bottom of the conversation. set_field works; Enter sends by default.
+- Use a phone number beginning with + or 00 and its country code. For an unqualified local number, ask for the country code before opening a chat. For a new chat by number, navigate to https://web.whatsapp.com/send?phone=<country code and number, digits only>. Copy every digit from the requested recipient. A chat-list search with no matches does not establish that the number is unregistered. Wait for the conversation or WhatsApp's invalid-number notice. The link opens a chat; confirm the open contact before sending. If the user explicitly requires a matching name as well, verify it.
 - Open the recipient's chat first: click_ax its row in the chat list, or search for them. Then, before sending or attaching, confirm the contact: click_ax the contact name in the chat header, and close the Contact info panel it opens with that panel's own Close button. Until then message actions are blocked, and the blocked result names the exact control. One run confirms one chat.
 - Emoji picker, attachment button (paperclip), voice-note (mic) sit to the left/right of the input.
 - Search at the top of the conversation list searches across all chats (people, group names, message content).

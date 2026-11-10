@@ -8,6 +8,8 @@ import { getApocalypseModeCopy } from './apocalypse-copy.mjs';
 import { getEmergencyBoxCopy } from './emergency-copy.mjs';
 
 export default {
+  "st.display.action_guards.label": "启用操作检查",
+  "st.display.action_guards.desc": "执行前检查收件人和其他重要操作。关闭后，由模型决定是否发送、重试、删除或发布。网站权限仍然有效。下次运行时生效。",
   'st.providers.title': '服务商名称',
   ...getGenerativeMediaCopy('zh'),
   ...bidiCopy,
@@ -1401,7 +1403,8 @@ export default {
   'sp.response.incomplete_retrying': "回答未完成 · 正在重试…",
   'sp.response.incomplete': "回答未完成",
   "st.display.agent_indicator.label": "智能体活动效果",
-  "st.display.agent_indicator.desc": "WebBrain 在标签页中工作时页面边缘的样式。所有样式都会让点击穿透到页面，且不会出现在截图中。",
+  "st.display.agent_indicator.desc": "随机模式会在每次运行时选择不同的效果。选择特定样式即可固定效果。",
+  "st.display.agent_indicator.random": "每次运行随机（默认）",
   "st.display.agent_indicator.circuit": "神经回路",
   "st.display.agent_indicator.aurora": "极光",
   "st.display.agent_indicator.scan": "扫描",

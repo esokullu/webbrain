@@ -8,6 +8,8 @@ import { getApocalypseModeCopy } from './apocalypse-copy.mjs';
 import { getEmergencyBoxCopy } from './emergency-copy.mjs';
 
 export default {
+  "st.display.action_guards.label": "تفعيل التحقق من الإجراءات",
+  "st.display.action_guards.desc": "يتحقق من المستلم والإجراءات المهمة قبل تنفيذها. عند إيقافه يقرر النموذج متى يرسل أو يعيد المحاولة أو يحذف أو ينشر. تظل أذونات الموقع سارية. يسري التغيير في التشغيل التالي.",
   'st.providers.title': 'عنوان المزوّد',
   ...getGenerativeMediaCopy('ar'),
   ...bidiCopy,
@@ -1335,7 +1337,8 @@ export default {
   'sp.response.incomplete_retrying': "إجابة غير مكتملة · جارٍ إعادة المحاولة…",
   'sp.response.incomplete': "إجابة غير مكتملة",
   "st.display.agent_indicator.label": "تأثير نشاط الوكيل",
-  "st.display.agent_indicator.desc": "مظهر حواف الصفحة أثناء عمل WebBrain في علامة تبويب. كل الأنماط تمرّر نقراتك إلى الصفحة ولا تظهر في لقطات الشاشة.",
+  "st.display.agent_indicator.desc": "يختار الوضع العشوائي تأثيرًا مختلفًا لكل تشغيل. اختر نمطًا محددًا لتثبيته.",
+  "st.display.agent_indicator.random": "عشوائي في كل تشغيل (افتراضي)",
   "st.display.agent_indicator.circuit": "دائرة عصبية",
   "st.display.agent_indicator.aurora": "شفق قطبي",
   "st.display.agent_indicator.scan": "مسح",

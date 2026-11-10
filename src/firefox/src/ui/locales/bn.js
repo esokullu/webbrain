@@ -6,6 +6,8 @@ import { getApocalypseModeCopy } from './apocalypse-copy.mjs';
 import { getEmergencyBoxCopy } from './emergency-copy.mjs';
 
 export default {
+  "st.display.action_guards.label": "কাজের আগে যাচাই করুন",
+  "st.display.action_guards.desc": "কাজের আগে প্রাপক ও গুরুত্বপূর্ণ পদক্ষেপ যাচাই করে। বন্ধ করলে পাঠানো, আবার চেষ্টা করা, মুছে ফেলা বা প্রকাশ করার সিদ্ধান্ত মডেল নেয়। সাইটের অনুমতি কার্যকর থাকে। পরবর্তী কাজ থেকে প্রযোজ্য।",
   'st.providers.title': 'প্রদানকারীর নাম',
   ...getGenerativeMediaCopy('bn'),
   ...bidiCopy,
@@ -1356,7 +1358,8 @@ export default {
   'sp.response.incomplete_retrying': "অসম্পূর্ণ উত্তর · আবার চেষ্টা করা হচ্ছে…",
   'sp.response.incomplete': "অসম্পূর্ণ উত্তর",
   "st.display.agent_indicator.label": "এজেন্ট কার্যকলাপ ইফেক্ট",
-  "st.display.agent_indicator.desc": "WebBrain কোনো ট্যাবে কাজ করার সময় পেজের কিনারা কেমন দেখাবে। প্রতিটি স্টাইল আপনার ক্লিক পেজে পৌঁছাতে দেয় এবং স্ক্রিনশটে আসে না।",
+  "st.display.agent_indicator.desc": "এলোমেলো মোড প্রতি রানে ভিন্ন ইফেক্ট বেছে নেয়। একই ইফেক্ট রাখতে নির্দিষ্ট স্টাইল বেছে নিন।",
+  "st.display.agent_indicator.random": "প্রতি রানে এলোমেলো (ডিফল্ট)",
   "st.display.agent_indicator.circuit": "নিউরাল সার্কিট",
   "st.display.agent_indicator.aurora": "অরোরা",
   "st.display.agent_indicator.scan": "স্ক্যান",

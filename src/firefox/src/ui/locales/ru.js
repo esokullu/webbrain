@@ -8,6 +8,8 @@ import { getApocalypseModeCopy } from './apocalypse-copy.mjs';
 import { getEmergencyBoxCopy } from './emergency-copy.mjs';
 
 export default {
+  "st.display.action_guards.label": "Проверять действия перед выполнением",
+  "st.display.action_guards.desc": "Проверяет получателя и важные действия до их выполнения. При отключении модель сама решает, отправить ли сообщение, повторить действие, удалить или опубликовать данные. Разрешения сайта действуют по-прежнему. Изменение вступит в силу при следующем запуске.",
   'st.providers.title': 'Название провайдера',
   ...getGenerativeMediaCopy('ru'),
   ...bidiCopy,
@@ -1335,7 +1337,8 @@ export default {
   'sp.response.incomplete_retrying': "Неполный ответ · повторная попытка…",
   'sp.response.incomplete': "Неполный ответ",
   "st.display.agent_indicator.label": "Эффект активности агента",
-  "st.display.agent_indicator.desc": "Как выглядят края страницы, пока WebBrain работает во вкладке. Все стили пропускают ваши клики и не попадают на скриншоты.",
+  "st.display.agent_indicator.desc": "Случайный режим выбирает другой эффект при каждом запуске. Выберите определённый стиль, чтобы закрепить его.",
+  "st.display.agent_indicator.random": "Случайно при каждом запуске (по умолчанию)",
   "st.display.agent_indicator.circuit": "Нейронная схема",
   "st.display.agent_indicator.aurora": "Сияние",
   "st.display.agent_indicator.scan": "Сканирование",

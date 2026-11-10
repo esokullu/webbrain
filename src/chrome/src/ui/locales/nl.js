@@ -8,6 +8,8 @@ import { getApocalypseModeCopy } from './apocalypse-copy.mjs';
 import { getEmergencyBoxCopy } from './emergency-copy.mjs';
 
 export default {
+  "st.display.action_guards.label": "Actiecontroles uitvoeren",
+  "st.display.action_guards.desc": "Controleert de ontvanger en ingrijpende acties vooraf. Als dit uitstaat, beslist het model over verzenden, opnieuw proberen, verwijderen en publiceren. Sitemachtigingen blijven gelden. Geldt vanaf de volgende taak.",
   'st.providers.title': 'Providernaam',
   ...getGenerativeMediaCopy('nl'),
   ...bidiCopy,
@@ -1353,7 +1355,8 @@ export default {
   'sp.response.incomplete_retrying': "Onvolledig antwoord · opnieuw proberen…",
   'sp.response.incomplete': "Onvolledig antwoord",
   "st.display.agent_indicator.label": "Effect bij agentactiviteit",
-  "st.display.agent_indicator.desc": "Hoe de paginaranden eruitzien terwijl WebBrain in een tabblad werkt. Elke stijl laat je klikken door en blijft buiten schermafbeeldingen.",
+  "st.display.agent_indicator.desc": "Willekeurig kiest bij elke uitvoering een ander effect. Kies een specifieke stijl om deze vast te houden.",
+  "st.display.agent_indicator.random": "Willekeurig per uitvoering (standaard)",
   "st.display.agent_indicator.circuit": "Neuraal circuit",
   "st.display.agent_indicator.aurora": "Poollicht",
   "st.display.agent_indicator.scan": "Scan",

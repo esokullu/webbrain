@@ -8,6 +8,8 @@ import { getApocalypseModeCopy } from './apocalypse-copy.mjs';
 import { getEmergencyBoxCopy } from './emergency-copy.mjs';
 
 export default {
+  "st.display.action_guards.label": "Gunakan semakan tindakan",
+  "st.display.action_guards.desc": "Menyemak penerima dan tindakan penting sebelum dilaksanakan. Jika dimatikan, model menentukan sama ada untuk menghantar, mencuba semula, memadam atau menerbitkan. Kebenaran laman masih berkuat kuasa. Berkuat kuasa pada tugas seterusnya.",
   'st.providers.title': 'Nama penyedia',
   ...getGenerativeMediaCopy('ms'),
   ...bidiCopy,
@@ -1335,7 +1337,8 @@ export default {
   'sp.response.incomplete_retrying': "Jawapan tidak lengkap · mencuba semula…",
   'sp.response.incomplete': "Jawapan tidak lengkap",
   "st.display.agent_indicator.label": "Kesan aktiviti ejen",
-  "st.display.agent_indicator.desc": "Rupa tepi halaman semasa WebBrain bekerja dalam tab. Semua gaya membenarkan klik anda sampai ke halaman dan tidak muncul dalam tangkapan skrin.",
+  "st.display.agent_indicator.desc": "Mod rawak memilih kesan berbeza setiap pelaksanaan. Pilih gaya tertentu untuk mengekalkannya.",
+  "st.display.agent_indicator.random": "Rawak setiap pelaksanaan (lalai)",
   "st.display.agent_indicator.circuit": "Litar saraf",
   "st.display.agent_indicator.aurora": "Aurora",
   "st.display.agent_indicator.scan": "Imbas",

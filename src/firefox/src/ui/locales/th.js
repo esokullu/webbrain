@@ -8,6 +8,8 @@ import { getApocalypseModeCopy } from './apocalypse-copy.mjs';
 import { getEmergencyBoxCopy } from './emergency-copy.mjs';
 
 export default {
+  "st.display.action_guards.label": "เปิดใช้การตรวจสอบการดำเนินการ",
+  "st.display.action_guards.desc": "ตรวจสอบผู้รับและการดำเนินการสำคัญก่อนทำงาน เมื่อปิด โมเดลจะตัดสินใจว่าจะส่ง ลองอีกครั้ง ลบ หรือเผยแพร่ สิทธิ์ของเว็บไซต์ยังมีผล เริ่มใช้ในการทำงานครั้งถัดไป",
   'st.providers.title': 'ชื่อผู้ให้บริการ',
   ...getGenerativeMediaCopy('th'),
   ...bidiCopy,
@@ -1335,7 +1337,8 @@ export default {
   'sp.response.incomplete_retrying': "คำตอบยังไม่สมบูรณ์ · กำลังลองอีกครั้ง…",
   'sp.response.incomplete': "คำตอบยังไม่สมบูรณ์",
   "st.display.agent_indicator.label": "เอฟเฟกต์ขณะเอเจนต์ทำงาน",
-  "st.display.agent_indicator.desc": "ลักษณะขอบหน้าเว็บขณะที่ WebBrain ทำงานในแท็บ ทุกสไตล์ปล่อยให้การคลิกของคุณผ่านไปยังหน้าเว็บ และไม่ปรากฏในภาพหน้าจอ",
+  "st.display.agent_indicator.desc": "โหมดสุ่มจะเลือกเอฟเฟกต์ที่ต่างกันในแต่ละครั้งที่รัน เลือกรูปแบบที่ต้องการเพื่อใช้แบบเดิมเสมอ",
+  "st.display.agent_indicator.random": "สุ่มทุกครั้งที่รัน (ค่าเริ่มต้น)",
   "st.display.agent_indicator.circuit": "วงจรประสาท",
   "st.display.agent_indicator.aurora": "แสงออโรรา",
   "st.display.agent_indicator.scan": "สแกน",

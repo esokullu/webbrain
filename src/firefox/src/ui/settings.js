@@ -71,6 +71,7 @@ import {
 import { ADDITIONAL_PROVIDER_UI } from '../providers/provider-catalog.js';
 import { AUTO_VISION_PROVIDER_IDS, visionDetectionMatches } from '../providers/vision-capabilities.js';
 import { canonicalizeOllamaBaseUrl } from '../providers/context-windows.js';
+import { resolvePromptTier } from '../providers/prompt-tier.js';
 import {
   COMPANION_PREFERRED_MODEL_PATTERNS,
   WEBBRAIN_COMPANION_DOWNLOAD_BASE,
@@ -91,7 +92,7 @@ const SUBSCRIPTION_GUIDE_PRODUCTS = Object.freeze({
 
 // Version shown in the subtitle. Kept here so it only needs one update per
 // release; the subtitle string itself is translated.
-const EXT_VERSION = '47.0.0';
+const EXT_VERSION = '47.1.1';
 
 const providersContainer = document.getElementById('providers');
 const generalSearchInput = document.getElementById('input-general-search');
@@ -101,8 +102,8 @@ const apocalypseModeStatus = document.getElementById('apocalypse-mode-status');
 const verboseToggle = document.getElementById('toggle-verbose');
 const composerDeliveryModeSelect = document.getElementById('select-composer-delivery-mode');
 const agentIndicatorStyleSelect = document.getElementById('select-agent-indicator-style');
-// Read by content/agent-visual-indicator.js; 'circuit' is the default.
-const AGENT_INDICATOR_STYLES = ['circuit', 'aurora', 'scan', 'gears', 'classic'];
+// Read by content/agent-visual-indicator.js; 'random' is the default.
+const AGENT_INDICATOR_STYLES = ['random', 'circuit', 'aurora', 'scan', 'gears', 'classic'];
 const selectionShortcutToggle = document.getElementById('toggle-selection-shortcut');
 const autoGroupTabsToggle = document.getElementById('toggle-auto-group-tabs');
 const helpImproveToggle = document.getElementById('toggle-help-improve');
@@ -139,6 +140,7 @@ const completionFlashTabToggle = document.getElementById('toggle-completion-flas
 const tracingToggle = document.getElementById('toggle-tracing');
 const feedbackDiagnosticsToggle = document.getElementById('toggle-feedback-diagnostics');
 const strictSecretToggle = document.getElementById('toggle-strict-secret');
+const actionGuardsToggle = document.getElementById('toggle-enforce-action-guards');
 const strictGuardsToggle = document.getElementById('toggle-strict-guards');
 const leanModeSelect = document.getElementById('select-lean-mode');
 const visionModeSelect = document.getElementById('select-vision-mode');
@@ -615,7 +617,7 @@ async function init() {
   browser.storage.local.remove(['authToken', 'authEmail', 'authDefaultModel']).catch(() => {});
 
   // Load display settings
-  const stored = await browser.storage.local.get([...DECISION_SETTINGS_KEYS, 'verboseMode', 'composerDeliveryMode', 'agentIndicatorStyle', 'selectionShortcutEnabled', AUTO_GROUP_TABS_KEY, 'helpImproveWebBrain', 'screenshotFallback', 'maxAgentSteps', 'autoScreenshot', 'useSiteAdapters', 'researchEscalationEnabled', 'researchEscalationEngine', 'voiceInputEnabled', 'alwaysAllowApiMutations', 'apiMutationObserverEnabled', 'openaiAskStreamingEnabled', 'planBeforeActMode', 'planBeforeAct', 'planReviewMode', 'planReviewConfidenceThreshold', DOWNLOAD_DIRECTORY_STORAGE_KEY, 'notifySound', 'completionConfetti', 'completionFlashTab', 'tracingEnabled', 'feedbackDiagnosticsEnabled', 'strictSecretMode', 'strictGuards', 'leanMode', 'visionMode', 'visionQuality', 'agentAllowLocalNetwork', 'scheduledTasksEnabled', 'scheduledRequireConsequentialConfirmation', 'systemOneEnabled', 'systemOneWatchEnabled', 'systemOneCompletionEnabled', 'systemOneFastClassifications', 'systemOneFastBrowser', 'systemOneWatchThreshold', 'systemOneCompletionThreshold', 'typesafeApiKey', 'providerFilter', 'requestTimeoutMs', 'clarifyTimeoutSec', 'clarifyTimeoutSemanticsV2', 'clarifyTimeoutPolicy', 'costAllowanceSessionUsd', 'costAllowanceTotalUsd', 'meteredProviderCostSpentUsd', 'screenshotRedaction', 'imageDetail', 'maxScreenshotsPerTurn', 'maxImageDimension']);
+  const stored = await browser.storage.local.get([...DECISION_SETTINGS_KEYS, 'verboseMode', 'composerDeliveryMode', 'agentIndicatorStyle', 'selectionShortcutEnabled', AUTO_GROUP_TABS_KEY, 'helpImproveWebBrain', 'screenshotFallback', 'maxAgentSteps', 'autoScreenshot', 'useSiteAdapters', 'researchEscalationEnabled', 'researchEscalationEngine', 'voiceInputEnabled', 'alwaysAllowApiMutations', 'apiMutationObserverEnabled', 'openaiAskStreamingEnabled', 'planBeforeActMode', 'planBeforeAct', 'planReviewMode', 'planReviewConfidenceThreshold', DOWNLOAD_DIRECTORY_STORAGE_KEY, 'notifySound', 'completionConfetti', 'completionFlashTab', 'tracingEnabled', 'feedbackDiagnosticsEnabled', 'strictSecretMode', 'enforceActionGuards', 'strictGuards', 'leanMode', 'visionMode', 'visionQuality', 'agentAllowLocalNetwork', 'scheduledTasksEnabled', 'scheduledRequireConsequentialConfirmation', 'systemOneEnabled', 'systemOneWatchEnabled', 'systemOneCompletionEnabled', 'systemOneFastClassifications', 'systemOneFastBrowser', 'systemOneWatchThreshold', 'systemOneCompletionThreshold', 'typesafeApiKey', 'providerFilter', 'requestTimeoutMs', 'clarifyTimeoutSec', 'clarifyTimeoutSemanticsV2', 'clarifyTimeoutPolicy', 'costAllowanceSessionUsd', 'costAllowanceTotalUsd', 'meteredProviderCostSpentUsd', 'screenshotRedaction', 'imageDetail', 'maxScreenshotsPerTurn', 'maxImageDimension']);
   if (typeof stored.providerFilter === 'string' && ['all','active','local','cloud','router'].includes(stored.providerFilter)) {
     providerFilter = stored.providerFilter;
   }
@@ -625,7 +627,7 @@ async function init() {
     composerDeliveryModeSelect.value = stored.composerDeliveryMode === 'steer' ? 'steer' : 'queue';
   }
   if (agentIndicatorStyleSelect) {
-    agentIndicatorStyleSelect.value = AGENT_INDICATOR_STYLES.includes(stored.agentIndicatorStyle) ? stored.agentIndicatorStyle : 'circuit';
+    agentIndicatorStyleSelect.value = AGENT_INDICATOR_STYLES.includes(stored.agentIndicatorStyle) ? stored.agentIndicatorStyle : 'random';
   }
   if (selectionShortcutToggle) selectionShortcutToggle.checked = stored.selectionShortcutEnabled !== false;
   if (autoGroupTabsToggle) autoGroupTabsToggle.checked = stored[AUTO_GROUP_TABS_KEY] !== false;
@@ -706,6 +708,7 @@ async function init() {
   if (costTotalLimitInput) costTotalLimitInput.value = totalLimit.toFixed(2);
   renderCostAllowanceSpent(totalSpent, totalLimit);
   if (strictSecretToggle) strictSecretToggle.checked = stored.strictSecretMode === true; // off by default
+  if (actionGuardsToggle) actionGuardsToggle.checked = stored.enforceActionGuards !== false;
   if (strictGuardsToggle) strictGuardsToggle.checked = stored.strictGuards === true; // off by default
   if (leanModeSelect) leanModeSelect.value = normalizeLeanModeSetting(stored.leanMode); // auto by default
   if (visionModeSelect) visionModeSelect.value = normalizeVisionModeSetting(stored.visionMode); // Auto by default
@@ -1375,7 +1378,7 @@ composerDeliveryModeSelect?.addEventListener('change', async () => {
 });
 
 agentIndicatorStyleSelect?.addEventListener('change', async () => {
-  const style = AGENT_INDICATOR_STYLES.includes(agentIndicatorStyleSelect.value) ? agentIndicatorStyleSelect.value : 'circuit';
+  const style = AGENT_INDICATOR_STYLES.includes(agentIndicatorStyleSelect.value) ? agentIndicatorStyleSelect.value : 'random';
   await browser.storage.local.set({ agentIndicatorStyle: style }).catch(() => {});
 });
 
@@ -1598,6 +1601,10 @@ btnResetCostSpend?.addEventListener('click', async () => {
 strictSecretToggle?.addEventListener('change', async () => {
   await browser.storage.local.set({ strictSecretMode: strictSecretToggle.checked }).catch(() => {});
   void syncDecisionStatus();
+});
+
+actionGuardsToggle?.addEventListener('change', async () => {
+  await browser.storage.local.set({ enforceActionGuards: actionGuardsToggle.checked });
 });
 
 strictGuardsToggle?.addEventListener('change', async () => {
@@ -2914,15 +2921,11 @@ function renderProviderCompatibilitySettings(id, config) {
   `;
 }
 
-// Effective tier for the dropdown's initial value — same precedence as the
-// provider getter: cloud is forced full; an explicit promptTier wins; the
-// legacy useCompactPrompt boolean maps to compact; otherwise local → mid.
-function effectivePromptTier(config) {
-  if ((config.category || 'cloud') === 'cloud') return 'full';
-  const tier = config.promptTier;
-  if (tier === 'compact' || tier === 'mid' || tier === 'full') return tier;
-  if (config.useCompactPrompt) return 'compact';
-  return config.category === 'local' ? 'mid' : 'full';
+// Effective tier for the dropdown's initial value: the provider getter's own
+// rule (providers/prompt-tier.js), with a config that names no category taken
+// as cloud. A local relay's stored tier counts only once the user chose it.
+function effectivePromptTier(config, providerId = '') {
+  return resolvePromptTier({ ...config, category: config.category || 'cloud' }, providerId);
 }
 
 function providerDisplayLabel(id, config = {}) {
@@ -3528,7 +3531,7 @@ function renderProviders() {
       const placeholder = field.placeholderKey ? t(field.placeholderKey) : (field.placeholder || '');
       if (field.type === 'select') {
         const current = field.key === 'promptTier'
-          ? effectivePromptTier(config)
+          ? effectivePromptTier(config, id)
           : (config[field.key] ?? field.options[0]?.value);
         const optionsHTML = field.options
           .map(o => `<option value="${escapeHtml(o.value)}"${o.value === current ? ' selected' : ''}>${escapeHtml(o.labelKey ? t(o.labelKey) : o.label)}</option>`)
@@ -3797,6 +3800,9 @@ function renderProviders() {
   });
   document.querySelectorAll('select[data-key="visionMode"]').forEach((select) => {
     select.addEventListener('change', () => refreshVisionStatus(select.dataset.provider));
+  });
+  document.querySelectorAll('select[data-key="promptTier"]').forEach((select) => {
+    select.addEventListener('change', () => { select.dataset.tierChosen = 'true'; });
   });
   document.querySelector('select[data-provider="ollama"][data-key="visionMode"]')?.addEventListener('change', refreshOllamaVisionStatus);
   document.querySelectorAll('.provider-compatibility select[data-provider], .provider-compatibility textarea[data-provider]').forEach((input) => {
@@ -4256,6 +4262,9 @@ async function saveProvider(id, { showFlash = true, markConfigured = true } = {}
       if (input.dataset.key === 'contextWindow') {
         config.manualContextWindow = input.dataset.manuallyEdited === 'true';
       }
+      // A tier picked in the menu is the user's choice, which a local relay
+      // needs before its stored tier counts (providers/prompt-tier.js).
+      if (input.dataset.key === 'promptTier' && input.dataset.tierChosen === 'true') config.promptTierChosen = true;
     });
     if (typeof config.label === 'string') config.label = config.label.trim();
     apiKeyWarning = providerApiKeyWarning(id, config);

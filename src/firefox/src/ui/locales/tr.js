@@ -8,6 +8,8 @@ import { getApocalypseModeCopy } from './apocalypse-copy.mjs';
 import { getEmergencyBoxCopy } from './emergency-copy.mjs';
 
 export default {
+  "st.display.action_guards.label": "Eylem denetimlerini uygula",
+  "st.display.action_guards.desc": "İşlemden önce alıcıyı ve önemli eylemleri denetler. Kapatırsanız gönderme, yeniden deneme, silme ve yayımlama kararını model verir. Site izinleri geçerlidir. Sonraki görevde uygulanır.",
   'st.providers.title': 'Sağlayıcı adı',
   ...getGenerativeMediaCopy('tr'),
   ...bidiCopy,
@@ -1334,7 +1336,8 @@ export default {
   "st.sync.consent.denied": "Şifrelenmiş senkronizasyon izni verilmedi.",
   'st.providers.webgpu_note.body': '{modelLink} runs entirely in Chrome with no API endpoint. Download it in Providers > WebGPU or Apocalypse Mode, then use the nuclear control in standalone chat.',
   "st.display.agent_indicator.label": "Ajan çalışma efekti",
-  "st.display.agent_indicator.desc": "WebBrain bir sekmede çalışırken sayfa kenarlarının nasıl görüneceğini seçin. Tüm stiller tıklamalarınızı sayfaya geçirir ve ekran görüntülerine girmez.",
+  "st.display.agent_indicator.desc": "Rastgele seçeneği her çalıştırmada farklı bir efekt seçer. Sabit tutmak için belirli bir stil seçin.",
+  "st.display.agent_indicator.random": "Her çalıştırmada rastgele (varsayılan)",
   "st.display.agent_indicator.circuit": "Sinir devresi",
   "st.display.agent_indicator.aurora": "Aurora",
   "st.display.agent_indicator.scan": "Tarama",

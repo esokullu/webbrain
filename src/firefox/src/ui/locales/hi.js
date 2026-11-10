@@ -6,6 +6,8 @@ import { getApocalypseModeCopy } from './apocalypse-copy.mjs';
 import { getEmergencyBoxCopy } from './emergency-copy.mjs';
 
 export default {
+  "st.display.action_guards.label": "कार्रवाई की जाँच लागू करें",
+  "st.display.action_guards.desc": "कार्रवाई से पहले प्राप्तकर्ता और महत्वपूर्ण कदमों की जाँच करता है। बंद करने पर मॉडल तय करता है कि भेजना, फिर से प्रयास करना, हटाना या प्रकाशित करना है। साइट की अनुमतियाँ लागू रहती हैं। अगली बार चलाने से प्रभावी होगा।",
   'st.providers.title': 'प्रदाता का नाम',
   ...getGenerativeMediaCopy('hi'),
   ...bidiCopy,
@@ -1356,7 +1358,8 @@ export default {
   'sp.response.incomplete_retrying': "अधूरा उत्तर · फिर प्रयास हो रहा है…",
   'sp.response.incomplete': "अधूरा उत्तर",
   "st.display.agent_indicator.label": "एजेंट गतिविधि प्रभाव",
-  "st.display.agent_indicator.desc": "WebBrain जब किसी टैब पर काम करता है तब पेज के किनारे कैसे दिखें। हर शैली आपके क्लिक पेज तक जाने देती है और स्क्रीनशॉट में नहीं आती।",
+  "st.display.agent_indicator.desc": "रैंडम मोड हर रन में अलग इफ़ेक्ट चुनता है। इसे स्थिर रखने के लिए कोई खास स्टाइल चुनें।",
+  "st.display.agent_indicator.random": "हर रन में रैंडम (डिफ़ॉल्ट)",
   "st.display.agent_indicator.circuit": "न्यूरल सर्किट",
   "st.display.agent_indicator.aurora": "ऑरोरा",
   "st.display.agent_indicator.scan": "स्कैन",

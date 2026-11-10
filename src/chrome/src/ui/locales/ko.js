@@ -8,6 +8,8 @@ import { getApocalypseModeCopy } from './apocalypse-copy.mjs';
 import { getEmergencyBoxCopy } from './emergency-copy.mjs';
 
 export default {
+  "st.display.action_guards.label": "작업 전 검사 적용",
+  "st.display.action_guards.desc": "실행 전에 수신자와 중요한 작업을 확인합니다. 끄면 전송, 재시도, 삭제, 게시 여부를 모델이 결정합니다. 사이트 권한은 계속 적용됩니다. 다음 실행부터 반영됩니다.",
   'st.providers.title': '공급자 이름',
   ...getGenerativeMediaCopy('ko'),
   ...bidiCopy,
@@ -1401,7 +1403,8 @@ export default {
   'sp.response.incomplete_retrying': "미완성 답변 · 다시 시도 중…",
   'sp.response.incomplete': "미완성 답변",
   "st.display.agent_indicator.label": "에이전트 작업 효과",
-  "st.display.agent_indicator.desc": "WebBrain이 탭에서 작업하는 동안 페이지 가장자리의 모습입니다. 모든 스타일은 클릭을 페이지로 통과시키며 스크린샷에 나타나지 않습니다.",
+  "st.display.agent_indicator.desc": "무작위 모드는 실행마다 다른 효과를 선택합니다. 효과를 고정하려면 특정 스타일을 선택하세요.",
+  "st.display.agent_indicator.random": "실행마다 무작위 (기본값)",
   "st.display.agent_indicator.circuit": "신경 회로",
   "st.display.agent_indicator.aurora": "오로라",
   "st.display.agent_indicator.scan": "스캔",

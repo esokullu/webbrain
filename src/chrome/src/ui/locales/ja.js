@@ -8,6 +8,8 @@ import { getApocalypseModeCopy } from './apocalypse-copy.mjs';
 import { getEmergencyBoxCopy } from './emergency-copy.mjs';
 
 export default {
+  "st.display.action_guards.label": "操作時のチェックを有効にする",
+  "st.display.action_guards.desc": "実行前に宛先や重要な操作を確認します。オフにすると、送信、再試行、削除、公開の判断をモデルに任せます。サイトの権限は引き続き適用されます。次回の実行から有効です。",
   'st.providers.title': 'プロバイダー名',
   ...getGenerativeMediaCopy('ja'),
   ...bidiCopy,
@@ -1401,7 +1403,8 @@ export default {
   'sp.response.incomplete_retrying': "未完の回答 · 再試行中…",
   'sp.response.incomplete': "未完の回答",
   "st.display.agent_indicator.label": "エージェント動作エフェクト",
-  "st.display.agent_indicator.desc": "WebBrain がタブで作業している間のページ端の表示です。どのスタイルでもクリックはページに届き、スクリーンショットには写りません。",
+  "st.display.agent_indicator.desc": "ランダムでは実行ごとに異なるエフェクトを選びます。固定するには特定のスタイルを選んでください。",
+  "st.display.agent_indicator.random": "実行ごとにランダム（既定）",
   "st.display.agent_indicator.circuit": "ニューラル回路",
   "st.display.agent_indicator.aurora": "オーロラ",
   "st.display.agent_indicator.scan": "スキャン",

@@ -58,6 +58,7 @@ const els = {
   downloads: $('downloads'),
   downloadRing: $('download-ring'),
   menu: $('menu'),
+  updates: $('updates'),
   findbar: $('findbar'),
   findInput: $('find-input'),
   findCount: $('find-count'),
@@ -268,6 +269,11 @@ function renderToolbar() {
   els.walletBadge.hidden = !waiting;
   els.wallet.title = waiting ? t('ui.walletWaiting') : t('ui.walletTip');
 
+  els.updates.hidden = !['available', 'ready'].includes(state.updates?.status);
+  if (!els.updates.hidden) {
+    const label = t('menu.updateAvailable', { version: state.updates.latestVersion });
+    els.updates.title = label; els.updates.setAttribute('aria-label', label);
+  }
   const dl = state.downloads;
   els.downloads.hidden = !dl || dl.count === 0;
   if (dl && dl.count) {
@@ -309,6 +315,7 @@ els.newTab.addEventListener('click', () => api.invoke('newTab'));
 els.back.addEventListener('click', () => api.invoke('back'));
 els.forward.addEventListener('click', () => api.invoke('forward'));
 els.reload.addEventListener('click', () => api.invoke(activeTab()?.loading ? 'stop' : 'reload'));
+els.updates.addEventListener('click', () => api.invoke('updates'));
 els.webbrain.addEventListener('click', () => api.invoke('webBrain'));
 els.wallet.addEventListener('click', () => api.invoke('wallet'));
 els.menu.addEventListener('click', () => {

@@ -837,7 +837,7 @@ for (const [build, engine] of [['chrome', chromium], ['firefox', firefox]]) {
   test(`${build}: local synthetic clicks attribute checkbox changes and navigation`, async () => {
     const source = read(build, 'content/content.js');
     const clickStart = source.indexOf('function clickElement(params, actionDeadlineExpired = () => false)');
-    const typeStart = source.indexOf('function typeText(params, actionDeadlineExpired = () => false)', clickStart);
+    const typeStart = source.indexOf('function typeText(', clickStart);
     const clickAxStart = source.indexOf("'click_ax':");
     const checkedStart = source.indexOf("'set_checked':", clickAxStart);
     const typeAxStart = source.indexOf("'type_ax':", checkedStart);
@@ -883,7 +883,7 @@ for (const [build, engine] of [['chrome', chromium], ['firefox', firefox]]) {
   test(`${build}: click-driven programmatic focus checks the monitor fence before focusin`, () => {
     const source = read(build, 'content/content.js');
     const clickStart = source.indexOf('function clickElement(params, actionDeadlineExpired = () => false)');
-    const typeStart = source.indexOf('function typeText(params, actionDeadlineExpired = () => false)', clickStart);
+    const typeStart = source.indexOf('function typeText(', clickStart);
     assert.ok(clickStart >= 0 && typeStart > clickStart, `${build}: click/type content action boundaries should be present`);
     const clickBody = source.slice(clickStart, typeStart);
     for (const [target, expected] of [['inp', 2], ['target', 1], ['sel', 1], ['el', 1], ['nearbySel', 1]]) {
@@ -2262,6 +2262,58 @@ for (const [build, engine] of [['chrome', chromium], ['firefox', firefox]]) {
     } finally { await browser.close(); }
   });
 
+  test(`${build}: random activity effect stays steady within a run and fixed settings override it`, async () => {
+    const { browser, page } = await fixture(engine, build);
+    try {
+      const errors = [];
+      page.on('pageerror', error => errors.push(error.message));
+      await page.evaluate(() => {
+        window.storageListeners = [];
+        chrome.storage = {
+          local: { get: async defaults => defaults },
+          onChanged: { addListener: fn => storageListeners.push(fn) },
+        };
+        window.indicatorMessage = (type, randomStyle) => messageListeners.forEach(fn => fn({ type, randomStyle }, {}, () => {}));
+        window.chooseStyle = newValue => storageListeners.forEach(fn => fn({ agentIndicatorStyle: { newValue } }, 'local'));
+      });
+      await page.addScriptTag({ content: read(build, 'content/agent-visual-indicator.js') });
+      // No saved preference: use this run's random choice supplied by the background.
+      await page.evaluate(() => indicatorMessage('WB_SHOW_AGENT_INDICATORS', 'scan'));
+      await page.waitForSelector('#webbrain-agent-effect', { state: 'attached' });
+      await page.evaluate(() => { window.firstEffect = document.getElementById('webbrain-agent-effect'); });
+      await page.evaluate(() => {
+        indicatorMessage('WB_HIDE_FOR_TOOL_USE');
+        indicatorMessage('WB_SHOW_AFTER_TOOL_USE');
+        indicatorMessage('WB_AGENT_INDICATOR_HEARTBEAT');
+        indicatorMessage('WB_SHOW_AGENT_INDICATORS', 'scan');
+      });
+      assert.equal(await page.evaluate(() => firstEffect === document.getElementById('webbrain-agent-effect')), true);
+      // An immediate next run may begin while the old effect is still fading.
+      await page.evaluate(() => {
+        indicatorMessage('WB_HIDE_AGENT_INDICATORS');
+        indicatorMessage('WB_SHOW_AGENT_INDICATORS', 'classic');
+      });
+      assert.equal(await page.locator('#webbrain-agent-glow-border').count(), 1);
+      assert.equal(await page.locator('#webbrain-agent-effect').count(), 0);
+      await page.evaluate(() => chooseStyle('scan'));
+      await page.waitForTimeout(550);
+      assert.equal(await page.locator('#webbrain-agent-glow-border').count(), 0);
+      assert.equal(await page.locator('#webbrain-agent-effect').count(), 1);
+      await page.evaluate(() => {
+        indicatorMessage('WB_HIDE_AGENT_INDICATORS');
+        indicatorMessage('WB_SHOW_AGENT_INDICATORS', 'classic');
+      });
+      assert.equal(await page.locator('#webbrain-agent-effect').count(), 1, 'fixed scan overrides the random classic choice');
+      assert.equal(await page.locator('#webbrain-agent-glow-border').count(), 0);
+      await page.evaluate(() => chooseStyle('random'));
+      await page.waitForTimeout(550);
+      assert.equal(await page.locator('#webbrain-agent-glow-border').count(), 1, 'switching back to random restores the run choice');
+      assert.equal(await page.locator('#webbrain-agent-effect').count(), 0);
+      assert.deepEqual(errors, []);
+      assert.equal((await page.evaluate(() => feedback)).length, 0, 'random effects stay outside page feedback');
+    } finally { await browser.close(); }
+  });
+
   test(`${build}: agent cursor, target ring and every activity effect stay out of page feedback`, async () => {
     const { browser, page } = await fixture(engine, build);
     try {
@@ -2334,6 +2386,131 @@ for (const [build, engine] of [['chrome', chromium], ['firefox', firefox]]) {
       await page.evaluate(() => window.__webbrainAgentIndicator.showTarget(document.getElementById('select'), 'click_coordinates'));
       assert.deepEqual(await page.evaluate(() => ['webbrain-agent-glow-border', 'webbrain-agent-target-outline']
         .map(id => getComputedStyle(document.getElementById(id)).animationName)), ['none', 'none']);
+    } finally { await browser.close(); }
+  });
+
+  test(`${build}: the agent cursor reaches its target before the click, presses with it, then blinks`, async () => {
+    const { browser, page } = await fixture(engine, build);
+    try {
+      await page.addScriptTag({ content: read(build, 'content/agent-visual-indicator.js') });
+      await page.evaluate(() => {
+        messageListeners.forEach(listener => listener({ type: 'WB_SHOW_AGENT_INDICATORS' }, {}, () => {}));
+        window.cursorMessage = message => {
+          let answer = null;
+          messageListeners.forEach(listener => listener(message, {}, reply => { if (reply && 'ok' in reply) answer = reply; }));
+          return answer;
+        };
+        window.cursorParts = () => {
+          const cursor = document.getElementById('webbrain-agent-target-cursor');
+          const r = cursor.getBoundingClientRect();
+          return { cursor, ripple: cursor.previousElementSibling, body: cursor.firstElementChild, x: r.left, y: r.top };
+        };
+      });
+      const approach = rect => page.evaluate(rect => cursorMessage({ type: 'WB_SHOW_AGENT_TARGET', phase: 'approach', source: 'click_text', rect }), rect);
+      const verdict = ok => page.evaluate(ok => cursorMessage({ type: 'WB_SHOW_AGENT_TARGET', phase: 'done', ok }), ok);
+      const position = () => page.evaluate(() => { const { x, y } = cursorParts(); return { x, y }; });
+      const pressing = () => page.evaluate(() => {
+        const { ripple, body } = cursorParts();
+        return {
+          ripples: ripple.getAnimations().map(animation => animation.currentTime),
+          press: body.getAnimations().some(animation => animation.effect.getComputedTiming().duration === 320),
+        };
+      });
+      const breathing = () => page.evaluate(() => cursorParts().body.getAnimations()
+        .some(animation => animation.effect.getComputedTiming().iterations === Infinity));
+
+      // The first target: the cursor fades in where it is.
+      assert.equal((await approach({ x: 40, y: 40, w: 40, h: 20 })).arriveInMs, 250);
+      await verdict(true);
+      await page.waitForTimeout(1200);
+      const start = await position();
+
+      // A far target: a gradual glide whose length the agent waits out.
+      const target = { x: 700, y: 500, w: 40, h: 20 };
+      const { arriveInMs } = await approach(target);
+      assert.ok(arriveInMs >= 360 && arriveInMs <= 760, String(arriveInMs));
+      await page.waitForTimeout(Math.round(arriveInMs / 4));
+      const midway = await position();
+      assert.ok(midway.x > start.x + 5 && midway.y > start.y + 5, `the cursor is on its way: ${JSON.stringify({ start, midway })}`);
+
+      // A screenshot hides the cursor mid-glide; the glide keeps going.
+      const glideThroughCapture = await page.evaluate(() => {
+        cursorMessage({ type: 'WB_HIDE_FOR_TOOL_USE' });
+        const { cursor } = cursorParts();
+        const hidden = getComputedStyle(cursor).display;
+        const running = cursor.getAnimations().filter(animation => animation.playState === 'running').length;
+        cursorMessage({ type: 'WB_SHOW_AFTER_TOOL_USE' });
+        return { hidden, running };
+      });
+      assert.deepEqual(glideThroughCapture, { hidden: 'none', running: 1 });
+      assert.equal((await pressing()).press, false, 'no press before the click');
+
+      // The click follows the landing: the trusted press presses the cursor,
+      // and the success verdict does not press it again.
+      await page.waitForTimeout(arriveInMs);
+      const landed = await position();
+      assert.ok(landed.x > midway.x && landed.y > midway.y, JSON.stringify({ midway, landed }));
+      await page.mouse.click(720, 510);
+      await page.waitForTimeout(60);
+      const pressed = await pressing();
+      assert.equal(pressed.press, true, 'the cursor presses with the click');
+      assert.equal(pressed.ripples.length, 1);
+      await page.waitForTimeout(60);
+      await verdict(true);
+      const afterVerdict = await pressing();
+      assert.equal(afterVerdict.ripples.length, 1);
+      assert.ok(afterVerdict.ripples[0] > pressed.ripples[0], 'the verdict does not restart the press');
+
+      // Between actions the cursor stays on the spot and blinks.
+      await page.waitForTimeout(1100);
+      assert.equal(await breathing(), true);
+      assert.deepEqual(await position(), landed);
+
+      // A live preference change must stop an existing infinite blink and
+      // restore it when motion is enabled again, without another page action.
+      await page.emulateMedia({ reducedMotion: 'reduce' });
+      await page.waitForFunction(() => cursorParts().body.getAnimations().length === 0);
+      await page.emulateMedia({ reducedMotion: 'no-preference' });
+      await page.waitForFunction(() => cursorParts().body.getAnimations()
+        .some(animation => animation.effect.getComputedTiming().iterations === Infinity));
+
+      // A failed click: the cursor gets there but does not press.
+      const secondTarget = { x: 200, y: 300, w: 40, h: 20 };
+      const failed = await approach(secondTarget);
+      assert.equal(await breathing(), false, 'an approach ends the blink');
+      await page.waitForTimeout(failed.arriveInMs + 60);
+      await verdict(false);
+      await page.waitForTimeout(60);
+      assert.deepEqual(await pressing(), { ripples: [], press: false });
+      const secondLanding = await position();
+
+      // Nothing to wait for: an unknown ref, reduced motion.
+      assert.equal((await page.evaluate(() => cursorMessage({ type: 'WB_SHOW_AGENT_TARGET', phase: 'approach', ref_id: 'ref_404' }))).arriveInMs, 0);
+      await page.emulateMedia({ reducedMotion: 'reduce' });
+      assert.equal((await approach(target)).arriveInMs, 0);
+      assert.deepEqual(await position(), landed, 'the cursor is already at the target when approach returns');
+      await verdict(true);
+      assert.deepEqual(await pressing(), { ripples: [], press: false });
+
+      // Enabling reduced motion partway through a glide lands the cursor
+      // and drops the press that was waiting for it to arrive.
+      await page.emulateMedia({ reducedMotion: 'no-preference' });
+      const glideBack = await approach(secondTarget);
+      assert.ok(glideBack.arriveInMs > 0);
+      await verdict(true);
+      await page.evaluate(() => {
+        window.cursorLandedOnMotionChange = new Promise(resolve => {
+          matchMedia('(prefers-reduced-motion: reduce)').addEventListener('change', () => requestAnimationFrame(() => {
+            const { x, y } = cursorParts();
+            resolve({ x, y });
+          }), { once: true });
+        });
+      });
+      await page.emulateMedia({ reducedMotion: 'reduce' });
+      assert.deepEqual(await page.evaluate(() => cursorLandedOnMotionChange), secondLanding);
+      await page.waitForTimeout(glideBack.arriveInMs);
+      assert.deepEqual(await pressing(), { ripples: [], press: false });
+      assert.equal((await page.evaluate(() => feedback)).filter(event => event.source !== 'user').length, 0);
     } finally { await browser.close(); }
   });
 

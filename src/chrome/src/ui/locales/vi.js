@@ -6,6 +6,8 @@ import { getApocalypseModeCopy } from './apocalypse-copy.mjs';
 import { getEmergencyBoxCopy } from './emergency-copy.mjs';
 
 export default {
+  "st.display.action_guards.label": "Áp dụng kiểm tra hành động",
+  "st.display.action_guards.desc": "Kiểm tra người nhận và các hành động quan trọng trước khi thực hiện. Khi tắt, mô hình quyết định việc gửi, thử lại, xóa hoặc đăng. Quyền của trang web vẫn được áp dụng. Có hiệu lực từ lần chạy tiếp theo.",
   'st.providers.title': 'Tên nhà cung cấp',
   ...getGenerativeMediaCopy('vi'),
   ...bidiCopy,
@@ -1400,7 +1402,8 @@ export default {
   'sp.response.incomplete_retrying': "Câu trả lời chưa hoàn chỉnh · đang thử lại…",
   'sp.response.incomplete': "Câu trả lời chưa hoàn chỉnh",
   "st.display.agent_indicator.label": "Hiệu ứng khi tác tử hoạt động",
-  "st.display.agent_indicator.desc": "Giao diện viền trang khi WebBrain làm việc trên một thẻ. Mọi kiểu đều cho cú nhấp của bạn đi xuyên qua và không xuất hiện trong ảnh chụp màn hình.",
+  "st.display.agent_indicator.desc": "Chế độ ngẫu nhiên chọn hiệu ứng khác nhau mỗi lần chạy. Chọn một kiểu cụ thể để giữ cố định.",
+  "st.display.agent_indicator.random": "Ngẫu nhiên mỗi lần chạy (mặc định)",
   "st.display.agent_indicator.circuit": "Mạch thần kinh",
   "st.display.agent_indicator.aurora": "Cực quang",
   "st.display.agent_indicator.scan": "Quét",

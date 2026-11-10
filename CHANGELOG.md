@@ -8,10 +8,40 @@ This changelog was generated from the repository Git history and release tags. V
 
 ### Added
 - Murshid has a wallet next to WebBrain in the toolbar: Bitcoin and Ethereum (also Arbitrum, OP Mainnet, Base, Polygon and the Sepolia test network) from one recovery phrase, encrypted with a password on the computer. It receives, shows the balance and sends, and lets websites connect and sign in through `window.ethereum`, with every connection, signature, transaction and network switch approved in the side panel.
+- Murshid 0.1.3 checks for application updates at startup and daily, with an Updates page, menu entry and toolbar notification. Signed macOS builds can download a verified update and restart to install it; Windows and Linux open their platform's published installer. Automatic checks can be disabled in Settings. All ten interface languages are supported. Older Murshid versions require one manual installation to gain update support.
+
+## [47.1.1] - 2026-11-10
+
+### Added
+- Advanced settings now include **Enforce action guards**, enabled by default. Turning it off lets the model decide whether to send, retry, delete or publish without the corresponding recipient and action checks. This setting is separate from Lean mode, takes effect on the next run, and is included in settings transfers and traces. Site permissions, explicit submit confirmation, Stop and run budgets still apply. Chrome and Firefox.
+
+### Changed
+- Murshid 0.1.2 for macOS bundles WebBrain 47.1.1 and WebBrain Companion 0.1.2, with Apple Silicon and Intel support in one universal installer.
+
+### Fixed
+- WhatsApp recipient checks now accept full international phone numbers starting with `+` or `00`, ask for a country code when only local digits are supplied, and bind sends to the verified contact. A verified new or empty conversation can receive its first message without requiring an existing message as a baseline. Chrome and Firefox.
+- The agent cursor responds immediately when reduced-motion preferences change, stopping a running glide, click effect or resting animation and restoring the appropriate animation when motion is enabled again. Chrome and Firefox.
+
+## [47.1.0] - 2026-11-10
+
+### Added
 - Murshid blocks ads and trackers by default, with Ghostery's adblocker library and EasyList, EasyPrivacy and uBlock's Unbreak list. The lists ship with Murshid, so blocking works offline from the first run, and are updated at most once a day. Turn it off in Settings, or for one site from the ⋮ menu. Murshid's own pages and WebBrain's requests and side panel are never filtered, and WebBrain still sees blocked requests through `chrome.webRequest`.
+- Added Standard Compute to the extended provider catalog in Chrome and Firefox. It is disabled by default and can be configured with your API key.
+
+### Changed
+- WebBrain Companion and the Local OpenAI-compatible Proxy now default to the Full prompt and tool tier. A tier saved automatically by older settings no longer overrides that default; an explicitly chosen tier still applies. Lean mode's Auto setting recognizes supported strong models relayed through these providers, including Gemini Flash from generation 3 onward, excluding Flash-Lite. Other local runtimes retain their existing defaults. Chrome and Firefox.
+- The agent activity effect is chosen randomly for each run by default. You can still select a fixed effect in Settings. Chrome and Firefox.
 
 ### Fixed
 - Sign-in password guard: instead of refusing, WebBrain now asks on a card ("Type this into a sign-in password field on <site>?", with the text masked, or hidden under strict secret handling) before typing a sign-in password you never gave. The card names the field's own site, including a sign-in frame from another site. "Type it" types that text into that field and accepts it on that site for the rest of the run; "Don't type it" keeps the refusal, and unattended runs still refuse. A login you saved yourself with /memory --add (or edited in Settings) counts as given, while notes WebBrain captured automatically do not. A lone password field with no sign-in around it, such as a "Password" with "Submit", asks once before a made-up value goes in, a Wi-Fi or other network key is typed unasked, and sign-in forms stay guarded, including web-component and form-less logins, re-authentication prompts and forms that mark their password field new-password. Chrome and Firefox.
+- PDF reads now validate the requested URL and the server's resolved address before processing the document, including Chrome's offscreen extraction and browser PDF viewer URLs. Local and private network addresses require local network access to be enabled; cloud metadata and link-local addresses remain blocked. Redirects are rejected, and cookies are sent only when the PDF shares the active tab's registrable domain. Reads bypass the HTTP cache so repeated reads can still verify the response address. Chrome and Firefox.
+- When asked to reply to a named sender in Gmail, WebBrain can open the message's Reply composer instead of getting blocked and falling back to a new thread. Sending still requires the recipient check. Chrome and Firefox.
+- WhatsApp can confirm saved contacts whose Contact info header contains both Close and Edit. Previously, the extra Edit button prevented WebBrain from finding Close, leaving the contact unconfirmed and blocking messages and attachments. Chrome and Firefox.
+- In Auto mode, answering a planner's clarifying question now keeps the Act or Dev mode of the task being clarified. A short answer such as "the second one" no longer switches the run into Ask and stalls the task. Chrome and Firefox.
+- Typing just a web address on the new-tab page now opens it in Ask and Act as well as Search. Prompts that mention an address still go to WebBrain, and filenames such as `notes.txt` are not mistaken for websites. This also applies to Murshid's new-tab page. Chrome and Firefox.
+- Murshid restores tab titles when closing tabs or widening the window makes room for them again, and applies the same title visibility rule across the tab strip.
+- The visible agent cursor now glides to its target before the click and presses with the action. Targets are checked after the glide, so a page that moves during the animation does not leave the click using stale coordinates. Background tabs and reduced-motion settings do not incur the animation wait.
+- Updated the agent's old Reddit guidance to explicitly apply post flair, re-read the picker after selecting an option, and verify the published post before moving on. This addresses submissions rejected for missing flair even though a preview chip was visible. Chrome and Firefox.
 
 ## [47.0.0] - 2026-11-08
 

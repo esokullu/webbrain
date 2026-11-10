@@ -8,6 +8,8 @@ import { getApocalypseModeCopy } from './apocalypse-copy.mjs';
 import { getEmergencyBoxCopy } from './emergency-copy.mjs';
 
 export default {
+  "st.display.action_guards.label": "Aktionsprüfungen anwenden",
+  "st.display.action_guards.desc": "Prüft Empfänger und folgenreiche Aktionen vor der Ausführung. Ist dies aus, entscheidet das Modell über Senden, Wiederholen, Löschen oder Veröffentlichen. Websiteberechtigungen gelten weiterhin. Wirksam ab dem nächsten Lauf.",
   'st.providers.title': 'Anbietername',
   ...getGenerativeMediaCopy('de'),
   ...bidiCopy,
@@ -1329,7 +1331,8 @@ export default {
   'sp.response.incomplete_retrying': "Unvollständige Antwort · erneuter Versuch…",
   'sp.response.incomplete': "Unvollständige Antwort",
   "st.display.agent_indicator.label": "Effekt bei Agentenaktivität",
-  "st.display.agent_indicator.desc": "Legt fest, wie die Seitenränder aussehen, während WebBrain in einem Tab arbeitet. Jeder Stil lässt Ihre Klicks durch und erscheint nicht auf Screenshots.",
+  "st.display.agent_indicator.desc": "Zufällig wählt für jeden Durchlauf einen anderen Effekt. Wähle einen bestimmten Stil, um ihn beizubehalten.",
+  "st.display.agent_indicator.random": "Zufällig pro Durchlauf (Standard)",
   "st.display.agent_indicator.circuit": "Neuronaler Schaltkreis",
   "st.display.agent_indicator.aurora": "Polarlicht",
   "st.display.agent_indicator.scan": "Scan",

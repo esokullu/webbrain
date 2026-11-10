@@ -29,6 +29,7 @@ const { urlsFromArgs } = require('./open-arguments');
 const identity = require('./identity');
 const { installWallet } = require('./wallet/install');
 const { Adblock } = require('./adblock');
+const { Updates } = require('./updates');
 
 const PERSISTENT_PARTITION = 'persist:murshid';
 const TEMPORARY_PARTITION = 'murshid-temporary';
@@ -90,6 +91,7 @@ const ctx = {
   wallet: null,
   downloads: null,
   companion: null,
+  updates: null,
   commands: null,
   settings: null,
   icon: null,
@@ -247,6 +249,13 @@ async function start() {
   ctx.downloads.on('update', () => ctx.refreshAllWindows());
   ctx.commands = createCommands(ctx);
   ctx.companion = new Companion(ctx);
+  const { autoUpdater, shell } = require('electron');
+  ctx.updates = new Updates({ version: app.getVersion(), packaged: app.isPackaged,
+    nativeUpdater: autoUpdater, openExternal: url => shell.openExternal(url) });
+  ctx.updates.on('change', () => ctx.refreshAllWindows());
+  autoUpdater.on('before-quit-for-update', () => {
+    ctx.quitting = true; ctx.settings?.flush(); ctx.history?.flush();
+  });
   installPermissions(ctx);
   installAppMenu(ctx);
   installUiIpc();
@@ -270,6 +279,7 @@ async function start() {
   openDestinations(pendingUrls.splice(0));
 
   ctx.companion.ensureRunning().catch(() => {});
+  if (app.isPackaged && ctx.settings.get('checkUpdates') !== false) ctx.updates.start();
 
   app.on('activate', () => {
     if (!ctx.windows.length) ctx.createWindow({});
@@ -441,6 +451,8 @@ function installUiIpc() {
       case 'panelResizeEnd':
         endPanelDrag(w);
         return null;
+      case 'updates':
+        return ctx.commands.run.updates(w);
       case 'mainMenu':
         popupMainMenu(ctx, w, args[0] || { x: 0, y: 0 });
         return null;
@@ -543,6 +555,14 @@ function installPageIpc() {
     if (!url.startsWith('murshid://')) return null;
     const w = ctx.windowForContents(event.sender);
     const tab = w?.tabs.find((t) => t.wc === event.sender);
+    // Update actions belong only to an owned, top-level Updates page.
+    if (['updateStatus', 'checkUpdates', 'downloadUpdate', 'installUpdate'].includes(command)) {
+      if (!tab || event.senderFrame !== event.sender.mainFrame || new URL(url).hostname !== 'updates') return null;
+      if (command === 'updateStatus') return ctx.updates.snapshot();
+      if (command === 'checkUpdates') return ctx.updates.check();
+      if (command === 'downloadUpdate') return ctx.updates.download();
+      return ctx.updates.install();
+    }
     switch (command) {
       case 'info':
         return {
@@ -567,6 +587,7 @@ function installPageIpc() {
             identifyAsChrome: ctx.settings.get('identifyAsChrome'),
             adblock: ctx.settings.get('adblock'),
             persistBrowserSession: ctx.settings.get('persistBrowserSession'),
+            checkUpdates: ctx.settings.get('checkUpdates'),
           },
           historyCount: ctx.history.count(),
           searchEngines: Object.entries(SEARCH_ENGINES).map(([id, e]) => ({ id, name: e.name })),
@@ -585,6 +606,10 @@ function installPageIpc() {
         if (key === 'searchEngine' && SEARCH_ENGINES[value]) ctx.settings.set(key, value);
         if (key === 'startCompanion' || key === 'searchSuggestions') ctx.settings.set(key, Boolean(value));
         if (key === 'identifyAsChrome' || key === 'adblock') ctx.settings.set(key, Boolean(value));
+        if (key === 'checkUpdates' && typeof value === 'boolean') {
+          ctx.settings.set(key, value); ctx.settings.flush();
+          if (app.isPackaged) { if (value) ctx.updates.start(); else ctx.updates.stop(); }
+        }
         if (key === 'persistBrowserSession' && typeof value === 'boolean') {
           ctx.settings.set(key, value);
           ctx.settings.flush();
@@ -616,6 +641,7 @@ app.on('window-all-closed', () => {
 });
 
 app.on('before-quit', () => {
+  ctx.updates?.stop();
   ctx.quitting = true;
   ctx.settings?.flush();
   ctx.history?.flush();

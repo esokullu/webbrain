@@ -419,6 +419,12 @@ const { validateFetchUrl: validateFetchUrlFx, validateResolvedAddress: validateR
 const { firefoxRestrictedDomainForUrl, firefoxRestrictedDomainFailure, firefoxHostPermissionFailure } = await import(
   'file://' + path.join(ROOT, 'src/firefox/src/firefox-restricted-domains.js').replace(/\\/g, '/')
 );
+const { fetchPdfBytes: fetchPdfBytesCh } = await import(
+  'file://' + path.join(ROOT, 'src/chrome/src/agent/pdf-extraction.js').replace(/\\/g, '/')
+);
+const { fetchPdfBytes: fetchPdfBytesFx } = await import(
+  'file://' + path.join(ROOT, 'src/firefox/src/agent/pdf-tools.js').replace(/\\/g, '/')
+);
 const WikipediaOfflineCh = await import(
   'file://' + path.join(ROOT, 'src/chrome/src/agent/wikipedia-offline.js').replace(/\\/g, '/')
 );
@@ -22965,6 +22971,55 @@ test('research_url rejects blocked redirect targets before returning hidden-tab 
     else globalThis.chrome = previousChrome;
     if (previousBrowser === undefined) delete globalThis.browser;
     else globalThis.browser = previousBrowser;
+  }
+});
+
+test('fetchPdfBytes rejects loopback, metadata, and RFC1918 addresses in Chrome and Firefox', async () => {
+  const previousFetch = globalThis.fetch;
+  const previousChrome = globalThis.chrome;
+  const previousBrowser = globalThis.browser;
+  let webRequest;
+  let fetchCalls = 0;
+  globalThis.fetch = async url => {
+    fetchCalls++;
+    webRequest.emit('onResponseStarted', { tabId: -1, url, type: 'xmlhttprequest', ip: '8.8.8.8' });
+    return new Response(new Uint8Array([37, 80, 68, 70]), { status: 200 });
+  };
+  try {
+    for (const [label, fetchPdfBytes] of [
+      ['chrome', fetchPdfBytesCh],
+      ['firefox', fetchPdfBytesFx],
+    ]) {
+      webRequest = makeAddressWebRequest();
+      globalThis[label === 'chrome' ? 'chrome' : 'browser'] = {
+        webRequest: webRequest.api, dns: { resolve: async () => ({ addresses: ['8.8.8.8'] }) },
+      };
+      // Loopback blocked by default
+      await assert.rejects(
+        fetchPdfBytes('http://127.0.0.1:8080/report.pdf'),
+        /Blocked loopback/,
+        `${label}: loopback must be blocked by default`,
+      );
+      // Cloud metadata blocked unconditionally
+      await assert.rejects(
+        fetchPdfBytes('http://169.254.169.254/latest/meta-data/', { allowLocalNetwork: true }),
+        /Blocked link-local/,
+        `${label}: cloud metadata must stay blocked even with local network allowed`,
+      );
+      // RFC1918 blocked by default
+      await assert.rejects(
+        fetchPdfBytes('http://192.168.1.1/secret.pdf'),
+        /Blocked private/,
+        `${label}: RFC1918 must be blocked by default`,
+      );
+      // Public URL allowed
+      const res = await fetchPdfBytes('https://example.com/safe.pdf', { verifyResponse: async () => {} });
+      assert.ok(res instanceof Uint8Array, `${label}: public PDF should fetch successfully`);
+    }
+  } finally {
+    globalThis.fetch = previousFetch;
+    globalThis.chrome = previousChrome;
+    globalThis.browser = previousBrowser;
   }
 });
 
@@ -77000,13 +77055,13 @@ test('extended provider catalog is complete, mirrored, safe, and excluded-provid
     minimax-coding-plan moark modelscope morph nano-gpt nearai nebius nova novita-ai
     ollama-cloud opencode opencode-go opper orcarouter ovhcloud perplexity
     perplexity-agent poe pollinations privatemode-ai qihang-ai qiniu-ai requesty runcrate scaleway siliconflow
-    siliconflow-cn stackit stepfun submodel synthetic tencent-coding-plan
+    siliconflow-cn stackit standardcompute stepfun submodel synthetic tencent-coding-plan
     upstage v0 venice vercel vivgrid vultr wandb xiaomi zai-coding-plan zenmux
     zhipuai zhipuai-coding-plan
   `.trim().split(/\s+/);
   const excluded = ['github-models', 'github-copilot', 'gitlab', 'sap-ai-core'];
 
-  assert.equal(expectedIds.length, 86);
+  assert.equal(expectedIds.length, 87);
   assert.deepEqual(ProviderCatalogCh.ADDITIONAL_PROVIDER_IDS, expectedIds);
   assert.deepEqual(ProviderCatalogFx.ADDITIONAL_PROVIDER_IDS, expectedIds);
   assert.deepEqual(
@@ -77021,8 +77076,8 @@ test('extended provider catalog is complete, mirrored, safe, and excluded-provid
   ]) {
     const defaults = new PM()._defaultConfigs();
     // Includes the sidepanel-only WebBrain Compass XL runtime profile, which is
-    // deliberately omitted from the 120/119 Settings provider cards.
-    const expectedDefaultCount = label === 'chrome' ? 121 : 120;
+    // deliberately omitted from the 121/120 Settings provider cards.
+    const expectedDefaultCount = label === 'chrome' ? 122 : 121;
     assert.equal(
       Object.keys(defaults).length,
       expectedDefaultCount,
@@ -77245,6 +77300,30 @@ test('extended provider catalog is complete, mirrored, safe, and excluded-provid
   assert.deepEqual(
     ProviderCatalogCh.ADDITIONAL_PROVIDER_UI.cloudgpu.suggestions,
     ['deepseek-v4-flash', 'deepseek-v4-pro', 'glm-5.3', 'kimi-k3', 'qwen3.5-397b'],
+  );
+  assert.deepEqual(
+    {
+      baseUrl: ProviderCatalogCh.ADDITIONAL_PROVIDER_DEFAULTS.standardcompute.baseUrl,
+      model: ProviderCatalogCh.ADDITIONAL_PROVIDER_DEFAULTS.standardcompute.model,
+      contextWindow: ProviderCatalogCh.ADDITIONAL_PROVIDER_DEFAULTS.standardcompute.contextWindow,
+      supportsVision: ProviderCatalogCh.ADDITIONAL_PROVIDER_DEFAULTS.standardcompute.supportsVision,
+      supportsTools: ProviderCatalogCh.ADDITIONAL_PROVIDER_DEFAULTS.standardcompute.supportsTools,
+      supportsAskStreaming: ProviderCatalogCh.ADDITIONAL_PROVIDER_DEFAULTS.standardcompute.supportsAskStreaming,
+      apiKeyUrl: ProviderCatalogCh.ADDITIONAL_PROVIDER_DEFAULTS.standardcompute.apiKeyUrl,
+    },
+    {
+      baseUrl: 'https://api.stdcmpt.com/v1',
+      model: 'StandardCompute',
+      contextWindow: 1000000,
+      supportsVision: false,
+      supportsTools: true,
+      supportsAskStreaming: true,
+      apiKeyUrl: 'https://standardcompute.com/dashboard',
+    },
+  );
+  assert.deepEqual(
+    ProviderCatalogCh.ADDITIONAL_PROVIDER_UI.standardcompute.suggestions,
+    ['StandardCompute', 'deepseek/deepseek-v4-pro', 'deepseek/deepseek-v4-flash', 'z-ai/glm-5.3', 'moonshotai/kimi-k3'],
   );
   assert.deepEqual(
     {
@@ -112907,6 +112986,7 @@ test('Chrome click paths suppress native file choosers and redirect to upload_fi
       '/src/content/file-upload-policy.js',
       '/src/content/rich-text-toolbar-heuristic.js',
       '/src/content/accessibility-tree.js',
+      '/src/content/whatsapp-phone.js',
       '/src/content/chat-observation.js',
       '/src/content/content.js',
       '/src/content/agent-visual-indicator.js',
@@ -119742,7 +119822,7 @@ test('agent viewport indicator heartbeat auto-cleans stale page UI', () => {
     assert.match(background, /onRemoved\.addListener\(\(tabId\)[\s\S]*stopIndicatorHeartbeat\(tabId\)/, `${label}: tab removal leaks heartbeat`);
 
     assert.match(indicator, /const INDICATOR_HEARTBEAT_TIMEOUT_MS = 65_000;/, `${label}: page lease timeout missing`);
-    assert.match(indicator, /function show\(\)[\s\S]*armIndicatorHeartbeat\(\)/, `${label}: show does not arm page lease`);
+    assert.match(indicator, /function show\(randomStyle\)[\s\S]*armIndicatorHeartbeat\(\)/, `${label}: show does not arm page lease`);
     assert.match(indicator, /function hide\(\)[\s\S]*clearIndicatorHeartbeat\(\)/, `${label}: hide does not clear page lease`);
     assert.match(indicator, /case 'WB_AGENT_INDICATOR_HEARTBEAT':[\s\S]*if \(indicatorsActive\) armIndicatorHeartbeat\(\)/, `${label}: page heartbeat does not refresh active lease`);
     assert.match(indicator, /setTimeout\(\(\) => \{[\s\S]*if \(indicatorsActive\) hide\(\);[\s\S]*INDICATOR_HEARTBEAT_TIMEOUT_MS/, `${label}: expired page lease does not hide stale indicator`);
@@ -119980,7 +120060,7 @@ test('content-script actions have a bounded unknown-outcome timeout', async () =
       : /await beforePageAgentDispatch\(globalThis\.browser \|\| globalThis\.chrome, tabId, \{\s*kind: 'input', selector, frameId: targetFrameId, fenceOnly: true,/g,
       `${label}: bound iframe typing skips the target-frame feedback fence`);
 
-    const fallbackTypeStart = contentSource.indexOf('async function _typeTextInner(params, actionDeadlineExpired = () => false)');
+    const fallbackTypeStart = contentSource.indexOf('async function _typeTextInner(');
     const fallbackTypeEnd = contentSource.indexOf('\n\n  /**', fallbackTypeStart + 20);
     const fallbackType = contentSource.slice(fallbackTypeStart, fallbackTypeEnd);
     assert.ok(fallbackTypeStart >= 0 && fallbackTypeEnd > fallbackTypeStart, `${label}: fallback typing deadline boundary missing`);
@@ -119996,7 +120076,7 @@ test('content-script actions have a bounded unknown-outcome timeout', async () =
     );
     assert.match(
       contentSource,
-      /'type': \(\) => typeText\(msg\.params \|\| \{\}, actionDeadlineExpired\)/,
+      /'type': \(\) => typeText\(msg\.params \|\| \{\}, actionDeadlineExpired, msg\.enforceActionGuards !== false\)/,
       `${label}: fallback typing handler does not receive the owning action deadline`,
     );
     const fallbackScrollStart = contentSource.indexOf('function smartScrollPage(params, actionDeadlineExpired = () => false)');
@@ -121369,10 +121449,10 @@ test('agent activity effect is a General setting, portable, and read live by the
     const select = settingsPanelHtml(settingsHtml, 'display').match(/<select id="select-agent-indicator-style"[\s\S]*?<\/select>/)?.[0];
     assert.ok(select, `${label}: the effect choice belongs to Settings → General`);
     assert.deepEqual([...select.matchAll(/<option value="([a-z]+)"/g)].map(match => match[1]),
-      ['circuit', 'aurora', 'scan', 'gears', 'classic'], `${label}: effect options changed`);
+      ['random', 'circuit', 'aurora', 'scan', 'gears', 'classic'], `${label}: effect options changed`);
     assert.match(settingsJs, new RegExp(`${runtimeApi}\\.storage\\.local\\.set\\(\\{ agentIndicatorStyle: style \\}\\)`), `${label}: the select must save agentIndicatorStyle`);
     assert.match(indicator, /const STYLE_STORAGE_KEY = 'agentIndicatorStyle';/, `${label}: the indicator reads another key`);
-    assert.match(indicator, /const DEFAULT_STYLE = 'circuit';/, `${label}: Neural circuit should be the default effect`);
+    assert.match(indicator, /const DEFAULT_STYLE = 'random';/, `${label}: random should be the default effect`);
     assert.match(indicator, new RegExp(`${runtimeApi}\\.storage\\?\\.onChanged`), `${label}: a new choice should apply to a running task`);
     // The cursor animates through CSS transitions and Web Animations: the page
     // monitor observes style attributes, so nothing may write them per frame.
@@ -121380,12 +121460,63 @@ test('agent activity effect is a General setting, portable, and read live by the
     assert.ok(cursorClass.length > 0, `${label}: AgentCursor missing`);
     assert.doesNotMatch(cursorClass, /requestAnimationFrame/, `${label}: the cursor must not run a per-frame style loop`);
 
-    assert.equal(configTransfer.DEFAULT_CONFIG_SETTINGS.agentIndicatorStyle, 'circuit', `${label}: portable default changed`);
+    assert.equal(configTransfer.DEFAULT_CONFIG_SETTINGS.agentIndicatorStyle, 'random', `${label}: portable default changed`);
     assert.ok(configTransfer.CONFIG_STORAGE_KEYS.includes('agentIndicatorStyle'), `${label}: config export/import omitted the effect`);
     const exported = JSON.stringify(configTransfer.createConfigExport({ agentIndicatorStyle: 'gears' }));
     assert.equal(configTransfer.parseConfigImport(exported).settings.agentIndicatorStyle, 'gears', `${label}: a chosen effect should survive export and import`);
+    const randomExport = JSON.stringify(configTransfer.createConfigExport({ agentIndicatorStyle: 'random' }));
+    assert.equal(configTransfer.parseConfigImport(randomExport).settings.agentIndicatorStyle, 'random', `${label}: random should survive export and import`);
     const unknown = JSON.stringify({ ...JSON.parse(exported), settings: { ...JSON.parse(exported).settings, agentIndicatorStyle: 'sparkles' } });
     assert.throws(() => configTransfer.parseConfigImport(unknown), /agentIndicatorStyle/, `${label}: an unknown effect should be rejected on import`);
+  }
+});
+
+test('random activity effect rotates per run and survives navigation and heartbeat restoration', async () => {
+  for (const build of ['chrome', 'firefox']) {
+    const source = fs.readFileSync(path.join(ROOT, `src/${build}/src/background.js`), 'utf8');
+    const start = source.indexOf('const activeIndicatorTabs = new Set();');
+    const removedStart = source.indexOf('.tabs.onRemoved.addListener((tabId)', start);
+    const end = source.indexOf('\n});', removedStart) + '\n});'.length;
+    assert.ok(start >= 0 && end > start);
+    const messages = [], timers = new Map(), retries = [];
+    let updated, removed;
+    const api = { tabs: {
+      sendMessage: async (tabId, message) => { messages.push({ tabId, ...message }); return { active: false }; },
+      onUpdated: { addListener: fn => { updated = fn; } },
+      onRemoved: { addListener: fn => { removed = fn; } },
+    } };
+    const context = vm.createContext({
+      chrome: api, browser: api, agent: {},
+      // A constant draw still has to produce a different style next run.
+      Math: { random: () => 0, floor: Math.floor },
+      setInterval: fn => { const id = timers.size + 1; timers.set(id, fn); return id; },
+      clearInterval: id => timers.delete(id), setTimeout: fn => retries.push(fn),
+      syncPdfContextMenuForActiveTab: async () => {},
+      withTeacherSessionStoreLock: async fn => fn(), teacherSessionStore: { clear() {} },
+      clearRunUiSnapshot() {}, clearDetachedRunFailure() {},
+      flashedBadgeTabs: new Set(), attentionBadgeOwners: new Map(),
+    });
+    vm.runInContext(source.slice(start, end), context);
+    const send = type => context.sendIndicatorMessage(7, type);
+    const last = () => messages.at(-1);
+    send('WB_SHOW_AGENT_INDICATORS');
+    const first = last().randomStyle;
+    assert.ok(['circuit', 'aurora', 'scan', 'gears', 'classic'].includes(first));
+    send('WB_SHOW_AGENT_INDICATORS');
+    assert.equal(last().randomStyle, first, `${build}: duplicate SHOW rerolled`);
+    updated(7, { status: 'complete' });
+    retries.splice(0).forEach(fn => fn());
+    assert.equal(last().randomStyle, first, `${build}: navigation rerolled`);
+    timers.values().next().value();
+    await Promise.resolve();
+    assert.equal(last().randomStyle, first, `${build}: heartbeat restoration rerolled`);
+    send('WB_HIDE_AGENT_INDICATORS');
+    assert.equal(timers.size, 0);
+    send('WB_SHOW_AGENT_INDICATORS');
+    assert.notEqual(last().randomStyle, first, `${build}: next run should differ`);
+    removed(7);
+    assert.equal(timers.size, 0);
+    assert.equal(vm.runInContext('indicatorRandomStyles.has(7)', context), false, `${build}: closed tab leaks its choice`);
   }
 });
 

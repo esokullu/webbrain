@@ -8,6 +8,8 @@ import { getApocalypseModeCopy } from './apocalypse-copy.mjs';
 import { getEmergencyBoxCopy } from './emergency-copy.mjs';
 
 export default {
+  "st.display.action_guards.label": "Stosuj kontrole działań",
+  "st.display.action_guards.desc": "Sprawdza odbiorcę i istotne działania przed wykonaniem. Po wyłączeniu model decyduje o wysłaniu, ponowieniu, usunięciu lub publikacji. Uprawnienia witryny nadal obowiązują. Zmiana dotyczy następnego zadania.",
   'st.providers.title': 'Nazwa dostawcy',
   ...getGenerativeMediaCopy('pl'),
   ...bidiCopy,
@@ -1362,7 +1364,8 @@ export default {
   'sp.response.incomplete_retrying': "Niepełna odpowiedź · ponawianie…",
   'sp.response.incomplete': "Niepełna odpowiedź",
   "st.display.agent_indicator.label": "Efekt aktywności agenta",
-  "st.display.agent_indicator.desc": "Wygląd krawędzi strony, gdy WebBrain pracuje na karcie. Każdy styl przepuszcza Twoje kliknięcia i nie pojawia się na zrzutach ekranu.",
+  "st.display.agent_indicator.desc": "Tryb losowy wybiera inny efekt przy każdym uruchomieniu. Wybierz konkretny styl, aby zachować go na stałe.",
+  "st.display.agent_indicator.random": "Losowo przy każdym uruchomieniu (domyślnie)",
   "st.display.agent_indicator.circuit": "Obwód neuronowy",
   "st.display.agent_indicator.aurora": "Zorza",
   "st.display.agent_indicator.scan": "Skanowanie",

@@ -3,7 +3,9 @@
 // class `quality` is skipped: no refusal, note, caveat, judge or forced turn.
 // The hard classes, permission gates, host checks, budgets and user control
 // keep their behavior. Auto turns lean mode on only for a strong model on a
-// cloud provider at the Full tier. Real Agent run loops with a scripted
+// cloud provider at the Full tier, or relayed by a local relay to the cloud
+// (WebBrain Companion, the Local OpenAI-compatible Proxy), which defaults to
+// the Full tier (providers/prompt-tier.js). Real Agent run loops with a scripted
 // provider, both builds; the recipient case runs the real content script in
 // Chromium.
 import assert from 'node:assert/strict';
@@ -44,6 +46,7 @@ const names = tools => tools.map(tool => tool.function.name);
 
 test('lean-mode.js is shared verbatim by both builds', () => {
   assert.equal(read('src/chrome/src/agent/lean-mode.js'), read('src/firefox/src/agent/lean-mode.js'));
+  assert.equal(read('src/chrome/src/providers/prompt-tier.js'), read('src/firefox/src/providers/prompt-tier.js'));
 });
 
 test('docs/lean-mode.md says a lean run keeps its tools and names every quality guard lean mode keeps', async () => {
@@ -141,6 +144,9 @@ for (const build of ['chrome', 'firefox']) {
       [{ category: 'cloud', model: 'o4-mini', promptTier: 'full' }, true, 'strong_cloud_model'],
       [{ category: 'cloud', model: 'gemini-2.5-pro', promptTier: 'full' }, true, 'strong_cloud_model'],
       [{ category: 'cloud', model: 'gemini-3.1-pro', promptTier: 'full' }, true, 'strong_cloud_model'],
+      [{ category: 'cloud', model: 'gemini-3-flash-preview', promptTier: 'full' }, true, 'strong_cloud_model'],
+      [{ category: 'cloud', model: 'gemini-3.8-flash-high', promptTier: 'full' }, true, 'strong_cloud_model'],
+      [{ category: 'router', model: 'google/gemini-3-flash', promptTier: 'full' }, true, 'strong_cloud_model'],
       [{ category: 'cloud', model: 'grok-4', promptTier: 'full' }, true, 'strong_cloud_model'],
       [{ category: 'router', model: 'anthropic/claude-sonnet-4.5', promptTier: 'full' }, true, 'strong_cloud_model'],
       // The provider's tier vetoes Auto.
@@ -152,6 +158,7 @@ for (const build of ['chrome', 'firefox']) {
       [{ category: 'cloud', model: 'gpt-4o', promptTier: 'full' }, false, 'model_not_listed'],
       [{ category: 'cloud', model: 'gpt-5-nano', promptTier: 'full' }, false, 'model_not_listed'],
       [{ category: 'cloud', model: 'gemini-2.5-flash', promptTier: 'full' }, false, 'model_not_listed'],
+      [{ category: 'cloud', model: 'gemini-3.1-flash-lite', promptTier: 'full' }, false, 'model_not_listed'],
       [{ category: 'cloud', model: 'webbrain-cloud 1.0', promptTier: 'full' }, false, 'model_not_listed'],
       // Local providers never, whatever they serve.
       [{ category: 'local', type: 'openai', providerId: 'ollama', model: 'gpt-oss:120b', promptTier: 'mid' }, false, 'local_provider'],
@@ -163,6 +170,19 @@ for (const build of ['chrome', 'firefox']) {
       // Cloud is a cloud provider although its id starts with "ollama-".
       [{ category: 'cloud', type: 'openai', providerId: 'ollama-cloud', model: 'gemini-3-pro-preview', promptTier: 'full' }, true, 'strong_cloud_model'],
       [{ category: 'local', providerId: 'custom-cloud', model: 'gpt-5', promptTier: 'full' }, false, 'local_provider'],
+      // A local relay to the cloud is judged by the model it relays. It
+      // defaults to Full: a stored Mid is the old local default the settings
+      // page saved with it, and counts only once the user chose it.
+      [{ category: 'local', providerName: 'webbrain-companion', model: 'claude-sonnet-4-5', promptTier: 'mid' }, true, 'strong_relay_model'],
+      [{ category: 'local', providerName: 'webbrain-companion', model: 'claude-sonnet-4-5', promptTier: 'mid', promptTierChosen: true }, false, 'prompt_tier'],
+      [{ category: 'local', providerId: 'webbrain_companion', model: 'gpt-5.4', promptTier: 'mid' }, true, 'strong_relay_model'],
+      [{ category: 'local', providerId: 'webbrain_companion-2', model: 'claude-opus-5-5' }, true, 'strong_relay_model'],
+      [{ category: 'local', providerName: 'local-openai-proxy', model: 'gemini-3-pro-preview', promptTier: 'compact' }, true, 'strong_relay_model'],
+      [{ category: 'local', providerName: 'webbrain-companion', model: 'bonsai-2-27b', promptTier: 'mid' }, false, 'model_not_listed'],
+      [{ category: 'local', providerName: 'webbrain-companion', model: 'gemini-3.8-flash-high', promptTier: 'mid' }, true, 'strong_relay_model'],
+      [{ category: 'local', providerName: 'webbrain-companion', model: 'claude-haiku-5-5', promptTier: 'mid' }, false, 'model_not_listed'],
+      // Only those two are relays; another local server stays local.
+      [{ category: 'local', providerName: 'vllm', providerId: 'vllm', model: 'claude-sonnet-4-5', promptTier: 'full' }, false, 'local_provider'],
       // A blank configured model is unset: the provider's own model decides.
       [{ config: { category: 'cloud', model: '' }, model: 'claude-sonnet-5' }, true, 'strong_cloud_model'],
       [{ config: { category: 'cloud', model: '   ' }, model: 'gpt-5' }, true, 'strong_cloud_model'],
@@ -184,6 +204,33 @@ for (const build of ['chrome', 'firefox']) {
     assert.equal(lean.normalizeLeanModeSetting('ON'), 'on');
     assert.equal(lean.normalizeLeanModeSetting('maybe'), 'auto');
     assert.equal(lean.normalizeLeanModeSetting(undefined), 'auto');
+  });
+
+  test(`${build}: a local relay to the cloud runs at the Full tier unless the user chose another`, async () => {
+    const { resolvePromptTier, isLocalRelay } = await import(`../src/${build}/src/providers/prompt-tier.js`);
+    const companion = { category: 'local', providerName: 'webbrain-companion' };
+    assert.equal(resolvePromptTier(companion), 'full');
+    assert.equal(resolvePromptTier({ ...companion, promptTier: 'mid' }), 'full', 'the Mid the settings page used to save with it');
+    assert.equal(resolvePromptTier({ ...companion, promptTier: 'mid', promptTierChosen: true }), 'mid');
+    assert.equal(resolvePromptTier({ ...companion, promptTier: 'compact', promptTierChosen: true }), 'compact');
+    assert.equal(resolvePromptTier({ category: 'local', providerName: 'local-openai-proxy', promptTier: 'mid' }), 'full');
+    assert.equal(resolvePromptTier({ category: 'local', promptTier: 'mid' }, 'webbrain_companion_2'), 'full', 'an instance id names a relay too');
+    assert.equal(isLocalRelay({}, 'webbrain_companion-copy'), true);
+    assert.equal(isLocalRelay({ providerName: 'ollama' }, 'ollama'), false);
+    // Everything else as before.
+    assert.equal(resolvePromptTier({ category: 'local', providerName: 'ollama' }), 'mid');
+    assert.equal(resolvePromptTier({ category: 'local', promptTier: 'full' }), 'full');
+    assert.equal(resolvePromptTier({ category: 'local', useCompactPrompt: true }), 'compact');
+    assert.equal(resolvePromptTier({ category: 'router' }), 'full');
+    assert.equal(resolvePromptTier({ category: 'router', promptTier: 'mid' }), 'mid');
+    assert.equal(resolvePromptTier({ category: 'cloud', promptTier: 'compact' }), 'full');
+    // The settings page reads the same rule, and records a tier picked in its
+    // menu as the user's choice.
+    const settings = read(`src/${build}/src/ui/settings.js`);
+    assert.match(settings, /function effectivePromptTier\(config, providerId = ''\) \{\n  return resolvePromptTier\(\{ \.\.\.config, category: config\.category \|\| 'cloud' \}, providerId\);/);
+    assert.match(settings, /effectivePromptTier\(config, id\)/);
+    assert.match(settings, /select\[data-key="promptTier"\]'\)\.forEach\(\(select\) => \{\n    select\.addEventListener\('change', \(\) => \{ select\.dataset\.tierChosen = 'true'; \}\);/);
+    assert.match(settings, /if \(input\.dataset\.key === 'promptTier' && input\.dataset\.tierChosen === 'true'\) config\.promptTierChosen = true;/);
   });
 
   test(`${build}: Auto reads real provider instances: category, tier and model`, () => {
@@ -223,20 +270,44 @@ for (const build of ['chrome', 'firefox']) {
     assert.deepEqual(lean.resolveLeanMode('auto', { provider: built('ollama-cloud', { model: 'gemini-3-pro-preview', apiKey: 'test' }) }),
       { active: true, setting: 'auto', reason: 'strong_cloud_model', family: 'gemini' });
     assert.equal(lean.resolveLeanMode('auto', { provider: built('ollama', { model: 'gpt-5' }) }).reason, 'local_provider');
+    // From a trace: WebBrain Companion relays the user's cloud subscriptions
+    // but was taken for a local provider whatever it served, and its Mid tier,
+    // the local default saved with it, vetoed Auto again.
+    const companion = built('webbrain_companion', { model: 'claude-sonnet-4-5', promptTier: 'mid' });
+    assert.equal(companion.promptTier, 'full', 'a relay runs at Full unless the user chose another tier');
+    assert.deepEqual(lean.resolveLeanMode('auto', { provider: companion }),
+      { active: true, setting: 'auto', reason: 'strong_relay_model', family: 'claude' });
+    const companionMid = built('webbrain_companion', { model: 'claude-sonnet-4-5', promptTier: 'mid', promptTierChosen: true });
+    assert.equal(companionMid.promptTier, 'mid', 'a tier the user chose stands');
+    assert.equal(lean.resolveLeanMode('auto', { provider: companionMid }).reason, 'prompt_tier');
+    assert.deepEqual(lean.resolveLeanMode('auto', { provider: built('webbrain_companion', { model: 'gemini-3.8-flash-high' }) }),
+      { active: true, setting: 'auto', reason: 'strong_relay_model', family: 'gemini' });
+    // Real local runtimes keep their Mid default.
+    assert.equal(built('ollama', { model: 'qwen3:8b' }).promptTier, 'mid');
+    assert.equal(built('vllm', { model: 'qwen3:8b' }).promptTier, 'mid');
+    assert.deepEqual(lean.resolveLeanMode('auto', { provider: built('local_openai_proxy', { model: 'gpt-5', apiKey: 'test' }) }),
+      { active: true, setting: 'auto', reason: 'strong_relay_model', family: 'gpt' });
+    // The model the Companion runs itself is not a strong one.
+    assert.equal(lean.resolveLeanMode('auto', { provider: built('webbrain_companion', { model: 'bonsai-2-27b' }) }).reason, 'model_not_listed');
     // A cleared model setting means the provider's default, which for
     // Anthropic is claude-sonnet-5.
     const anthropic = built('anthropic', { model: '', apiKey: 'test' });
     assert.equal(anthropic.model, 'claude-sonnet-5');
     assert.deepEqual(lean.resolveLeanMode('auto', { provider: anthropic }),
       { active: true, setting: 'auto', reason: 'strong_cloud_model', family: 'claude' });
-    // Auto agrees with ProviderManager.categoryFor on every built-in, and a
-    // built-in whose default URL is on this machine is local.
+    // Auto agrees with ProviderManager.categoryFor on every built-in except
+    // the two local relays to the cloud, and every other built-in whose
+    // default URL is on this machine is local.
+    const relays = ['webbrain_companion', 'local_openai_proxy'];
     for (const [id, config] of Object.entries(defaults)) {
       const category = ProviderManager.categoryFor(id, config);
       const info = lean.leanProviderInfo({ config: { ...config, category, _providerId: id } });
-      assert.equal(info.local, category === 'local', `${id} is ${category}`);
-      assert.equal(info.cloud, category !== 'local', `${id} is ${category}`);
-      if (/^https?:\/\/(?:localhost|127\.0\.0\.1|\[::1\])[:/]/.test(String(config.baseUrl || ''))) assert.ok(info.local, `${id} runs locally`);
+      const relay = relays.includes(id);
+      assert.equal(info.relay, relay, `${id} relay`);
+      if (relay) assert.equal(category, 'local', `${id} is a local address`);
+      assert.equal(info.local, category === 'local' && !relay, `${id} is ${category}`);
+      assert.equal(info.cloud, category !== 'local' || relay, `${id} is ${category}`);
+      if (!relay && /^https?:\/\/(?:localhost|127\.0\.0\.1|\[::1\])[:/]/.test(String(config.baseUrl || ''))) assert.ok(info.local, `${id} runs locally`);
     }
   });
 
@@ -312,6 +383,27 @@ for (const build of ['chrome', 'firefox']) {
     for (const [id, reason] of Object.entries(lean.LEAN_KEPT_QUALITY_GUARDS)) {
       assert.equal(policy.guardEntry(id)?.class, 'quality', id);
       assert.ok(reason.length > 20, id);
+    }
+  });
+
+  test(`${build}: switching off action guards skips every hard and quality check independently of Lean and Strict`, () => {
+    const agent = new Agent({ getActive: () => STRONG });
+    for (const leanMode of ['off', 'on']) {
+      for (const strict of [false, true]) {
+        const tab = nextTab++;
+        agent.leanMode = leanMode;
+        agent.strictGuards = strict;
+        agent.enforceActionGuards = false;
+        agent._beginLeanRun(tab, 'act');
+        agent.enforceActionGuards = true;
+        for (const [id, entry] of Object.entries(policy.GUARDS)) {
+          const skip = entry.class === 'quality' || policy.isHardGuardClass(entry.class);
+          for (const decided of [true, false]) {
+            assert.equal(agent._guardOutcome(id, { decided, tabId: tab }),
+              skip ? 'skip' : policy.guardOutcome(id, { decided, strict }), id);
+          }
+        }
+      }
     }
   });
 
@@ -496,16 +588,19 @@ for (const build of ['chrome', 'firefox']) {
     assert.match(String(result), /./);
   });
 
-  test(`${build}: a lean run still asks the site permission gate before acting`, async () => {
-    const tab = nextTab++;
-    const h = runAgent(n => (n === 1 ? call('save', 'click_ax', { ref_id: 'ref_save' }) : call('done', 'done', { summary: 'Could not save.', outcome: 'failed' })));
-    h.agent._skipPermissionGate = false;
-    h.agent._ensureGateSetting = async () => false;
-    h.agent.permissions.check = () => ({ allowed: false, needsPrompt: false }); // a standing deny for this site
-    await h.agent.processMessage(tab, 'Save the owned profile.', () => {}, 'act', [], { detachedRequestId: `lean-${tab}` });
-    assert.equal(h.dispatched.includes('click_ax'), false, 'the denied click was not dispatched');
-    assert.ok(h.agent.conversations.get(tab).some(message => message.role === 'tool' && /denied permission/.test(String(message.content))));
-  });
+  for (const enforceActionGuards of [true, false]) {
+    test(`${build}: a site denial blocks the action with enforcement ${enforceActionGuards ? 'on' : 'off'}`, async () => {
+      const tab = nextTab++;
+      const h = runAgent(n => (n === 1 ? call('save', 'click_ax', { ref_id: 'ref_save' }) : call('done', 'done', { summary: 'Could not save.', outcome: 'failed' })));
+      h.agent.enforceActionGuards = enforceActionGuards;
+      h.agent._skipPermissionGate = false;
+      h.agent._ensureGateSetting = async () => false;
+      h.agent.permissions.check = () => ({ allowed: false, needsPrompt: false }); // a standing deny for this site
+      await h.agent.processMessage(tab, 'Save the owned profile.', () => {}, 'act', [], { detachedRequestId: `lean-${tab}` });
+      assert.equal(h.dispatched.includes('click_ax'), false, 'the denied click was not dispatched');
+      assert.ok(h.agent.conversations.get(tab).some(message => message.role === 'tool' && /denied permission/.test(String(message.content))));
+    });
+  }
 
   // ── Handlers ────────────────────────────────────────────────────────────
   test(`${build}: a lean done takes no screenshot and asks no judge; a chat receipt that cannot be saved still refuses`, async () => {
@@ -810,6 +905,10 @@ for (const build of ['chrome', 'firefox']) {
     assert.equal(block.mutationConfirmation?.reason, 'not_named', 'the deletion card is offered');
     assert.equal(block.noDispatch, true);
     assert.equal(calls.filter(item => item.kind === 'deletion_request').length, 1, 'the deletion decision still runs');
+    agent.enforceActionGuards = false;
+    agent._beginLeanRun(tab, 'act');
+    assert.equal(await agent._resourceMutationPreSubmitBlock(tab, 'click_ax', { ref_id: 'ref_42' }, detected, provider), null);
+    assert.equal(calls.filter(item => item.kind === 'deletion_request').length, 1, 'no second deletion decision or card');
   });
 
   test(`${build}: settings, background, export and locales carry the setting`, async () => {
@@ -822,7 +921,7 @@ for (const build of ['chrome', 'firefox']) {
     assert.match(settings, /'strictGuards', 'leanMode'/);
     assert.match(settings, /leanModeSelect\.value = normalizeLeanModeSetting\(stored\.leanMode\)/);
     assert.match(settings, new RegExp(`await ${runtime}\\.storage\\.local\\.set\\(\\{ leanMode: normalizeLeanModeSetting\\(leanModeSelect\\.value\\) \\}\\)`));
-    assert.match(background, /get\(\['strictSecretMode', 'strictGuards', 'leanMode'\]\)/);
+    assert.match(background, /get\(\['strictSecretMode', 'enforceActionGuards', 'strictGuards', 'leanMode'\]\)/);
     assert.match(background, /agent\.leanMode = normalizeLeanModeSetting\(stored\?\.leanMode\);/);
     assert.match(background, /if \(changes\.leanMode\) \{\s*agent\.leanMode = normalizeLeanModeSetting\(changes\.leanMode\.newValue\);/);
     const config = await import(`../src/${build}/src/config-transfer.js`);
@@ -832,7 +931,12 @@ for (const build of ['chrome', 'firefox']) {
     const exported = config.createConfigExport({});
     assert.equal(config.parseConfigImport(JSON.stringify({ ...exported, settings: { ...exported.settings, leanMode: 'off' } })).settings.leanMode, 'off');
     assert.throws(() => config.parseConfigImport(JSON.stringify({ ...exported, settings: { ...exported.settings, leanMode: 'maybe' } })), /leanMode/);
-    // Every locale has real copy for the five strings.
+    assert.equal(exported.settings.enforceActionGuards, true);
+    assert.equal(config.parseConfigImport(JSON.stringify({ ...exported, settings: { leanMode: 'on' } })).settings.enforceActionGuards, true);
+    const off = config.createConfigExport({ enforceActionGuards: false, leanMode: 'off' });
+    assert.equal(config.parseConfigImport(JSON.stringify(off)).settings.enforceActionGuards, false);
+    assert.throws(() => config.parseConfigImport(JSON.stringify({ ...exported, settings: { enforceActionGuards: 'false' } })), /enforceActionGuards/);
+    // Every locale has a label and explanation for each setting.
     const dir = path.join(ROOT, `src/${build}/src/ui/locales`);
     const english = (await import(`../src/${build}/src/ui/locales/en.js`)).default;
     assert.match(english['st.display.lean_mode.desc'], /^For strong models: no automatic checks of typing[\s\S]*who receives a message, deleting data, spending money, credentials, publishing something you didn’t ask for, and site permissions/);
@@ -845,11 +949,39 @@ for (const build of ['chrome', 'firefox']) {
       for (const key of ['label', 'desc', 'auto', 'on', 'off']) {
         assert.ok(String(dict[`st.display.lean_mode.${key}`] || '').trim(), `${file}: ${key}`);
       }
+      for (const key of ['label', 'desc']) {
+        const id = 'st.display.action_guards.' + key;
+        assert.ok(dict[id]?.trim(), file + ' ' + id);
+        if (file !== 'en.js') assert.notEqual(dict[id], english[id], file + ' ' + id);
+      }
       if (file !== 'en.js') {
         assert.notEqual(dict['st.display.lean_mode.desc'], english['st.display.lean_mode.desc'], `${file}: translated description`);
         assert.notEqual(dict['st.display.lean_mode.label'], english['st.display.lean_mode.label'], `${file}: translated label`);
       }
     }
+  });
+
+  test(`${build}: a delayed storage read cannot undo a newer action-guard preference`, async () => {
+    const source = read(`src/${build}/src/background.js`);
+    const load = source.slice(source.indexOf('let actionGuardsSettingsRevision'), source.indexOf('const strictSecretModeReady'));
+    const change = source.match(/if \(areaName === 'local' && changes\.enforceActionGuards\) \{[^}]*\}/)[0];
+    let answer;
+    const agent = { enforceActionGuards: true };
+    const api = { storage: { local: { get: () => new Promise(resolve => { answer = resolve; }) } } };
+    const settings = vm.runInNewContext(`${load}; ({ load: loadStrictSecretMode, change(changes, areaName) { ${change} } })`,
+      { agent, chrome: api, browser: api, normalizeLeanModeSetting: lean.normalizeLeanModeSetting });
+    for (const value of [false, true]) {
+      const pending = settings.load();
+      settings.change({ enforceActionGuards: { newValue: value } }, 'local');
+      answer({ enforceActionGuards: !value });
+      await pending;
+      assert.equal(agent.enforceActionGuards, value);
+    }
+    settings.change({ enforceActionGuards: { newValue: false } }, 'sync');
+    assert.equal(agent.enforceActionGuards, true);
+    settings.change({ enforceActionGuards: { newValue: false } }, 'local');
+    settings.change({ enforceActionGuards: { oldValue: false } }, 'local');
+    assert.equal(agent.enforceActionGuards, true, 'removing the preference restores the default');
   });
 
   test(`${build}: traces and the scheduler know which mode ran`, async () => {
@@ -863,6 +995,10 @@ for (const build of ['chrome', 'firefox']) {
     const config = agent._runtimeTraceConfig(STRONG, { tabId: tab, mode: 'act' });
     assert.equal(config.lean_mode, true);
     assert.equal(config.lean_mode_setting, 'auto');
+    assert.equal(runtimeConfig.normalizeRuntimeTraceConfig(config).enforce_action_guards, true);
+    agent.enforceActionGuards = false;
+    agent._beginLeanRun(tab, 'act');
+    assert.equal(runtimeConfig.normalizeRuntimeTraceConfig(agent._runtimeTraceConfig(STRONG, { tabId: tab, mode: 'act' })).enforce_action_guards, false);
     assert.match(read(`src/${build}/src/agent/agent.js`), /trace\.recordNote\(runId, null, 'lean_mode', \{/);
     // The scheduler's opt-in System One judge is a quality check.
     const { ScheduledJobManager } = await import(`../src/${build}/src/agent/scheduler.js`);

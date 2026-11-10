@@ -8,6 +8,8 @@ import { getApocalypseModeCopy } from './apocalypse-copy.mjs';
 import { getEmergencyBoxCopy } from './emergency-copy.mjs';
 
 export default {
+  "st.display.action_guards.label": "Перевіряти дії перед виконанням",
+  "st.display.action_guards.desc": "Перевіряє отримувача та важливі дії перед виконанням. Якщо вимкнути, модель сама вирішує, коли надсилати, повторювати, видаляти чи публікувати. Дозволи сайту залишаються чинними. Зміна діє з наступного запуску.",
   'st.providers.title': 'Назва постачальника',
   ...getGenerativeMediaCopy('uk'),
   ...bidiCopy,
@@ -1401,7 +1403,8 @@ export default {
   'sp.response.incomplete_retrying': "Неповна відповідь · повторна спроба…",
   'sp.response.incomplete': "Неповна відповідь",
   "st.display.agent_indicator.label": "Ефект активності агента",
-  "st.display.agent_indicator.desc": "Як виглядають краї сторінки, поки WebBrain працює у вкладці. Усі стилі пропускають ваші кліки й не потрапляють на знімки екрана.",
+  "st.display.agent_indicator.desc": "Випадковий режим обирає інший ефект під час кожного запуску. Оберіть певний стиль, щоб закріпити його.",
+  "st.display.agent_indicator.random": "Випадково під час кожного запуску (типово)",
   "st.display.agent_indicator.circuit": "Нейронна схема",
   "st.display.agent_indicator.aurora": "Сяйво",
   "st.display.agent_indicator.scan": "Сканування",

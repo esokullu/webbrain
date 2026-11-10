@@ -427,6 +427,7 @@ class MurshidWindow {
       webBrain: this.ctx.webBrainInfo(),
       wallet: { pending: this.ctx.wallet?.pendingCount() || 0 },
       downloads: this.ctx.downloads?.summary() || null,
+      updates: this.ctx.updates?.snapshot() || null,
     });
   }
 
