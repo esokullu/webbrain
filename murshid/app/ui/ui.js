@@ -59,6 +59,7 @@ const els = {
   downloadRing: $('download-ring'),
   menu: $('menu'),
   updates: $('updates'),
+  adblock: $('adblock'),
   findbar: $('findbar'),
   findInput: $('find-input'),
   findCount: $('find-count'),
@@ -269,6 +270,18 @@ function renderToolbar() {
   els.walletBadge.hidden = !waiting;
   els.wallet.title = waiting ? t('ui.walletWaiting') : t('ui.walletTip');
 
+  // The shield: ads and trackers blocked on this site, or allowed here.
+  const adblock = state.adblock;
+  els.adblock.hidden = !adblock;
+  if (adblock) {
+    const label = t(adblock.allowed ? 'ui.adblockAllowed' : 'ui.adblockBlocking', { host: adblock.site });
+    els.adblock.title = label;
+    els.adblock.setAttribute('aria-label', label);
+    els.adblock.setAttribute('aria-pressed', String(!adblock.allowed));
+    els.adblock.classList.toggle('allowed', adblock.allowed);
+    els.adblock.querySelector('use').setAttribute('href', adblock.allowed ? '#i-shield-off' : '#i-shield');
+  }
+
   els.updates.hidden = !['available', 'ready'].includes(state.updates?.status);
   if (!els.updates.hidden) {
     const label = t('menu.updateAvailable', { version: state.updates.latestVersion });
@@ -318,6 +331,7 @@ els.reload.addEventListener('click', () => api.invoke(activeTab()?.loading ? 'st
 els.updates.addEventListener('click', () => api.invoke('updates'));
 els.webbrain.addEventListener('click', () => api.invoke('webBrain'));
 els.wallet.addEventListener('click', () => api.invoke('wallet'));
+els.adblock.addEventListener('click', () => api.invoke('adblockSite'));
 els.menu.addEventListener('click', () => {
   const r = els.menu.getBoundingClientRect();
   api.invoke('mainMenu', { x: r.right - 4, y: r.bottom + 2 });

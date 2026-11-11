@@ -164,6 +164,18 @@ const ctx = {
     if (w.walletOpen) w.closeWallet();
     else w.openWallet();
   },
+  /** The site in this tab whose ads Murshid blocks or allows, with the choice; null when it filters nothing there. */
+  adblockSite(tab) {
+    const site = this.adblock?.enabled ? this.adblock.siteOf(tab?.url) : null;
+    return site ? { site, allowed: this.adblock.isAllowed(site) } : null;
+  },
+  /** Allows ads on the tab's site, or blocks them again, and reloads it (the toolbar shield, the ⋮ menu). */
+  toggleAdblock(tab) {
+    const current = this.adblockSite(tab);
+    if (!current) return;
+    this.adblock.setAllowed(current.site, !current.allowed);
+    if (!tab.wc.isDestroyed()) tab.wc.reload();
+  },
   sendExtensionCommand(w, name) {
     if (!this.webBrainId || !w?.activeTab) return;
     const details = this.extensions.ctx?.store?.tabDetailsCache?.get(w.activeTab.id);
@@ -195,6 +207,10 @@ async function start() {
   ctx.adblock = new Adblock({ settings: ctx.settings, userData: ctx.userData });
   identity.install(ses, ctx.settings, ctx);
   ctx.adblock.install(ses);
+  // The toolbar shield follows the setting and the per-site choices.
+  ctx.settings.on('changed', (key) => {
+    if (key === 'adblock' || key === 'adblockAllowedSites') ctx.refreshAllWindows();
+  });
   handleProtocol(ses);
 
   // Order matters: Murshid's "pre" preload adds APIs before
@@ -439,6 +455,9 @@ function installUiIpc() {
       case 'wallet':
         ctx.toggleWallet(w);
         return null;
+      case 'adblockSite':
+        ctx.toggleAdblock(tab);
+        return null;
       case 'panelClose':
         ctx.crx.closePanelInWindow(w);
         return null;
@@ -452,7 +471,8 @@ function installUiIpc() {
         endPanelDrag(w);
         return null;
       case 'updates':
-        return ctx.commands.run.updates(w);
+        ctx.commands.run.updates(w);
+        return null;
       case 'mainMenu':
         popupMainMenu(ctx, w, args[0] || { x: 0, y: 0 });
         return null;

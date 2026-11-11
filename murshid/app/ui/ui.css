@@ -350,6 +350,11 @@ html[dir="rtl"] .tab .title { mask-image: linear-gradient(270deg, #000 calc(100%
 .toolbar-pill.open { background: var(--gold-soft); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--gold) 55%, transparent); }
 .toolbar-pill[disabled] { opacity: 0.45; }
 
+/* The ad blocker for this site: a gold shield while it blocks, a crossed-out
+   faint one where ads are allowed. */
+#adblock svg { width: 19px; height: 19px; color: var(--gold); }
+#adblock.allowed svg { color: var(--muted); }
+
 #downloads i {
   position: absolute;
   inset: 3px;
