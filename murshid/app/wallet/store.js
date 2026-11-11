@@ -78,6 +78,7 @@ class Wallet extends EventEmitter {
     this.requests = new Map(); // id -> request from a website
     this.reviews = new Map(); // id -> transfer shown for confirmation
     this.sends = new Map(); // network id -> transfers sent (or about to be) on it
+    this.sendQueue = new Map(); // network id -> the send running on it, for the next to wait on
     this.lockTimer = null;
     this.fetchFn = fetchFn;
     this.bitcoinClient = null; // made on first use, with its library
@@ -456,17 +457,42 @@ class Wallet extends EventEmitter {
     const review = this.reviews.get(id);
     this.reviews.delete(id);
     if (!review || review.expires < this.now() || review.identity !== this.identity()) throw new WalletError('expired');
-    this.dropReviews(review.net.id);
-    let hash;
-    if (review.net.kind === 'bitcoin') {
-      const signed = bitcoinLib().signPayment(review.payment, keys.bitcoin.privateKey);
-      hash = await this.bitcoin.broadcast(signed.hex);
-    } else {
-      hash = await this.evm.send(review.net, keys.evm.account, review.prepared);
+    this.dropReviews(review.net.id); // now, before another confirm can pick one up
+    return this.sending(review.net.id, async () => {
+      let hash;
+      if (review.net.kind === 'bitcoin') {
+        const signed = bitcoinLib().signPayment(review.payment, keys.bitcoin.privateKey);
+        hash = await this.bitcoin.broadcast(signed.hex);
+      } else {
+        hash = await this.evm.send(review.net, keys.evm.account, review.prepared);
+      }
+      const url = review.net.txUrl(hash);
+      this.emit('notice', { kind: 'sent', url });
+      return { hash, url };
+    });
+  }
+
+  /**
+   * Runs a send on a network after any send already running there, never at
+   * the same time. Until the node has it, the node still reports the old nonce
+   * or unspent coins, so every review built before it finishes (including
+   * one started while it was on its way) is dropped once more when it ends.
+   */
+  async sending(networkId, send) {
+    const previous = this.sendQueue.get(networkId) || Promise.resolve();
+    let release;
+    const done = new Promise((resolve) => { release = resolve; });
+    const mine = previous.then(() => done);
+    this.sendQueue.set(networkId, mine);
+    await previous;
+    this.dropReviews(networkId);
+    try {
+      return await send();
+    } finally {
+      this.dropReviews(networkId);
+      release();
+      if (this.sendQueue.get(networkId) === mine) this.sendQueue.delete(networkId);
     }
-    const url = review.net.txUrl(hash);
-    this.emit('notice', { kind: 'sent', url });
-    return { hash, url };
   }
 
   // ------------------------------------------- requests from websites

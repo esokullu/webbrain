@@ -289,11 +289,14 @@ class Provider {
       if (details.blocked) throw new WalletError('willFail', failure);
       if (this.wallet.evmNetwork().chainId !== net.chainId) throw new WalletError('failed', 'the network changed');
       const { account } = this.wallet.requireKeys().evm;
-      this.wallet.dropReviews(net.id); // transfers reviewed in the panel would reuse this nonce
-      const prepared = await this.wallet.evm.prepare(net, account, request);
-      const hash = await this.wallet.evm.send(net, account, prepared);
-      this.wallet.emit('notice', { kind: 'sent', url: net.txUrl(hash) });
-      return hash;
+      // One send at a time on this network, so this one takes the next nonce;
+      // transfers reviewed in the panel meanwhile are reviewed again.
+      return this.wallet.sending(net.id, async () => {
+        const prepared = await this.wallet.evm.prepare(net, account, request);
+        const hash = await this.wallet.evm.send(net, account, prepared);
+        this.wallet.emit('notice', { kind: 'sent', url: net.txUrl(hash) });
+        return hash;
+      });
     });
   }
 

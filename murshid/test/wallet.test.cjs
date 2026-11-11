@@ -698,6 +698,51 @@ test('a review still being built when a transfer goes out on its network is not 
   await wallet.confirm((await wallet.review({ ...transfer, network: 'arbitrum' })).id);
 });
 
+test('a review built while a send is still on its way is not kept, and sends on a network go one at a time', async () => {
+  const wallet = await readyWallet();
+  const provider = new Provider(wallet);
+  wallet.connect(SITE.origin);
+  wallet.setEvmChain(8453);
+  wallet.evm.balance = async () => 10n ** 18n;
+  let nonce = 4; // what the node reports: it moves only once a send has reached it
+  let pause = null;
+  const sent = [];
+  let inFlight = 0;
+  wallet.evm.prepare = async (net, account, tx) => ({ request: { ...tx, gas: 21000n, maxFeePerGas: 1n, maxPriorityFeePerGas: 1n, nonce: tx.nonce ?? nonce }, fee: 21000n, l1Fee: 0n });
+  wallet.evm.send = async (net, account, prepared) => {
+    inFlight += 1;
+    assert.equal(inFlight, 1, 'never two sends at once on one network');
+    if (pause) await pause;
+    sent.push(prepared.request.nonce);
+    nonce += 1;
+    inFlight -= 1;
+    return `0x${String(sent.length).padStart(64, '0')}`;
+  };
+  const transfer = { network: 'base', to: '0x000000000000000000000000000000000000dEaD', amount: '0.01' };
+
+  // The first send is on its way while another window builds and finishes a review.
+  const first = await wallet.review(transfer);
+  let release;
+  pause = new Promise((resolve) => { release = resolve; });
+  const sending = wallet.confirm(first.id);
+  await new Promise((resolve) => setImmediate(resolve));
+  const second = await wallet.review(transfer); // the node still says nonce 4
+  pause = null;
+  release();
+  await sending;
+  await assert.rejects(wallet.confirm(second.id), { code: 'expired' });
+
+  // A site's transaction and a panel transfer at the same moment: one after the other, nonces 5 and 6.
+  const third = await wallet.review(transfer);
+  const queued = nextRequest(wallet);
+  const siteTx = provider.handle(SITE, 'eth_sendTransaction', [{ to: EVM_ADDRESS, value: '0x1' }]);
+  const request = await queued;
+  const results = await Promise.allSettled([wallet.confirm(third.id), wallet.approve(request.id)]);
+  assert.deepEqual(results.map((r) => r.status), ['fulfilled', 'fulfilled']);
+  await siteTx;
+  assert.deepEqual(sent, [4, 5, 6]);
+});
+
 test('read-only calls go to the node; requests from a page that went away are dropped', async () => {
   const wallet = await readyWallet();
   const provider = new Provider(wallet);
