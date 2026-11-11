@@ -8,7 +8,7 @@ const viem = require('viem');
 const actions = require('viem/actions');
 const { estimateL1Fee } = require('viem/op-stack');
 const { OP_STACK_GAS_ORACLE } = require('./networks');
-const { WalletError } = require('./vault');
+const { WalletError } = require('./errors');
 
 // What websites may ask the node through the wallet: reading only. Anything
 // that signs, sends or changes the wallet goes through an approval instead.

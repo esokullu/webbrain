@@ -24,8 +24,7 @@ function defaultFetch() {
  */
 function createFetch(base = null, { timeoutMs = TIMEOUT_MS } = {}) {
   // The wallet's session is made on its first request, not while Murshid
-  // starts: a session created before WebBrain loads stops WebBrain's
-  // service worker from registering.
+  // starts, so starting up stays as light as it was without a wallet.
   const inner = base || ((url, init) => defaultFetch()(url, init));
   return async function walletFetch(url, init = {}) {
     const controller = new AbortController();

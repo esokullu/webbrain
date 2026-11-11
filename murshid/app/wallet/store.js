@@ -11,13 +11,16 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { EventEmitter } = require('node:events');
 const { randomUUID } = require('node:crypto');
-const { formatUnits, parseUnits } = require('viem');
-const encodeQR = require('@paulmillr/qr').default;
-const vault = require('./vault');
-const { WalletError } = vault;
+const { formatUnits, parseUnits } = require('./units');
+const { WalletError } = require('./errors');
 const networks = require('./networks');
-const { BitcoinClient, buildPayment, signPayment, validAddress: validBitcoinAddress, SPEEDS } = require('./bitcoin');
-const { EvmClient, validAddress: validEvmAddress } = require('./evm');
+// The crypto libraries (viem, the BIP39/32 and Bitcoin signers, the QR
+// encoder) take seconds to load, so they are loaded on first use: unlocking,
+// a balance, a signature, a site's RPC call. Starting Murshid, and answering
+// a page that only asks for the chain or its accounts, touch none of them.
+const vault = () => require('./vault');
+const bitcoinLib = () => require('./bitcoin');
+const evmLib = () => require('./evm');
 
 const FILE = 'murshid-wallet.json';
 const AUTO_LOCK_MS = 30 * 60 * 1000;
@@ -75,9 +78,22 @@ class Wallet extends EventEmitter {
     this.requests = new Map(); // id -> request from a website
     this.reviews = new Map(); // id -> transfer shown for confirmation
     this.lockTimer = null;
-    this.bitcoin = new BitcoinClient(fetchFn);
-    this.evm = new EvmClient(fetchFn);
+    this.fetchFn = fetchFn;
+    this.bitcoinClient = null; // made on first use, with its library
+    this.evmClient = null;
     this.load();
+  }
+
+  /** The Bitcoin network client (loads the Bitcoin library the first time). */
+  get bitcoin() {
+    if (!this.bitcoinClient) this.bitcoinClient = new (bitcoinLib().BitcoinClient)(this.fetchFn);
+    return this.bitcoinClient;
+  }
+
+  /** The EVM network client (loads viem the first time). */
+  get evm() {
+    if (!this.evmClient) this.evmClient = new (evmLib().EvmClient)(this.fetchFn);
+    return this.evmClient;
   }
 
   // ---------------------------------------------------------------- file
@@ -141,7 +157,7 @@ class Wallet extends EventEmitter {
   createPhrase() {
     if (this.exists) throw new WalletError('failed', 'a wallet already exists');
     if (!this.pendingPhrase) {
-      this.pendingPhrase = { id: randomUUID(), phrase: vault.newPhrase() };
+      this.pendingPhrase = { id: randomUUID(), phrase: vault().newPhrase() };
       this.changed();
     }
     return { id: this.pendingPhrase.id, words: this.pendingPhrase.phrase.split(' ') };
@@ -162,24 +178,24 @@ class Wallet extends EventEmitter {
   }
 
   async importPhrase(phrase, password) {
-    if (!vault.validPhrase(phrase)) throw new WalletError('invalidPhrase');
-    await this.setup(vault.normalizePhrase(phrase), password);
+    if (!vault().validPhrase(phrase)) throw new WalletError('invalidPhrase');
+    await this.setup(vault().normalizePhrase(phrase), password);
   }
 
   async setup(phrase, password) {
     // Claimed before the slow encryption: two panels finishing at once must not
     // both succeed, the second quietly replacing the first wallet.
     if (this.exists || this.settingUp) throw new WalletError('failed', 'a wallet already exists');
-    vault.checkPassword(password);
+    vault().checkPassword(password);
     this.settingUp = true;
     let box;
     try {
-      box = await vault.seal(phrase, password);
+      box = await vault().seal(phrase, password);
     } finally {
       this.settingUp = false;
     }
     if (this.exists) throw new WalletError('failed', 'a wallet already exists');
-    const keys = vault.deriveKeys(phrase);
+    const keys = vault().deriveKeys(phrase);
     if (this.unreadable && fs.existsSync(this.file)) {
       fs.renameSync(this.file, `${this.file}.unreadable-${this.now()}`);
       this.unreadable = false;
@@ -203,19 +219,19 @@ class Wallet extends EventEmitter {
   async unlock(password) {
     if (!this.exists) throw new WalletError('failed', 'no wallet');
     const vaultBox = this.data.vault;
-    const phrase = await vault.open(vaultBox, password);
+    const phrase = await vault().open(vaultBox, password);
     // Reset, or replaced from another window, while the password was checked.
     if (!this.exists || this.data.vault !== vaultBox) throw new WalletError('failed', 'the wallet changed');
-    const keys = vault.deriveKeys(phrase);
+    const keys = vault().deriveKeys(phrase);
     if (keys.bitcoin.address !== this.data.addresses.bitcoin || keys.evm.address !== this.data.addresses.evm) {
-      vault.wipeKeys(keys);
+      vault().wipeKeys(keys);
       throw new WalletError('failed', 'the wallet file does not match its keys');
     }
     this.setKeys(keys);
   }
 
   setKeys(keys) {
-    if (this.keys && this.keys !== keys) vault.wipeKeys(this.keys);
+    if (this.keys && this.keys !== keys) vault().wipeKeys(this.keys);
     this.keys = keys;
     this.touch();
     // A site that was connected before the wallet locked needs nothing more.
@@ -228,7 +244,7 @@ class Wallet extends EventEmitter {
 
   lock() {
     if (!this.keys) return;
-    vault.wipeKeys(this.keys);
+    vault().wipeKeys(this.keys);
     this.keys = null;
     this.reviews.clear();
     clearTimeout(this.lockTimer);
@@ -253,7 +269,7 @@ class Wallet extends EventEmitter {
 
   async revealPhrase(password) {
     if (!this.exists) throw new WalletError('failed', 'no wallet');
-    return (await vault.open(this.data.vault, password)).split(' ');
+    return (await vault().open(this.data.vault, password)).split(' ');
   }
 
   /** Erases the wallet from this computer. */
@@ -354,7 +370,7 @@ class Wallet extends EventEmitter {
     const address = net.kind === 'bitcoin' ? this.data.addresses.bitcoin : this.data.addresses.evm;
     // BIP21 for Bitcoin; a bare address for Ethereum, which every wallet's scanner reads.
     const uri = net.kind === 'bitcoin' ? `bitcoin:${address}` : address;
-    const svg = encodeQR(uri, 'svg', { ecc: 'medium', border: 1 });
+    const svg = require('@paulmillr/qr').default(uri, 'svg', { ecc: 'medium', border: 1 });
     return { network: net.id, address, uri, qr: `data:image/svg+xml;base64,${Buffer.from(svg).toString('base64')}`, explorer: net.addressUrl(address) };
   }
 
@@ -371,14 +387,14 @@ class Wallet extends EventEmitter {
     const net = networks.byId(network);
     if (!net) throw new WalletError('failed', 'unknown network');
     const target = String(to || '').trim();
-    const valid = net.kind === 'bitcoin' ? validBitcoinAddress(target) : validEvmAddress(target);
+    const valid = net.kind === 'bitcoin' ? bitcoinLib().validAddress(target) : evmLib().validAddress(target);
     if (!valid) throw new WalletError('invalidAddress');
     const value = max ? null : parseAmount(amount, net.decimals);
     let review;
     if (net.kind === 'bitcoin') {
-      if (!SPEEDS.includes(speed)) throw new WalletError('failed', 'unknown speed');
+      if (!bitcoinLib().SPEEDS.includes(speed)) throw new WalletError('failed', 'unknown speed');
       const [utxos, fees] = await Promise.all([this.bitcoin.utxos(keys.bitcoin.address), this.bitcoin.fees()]);
-      const payment = buildPayment({
+      const payment = bitcoinLib().buildPayment({
         address: keys.bitcoin.address, publicKey: keys.bitcoin.publicKey, utxos, to: target, amount: value, max, feeRate: fees[speed],
       });
       review = { net, payment, amount: payment.amount, fee: payment.fee, feeRate: payment.feeRate };
@@ -437,7 +453,7 @@ class Wallet extends EventEmitter {
     this.dropReviews(review.net.id);
     let hash;
     if (review.net.kind === 'bitcoin') {
-      const signed = signPayment(review.payment, keys.bitcoin.privateKey);
+      const signed = bitcoinLib().signPayment(review.payment, keys.bitcoin.privateKey);
       hash = await this.bitcoin.broadcast(signed.hex);
     } else {
       hash = await this.evm.send(review.net, keys.evm.account, review.prepared);

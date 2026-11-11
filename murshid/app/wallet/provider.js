@@ -5,10 +5,11 @@
 // networks wait in the wallet's queue until the user approves them in the
 // wallet panel. The origin comes from the main process, never from the page.
 
-const viem = require('viem');
 const networks = require('./networks');
-const { WalletError } = require('./vault');
-const { quantity, hexData, describeCall, signTypedData, typedDataChain, validAddress, READ_ONLY_METHODS } = require('./evm');
+const { WalletError } = require('./errors');
+// viem and the EVM helpers load on first use, not while Murshid starts.
+const evm = () => require('./evm');
+const viem = () => require('viem');
 const { displayAmount, displayFee } = require('./store');
 
 class ProviderError extends Error {
@@ -169,7 +170,7 @@ class Provider {
         // It signs any hash, so a site can get a transaction signed without saying so.
         throw new ProviderError(4200, 'eth_sign is disabled. Use personal_sign or eth_signTypedData_v4.');
       default:
-        if (READ_ONLY_METHODS.has(method)) {
+        if (evm().READ_ONLY_METHODS.has(method)) {
           if (!this.wallet.exists) throw new WalletError('disconnected');
           return this.wallet.evm.rpc(net, method, list);
         }
@@ -182,7 +183,7 @@ class Provider {
     let message = first;
     let address = second;
     // Some sites still send [address, message].
-    if (validAddress(first) && !validAddress(second) && sameAddress(first, this.address())) [message, address] = [second, first];
+    if (evm().validAddress(first) && !evm().validAddress(second) && sameAddress(first, this.address())) [message, address] = [second, first];
     if (typeof message !== 'string') throw invalid('personal_sign needs a message.');
     if (message.length > MAX_SHOWN) throw invalid('The message is too long to show for approval.');
     if (!sameAddress(address, this.address())) throw unauthorized();
@@ -210,18 +211,18 @@ class Provider {
     if (!parsed || typeof parsed !== 'object' || !parsed.types || !parsed.primaryType || !parsed.message) throw invalid('Incomplete typed data.');
     const json = JSON.stringify(parsed.message, null, 2);
     if (json.length > MAX_SHOWN) throw invalid('The typed data is too large to show for approval.');
-    const chain = typedDataChain(parsed);
+    const chain = evm().typedDataChain(parsed);
     const current = this.wallet.evmNetwork();
     const details = {
       primaryType: String(parsed.primaryType),
       domainName: parsed.domain?.name ? String(parsed.domain.name) : null,
-      contract: validAddress(parsed.domain?.verifyingContract) ? viem.getAddress(parsed.domain.verifyingContract) : null,
+      contract: evm().validAddress(parsed.domain?.verifyingContract) ? viem().getAddress(parsed.domain.verifyingContract) : null,
       chainMismatch: chain !== null && chain !== current.chainId ? (networks.byChainId(chain)?.name || String(chain)) : null,
       // Permit, Permit2 and the like move tokens later, with no transaction to approve.
       permit: /permit/i.test(String(parsed.primaryType)),
       json,
     };
-    return this.wallet.request('typed', site, details, async () => signTypedData(this.wallet.requireKeys().evm.account, parsed));
+    return this.wallet.request('typed', site, details, async () => evm().signTypedData(this.wallet.requireKeys().evm.account, parsed));
   }
 
   async sendTransaction(site, tx) {
@@ -229,20 +230,20 @@ class Provider {
     if (!tx || typeof tx !== 'object') throw invalid('eth_sendTransaction needs a transaction.');
     if (tx.from !== undefined && !sameAddress(tx.from, this.address())) throw unauthorized();
     const net = this.wallet.evmNetwork();
-    if (tx.chainId !== undefined && Number(quantity(tx.chainId, 'chainId')) !== net.chainId) throw invalid(`The wallet is on ${net.name} (chain ${net.chainId}).`);
-    if (tx.to !== undefined && tx.to !== null && !validAddress(tx.to)) throw invalid('Invalid "to" address.');
+    if (tx.chainId !== undefined && Number(evm().quantity(tx.chainId, 'chainId')) !== net.chainId) throw invalid(`The wallet is on ${net.name} (chain ${net.chainId}).`);
+    if (tx.to !== undefined && tx.to !== null && !evm().validAddress(tx.to)) throw invalid('Invalid "to" address.');
     // A nonce the site chose (to replace or cancel a pending transaction) is kept.
-    const nonce = quantity(tx.nonce, 'nonce');
+    const nonce = evm().quantity(tx.nonce, 'nonce');
     if (nonce !== undefined && nonce > BigInt(Number.MAX_SAFE_INTEGER)) throw invalid('Invalid nonce.');
     const request = {
-      to: tx.to ? viem.getAddress(tx.to) : undefined,
-      value: quantity(tx.value, 'value') ?? 0n,
-      data: hexData(tx.data ?? tx.input),
-      gas: quantity(tx.gas ?? tx.gasLimit, 'gas'),
+      to: tx.to ? viem().getAddress(tx.to) : undefined,
+      value: evm().quantity(tx.value, 'value') ?? 0n,
+      data: evm().hexData(tx.data ?? tx.input),
+      gas: evm().quantity(tx.gas ?? tx.gasLimit, 'gas'),
       nonce: nonce === undefined ? undefined : Number(nonce),
-      maxFeePerGas: quantity(tx.maxFeePerGas, 'maxFeePerGas'),
-      maxPriorityFeePerGas: quantity(tx.maxPriorityFeePerGas, 'maxPriorityFeePerGas'),
-      gasPrice: quantity(tx.gasPrice, 'gasPrice'),
+      maxFeePerGas: evm().quantity(tx.maxFeePerGas, 'maxFeePerGas'),
+      maxPriorityFeePerGas: evm().quantity(tx.maxPriorityFeePerGas, 'maxPriorityFeePerGas'),
+      gasPrice: evm().quantity(tx.gasPrice, 'gasPrice'),
     };
     if (!request.to && !request.data) throw invalid('A transaction needs a recipient or data.');
     if (request.data && request.data.length > MAX_DATA) throw invalid('The transaction data is too large to show for approval.');
@@ -279,7 +280,7 @@ class Provider {
       fee: fee === null ? null : displayFee(fee, 18),
       data: request.data || null,
       dataBytes: request.data ? (request.data.length - 2) / 2 : 0,
-      call: describeCall(request.data),
+      call: evm().describeCall(request.data),
       failure,
       // Without a gas limit there is nothing to sign when the estimate failed.
       blocked: Boolean(failure) && request.gas === undefined,

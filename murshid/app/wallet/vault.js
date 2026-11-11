@@ -17,6 +17,7 @@ const btc = require('@scure/btc-signer');
 const { bytesToHex } = require('viem');
 const { privateKeyToAccount } = require('viem/accounts');
 const { BITCOIN, EVM_PATH } = require('./networks');
+const { WalletError } = require('./errors');
 
 const scrypt = promisify(crypto.scrypt);
 
@@ -25,14 +26,6 @@ const scrypt = promisify(crypto.scrypt);
 const KDF = Object.freeze({ name: 'scrypt', N: 2 ** 17, r: 8, p: 1 });
 const MIN_PASSWORD = 8;
 
-class WalletError extends Error {
-  /** @param {string} code a key under wallet.error.* in app/locales */
-  constructor(code, detail) {
-    super(detail ? `${code}: ${detail}` : code);
-    this.code = code;
-    this.detail = detail;
-  }
-}
 
 function normalizePhrase(text) {
   return String(text || '').normalize('NFKD').trim().toLowerCase().split(/\s+/).filter(Boolean).join(' ');

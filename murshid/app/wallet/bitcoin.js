@@ -7,7 +7,7 @@
 const btc = require('@scure/btc-signer');
 const { hex } = require('@scure/base');
 const { BITCOIN } = require('./networks');
-const { WalletError } = require('./vault');
+const { WalletError } = require('./errors');
 
 const RBF_SEQUENCE = 0xfffffffd; // lets a stuck payment be replaced with a higher fee elsewhere
 const MAX_FEE_RATE = 1000; // sat/vB; anything above is a broken or hostile fee source

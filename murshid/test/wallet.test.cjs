@@ -147,6 +147,35 @@ test('two panels finishing setup at once cannot both create a wallet', async () 
   }
 });
 
+test('starting the wallet, and answering what a page asks first, loads no crypto library', async () => {
+  // They take seconds to load; Murshid's startup must not wait for them.
+  const { spawnSync } = require('node:child_process');
+  const dir = tempDir();
+  try {
+    await readyWallet(dir); // a wallet file exists, as after a restart
+    const script = `
+      const { Wallet } = require(${JSON.stringify(path.join(__dirname, '..', 'app', 'wallet', 'store'))});
+      const { Provider } = require(${JSON.stringify(path.join(__dirname, '..', 'app', 'wallet', 'provider'))});
+      require(${JSON.stringify(path.join(__dirname, '..', 'app', 'wallet', 'http'))});
+      (async () => {
+        const wallet = new Wallet({ dir: ${JSON.stringify(dir)}, fetchFn: async () => { throw new Error('offline'); } });
+        wallet.state();
+        const site = { origin: 'https://app.example.com', contentsId: 1 };
+        wallet.siteState(site.origin);
+        const provider = new Provider(wallet);
+        await provider.handle(site, 'eth_chainId');
+        await provider.handle(site, 'eth_accounts');
+        const heavy = Object.keys(require.cache).filter((f) => /[\\\\/](viem|ox|@scure|@noble|@paulmillr)[\\\\/]/.test(f));
+        console.log(JSON.stringify({ exists: wallet.exists, heavy: heavy.length }));
+      })();`;
+    const run = spawnSync(process.execPath, ['-e', script], { encoding: 'utf8' });
+    assert.equal(run.status, 0, run.stderr);
+    assert.deepEqual(JSON.parse(run.stdout.trim()), { exists: true, heavy: 0 });
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('amounts are read and shown exactly', () => {
   assert.equal(parseAmount('0.0001', 8), 10000n);
   assert.equal(parseAmount('0,5', 8), 50000000n);
