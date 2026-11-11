@@ -77,6 +77,7 @@ class Wallet extends EventEmitter {
     this.settingUp = false; // a create or restore is encrypting
     this.requests = new Map(); // id -> request from a website
     this.reviews = new Map(); // id -> transfer shown for confirmation
+    this.sends = new Map(); // network id -> transfers sent (or about to be) on it
     this.lockTimer = null;
     this.fetchFn = fetchFn;
     this.bitcoinClient = null; // made on first use, with its library
@@ -384,6 +385,7 @@ class Wallet extends EventEmitter {
   async review({ network, to, amount, max = false, speed = 'normal' } = {}) {
     const keys = this.requireKeys();
     const identity = this.identity();
+    const sends = this.sends.get(network) || 0;
     const net = networks.byId(network);
     if (!net) throw new WalletError('failed', 'unknown network');
     const target = String(to || '').trim();
@@ -414,6 +416,9 @@ class Wallet extends EventEmitter {
     // Reset, replaced or locked while the network answered: this review was
     // built from the old wallet's keys and coins, and is not kept.
     if (this.identity() !== identity || this.keys !== keys) throw new WalletError('failed', 'the wallet changed');
+    // A transfer went out on this network while this one was being built: it
+    // may hold the same nonce or coins, so it is built again, never kept.
+    if ((this.sends.get(net.id) || 0) !== sends) throw new WalletError('expired');
     const id = randomUUID();
     this.reviews.set(id, { ...review, id, identity, to: target, expires: this.now() + REVIEW_TTL_MS });
     for (const [other, r] of this.reviews) if (r.expires < this.now()) this.reviews.delete(other);
@@ -441,6 +446,7 @@ class Wallet extends EventEmitter {
    * Their panels get "review again" when they try to confirm.
    */
   dropReviews(networkId) {
+    this.sends.set(networkId, (this.sends.get(networkId) || 0) + 1); // and any review still being built
     for (const [id, review] of this.reviews) if (review.net.id === networkId) this.reviews.delete(id);
   }
 

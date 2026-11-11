@@ -667,6 +667,37 @@ test('a priority fee the site sets on its own is kept, zero included', async () 
   assert.equal(signed[0].maxPriorityFeePerGas, 0n);
 });
 
+test('a review still being built when a transfer goes out on its network is not kept', async () => {
+  const wallet = await readyWallet();
+  wallet.evm.balance = async () => 10n ** 18n;
+  let nonce = 4;
+  let hold = null; // lets the test pause one preparation
+  const sent = [];
+  wallet.evm.prepare = async (net, account, tx) => {
+    const seen = nonce;
+    if (hold) await hold;
+    return { request: { ...tx, gas: 21000n, maxFeePerGas: 1n, maxPriorityFeePerGas: 1n, nonce: seen }, fee: 21000n, l1Fee: 0n };
+  };
+  wallet.evm.send = async (net, account, prepared) => { sent.push(prepared.request.nonce); nonce += 1; return `0x${String(sent.length).padStart(64, '0')}`; };
+  const transfer = { network: 'base', to: '0x000000000000000000000000000000000000dEaD', amount: '0.01' };
+
+  const first = await wallet.review(transfer);
+  let release;
+  hold = new Promise((resolve) => { release = resolve; });
+  const second = wallet.review(transfer); // another window, still preparing (it has seen nonce 4)
+  hold = null;
+  await wallet.confirm(first.id); // sends nonce 4
+  release();
+  await assert.rejects(second, { code: 'expired' });
+  assert.equal(wallet.reviews.size, 0);
+  // Built again, it gets the next nonce.
+  const again = await wallet.review(transfer);
+  await wallet.confirm(again.id);
+  assert.deepEqual(sent, [4, 5]);
+  // Other networks are not affected.
+  await wallet.confirm((await wallet.review({ ...transfer, network: 'arbitrum' })).id);
+});
+
 test('read-only calls go to the node; requests from a page that went away are dropped', async () => {
   const wallet = await readyWallet();
   const provider = new Provider(wallet);
