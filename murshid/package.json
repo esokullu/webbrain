@@ -1,7 +1,7 @@
 {
   "name": "murshid",
   "productName": "Murshid",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "Murshid — a Chromium browser with the WebBrain agent built in.",
   "private": true,
   "main": "app/main.js",
@@ -9,7 +9,7 @@
   "author": "Emre Sokullu",
   "homepage": "https://github.com/webbrain-one/webbrain/tree/main/murshid",
   "scripts": {
-    "test": "node --test test/review-fixes.test.cjs test/i18n.test.cjs test/history.test.cjs test/tab-strip.test.cjs test/wallet.test.cjs test/adblock.test.cjs test/updates.test.cjs",
+    "test": "node --test test/review-fixes.test.cjs test/tab-navigation.test.cjs test/i18n.test.cjs test/history.test.cjs test/tab-strip.test.cjs test/wallet.test.cjs test/adblock.test.cjs test/updates.test.cjs test/window-bounds.test.cjs test/crx-webrequest.test.cjs",
     "test:integration": "node test/run-smoke.cjs",
     "test:session": "node test/run-session-smoke.cjs",
     "test:wallet": "node test/run-wallet-smoke.cjs",

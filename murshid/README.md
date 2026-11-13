@@ -223,7 +223,7 @@ scripts/
   art/sources/     those pictures, with where they came from
   art/icon.mjs     draw the icon SVGs (the fez)
   build-icons.mjs  rasterize the icon (PNG, ICO, template images, favicons)
-  copy-art.mjs     copy the icon into web/
+  copy-art.mjs     copy the icon into web/ and render the PNG social preview
   copy-fonts.mjs   copy the self-hosted fonts into web/fonts
   serve.mjs        static server for web/ and assets/
   build-adblock.mjs  rebuild app/adblock/engine.bin.gz from the filter lists
@@ -344,6 +344,17 @@ Windows, at 2x, on a fresh profile with no accounts.
 with `npm run web` and open http://localhost:4917/web/. Fonts: Cormorant
 Garamond, IBM Plex Sans and Mono, and Aref Ruqaa for the Arabic script, all
 under the SIL Open Font License (`web/fonts/LICENSE.txt`).
+
+### Download counts
+
+`web/middleware.ts` is Vercel Routing Middleware for `/download/*` and
+`/updates/stable.json`. For each GET it reports the path, range header, address,
+country, user agent and referring host to WebBrain's stats server
+(`https://api.webbrain.one/v1/murshid/downloads`) after handing the request on,
+so files are still served straight from Vercel's CDN. It does nothing unless
+`MURSHID_DOWNLOAD_EVENT_SECRET` is set in the Vercel project (production) to the
+same value as on the stats server; `MURSHID_DOWNLOAD_EVENT_URL` overrides the
+endpoint. The counts appear on the Murshid tab of `api.webbrain.one/stats`.
 
 ## Licence
 

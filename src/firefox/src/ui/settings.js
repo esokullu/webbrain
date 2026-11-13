@@ -6,12 +6,12 @@ import { D1_CONSENT_KEY, D1_CONSENT_VERSION, D1_MODEL_ID } from '../providers/d1
 import { d1LocalAssistReady } from '../agent/decision-availability.js';
 import { initD1Settings } from './d1-settings.js';
 /**
- * WebBrain Settings pages — settings.html (preferences, budgets, memory,
- * skills, CAPTCHA, Bridge, advanced), providers.html (the chat provider and
- * the assistive models) and permissions.html (site permissions).
+ * WebBrain Settings — settings.html: preferences, the chat provider and the
+ * assistive models, permissions and privacy, budgets, memory, skills, CAPTCHA,
+ * Bridge, Offline (Apocalypse Mode) and advanced settings, one section each.
+ * providers.html and permissions.html only forward old links here.
  *
- * One controller serves all three pages: each section below wires itself up
- * only when its markup is on the current page.
+ * Each section below wires itself up only when its markup is on the page.
  */
 
 import { t, translationsForKey } from './i18n.js';
@@ -92,7 +92,7 @@ const SUBSCRIPTION_GUIDE_PRODUCTS = Object.freeze({
 
 // Version shown in the subtitle. Kept here so it only needs one update per
 // release; the subtitle string itself is translated.
-const EXT_VERSION = '47.1.1';
+const EXT_VERSION = '48.1.1';
 
 const providersContainer = document.getElementById('providers');
 const generalSearchInput = document.getElementById('input-general-search');
@@ -107,7 +107,6 @@ const AGENT_INDICATOR_STYLES = ['random', 'circuit', 'aurora', 'scan', 'gears', 
 const selectionShortcutToggle = document.getElementById('toggle-selection-shortcut');
 const autoGroupTabsToggle = document.getElementById('toggle-auto-group-tabs');
 const helpImproveToggle = document.getElementById('toggle-help-improve');
-const screenshotToggle = document.getElementById('toggle-screenshot-fallback');
 const maxStepsRange = document.getElementById('range-max-steps');
 const stepsValueLabel = document.getElementById('steps-value');
 const requestTimeoutRange = document.getElementById('range-request-timeout');
@@ -261,8 +260,9 @@ function activeProviderIsCompass() {
   const config = providersData?.[activeProviderId];
   return !!activeProviderId && (providerDefinitionId(activeProviderId) === 'webbrain_cloud' || config?.providerName === 'webbrain-cloud');
 }
-// The Strict Secret Mode switch is on settings.html and the decision card on
-// providers.html, so the card follows the stored setting, not the switch.
+// The Strict Secret Mode switch and the decision card are in different
+// sections, and Settings may be open in another tab, so the card follows the
+// stored setting, not the switch.
 let strictSecretModeOn = false;
 if (globalThis.browser?.storage?.onChanged) {
   browser.storage.onChanged.addListener((changes, area) => {
@@ -412,9 +412,9 @@ function setGeneralSearchHidden(item, hidden) {
   item.classList.toggle('general-search-hidden', hidden);
 }
 
-// The search box covers the tabs marked data-search (General, Budgets,
-// CAPTCHA and Advanced). With a query, those tabs show together and keep only
-// their matching rows; settings-tabs.js clears the query when a tab is picked.
+// The search box covers every section (each is marked data-search). With a
+// query, the sections show together and keep only their matching rows;
+// settings-tabs.js clears the query when a section is picked.
 const searchPanels = Array.from(document.querySelectorAll('.tab-panel[data-search]'));
 
 function filterGeneralSettings() {
@@ -426,6 +426,9 @@ function filterGeneralSettings() {
     const scope = panel.querySelector('[data-search-scope]') || panel;
     let panelMatches = 0;
     for (const item of Array.from(scope.children)) {
+      // Group headings are signposts, not settings: a search hides them (CSS)
+      // and never counts one as a match.
+      if (item.classList.contains('settings-group-heading')) continue;
       const matches = !query || (!item.hidden && searchTextForGeneralItem(item).includes(query));
       setGeneralSearchHidden(item, !!query && !matches);
       if (matches) panelMatches += 1;
@@ -616,8 +619,14 @@ async function init() {
   // UI, so purge any stale credentials left over from that flow.
   browser.storage.local.remove(['authToken', 'authEmail', 'authDefaultModel']).catch(() => {});
 
+  // The side panel's "Manage site permissions" opens Permissions & privacy
+  // directly, so that section loads now rather than after the model, memory
+  // and skills sections below, which wait on the background.
+  const permissionsLoad = loadPermissionsSection();
+  permissionsLoad.catch(() => {}); // awaited further down
+
   // Load display settings
-  const stored = await browser.storage.local.get([...DECISION_SETTINGS_KEYS, 'verboseMode', 'composerDeliveryMode', 'agentIndicatorStyle', 'selectionShortcutEnabled', AUTO_GROUP_TABS_KEY, 'helpImproveWebBrain', 'screenshotFallback', 'maxAgentSteps', 'autoScreenshot', 'useSiteAdapters', 'researchEscalationEnabled', 'researchEscalationEngine', 'voiceInputEnabled', 'alwaysAllowApiMutations', 'apiMutationObserverEnabled', 'openaiAskStreamingEnabled', 'planBeforeActMode', 'planBeforeAct', 'planReviewMode', 'planReviewConfidenceThreshold', DOWNLOAD_DIRECTORY_STORAGE_KEY, 'notifySound', 'completionConfetti', 'completionFlashTab', 'tracingEnabled', 'feedbackDiagnosticsEnabled', 'strictSecretMode', 'enforceActionGuards', 'strictGuards', 'leanMode', 'visionMode', 'visionQuality', 'agentAllowLocalNetwork', 'scheduledTasksEnabled', 'scheduledRequireConsequentialConfirmation', 'systemOneEnabled', 'systemOneWatchEnabled', 'systemOneCompletionEnabled', 'systemOneFastClassifications', 'systemOneFastBrowser', 'systemOneWatchThreshold', 'systemOneCompletionThreshold', 'typesafeApiKey', 'providerFilter', 'requestTimeoutMs', 'clarifyTimeoutSec', 'clarifyTimeoutSemanticsV2', 'clarifyTimeoutPolicy', 'costAllowanceSessionUsd', 'costAllowanceTotalUsd', 'meteredProviderCostSpentUsd', 'screenshotRedaction', 'imageDetail', 'maxScreenshotsPerTurn', 'maxImageDimension']);
+  const stored = await browser.storage.local.get([...DECISION_SETTINGS_KEYS, 'verboseMode', 'composerDeliveryMode', 'agentIndicatorStyle', 'selectionShortcutEnabled', AUTO_GROUP_TABS_KEY, 'helpImproveWebBrain', 'maxAgentSteps', 'autoScreenshot', 'useSiteAdapters', 'researchEscalationEnabled', 'researchEscalationEngine', 'voiceInputEnabled', 'alwaysAllowApiMutations', 'apiMutationObserverEnabled', 'openaiAskStreamingEnabled', 'planBeforeActMode', 'planBeforeAct', 'planReviewMode', 'planReviewConfidenceThreshold', DOWNLOAD_DIRECTORY_STORAGE_KEY, 'notifySound', 'completionConfetti', 'completionFlashTab', 'tracingEnabled', 'feedbackDiagnosticsEnabled', 'strictSecretMode', 'enforceActionGuards', 'strictGuards', 'leanMode', 'visionMode', 'visionQuality', 'agentAllowLocalNetwork', 'scheduledTasksEnabled', 'scheduledRequireConsequentialConfirmation', 'systemOneEnabled', 'systemOneWatchEnabled', 'systemOneCompletionEnabled', 'systemOneFastClassifications', 'systemOneFastBrowser', 'systemOneWatchThreshold', 'systemOneCompletionThreshold', 'typesafeApiKey', 'providerFilter', 'requestTimeoutMs', 'clarifyTimeoutSec', 'clarifyTimeoutSemanticsV2', 'clarifyTimeoutPolicy', 'costAllowanceSessionUsd', 'costAllowanceTotalUsd', 'meteredProviderCostSpentUsd', 'screenshotRedaction', 'imageDetail', 'maxScreenshotsPerTurn', 'maxImageDimension']);
   if (typeof stored.providerFilter === 'string' && ['all','active','local','cloud','router'].includes(stored.providerFilter)) {
     providerFilter = stored.providerFilter;
   }
@@ -632,7 +641,6 @@ async function init() {
   if (selectionShortcutToggle) selectionShortcutToggle.checked = stored.selectionShortcutEnabled !== false;
   if (autoGroupTabsToggle) autoGroupTabsToggle.checked = stored[AUTO_GROUP_TABS_KEY] !== false;
   if (helpImproveToggle) helpImproveToggle.checked = stored.helpImproveWebBrain !== false; // on by default
-  if (screenshotToggle) screenshotToggle.checked = stored.screenshotFallback ?? true; // on by default
   if (maxStepsRange && stepsValueLabel) {
     if (isUnlimitedMaxAgentSteps(stored.maxAgentSteps)) {
       maxStepsRange.value = MAX_AGENT_STEPS_UNLIMITED_SENTINEL;
@@ -780,10 +788,9 @@ async function init() {
 
   await loadCustomSkills();
 
-  // Load site permissions (capability × origin grants) + the master switch
-  await initPermissionGateToggle();
-  await renderPermissions();
-  await initScreenshotRedactionToggle();
+  // Site permissions (capability × origin grants) + the master switch,
+  // started at the top of init().
+  await permissionsLoad;
   await refreshApocalypseModeStatus();
 
   // Load providers. The decision card's Auto status reads the active one too.
@@ -796,12 +803,15 @@ async function init() {
   }
   // Tooling (UI tests, docs screenshots) waits for this before reading the page.
   document.documentElement.dataset.settingsReady = 'true';
+  // settings-presets-ui.js greys out rows whose parent switch is off.
+  document.dispatchEvent(new Event('wb-settings-loaded'));
 }
 
 // --- Site permissions (capability × origin grants) ---
 
 const PERMISSIONS_KEY = 'wb_permissions';
 const GATE_KEY = 'askBeforeConsequentialActions';
+const permissionGateToggle = document.getElementById('toggle-permission-gate');
 
 // Prompts are off when the stored setting is false or the side panel's skip
 // dialog turned them off until the browser closes (storage.session).
@@ -814,39 +824,52 @@ async function readAskBeforeConsequential() {
 }
 
 function renderPermissionGateToggle(askBefore) {
-  const toggle = document.getElementById('toggle-permission-gate');
   const warning = document.getElementById('permission-gate-warning');
-  if (toggle) toggle.checked = askBefore;
+  if (permissionGateToggle) permissionGateToggle.checked = askBefore;
   if (warning) warning.style.display = askBefore ? 'none' : '';
 }
 
-async function initPermissionGateToggle() {
-  const toggle = document.getElementById('toggle-permission-gate');
-  if (!toggle) return;
-  renderPermissionGateToggle(await readAskBeforeConsequential());
-  toggle.addEventListener('change', async () => {
-    await browser.storage.local.set({ [GATE_KEY]: toggle.checked });
-    // Turning prompts back on also ends a "this session only" skip.
-    if (toggle.checked) {
-      await Promise.resolve()
-        .then(() => browser.storage.session.remove(PERMISSION_GATE_SESSION_OFF_KEY))
-        .catch(() => {});
-    }
-    renderPermissionGateToggle(toggle.checked);
-  });
+// This section's switches are wired when the page loads, like strict secret
+// handling below, so they save from the first click. A click made before the
+// stored value has been read is already saved, and that read must not undo it.
+let permissionGateClicked = false;
+permissionGateToggle?.addEventListener('change', async () => {
+  permissionGateClicked = true;
+  await browser.storage.local.set({ [GATE_KEY]: permissionGateToggle.checked });
+  // Turning prompts back on also ends a "this session only" skip.
+  if (permissionGateToggle.checked) {
+    await Promise.resolve()
+      .then(() => browser.storage.session.remove(PERMISSION_GATE_SESSION_OFF_KEY))
+      .catch(() => {});
+  }
+  renderPermissionGateToggle(permissionGateToggle.checked);
+});
+
+async function loadPermissionGateToggle() {
+  if (!permissionGateToggle) return;
+  const askBefore = await readAskBeforeConsequential();
+  if (!permissionGateClicked) renderPermissionGateToggle(askBefore);
 }
 
 // Screenshot redaction (issue #312): local, best-effort PII blurring on
 // screenshots BEFORE they are sent to a vision model. OFF by default.
 const REDACTION_KEY = 'screenshotRedaction';
-async function initScreenshotRedactionToggle() {
-  const toggle = document.getElementById('toggle-screenshot-redaction');
-  if (!toggle) return;
+const screenshotRedactionToggle = document.getElementById('toggle-screenshot-redaction');
+let screenshotRedactionClicked = false;
+screenshotRedactionToggle?.addEventListener('change', async () => {
+  screenshotRedactionClicked = true;
+  await browser.storage.local.set({ [REDACTION_KEY]: screenshotRedactionToggle.checked });
+});
+
+async function loadScreenshotRedactionToggle() {
+  if (!screenshotRedactionToggle) return;
   const stored = await browser.storage.local.get(REDACTION_KEY);
-  toggle.checked = stored[REDACTION_KEY] === true; // OFF by default
-  toggle.addEventListener('change', async () => {
-    await browser.storage.local.set({ [REDACTION_KEY]: toggle.checked });
-  });
+  if (!screenshotRedactionClicked) screenshotRedactionToggle.checked = stored[REDACTION_KEY] === true; // OFF by default
+}
+
+// The master switch, the grants and the redaction switch; init() starts this first.
+function loadPermissionsSection() {
+  return Promise.all([loadPermissionGateToggle(), renderPermissions(), loadScreenshotRedactionToggle()]);
 }
 
 async function renderPermissions() {
@@ -1415,10 +1438,6 @@ helpImproveToggle?.addEventListener('change', async () => {
   await browser.storage.local.set({ helpImproveWebBrain: helpImproveToggle.checked }).catch(() => {});
 });
 
-screenshotToggle?.addEventListener('change', async () => {
-  await browser.storage.local.set({ screenshotFallback: screenshotToggle.checked }).catch(() => {});
-});
-
 maxStepsRange?.addEventListener('input', () => {
   stepsValueLabel.textContent = Number(maxStepsRange.value) === MAX_AGENT_STEPS_UNLIMITED_SENTINEL ? '∞' : maxStepsRange.value;
 });
@@ -1533,6 +1552,9 @@ if (planBeforeActModeSelect) {
 }
 
 if (planReviewModeSelect) {
+  // A combined switch in General can change this select without a change
+  // event (settings-presets-ui.js); the threshold row still has to follow.
+  planReviewModeSelect.addEventListener('wb-setting-sync', updatePlanReviewConfidenceUI);
   planReviewModeSelect.addEventListener('change', async () => {
     const mode = PLAN_REVIEW_MODES.has(planReviewModeSelect.value) ? planReviewModeSelect.value : 'confidence';
     updatePlanReviewConfidenceUI();
@@ -2303,6 +2325,7 @@ async function loadUserMemorySettings() {
   if (userMemoryAutoToggle) userMemoryAutoToggle.checked = res.autoCaptureEnabled === true;
   if (userMemoryFormToggle) userMemoryFormToggle.checked = res.formCaptureEnabled === true;
   if (userMemoryMaxCharsInput) userMemoryMaxCharsInput.value = String(res.maxPromptChars ?? USER_MEMORY_DEFAULT_MAX_PROMPT_CHARS);
+  document.dispatchEvent(new Event('wb-settings-loaded'));
   renderUserMemoryRecords(res.records || []);
 }
 
@@ -3536,10 +3559,13 @@ function renderProviders() {
         const optionsHTML = field.options
           .map(o => `<option value="${escapeHtml(o.value)}"${o.value === current ? ' selected' : ''}>${escapeHtml(o.labelKey ? t(o.labelKey) : o.label)}</option>`)
           .join('');
+        // A tier already chosen (saved, or picked and kept through a
+        // re-render) stays chosen, so Save keeps sending promptTierChosen.
+        const tierChosenAttr = (field.key === 'promptTier' && config.promptTierChosen === true) ? ' data-tier-chosen="true"' : '';
         fieldHTML += `
           <div class="field">
             <label>${escapeHtml(label)}</label>
-            <select data-provider="${id}" data-key="${field.key}" data-type="select">${optionsHTML}</select>
+            <select data-provider="${id}" data-key="${field.key}" data-type="select"${tierChosenAttr}>${optionsHTML}</select>
           </div>
         `;
         if (VISION_UI_PROVIDER_IDS.has(definitionId) && field.key === 'visionMode') {
@@ -4380,6 +4406,9 @@ function syncInputsIntoProvidersData() {
     if (key === 'contextWindow') {
       providersData[id].manualContextWindow = input.dataset.manuallyEdited === 'true';
     }
+    // Keep an unsaved tier pick a choice: a local relay's tier counts only
+    // with promptTierChosen, so without it the rebuilt menu reads Full.
+    if (key === 'promptTier' && input.dataset.tierChosen === 'true') providersData[id].promptTierChosen = true;
   });
 }
 

@@ -20,6 +20,7 @@
   <a href="README.zh-CN.md">中文</a> ·
   <a href="README.fr.md">Français</a> ·
   <a href="README.ja.md">日本語</a> ·
+  <a href="README.tr.md">Türkçe</a> ·
   <a href="docs/zh-CN/">文档</a> ·
   <a href="https://webbrain.one">官网</a> ·
   <a href="LICENSE">GPL-3.0-or-later</a>
@@ -75,7 +76,7 @@ git clone https://github.com/webbrain-one/webbrain.git
 
 **WebBrain Companion** 是独立的桌面应用，可使用本地模型和受支持的账户订阅。
 [下载 Windows、macOS 或 Linux 版本](https://github.com/webbrain-one/webbrain/releases/tag/systray-v0.1.2)，
-然后在“提供商”页面选择 **WebBrain Companion**。默认本地地址为
+然后在“设置 → 模型 → LLM”中选择 **WebBrain Companion**。默认本地地址为
 `http://127.0.0.1:8327/v1`；同一台电脑上的扩展不需要 API 密钥。点击
 **Load Models** 选择模型，再测试连接。详情参阅[配置指南](docs/providers-and-models.md#webbrain-companion)。
 

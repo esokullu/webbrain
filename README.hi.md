@@ -20,6 +20,7 @@
   <a href="README.zh-CN.md">中文</a> ·
   <a href="README.fr.md">Français</a> ·
   <a href="README.ja.md">日本語</a> ·
+  <a href="README.tr.md">Türkçe</a> ·
   <a href="docs/">दस्तावेज़</a> ·
   <a href="https://webbrain.one">वेबसाइट</a> ·
   <a href="https://discord.gg/cgC325ssfw">Discord</a> ·
@@ -118,7 +119,7 @@ Mid और Full हिस्ट्री जमा होने से पहल
 WebBrain llama.cpp, Ollama और LM
 Studio के लिए वास्तविक विंडो अपने आप पहचानता है, और बातचीत भरने पर उसे अपने आप
 संपीडित (compact) करता है। Ollama, llama.cpp, LM Studio और LocalAI के लिए,
-स्क्रीनशॉट जोड़ने से पहले यह नेटिव सर्वर मेटाडेटा भी पढ़ता है; Providers पेज पर
+स्क्रीनशॉट जोड़ने से पहले यह नेटिव सर्वर मेटाडेटा भी पढ़ता है; Settings → Models → LLM में
 Auto, Force on और Off ओवरराइड्स उपलब्ध हैं। जब वैकल्पिक Model फ़ील्ड खाली हो,
 तो हर उपयोगकर्ता टर्न पर लोडेड-मॉडल की क्षमता दोबारा जाँची जाती है, जिससे सर्वर-साइड
 हॉट स्वैप असर दिखाए। एक प्रीव्यू `ollama launch webbrain --model <model>`
@@ -128,7 +129,7 @@ Auto, Force on और Off ओवरराइड्स उपलब्ध है�
 **क्लाउड APIs** — OpenAI, Anthropic Claude, Google Gemini, Azure OpenAI, AWS
 Bedrock, Mistral, DeepSeek, xAI Grok, MiniMax, Kimi, Qwen, z.ai GLM, Groq,
 Together, Cloudflare, Nvidia NIM, Hugging Face, Fireworks, OpenRouter और भी बहुत कुछ।
-Providers पेज पर **Chromium पर 119 बिल्ट-इन प्रोवाइडर कार्ड्स** (Firefox पर 118)
+Settings → Models → LLM में **Chromium पर 119 बिल्ट-इन प्रोवाइडर कार्ड्स** (Firefox पर 118)
 शामिल हैं, जिनमें एंडपॉइंट-मुक्त लोकल WebGPU विकल्प भी है — परीक्षित LFM2.5 2.6B
 प्रीसेट और एक प्रायोगिक कस्टम Hugging Face ONNX रिपॉज़िटरी विकल्प के साथ —
 देखें [पूरी कैटलॉग](docs/providers-and-models.md#extended-provider-catalog)।

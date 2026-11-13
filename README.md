@@ -20,6 +20,7 @@
   <a href="README.zh-CN.md">中文</a> ·
   <a href="README.fr.md">Français</a> ·
   <a href="README.ja.md">日本語</a> ·
+  <a href="README.tr.md">Türkçe</a> ·
   <a href="docs/">Docs</a> ·
   <a href="https://webbrain.one">Website</a> ·
   <a href="https://discord.gg/cgC325ssfw">Discord</a> ·
@@ -119,7 +120,7 @@ exact tokenizer; see the [context guidance](docs/providers-and-models.md#local-p
 WebBrain auto-detects the real window for llama.cpp, Ollama, and LM
 Studio, and auto-compacts the conversation as it fills up. For Ollama,
 llama.cpp, LM Studio, and LocalAI, it also reads native server metadata before
-adding screenshots; the Providers page provides Auto, Force on, and Off overrides. When
+adding screenshots; Settings → Models → LLM provides Auto, Force on, and Off overrides. When
 the optional Model field is blank, the loaded-model capability is rechecked on
 every user turn so a server-side hot swap takes effect. There is also a
 preview `ollama launch webbrain --model <model>` handoff. Details:
@@ -128,7 +129,7 @@ preview `ollama launch webbrain --model <model>` handoff. Details:
 **Cloud APIs** — OpenAI, Anthropic Claude, Google Gemini, Azure OpenAI, AWS
 Bedrock, Mistral, DeepSeek, xAI Grok, MiniMax, Kimi, Qwen, z.ai GLM, Groq,
 Together, Cloudflare, Nvidia NIM, Hugging Face, Fireworks, OpenRouter, and more.
-The Providers page ships **121 built-in provider cards on Chromium** (120 on Firefox),
+Settings → Models → LLM ships **121 built-in provider cards on Chromium** (120 on Firefox),
 including an endpoint-free local WebGPU option with the tested LFM2.5 2.6B
 preset and an experimental custom Hugging Face ONNX repository option —
 see the [full catalog](docs/providers-and-models.md#extended-provider-catalog).
