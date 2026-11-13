@@ -70,6 +70,7 @@ function installAppMenu(ctx) {
         item('mac.zoomOut', 'Cmd+-', c.zoomOut),
         { type: 'separator' },
         item('mac.webBrainPanel', 'Alt+Shift+W', c.webBrain),
+        item('mac.walletPanel', undefined, c.wallet),
         { type: 'separator' },
         item('mac.fullscreen', 'Ctrl+Cmd+F', c.fullscreen),
         item('mac.viewSource', 'Cmd+Alt+U', c.viewSource),
@@ -130,6 +131,7 @@ function popupMainMenu(ctx, w, { x, y }) {
     { label: t('menu.reopenTab'), accelerator: `${mod}+Shift+T`, click: () => c.reopenTab(w) },
     { type: 'separator' },
     { label: t('menu.webBrainPanel'), accelerator: 'Alt+Shift+W', click: () => c.webBrain(w) },
+    { label: t('menu.wallet'), click: () => c.wallet(w) },
     {
       label: t(companion.running ? 'menu.companionRunning' : companion.found ? 'menu.companionStart' : 'menu.companionGet'),
       click: () => ctx.companion.openPanel(w),

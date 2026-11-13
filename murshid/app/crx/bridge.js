@@ -318,6 +318,10 @@ class CrxBridge {
   closePanelInWindow(win) {
     const key = win.visiblePanelKey;
     if (!key) return;
+    if (key === 'wallet') {
+      win.closeWallet(); // Murshid's own panel, not an extension's
+      return;
+    }
     const [kind, rawId] = key.split(':');
     const id = Number(rawId);
     let extId;
@@ -334,6 +338,12 @@ class CrxBridge {
   }
 
   togglePanelForActiveTab(win) {
+    if (win.walletOpen) {
+      // The wallet covers WebBrain's panel: put WebBrain back, opening it if need be.
+      win.closeWallet();
+      if (!win.visiblePanelKey) this.clickAction(win);
+      return;
+    }
     if (win.visiblePanelKey) {
       this.closePanelInWindow(win);
       return;

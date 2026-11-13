@@ -24,4 +24,12 @@ if (typeof location !== 'undefined' && location.protocol === 'murshid:' && windo
     openWebBrain: () => ipcRenderer.invoke('murshid-page', 'openWebBrain'),
     companion: () => ipcRenderer.invoke('murshid-page', 'companion'),
   });
+  // The wallet page (app/pages/wallet.js). The main process answers only when
+  // it is the wallet in the side panel (app/wallet/install.js).
+  if (location.host === 'wallet') {
+    contextBridge.exposeInMainWorld('murshidWallet', {
+      invoke: (command, ...args) => ipcRenderer.invoke('murshid-wallet', command, ...args),
+      on: (callback) => ipcRenderer.on('murshid-wallet-event', (_event, message) => callback(message)),
+    });
+  }
 }
