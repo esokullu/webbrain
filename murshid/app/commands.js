@@ -57,6 +57,7 @@ function createCommands(ctx) {
     print: (w) => tabOf(w)?.wc.print(),
     fullscreen: (w) => w && w.win.setFullScreen(!w.win.isFullScreen()),
     webBrain: (w) => w && ctx.crx.togglePanelForActiveTab(w),
+    wallet: (w) => ctx.toggleWallet(w),
     webBrainCommand: (w, name) => ctx.sendExtensionCommand(w, name),
     settings: (w) => (w || ctx.createWindow({ empty: true })).addTab({ url: 'murshid://settings' }),
     updates: (w) => (w || ctx.createWindow({ empty: true })).addTab({ url: 'murshid://updates' }),

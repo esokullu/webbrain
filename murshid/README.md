@@ -11,6 +11,9 @@ Murshid is a Chromium browser, built on Electron, with WebBrain built in:
   every profile. The toolbar's WebBrain button opens its side panel, docked in
   the window and resizable; per-tab panels follow the tab you are on.
 - **WebBrain's new tab page preinstalled**, and switched on for new profiles.
+- **A wallet.** The toolbar's Wallet button opens it in the side panel:
+  Bitcoin and Ethereum from one recovery phrase, and websites can sign you in
+  with it through `window.ethereum`. See [The wallet](#the-wallet).
 - **WebBrain Companion in the system tray.** Murshid starts
   `../webbrain-systray` in the background (`--background`, no panel) when it is
   installed or bundled and not already running. The tray app is the Go
@@ -120,6 +123,48 @@ profile (handy for testing first-run behaviour); `MURSHID_DEBUG=1` mirrors the
 extension worker's console to the terminal. Extension warnings and errors are
 always written to `<profile>/logs/extensions.log`.
 
+## The wallet
+
+The Wallet button next to WebBrain opens Murshid's wallet in the side panel,
+for every tab of the window, in place of WebBrain's panel while it is open.
+
+- **One recovery phrase, two kinds of address.** A new wallet is 12 BIP39
+  words from the system's secure random source; an existing 12 or 24 word
+  phrase can be restored. It gives one Bitcoin address (BIP84, `bc1q…`) and one
+  Ethereum address (BIP44, `m/44'/60'/0'/0/0`, the same as MetaMask) used on
+  Ethereum, Arbitrum One, OP Mainnet, Base, Polygon and the Sepolia test
+  network. Native coins only: no tokens, swaps, bridges or hardware wallets.
+- **Receive, balance, send.** Three columns, side by side when the panel is
+  wide and stacked when it is narrow. A transfer is built first and shown with
+  its fee, and signed only after *Send now*. Bitcoin spends only confirmed
+  coins, opts in to replace-by-fee and sends change back to the same address;
+  *Send all* sends everything but the fee.
+- **Kept on this computer.** The phrase is stored only encrypted, in
+  `<profile>/murshid-wallet.json`: scrypt (N=2¹⁷, r=8, p=1) turns the password
+  into an AES-256-GCM key. Keys are derived on unlock and live only in the
+  main process; the wallet page never sees them. The wallet locks after 30
+  minutes without use and when Murshid quits.
+- **Websites.** While a wallet exists, top-level `http(s)` pages get
+  `window.ethereum` (EIP-1193, also announced through EIP-6963). A site sees
+  the Ethereum address only after the user connects it, and only while the
+  wallet is unlocked. Connecting, `personal_sign`, `eth_signTypedData_v4`,
+  `eth_sendTransaction` and network switches wait in the panel for approval,
+  which opens by itself; the approve button stays off for a moment so a
+  request cannot land under a click meant for something else. The panel flags
+  sign-in messages (EIP-4361) for another domain, permits, unlimited token
+  approvals and transactions expected to fail. `eth_sign` is refused; read-only
+  calls go to the network's node. Connected sites are listed under *More*.
+- **Network.** Balances, fees and broadcasts use public endpoints with no
+  account (mempool.space and Blockstream for Bitcoin; PublicNode and each
+  chain's own RPC for the rest), through a session of their own with no cookies.
+  They see the wallet's addresses and the computer's IP address.
+
+The code is in `app/wallet/` (`store.js` the wallet, `provider.js` what sites
+may ask, `install.js` the IPC, `provider-preload.js` `window.ethereum`) and
+`app/pages/wallet.*` (the panel). `npm test` covers the keys, encryption,
+transfers and site requests; `npm run test:wallet` drives the panel and a
+local test page in Electron with a fresh profile.
+
 ## How WebBrain runs inside Electron
 
 Electron supports only part of the Chrome extension API.
@@ -159,11 +204,12 @@ app/
   tab.js           one tab (a WebContentsView)
   crx/             extension API bridge (see above)
   ui/              the browser chrome: tab strip, toolbar, panel header
-  pages/           murshid://newtab, settings, about, error
+  pages/           murshid://newtab, settings, about, error, wallet
   commands.js      shortcuts (before-input-event on Windows/Linux, app menu on macOS)
   menu.js          app menu, ⋮ menu, tab menu
   downloads.js     download tracking shared by the toolbar and chrome.downloads
   companion.js     find and start WebBrain Companion
+  wallet/          the wallet: keys, networks, window.ethereum (see above)
   permissions.js   site permission prompts
   identity.js      user agent and client hints; owns the session's webRequest listeners
   adblock/         ad and tracker blocking: lists, engine, bundled engine (see above)

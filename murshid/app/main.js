@@ -27,6 +27,7 @@ const { registerSchemes, handleProtocol } = require('./protocol');
 const { resolveInput } = require('./url');
 const { urlsFromArgs } = require('./open-arguments');
 const identity = require('./identity');
+const { installWallet } = require('./wallet/install');
 const { Adblock } = require('./adblock');
 const { Updates } = require('./updates');
 
@@ -92,6 +93,7 @@ const ctx = {
   adblock: null,
   extensions: null,
   crx: null,
+  wallet: null,
   downloads: null,
   companion: null,
   updates: null,
@@ -161,6 +163,11 @@ const ctx = {
   },
   refreshAllWindows() {
     this.windows.forEach((w) => w.scheduleState());
+  },
+  toggleWallet(w) {
+    if (!w) return;
+    if (w.walletOpen) w.closeWallet();
+    else w.openWallet();
   },
   /** The site in this tab whose ads Murshid blocks or allows, with the choice; null when it filters nothing there. */
   adblockSite(tab) {
@@ -258,6 +265,7 @@ async function start() {
   ses.registerPreloadScript({ id: 'murshid-pages', type: 'frame', filePath: path.join(__dirname, 'pages', 'preload.js') });
 
   ctx.crx = new CrxBridge(ctx);
+  ctx.wallet = installWallet(ctx);
   ctx.omnibox = new Omnibox(ctx);
   ctx.downloads = new Downloads(ctx);
   ctx.downloads.on('update', () => ctx.refreshAllWindows());
@@ -449,6 +457,9 @@ function installUiIpc() {
       case 'home': return ctx.commands.run.home(w);
       case 'webBrain':
         ctx.crx.togglePanelForActiveTab(w);
+        return null;
+      case 'wallet':
+        ctx.toggleWallet(w);
         return null;
       case 'adblockSite':
         ctx.toggleAdblock(tab);

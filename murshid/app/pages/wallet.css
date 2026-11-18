@@ -1,0 +1,220 @@
+/* Murshid wallet (murshid://wallet, in the side panel). Parchment and ink like
+   the rest of Murshid: the three columns are three tones of the same paper,
+   gold marks focus and activity, crimson is kept for warnings. */
+
+.wallet {
+  --c1: #fbf6ea;  /* receive */
+  --c2: #f5ecda;  /* balance */
+  --c3: #eee2ca;  /* send */
+  --bar: #f4ead6;
+  --field: #fffdf8;
+  --ink: #2a1d16;
+  --ink-text: #fbf3e4;
+  --warn-bg: rgba(158, 27, 43, .07);
+  --mono: ui-monospace, "Cascadia Code", "IBM Plex Mono", Consolas, monospace;
+  --serif: "Cormorant Garamond", "Cormorant", Garamond, "Iowan Old Style", "Palatino Linotype", Georgia, serif;
+}
+@media (prefers-color-scheme: dark) {
+  .wallet {
+    --c1: #241c18;
+    --c2: #1d1714;
+    --c3: #17110e;
+    --bar: #140f0d;
+    --field: #120d0b;
+    --ink: #f1e6d0;
+    --ink-text: #140f0d;
+    --warn-bg: rgba(200, 40, 58, .12);
+  }
+}
+
+html, body.wallet { height: 100%; }
+body.wallet { margin: 0; overflow: hidden; background: var(--c2); font-size: 14px; line-height: 1.5; }
+.sprite { position: absolute; width: 0; height: 0; overflow: hidden; }
+[hidden] { display: none !important; }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+
+.wallet svg { width: 16px; height: 16px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.wallet svg circle { fill: currentColor; stroke: none; }
+.wallet svg circle.ring { fill: none; stroke: currentColor; }
+
+.view { position: absolute; inset: 0; overflow: auto; }
+.view.center, .view.setup { display: grid; place-items: center; padding: 28px 22px; background: var(--c1); }
+.setup-inner { width: min(460px, 100%); }
+.setup .mark { margin-bottom: 22px; }
+.setup .mark img { width: 34px; height: 34px; border-radius: 9px; }
+.setup h1 { font-size: 38px; line-height: 1.05; margin: 0 0 12px; }
+.setup h1 em { color: var(--gold); }
+.setup h2, .request h2 { font-family: var(--serif); font-weight: 500; font-size: 30px; line-height: 1.1; margin: 0 0 10px; }
+.lede { color: var(--muted); margin: 0 0 22px; }
+.hint { color: var(--muted); font-size: 12.5px; margin: 6px 0 0; }
+.note { padding: 10px 12px; border-radius: 10px; background: var(--gold-soft); margin: 12px 0; font-size: 13px; display: flex; gap: 8px; align-items: flex-start; }
+.note.warn { background: var(--warn-bg); color: var(--crimson); }
+.note svg { margin-top: 2px; }
+.error { color: var(--crimson); font-size: 13px; margin: 6px 0 0; min-height: 0; }
+.error:empty { display: none; }
+
+/* buttons */
+.wallet .button { height: 38px; padding: 0 18px; font-size: 14px; justify-content: center; white-space: nowrap; }
+.wallet .button svg { width: 15px; height: 15px; }
+.wallet .button.primary { background: var(--ink); border-color: var(--ink); color: var(--ink-text); }
+.wallet .button.primary:hover { box-shadow: 0 0 0 3px var(--gold-soft); border-color: var(--gold); }
+.wallet .button.quiet { background: transparent; }
+.wallet .button.small { height: 32px; padding: 0 13px; font-size: 13px; }
+.wallet .button.danger { color: var(--crimson); background: transparent; border-color: color-mix(in srgb, var(--crimson) 45%, var(--line)); }
+.wallet .button.danger:hover { box-shadow: 0 0 0 3px var(--warn-bg); border-color: var(--crimson); }
+.wallet .button:focus-visible, .link:focus-visible, .icon:focus-visible, .col-head:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+.stack { display: grid; gap: 10px; }
+.stack .button { width: 100%; height: 44px; }
+.row-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.link { display: inline-flex; align-items: center; gap: 6px; border: 0; background: none; padding: 0; color: var(--muted); cursor: pointer; font: inherit; font-size: 13px; text-align: start; }
+.link:hover { color: var(--text); }
+.back { margin-bottom: 18px; }
+[dir="rtl"] .back svg { transform: scaleX(-1); }
+.icon { width: 34px; height: 34px; display: grid; place-items: center; border: 0; border-radius: 50%; background: none; color: var(--text); cursor: pointer; }
+.icon:hover { background: var(--gold-soft); }
+.icon svg { width: 18px; height: 18px; }
+
+/* forms */
+.form { display: grid; gap: 12px; margin-top: 14px; }
+.form.inline { display: flex; gap: 8px; margin-top: 10px; }
+.form.inline input { flex: 1; min-width: 0; }
+.field { display: grid; gap: 5px; font-weight: 600; font-size: 13px; }
+.wallet input[type="password"], .wallet input:not([type]), .wallet textarea {
+  width: 100%; box-sizing: border-box; padding: 9px 12px; border-radius: 10px;
+  border: 1px solid var(--line); background: var(--field); color: var(--text);
+  font: 400 14px/1.4 inherit; outline: 0;
+}
+.wallet textarea { font-family: var(--mono); font-size: 13px; resize: vertical; min-height: 92px; }
+.wallet input:focus, .wallet textarea:focus { border-color: var(--gold); box-shadow: 0 0 0 3px var(--gold-soft); }
+.check { display: flex; gap: 10px; align-items: center; margin: 16px 0 4px; font-weight: 600; cursor: pointer; }
+.check input { width: 18px; height: 18px; accent-color: var(--ink); }
+
+.words { list-style: none; counter-reset: word; display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; padding: 0; margin: 0; }
+.words li { counter-increment: word; padding: 7px 9px; border-radius: 8px; background: var(--c2); border: 1px solid var(--line); font: 500 13.5px/1.2 var(--mono); user-select: all; }
+.words li::before { content: counter(word); display: inline-block; min-width: 2.2em; color: var(--muted); font-size: 11px; }
+@media (max-width: 360px) { .words { grid-template-columns: repeat(2, 1fr); } }
+
+/* --------------------------------------------------------------- main view */
+
+.main { display: flex; flex-direction: column; overflow: hidden; }
+.bar { flex: none; display: flex; align-items: center; gap: 4px; height: 50px; padding: 0 8px 0 12px; background: var(--bar); border-bottom: 1px solid var(--line); }
+.bar-fill { flex: 1; }
+.network select {
+  appearance: none; -webkit-appearance: none;
+  min-width: 0; max-width: 220px; height: 34px; padding-block: 0; padding-inline: 12px 30px;
+  border-radius: 17px; border: 1px solid var(--line); background-color: var(--c1); color: var(--text);
+  font: 600 13.5px/1 inherit; cursor: pointer;
+  background-image: linear-gradient(45deg, transparent 50%, currentColor 50%), linear-gradient(135deg, currentColor 50%, transparent 50%);
+  background-position: calc(100% - 16px) 15px, calc(100% - 11px) 15px; background-size: 5px 5px; background-repeat: no-repeat;
+}
+[dir="rtl"] .network select { background-position: 11px 15px, 16px 15px; }
+.network select:focus { outline: 0; border-color: var(--gold); box-shadow: 0 0 0 3px var(--gold-soft); }
+
+/* Narrow (the side panel): the columns stack, and the open one takes the room. */
+.columns { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.col { display: flex; flex-direction: column; min-height: 0; border-bottom: 1px solid var(--line); transition: flex-grow 220ms ease; flex: 0 0 auto; }
+.col:last-child { border-bottom: 0; }
+#col-receive { background: var(--c1); }
+#col-balance { background: var(--c2); }
+#col-send { background: var(--c3); }
+.col.active { flex: 1 1 0; }
+.col-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; width: 100%; padding: 14px 18px; border: 0; background: none; color: inherit; font: inherit; text-align: start; cursor: pointer; }
+.col-head h3 { margin: 0; font: 600 11.5px/1 var(--mono); letter-spacing: .24em; text-transform: uppercase; color: var(--muted); }
+.col.active .col-head h3 { color: var(--text); }
+.col-sum { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font: 500 13px/1 var(--mono); }
+.col.active .col-sum { visibility: hidden; }
+.col-body { display: none; flex: 1; min-height: 0; overflow: auto; padding: 4px 18px 18px; }
+.col.active .col-body { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; text-align: center; }
+#col-send .col-body { align-items: stretch; text-align: start; justify-content: flex-start; }
+
+@media (min-width: 600px) {
+  /* Wide: three columns side by side, as the wallet was first drawn. */
+  .columns { flex-direction: row; }
+  .col, .col.active { flex: 1 1 0; border-bottom: 0; border-inline-end: 1px solid var(--line); }
+  .col:last-child { border-inline-end: 0; }
+  .col-head { cursor: default; justify-content: center; padding-top: 22px; }
+  .col-head h3 { color: var(--text); }
+  .col-sum { display: none; }
+  .col-body { display: flex !important; flex-direction: column; align-items: center; justify-content: center; gap: 12px; text-align: center; }
+  #col-send .col-body { justify-content: center; }
+}
+
+.qr { padding: 10px; border-radius: 14px; background: #fffdf8; border: 1px solid var(--line); line-height: 0; }
+.qr img { width: min(180px, 46vw); height: auto; image-rendering: pixelated; }
+.address { display: block; max-width: 100%; padding: 8px 10px; border-radius: 8px; background: color-mix(in srgb, var(--field) 70%, transparent); border: 1px solid var(--line); font: 500 12.5px/1.45 var(--mono); word-break: break-all; user-select: all; }
+
+.amount { margin: 0; font-family: var(--serif); font-size: 46px; line-height: 1.05; font-weight: 500; font-variant-numeric: lining-nums tabular-nums; word-break: break-all; }
+.amount .symbol { font: 600 13px/1 var(--mono); letter-spacing: .18em; color: var(--muted); vertical-align: middle; }
+
+/* An address is typed left to right; the hint before it reads like the page. */
+[dir="rtl"] #send-to:placeholder-shown { direction: rtl; unicode-bidi: isolate; }
+
+/* Amounts read left to right in every language, with the coin after them. */
+.amount-input { position: relative; display: block; direction: ltr; }
+.amount-input input { padding-inline-end: 56px !important; }
+.amount-input .symbol { position: absolute; inset-inline-end: 12px; top: 50%; transform: translateY(-50%); font: 600 12px/1 var(--mono); letter-spacing: .12em; color: var(--muted); }
+.speeds { border: 0; padding: 0; margin: 0; display: flex; gap: 0; border-radius: 10px; overflow: hidden; border: 1px solid var(--line); }
+.speeds legend { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+.speeds label { flex: 1; position: relative; }
+.speeds input { position: absolute; opacity: 0; inset: 0; margin: 0; cursor: pointer; }
+.speeds span { display: block; padding: 7px 4px; text-align: center; font-size: 12.5px; color: var(--muted); background: var(--field); }
+.speeds label + label span { border-inline-start: 1px solid var(--line); }
+.speeds input:checked + span { background: var(--ink); color: var(--ink-text); }
+.speeds input:focus-visible + span { box-shadow: inset 0 0 0 2px var(--gold); }
+
+.review dl { display: grid; grid-template-columns: auto 1fr; gap: 8px 14px; margin: 0 0 6px; align-items: baseline; }
+.review dt { color: var(--muted); font-size: 12.5px; }
+.review dd { margin: 0; font: 500 13.5px/1.4 var(--mono); word-break: break-all; text-align: end; }
+.review code { font: inherit; }
+.review .row-actions { margin-top: 12px; }
+.done { text-align: center; }
+.done .row-actions { justify-content: center; }
+.done-mark { margin: 6px 0; color: var(--gold); }
+.done-mark svg { width: 34px; height: 34px; stroke-width: 2; }
+
+/* ---------------------------------------------------------------- more */
+
+.sheet { background: var(--c1); }
+.sheet .bar { position: sticky; top: 0; }
+.sheet .back { margin: 0; }
+.sheet-inner { padding: 6px 18px 28px; }
+.sheet h3 { margin: 22px 0 6px; font: 600 11.5px/1 var(--mono); letter-spacing: .24em; text-transform: uppercase; }
+.sites { list-style: none; padding: 0; margin: 0; display: grid; gap: 6px; }
+.sites li { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: 10px; background: var(--c2); border: 1px solid var(--line); }
+.sites li span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 500 13px/1.3 var(--mono); }
+#reveal-words { margin-top: 12px; }
+
+/* ------------------------------------------------------------- requests */
+
+.request { background: var(--c1); padding: 22px 18px; display: flex; }
+.request-inner { width: min(520px, 100%); margin: auto; display: flex; flex-direction: column; gap: 4px; }
+.request-count { margin: 0 0 4px; font: 600 11px/1 var(--mono); letter-spacing: .2em; text-transform: uppercase; color: var(--muted); }
+.site { display: flex; align-items: center; gap: 8px; margin: 2px 0 6px; padding: 10px 12px; border-radius: 12px; background: var(--c2); border: 1px solid var(--line); font: 600 14px/1.3 var(--mono); word-break: break-all; }
+.site svg { color: var(--gold); }
+.site.insecure svg { color: var(--crimson); }
+.request-body { display: grid; gap: 10px; margin-top: 4px; }
+.request-body p { margin: 0; }
+.request-body dl { display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; margin: 0; }
+.request-body dt { color: var(--muted); font-size: 12.5px; }
+.request-body dd { margin: 0; font: 500 13px/1.4 var(--mono); word-break: break-all; text-align: end; }
+.message { margin: 0; max-height: 240px; overflow: auto; padding: 10px 12px; border-radius: 10px; background: var(--field); border: 1px solid var(--line); font: 12.5px/1.5 var(--mono); white-space: pre-wrap; word-break: break-word; text-align: start; }
+.message-label { font-weight: 600; font-size: 12.5px; color: var(--muted); }
+.request-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 16px; }
+.request-actions .button { width: 100%; height: 42px; }
+.request-actions .button:disabled { cursor: progress; }
+
+/* Arabic and Persian: letter spacing and capitals are for Latin labels; in a
+   joined script they pull the letters apart. */
+:lang(ar) .col-head h3, :lang(fa) .col-head h3, :lang(ar) .sheet h3, :lang(fa) .sheet h3,
+:lang(ar) .request-count, :lang(fa) .request-count, :lang(ar) .mark span, :lang(fa) .mark span {
+  font-family: var(--arabic-text);
+  font-size: 13px;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+/* ---------------------------------------------------------------- toast */
+
+.toast { position: fixed; inset-inline: 12px; bottom: 12px; z-index: 5; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 14px; border-radius: 12px; background: var(--ink); color: var(--ink-text); font-size: 13px; box-shadow: 0 10px 30px -12px rgba(0, 0, 0, .45); }
+.toast a { color: inherit; font-weight: 600; white-space: nowrap; }
+.toast.error { background: var(--crimson); color: #fbf3e4; }

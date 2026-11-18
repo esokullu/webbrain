@@ -316,25 +316,39 @@ html[dir="rtl"] .tab .title { mask-image: linear-gradient(270deg, #000 calc(100%
   background: var(--hover);
 }
 
+/* WebBrain and the wallet: round buttons with only their icon (the name is
+   in the tooltip), ringed in gold while their panel is open. */
 .toolbar-pill {
-  height: 32px;
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  padding-block: 0;
-  padding-inline: 8px 12px;
-  border-radius: 16px;
-  font-weight: 600;
-  letter-spacing: 0.01em;
+  position: relative;
+  flex: none;
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border-radius: 50%;
   color: var(--text);
   -webkit-app-region: no-drag;
   transition: background-color 120ms ease, box-shadow 120ms ease;
 }
 .toolbar-pill img { width: 20px; height: 20px; border-radius: 5px; }
+.toolbar-pill > svg { width: 20px; height: 20px; color: var(--gold); }
+#wallet-badge {
+  position: absolute;
+  top: 3px;
+  inset-inline-end: 3px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--gold);
+  box-shadow: 0 0 0 2px var(--toolbar);
+  animation: wallet-wait 1.6s ease-in-out infinite;
+}
+@keyframes wallet-wait { 50% { opacity: 0.35; } }
+@media (prefers-reduced-motion: reduce) { #wallet-badge { animation: none; } }
 .toolbar-pill:hover { background: var(--hover); }
 .toolbar-pill.open { background: var(--gold-soft); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--gold) 55%, transparent); }
 .toolbar-pill[disabled] { opacity: 0.45; }
-@media (max-width: 760px) { .toolbar-pill span { display: none; } .toolbar-pill { padding: 0 6px; } }
 
 /* The ad blocker for this site: a gold shield while it blocks, a crossed-out
    faint one where ads are allowed. */
@@ -399,6 +413,7 @@ html[dir="rtl"] .tab .title { mask-image: linear-gradient(270deg, #000 calc(100%
 }
 #panel-header[hidden], #splitter[hidden] { display: none; }
 #panel-header img { width: 18px; height: 18px; border-radius: 4px; }
+#panel-header > svg { width: 18px; height: 18px; color: var(--gold); flex: none; }
 #panel-title { flex: 1; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 #panel-header .icon-button { width: 28px; height: 28px; }
 

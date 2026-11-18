@@ -9,9 +9,10 @@
   "author": "Emre Sokullu",
   "homepage": "https://github.com/webbrain-one/webbrain/tree/main/murshid",
   "scripts": {
-    "test": "node --test test/review-fixes.test.cjs test/tab-navigation.test.cjs test/i18n.test.cjs test/history.test.cjs test/tab-strip.test.cjs test/adblock.test.cjs test/updates.test.cjs test/window-bounds.test.cjs test/crx-webrequest.test.cjs",
+    "test": "node --test test/review-fixes.test.cjs test/tab-navigation.test.cjs test/i18n.test.cjs test/history.test.cjs test/tab-strip.test.cjs test/wallet.test.cjs test/adblock.test.cjs test/updates.test.cjs test/window-bounds.test.cjs test/crx-webrequest.test.cjs",
     "test:integration": "node test/run-smoke.cjs",
     "test:session": "node test/run-session-smoke.cjs",
+    "test:wallet": "node test/run-wallet-smoke.cjs",
     "test:adblock": "node test/run-adblock-smoke.cjs",
     "start": "electron .",
     "dev": "electron . --murshid-devtools",
@@ -30,7 +31,12 @@
   "dependencies": {
     "@ghostery/adblocker": "2.20.3",
     "@ghostery/adblocker-electron-preload": "2.20.3",
-    "electron-chrome-extensions": "4.10.0"
+    "@paulmillr/qr": "0.3.0",
+    "@scure/bip32": "1.7.0",
+    "@scure/bip39": "1.6.0",
+    "@scure/btc-signer": "1.8.1",
+    "electron-chrome-extensions": "4.10.0",
+    "viem": "2.57.16"
   },
   "devDependencies": {
     "@fontsource/amiri": "^5.3.0",
@@ -57,7 +63,10 @@
       "app/**/*",
       "assets/icons/**/*",
       "package.json",
-      "!**/*.map"
+      "!**/*.map",
+      "!**/node_modules/{viem,ox}/{_esm,_types,trusted-setups}/**",
+      "!**/node_modules/{viem,ox,@noble,@scure,micro-packed,@paulmillr,abitype}/**/*.{ts,mts,cts}",
+      "!**/node_modules/{@noble,@scure,micro-packed,@paulmillr}/**/{esm,src}/**"
     ],
     "extraResources": [
       {

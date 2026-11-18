@@ -1,7 +1,7 @@
 'use strict';
 
-// murshid:// — Murshid's own pages (newtab fallback, settings, about, error)
-// and assets. Served from app/pages and assets/, nothing else.
+// murshid:// — Murshid's own pages (newtab fallback, settings, about, error,
+// wallet) and assets. Served from app/pages and assets/, nothing else.
 
 const { net, protocol } = require('electron');
 const fs = require('node:fs');
@@ -16,6 +16,7 @@ const PAGES = {
   about: 'about.html',
   updates: 'updates.html',
   error: 'error.html',
+  wallet: 'wallet.html',
 };
 
 function registerSchemes() {
@@ -53,7 +54,10 @@ function handleProtocol(ses) {
     // Pages are templates: they arrive in the interface language (app/i18n.js).
     if (file.startsWith(pagesDir) && file.endsWith('.html')) {
       const html = i18n.renderTemplate(fs.readFileSync(file, 'utf8'));
-      return new Response(html, { headers: { 'content-type': 'text/html; charset=utf-8' } });
+      // Murshid's pages are never shown inside another page (no clickjacking).
+      return new Response(html, {
+        headers: { 'content-type': 'text/html; charset=utf-8', 'content-security-policy': "frame-ancestors 'none'", 'x-frame-options': 'DENY' },
+      });
     }
     return net.fetch(pathToFileURL(file).href);
   });
