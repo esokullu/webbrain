@@ -86,5 +86,6 @@ test('the build writes the release files with matching checksums', () => {
   const version = JSON.parse(fs.readFileSync(path.join(dist, 'VERSION.json'), 'utf8'));
   assert.equal(version.name, '@webbrain/embed');
   assert.equal(version.license, 'GPL-3.0-or-later');
-  assert.match(version.source, /^https:\/\/github\.com\/webbrain-one\/webbrain\/tree\/.+\/embed$/);
+  const repository = process.env.GITHUB_REPOSITORY || 'webbrain-one/webbrain';
+  assert.equal(version.source, "https://github.com/" + repository + "/tree/" + (version.commit === 'unknown' ? 'main' : version.commit) + "/embed");
 });
