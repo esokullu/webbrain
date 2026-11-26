@@ -817,6 +817,14 @@
       .wb-msg-assistant li {
         margin: 3px 0;
       }
+      .wb-msg-assistant .wb-citations {
+        margin: 10px 0 0;
+        padding: 7px 0 0;
+        border-top: 1px solid var(--border);
+        list-style: none;
+        color: var(--text-secondary);
+        font-size: 12px;
+      }
       .wb-msg-assistant blockquote {
         margin: 6px 0;
         padding: 6px 10px;
@@ -1722,11 +1730,36 @@
     return el;
   }
 
-  function appendAssistantBubble(markdown) {
+  function appendAssistantBubble(markdown, citations) {
     emptyEl.style.display = 'none';
     const el = document.createElement('div');
     el.className = 'wb-msg wb-msg-assistant';
+    el.dir = 'auto';
     el.innerHTML = formatMarkdown(markdown);
+    if (Array.isArray(citations)) {
+      const list = document.createElement('ul');
+      list.className = 'wb-citations';
+      list.setAttribute('aria-label', 'Sources');
+      for (const citation of citations) {
+        if (!Number.isInteger(citation?.number) || typeof citation.title !== 'string') continue;
+        const location = Number.isInteger(citation.page) ? `p. ${citation.page}` : citation.section;
+        const label = `[${citation.number}] ${citation.title}${location ? ` \u00b7 ${location}` : ''}`;
+        const item = document.createElement('li');
+        item.dir = 'auto';
+        if (typeof citation.url === 'string' && citation.url.startsWith('https://')) {
+          const link = document.createElement('a');
+          link.href = citation.url;
+          link.target = '_blank';
+          link.rel = 'noopener noreferrer';
+          link.textContent = label;
+          item.append(link);
+        } else {
+          item.textContent = label;
+        }
+        list.append(item);
+      }
+      if (list.childElementCount) el.append(list);
+    }
     messagesEl.appendChild(el);
     bodyEl.scrollTop = bodyEl.scrollHeight;
     return el;
@@ -1985,10 +2018,11 @@
     const question = String(display || '').trim() || text;
     appendUserBubble(question);
     inputEl.value = '';
+    const turnId = randomToken(24);
     let transcript;
     if (siteConfig.saveChats === true) {
       chatId ||= randomToken(24);
-      transcript = { chatId, turnId: randomToken(24), question: [...question].slice(0, 16000).join('') };
+      transcript = { chatId, turnId, question: [...question].slice(0, 16000).join('') };
     }
 
     // A cleared chat replaces `conversation`, so the run keeps its own history.
@@ -2046,6 +2080,7 @@
             messages: history,
             finalize,
             pageContext,
+            turnId,
             transcript,
           }),
         });
@@ -2067,7 +2102,7 @@
             : toolCalls.find((tc) => tc.name === 'done' && typeof tc.arguments?.summary === 'string')?.arguments.summary;
           const reply = (typeof answer === 'string' && answer.trim()) || "I couldn't finish answering this turn.";
           history.push({ role: 'assistant', content: reply });
-          appendAssistantBubble(reply);
+          appendAssistantBubble(reply, turn.citations);
           return;
         }
 
@@ -2086,7 +2121,7 @@
           if (tcName === 'done') {
             const summary = tcArgs.summary || turn.content || 'Task complete.';
             pushToolResult(history, tc, JSON.stringify({ success: true, summary }));
-            appendAssistantBubble(summary);
+            appendAssistantBubble(summary, turn.citations);
             return;
           }
 

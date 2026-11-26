@@ -37,6 +37,7 @@ fs.copyFileSync(EXTENSION_PATHS.icon48, path.join(distDir, 'icon48.png'));
 fs.copyFileSync(EXTENSION_PATHS.icon128, path.join(distDir, 'icon128.png'));
 
 const pkg = JSON.parse(fs.readFileSync(path.resolve(PROJECT_ROOT, 'package.json'), 'utf8'));
+const repository = process.env.GITHUB_REPOSITORY || 'webbrain-one/webbrain';
 let commit = process.env.GITHUB_SHA || '';
 if (!commit) {
   try {
@@ -49,7 +50,7 @@ write('VERSION.json', `${JSON.stringify({
   name: pkg.name,
   version: pkg.version,
   commit,
-  source: `https://github.com/webbrain-one/webbrain/tree/${commit === 'unknown' ? 'main' : commit}/embed`,
+  source: `https://github.com/${repository}/tree/${commit === 'unknown' ? 'main' : commit}/embed`,
   license: pkg.license,
 }, null, 2)}\n`);
 

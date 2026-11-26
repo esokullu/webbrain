@@ -119,6 +119,38 @@ async function openPage(config, turns = []) {
 
 const toolMessages = (request) => request.messages.filter((m) => m.role === 'tool');
 
+test('citation links and turn IDs work even with chat history disabled', async () => {
+  const citations = [
+    { number: 1, title: 'kitap', url: null, page: 7, section: null },
+    { number: 2, title: '<Guide>', url: 'https://example.org/guide', page: null, section: 'Refunds' },
+  ];
+  const { page } = await openPage({ modePolicy: 'ask_only', saveChats: false }, [
+    { toolCalls: [{ id: 'read', name: 'read_page', arguments: {} }] },
+    { content: 'The policy is on page 7 [1] and in Refunds [2].', citations },
+    { content: 'Another answer.' },
+  ]);
+  try {
+    await page.locator('#askbtn').click();
+    await page.waitForFunction(() => window.__testShadow.querySelector('.wb-citations')?.children.length === 2);
+    assert.match(state.requests[0].turnId, /^[a-z0-9]{24}$/);
+    assert.equal(state.requests[1].turnId, state.requests[0].turnId);
+    assert.ok(state.requests.every((request) => !request.transcript));
+    const labels = await page.evaluate(() => Array.from(window.__testShadow.querySelectorAll('.wb-citations li'), (node) => ({
+      text: node.textContent,
+      href: node.querySelector('a')?.href ?? null,
+    })));
+    assert.deepEqual(labels, [
+      { text: '[1] kitap · p. 7', href: null },
+      { text: '[2] <Guide> · Refunds', href: 'https://example.org/guide' },
+    ]);
+    await page.evaluate(() => window.WebBrain.ask('A new question'));
+    await waitFor(() => state.requests.length === 3, 'new question');
+    assert.notEqual(state.requests[2].turnId, state.requests[0].turnId);
+  } finally {
+    await page.close();
+  }
+});
+
 test('embed.js loads as a classic script without page errors', async () => {
   const { page, pageErrors } = await openPage({ modePolicy: 'ask_only' });
   assert.equal(await page.evaluate(() => typeof window.__wbEmbedRuntime), 'object');
